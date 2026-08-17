@@ -5,7 +5,8 @@ from sqlalchemy.pool import StaticPool
 from src.app.models.orm import Base
 from src.app.services.procurement_case_state import ProcurementCaseState
 from src.app.services.procurement_decision_coordinator import (
-    invalidations_for_changed_paths, record_procurement_decision_run,
+    ProcurementDecisionCoordinator, invalidations_for_changed_paths,
+    record_procurement_decision_run,
 )
 from src.app.services.procurement_decision_run import load_decision_runs
 from src.app.services.recommendation_core.envelope import CoreResponse, StageResult, TurnEnvelope
@@ -107,3 +108,60 @@ def test_coordinator_persists_temporal_conflicts_without_resolving_them():
     assert projection["temporal_conflicts"][0]["status"] == "unresolved"
     stored = load_decision_runs(db, tenant_id="portfolio", case_id="case-conflict")
     assert stored[0].temporal_conflicts[0].resolution_owner == "supplier"
+
+
+def test_shadow_coordinator_owns_single_invocation_and_grants_no_authority():
+    db = _db()
+    state = ProcurementCaseState(case_id="case-owner", revision=1, objective="fleet")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="help", uid="buyer", tenant_id="portfolio", trace_id="trace-owner",
+        session={"procurement_case_state": state.model_dump(mode="json")},
+    )
+    response = CoreResponse(envelope=envelope, lane="SEARCH")
+    calls = []
+    coordinator = ProcurementDecisionCoordinator(db, envelope)
+    result = coordinator.evaluate(lambda: calls.append("called") or response)
+    coordinator.persist(result)
+    assert calls == ["called"]
+    assert result.extras["procurement_decision_coordinator"]["mode"] == (
+        "shadow_owner_legacy_stage_adapter"
+    )
+    assert result.extras["procurement_decision_coordinator"]["commercial_authority_granted"] is False
+    assert len(load_decision_runs(db, tenant_id="portfolio", case_id="case-owner")) == 1
+
+
+def test_shadow_coordinator_reports_overrun_and_checks_cancellation(monkeypatch):
+    from src.app.services.recommendation_core.cancellation import (
+        RecommendationCancellation,
+        RecommendationCancelled,
+    )
+    import pytest
+
+    db = _db()
+    envelope = TurnEnvelope.from_suggest_params(
+        query="help", uid="buyer", tenant_id="portfolio", trace_id="trace-deadline",
+    )
+    response = CoreResponse(envelope=envelope)
+    ticks = iter((10.0, 10.2))
+    monkeypatch.setattr(
+        "src.app.services.procurement_decision_coordinator.time.perf_counter",
+        lambda: next(ticks),
+    )
+    monkeypatch.setenv("PROCUREMENT_DECISION_SHADOW_DEADLINE_MS", "100")
+    result = ProcurementDecisionCoordinator(db, envelope).evaluate(lambda: response)
+    assert result.extras["procurement_decision_coordinator"]["deadline_status"] == (
+        "exceeded_observed"
+    )
+
+    cancellation = RecommendationCancellation.with_timeout(10)
+    cancellation.cancel("buyer_disconnected")
+    cancelled_envelope = TurnEnvelope.from_suggest_params(
+        query="help", uid="buyer", tenant_id="portfolio", trace_id="trace-cancelled",
+        cancellation=cancellation,
+    )
+    calls = []
+    with pytest.raises(RecommendationCancelled):
+        ProcurementDecisionCoordinator(db, cancelled_envelope).evaluate(
+            lambda: calls.append("should-not-run") or response,
+        )
+    assert calls == []

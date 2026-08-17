@@ -260,3 +260,7 @@ def test_stage_executes_only_a_tenant_allowed_capability_provider(monkeypatch):
     assert out["items"][0]["provider_source_policy"]["review_status"] == "approved"
     assert out["items"][0]["claim_candidates"][0]["attribute_key"] == "ram_gb"
     assert [item["status"] for item in out["provider_attempts"]] == ["selected", "ok"]
+    assert out["tool_selection_receipts"][0]["capability"] == (
+        "authoritative_software_requirements"
+    )
+    assert out["tool_selection_receipts"][0]["commercial_authority_granted"] is False

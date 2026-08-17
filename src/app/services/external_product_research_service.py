@@ -254,14 +254,24 @@ def run_external_research_stage(
     ))[:3]
     selected_by_id: Dict[str, Any] = {}
     attempts: list[Dict[str, Any]] = []
+    tool_selection_receipts: list[Dict[str, Any]] = []
     for capability in requested_capabilities:
-        selected_for_capability, capability_attempts = registry.select(
-            capability,
-            tenant_id=str(tenant_id or ""),
-            buyer_consent=bool(buyer_consent),
-            max_providers=3,
-        )
+        selection_receipt = None
+        if hasattr(registry, "select_with_receipt"):
+            selected_for_capability, capability_attempts, selection_receipt = (
+                registry.select_with_receipt(
+                    capability, tenant_id=str(tenant_id or ""),
+                    buyer_consent=bool(buyer_consent), max_providers=3,
+                )
+            )
+        else:
+            selected_for_capability, capability_attempts = registry.select(
+                capability, tenant_id=str(tenant_id or ""),
+                buyer_consent=bool(buyer_consent), max_providers=3,
+            )
         attempts.extend(capability_attempts)
+        if selection_receipt is not None:
+            tool_selection_receipts.append(selection_receipt.model_dump(mode="json"))
         for provider in selected_for_capability:
             selected_by_id.setdefault(provider.provider_id, provider)
     selected = tuple(selected_by_id.values())[:3]
@@ -272,6 +282,7 @@ def run_external_research_stage(
             "source_status": SourceStatus(source=_SOURCE, status="unavailable").to_dict(),
             "provider_id": None,
             "provider_attempts": attempts,
+            "tool_selection_receipts": tool_selection_receipts,
             "run_status": status,
             "cache_status": "miss_or_disabled",
             "query_hash": hashlib.sha256(str(query or "").encode("utf-8")).hexdigest()[:16],
@@ -345,6 +356,7 @@ def run_external_research_stage(
         "provider_id": provider_ids[0] if len(provider_ids) == 1 else None,
         "provider_ids": provider_ids,
         "provider_attempts": attempts,
+        "tool_selection_receipts": tool_selection_receipts,
         "run_status": run_status,
         "cache_status": "hit" if run_status == "cached" else "miss_or_disabled",
         # Proves which scrubbed query ran without exposing endpoint credentials or

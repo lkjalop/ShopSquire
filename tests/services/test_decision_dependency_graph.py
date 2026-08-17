@@ -84,3 +84,20 @@ def test_dependency_traversal_is_bounded():
     )
     assert result.truncated is True
     assert result.visited_refs == ("artifact:0", "artifact:1", "artifact:2")
+
+
+def test_failed_stage_does_not_claim_to_have_produced_an_artifact():
+    from types import SimpleNamespace
+    from src.app.services.decision_dependency_graph import derive_decision_dependency_edges
+
+    edges = derive_decision_dependency_edges(
+        run_id="run", tenant_id="t1", case_id="case",
+        stage_receipts=(SimpleNamespace(
+            stage="evidence", stage_id="evidence", status="failed",
+            input_artifact_refs=("source:page",),
+            output_artifact_refs=("requirements:accepted",),
+            dependency_stage_ids=(),
+        ),),
+    )
+    assert any(row.relation == "consumed_by" for row in edges)
+    assert not any(row.relation == "produced_by" for row in edges)

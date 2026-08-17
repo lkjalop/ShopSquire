@@ -260,16 +260,23 @@ class StageResult:
     hidden inside a monolithic turn. The message it may have claimed lives on CoreResponse.message
     (via set_message); this record is telemetry, never the source of the prose."""
     stage: str
+    stage_id: str | None = None
     status: str = "ok"              # ok | clarify | conflict | skipped | error
     latency_ms: float = 0.0
     retrieval_count: int = 0
     won_message: bool = False       # did this stage claim the primary-message slot?
     data: Dict[str, Any] = field(default_factory=dict)
+    input_artifact_refs: tuple[str, ...] = ()
+    output_artifact_refs: tuple[str, ...] = ()
+    dependency_stage_ids: tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"stage": self.stage, "status": self.status,
+        return {"stage": self.stage, "stage_id": self.stage_id, "status": self.status,
                 "latency_ms": round(self.latency_ms, 1),
                 "retrieval_count": self.retrieval_count, "won_message": self.won_message,
+                "input_artifact_refs": list(self.input_artifact_refs),
+                "output_artifact_refs": list(self.output_artifact_refs),
+                "dependency_stage_ids": list(self.dependency_stage_ids),
                 **({"data": self.data} if self.data else {})}
 
 
@@ -309,12 +316,20 @@ class CoreResponse:
         return False
 
     def record_stage(self, stage: str, *, status: str = "ok", latency_ms: float = 0.0,
+                     stage_id: str | None = None,
                      retrieval_count: int = 0, won_message: bool = False,
+                     input_artifact_refs: tuple[str, ...] = (),
+                     output_artifact_refs: tuple[str, ...] = (),
+                     dependency_stage_ids: tuple[str, ...] = (),
                      **data: Any) -> None:
         """Append one stage's operational breadcrumb. Additive — never touches the message."""
         self.stage_results.append(StageResult(
-            stage=stage, status=status, latency_ms=latency_ms, retrieval_count=retrieval_count,
-            won_message=won_message, data=dict(data)))
+            stage=stage, stage_id=stage_id, status=status, latency_ms=latency_ms,
+            retrieval_count=retrieval_count,
+            won_message=won_message, data=dict(data),
+            input_artifact_refs=tuple(input_artifact_refs),
+            output_artifact_refs=tuple(output_artifact_refs),
+            dependency_stage_ids=tuple(dependency_stage_ids)))
 
     def finalize(self) -> "CoreResponse":
         """Enforce the invariants; called once by the orchestrator before the adapter."""

@@ -5,6 +5,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -36,12 +37,24 @@ class TemporalClaim(BaseModel):
     observed_at: str
     source: str = Field(min_length=1, max_length=240)
     source_authority: str = Field(default="unspecified", max_length=120)
+    source_text: str | None = Field(default=None, max_length=500)
+    timezone_name: str | None = Field(default=None, max_length=80)
 
     @field_validator("valid_from", "valid_to", "observed_at")
     @classmethod
     def validate_time(cls, value: str | None) -> str | None:
         if value is not None:
             _utc(value)
+        return value
+
+    @field_validator("timezone_name")
+    @classmethod
+    def validate_timezone(cls, value: str | None) -> str | None:
+        if value:
+            try:
+                ZoneInfo(value)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("temporal_claim_timezone_unknown") from exc
         return value
 
 
@@ -87,6 +100,60 @@ def _overlap(left: TemporalClaim, right: TemporalClaim) -> tuple[datetime, datet
     return (start, end) if start < end else None
 
 
+_TIME_ATTRIBUTES = {
+    "required_by", "delivery_date", "deadline", "quote_valid_until", "available_at",
+}
+
+
+def _value_time(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return _utc(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _conflict_type(left: TemporalClaim, right: TemporalClaim) -> str:
+    same_phrase = bool(left.source_text and left.source_text == right.source_text)
+    different_zone = bool(
+        left.timezone_name and right.timezone_name
+        and left.timezone_name != right.timezone_name
+    )
+    if same_phrase and different_zone:
+        return "time_anchor_mismatch"
+    if left.attribute in _TIME_ATTRIBUTES:
+        return "time_anchor_mismatch"
+    return "value_mismatch"
+
+
+def _receipt(
+    left: TemporalClaim, right: TemporalClaim, *, conflict_type: str,
+) -> TemporalConflictReceipt | None:
+    overlap = _overlap(left, right)
+    if overlap is None:
+        return None
+    pair = tuple(sorted((left.claim_id, right.claim_id)))
+    digest = hashlib.sha256(json.dumps({
+        "subject": left.subject, "attribute": f"{left.attribute}|{right.attribute}",
+        "claims": pair, "type": conflict_type,
+    }, sort_keys=True).encode()).hexdigest()[:24]
+    end = None if overlap[1] == datetime.max.replace(tzinfo=timezone.utc) else overlap[1].isoformat()
+    stages = tuple(dict.fromkeys(
+        _ATTRIBUTE_STAGES.get(left.attribute, ("evidence", "fit", "commercial", "response"))
+        + _ATTRIBUTE_STAGES.get(right.attribute, ("evidence", "fit", "commercial", "response"))
+    ))
+    return TemporalConflictReceipt(
+        conflict_id=f"tcr-{digest}", subject=left.subject,
+        attribute=(left.attribute if left.attribute == right.attribute else f"{left.attribute}|{right.attribute}"),
+        competing_claim_ids=pair,
+        valid_time_overlap=(overlap[0].isoformat(), end),
+        observed_times={item.claim_id: item.observed_at for item in (left, right)},
+        conflict_type=conflict_type, affected_stages=stages,
+        resolution_owner=_owner((left, right)), status="unresolved",
+    )
+
+
 def detect_temporal_conflicts(
     claims: list[TemporalClaim] | tuple[TemporalClaim, ...],
 ) -> tuple[TemporalConflictReceipt, ...]:
@@ -97,25 +164,23 @@ def detect_temporal_conflicts(
         for right in typed[index + 1:]:
             if (left.subject, left.attribute) != (right.subject, right.attribute):
                 continue
-            overlap = _overlap(left, right)
-            if overlap is None or left.value == right.value:
+            if left.value == right.value:
                 continue
-            pair = tuple(sorted((left.claim_id, right.claim_id)))
-            digest = hashlib.sha256(json.dumps({
-                "subject": left.subject, "attribute": left.attribute, "claims": pair,
-            }, sort_keys=True).encode()).hexdigest()[:24]
-            end = None if overlap[1] == datetime.max.replace(tzinfo=timezone.utc) else overlap[1].isoformat()
-            rows.append(TemporalConflictReceipt(
-                conflict_id=f"tcr-{digest}", subject=left.subject, attribute=left.attribute,
-                competing_claim_ids=pair,
-                valid_time_overlap=(overlap[0].isoformat(), end),
-                observed_times={item.claim_id: item.observed_at for item in (left, right)},
-                conflict_type="value_mismatch",
-                affected_stages=_ATTRIBUTE_STAGES.get(
-                    left.attribute, ("evidence", "fit", "commercial", "response"),
-                ),
-                resolution_owner=_owner((left, right)), status="unresolved",
-            ))
+            receipt = _receipt(left, right, conflict_type=_conflict_type(left, right))
+            if receipt:
+                rows.append(receipt)
+    # Cross-attribute commercial validity: an offer that expires before the
+    # requested delivery date cannot support that promise.
+    for quote in (item for item in typed if item.attribute == "quote_valid_until"):
+        for delivery in (item for item in typed if item.attribute in {"required_by", "delivery_date"}):
+            if quote.subject != delivery.subject:
+                continue
+            quote_time, delivery_time = _value_time(quote.value), _value_time(delivery.value)
+            if quote_time is None or delivery_time is None or quote_time >= delivery_time:
+                continue
+            receipt = _receipt(quote, delivery, conflict_type="validity_mismatch")
+            if receipt:
+                rows.append(receipt)
     rows.sort(key=lambda item: item.conflict_id)
     return tuple(rows)
 

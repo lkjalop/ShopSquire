@@ -210,10 +210,16 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
                    limit: int = 10) -> CoreResponse:
     """Never raises. The response is always finalized (honesty invariants enforced)."""
     started = time.perf_counter()
+    from src.app.services.procurement_decision_coordinator import (
+        ProcurementDecisionCoordinator,
+    )
+    coordinator = ProcurementDecisionCoordinator(db, envelope)
     try:
         if envelope.cancellation is not None:
             envelope.cancellation.raise_if_cancelled()
-        core = _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit)
+        core = coordinator.evaluate(
+            lambda: _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit),
+        )
     except Exception as exc:
         from src.app.services.recommendation_core.cancellation import RecommendationCancelled
         if isinstance(exc, RecommendationCancelled):
@@ -222,6 +228,13 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
         else:
             logger.exception("recommendation_core turn failed: %s", exc)
             core = degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
+        core.extras.setdefault("procurement_decision_coordinator", {
+            "schema_version": "procurement-decision-coordinator-shadow-v1",
+            "mode": "shadow_owner_legacy_stage_adapter",
+            "deadline_status": "cancelled" if isinstance(exc, RecommendationCancelled) else "failed",
+            "buyer_visible_authority": False,
+            "commercial_authority_granted": False,
+        })
     router_metrics = (
         last_router_call_metrics()
         if any(item.stage == "route+intent" for item in core.stage_results)
@@ -232,10 +245,7 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
         total_ms=(time.perf_counter() - started) * 1000.0,
         router_metrics=router_metrics,
     )
-    from src.app.services.procurement_decision_coordinator import (
-        record_procurement_decision_run_safely,
-    )
-    record_procurement_decision_run_safely(db, envelope=envelope, response=core)
+    coordinator.persist(core)
     return core
 
 
@@ -1389,39 +1399,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     #   variant-clarify (1c) — one question when a variant materially moves the floor; else assumption.
     #   complement-offer (1d.4) — declared complement → bundle-upsell if stocked, else source-it RFQ.
     #   bulk-economics (1f)  — 'N units, $T total' → ÷units viability + tradeoff menu.
-    from src.app.services.recommendation_core.typed_stage_coordinator import (
-        CoordinatedStage, RecommendationPhase, run_coordinated_stages,
+    from src.app.services.recommendation_core.post_retrieval_stage_plan import (
+        build_post_retrieval_stage_plan,
     )
-    run_coordinated_stages(resp, (
-        CoordinatedStage(
-            RecommendationPhase.FIT, "capability_budget",
-            lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.FIT, "shelf",
-            lambda: _build_shelf(db, envelope, decision, resp, limit),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.FIT, "variant_clarify",
-            lambda: _maybe_variant_clarify(envelope, decision, resp),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.COMMERCIAL, "complement_offer",
-            lambda: _maybe_complement_offer(db, envelope, decision, resp),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.COMMERCIAL, "bulk_economics",
-            lambda: _maybe_bulk_economics(db, envelope, decision, resp),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.COMMERCIAL, "fulfillment_preview",
-            lambda: _maybe_fulfillment_preview(envelope, decision, resp),
-        ),
-        CoordinatedStage(
-            RecommendationPhase.RESPONSE, "secondary_explanation",
-            lambda: coordinate_exact_product_fit(db, envelope, decision, resp),
-        ),
-    ), cancellation=envelope.cancellation, logger=logger)
+    from src.app.services.recommendation_core.typed_stage_coordinator import run_coordinated_stages
+    run_coordinated_stages(resp, build_post_retrieval_stage_plan({
+        "capability_budget": lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
+        "shelf": lambda: _build_shelf(db, envelope, decision, resp, limit),
+        "variant_clarify": lambda: _maybe_variant_clarify(envelope, decision, resp),
+        "complement_offer": lambda: _maybe_complement_offer(db, envelope, decision, resp),
+        "bulk_economics": lambda: _maybe_bulk_economics(db, envelope, decision, resp),
+        "fulfillment_preview": lambda: _maybe_fulfillment_preview(envelope, decision, resp),
+        "secondary_explanation": lambda: coordinate_exact_product_fit(db, envelope, decision, resp),
+    }), cancellation=envelope.cancellation, logger=logger)
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:

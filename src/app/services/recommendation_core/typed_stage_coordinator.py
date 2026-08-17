@@ -21,6 +21,10 @@ class CoordinatedStage:
     phase: RecommendationPhase
     name: str
     operation: Callable[[], None]
+    stage_id: str | None = None
+    input_artifact_refs: tuple[str, ...] = ()
+    output_artifact_refs: tuple[str, ...] = ()
+    dependency_stage_ids: tuple[str, ...] = ()
 
 
 _PHASE_ORDER = {
@@ -58,6 +62,10 @@ def run_coordinated_stages(
             stage.operation,
             cancellation=cancellation,
             logger=logger,
+            input_artifact_refs=stage.input_artifact_refs,
+            output_artifact_refs=stage.output_artifact_refs,
+            dependency_stage_ids=stage.dependency_stage_ids,
+            stage_id=stage.stage_id,
         )
 
 

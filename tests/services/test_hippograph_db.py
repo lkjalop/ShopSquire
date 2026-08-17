@@ -142,3 +142,22 @@ def test_hippograph_journey_endpoint_is_typed_and_non_authoritative():
         "buyer_case", "research_evidence", "catalog_and_fit",
         "inventory_and_procurement", "sales_and_market", "outcome_and_governance",
     ]
+
+
+def test_hippograph_view_endpoint_selects_bounded_non_authoritative_view():
+    response = _client.get(
+        "/api/v1/hippograph/view",
+        params={
+            "seed_id": "shopping_case:case-demo",
+            "purpose": "what_changed",
+            "max_depth": 2,
+            "max_edges": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["plan"]["purpose"] == "what_changed"
+    assert payload["plan"]["max_depth"] == 2
+    assert payload["receipt"]["authority"] == "evidence_recall_only"
+    assert payload["ranking_authority"] == "none"
+    assert payload["commerce_authority"] == "none"

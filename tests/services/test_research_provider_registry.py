@@ -44,6 +44,17 @@ def test_registry_selects_by_capability_tenant_consent_and_authority():
     }]
 
 
+def test_registry_exposes_capability_selection_receipt_without_commerce_authority():
+    registry = ResearchProviderRegistry([_provider()])
+    selected, _attempts, receipt = registry.select_with_receipt(
+        "official_requirements", tenant_id="tenant-a", buyer_consent=True,
+    )
+    assert [row.provider_id for row in selected] == ["official-search"]
+    assert receipt.capability == "authoritative_software_requirements"
+    assert receipt.selected_deployment_ids == ("official-search",)
+    assert receipt.commercial_authority_granted is False
+
+
 def test_registry_fails_closed_for_wrong_tenant_or_missing_consent():
     registry = ResearchProviderRegistry([_provider()])
 

@@ -58,7 +58,10 @@ def derive_decision_dependency_edges(
                 source_ref=artifact, target_ref=stage_ref, relation="consumed_by",
             )
             edges[edge.edge_id] = edge
-        for artifact in receipt.output_artifact_refs:
+        # Declared output shape is useful in the receipt, but a failed/degraded
+        # stage did not produce an authoritative artifact edge.
+        completed = str(getattr(receipt.status, "value", receipt.status)) == "completed"
+        for artifact in receipt.output_artifact_refs if completed else ():
             edge = DecisionDependencyEdge(
                 edge_id=_edge_id(run_id, stage_ref, artifact, "produced_by"),
                 run_id=run_id, tenant_id=tenant_id, case_id=case_id,

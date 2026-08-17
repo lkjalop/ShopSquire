@@ -80,6 +80,35 @@ class ResearchProviderRegistry:
         buyer_consent: bool,
         max_providers: int = 3,
     ) -> tuple[tuple[ResearchProvider, ...], list[dict[str, Any]]]:
+        selected, attempts, _receipt = self.select_with_receipt(
+            capability, tenant_id=tenant_id, buyer_consent=buyer_consent,
+            max_providers=max_providers,
+        )
+        return selected, attempts
+
+    def select_with_receipt(
+        self,
+        capability: ProviderCapability,
+        *,
+        tenant_id: str,
+        buyer_consent: bool,
+        max_providers: int = 3,
+    ):
+        """Select through the cross-domain capability fabric and retain legacy attempts."""
+        from src.app.services.tool_capability_selector import (
+            ToolDeployment, ToolHealth, ToolPolicy, ToolRequirement,
+            select_tool_deployments,
+        )
+
+        capability_map = {
+            "concept_discovery": "discover_authoritative_origin",
+            "official_requirements": "authoritative_software_requirements",
+            "standards_regulatory": "authoritative_software_requirements",
+            "professional_software_requirements": "authoritative_software_requirements",
+            "game_requirements": "authoritative_software_requirements",
+            "approved_tenant_document": "buyer_document_extraction",
+            "visual_document_evidence": "buyer_document_extraction",
+        }
         limit = max(1, min(int(max_providers), 4))
         candidates = [item for item in self._providers if capability in item.capabilities]
         if not candidates:
@@ -87,10 +116,10 @@ class ResearchProviderRegistry:
                 "provider_id": None,
                 "status": "not_configured",
                 "capability": capability,
-            }]
-        selected: list[ResearchProvider] = []
+            }], None
         attempts: list[dict[str, Any]] = []
-        for provider in candidates[:limit]:
+        eligible: list[ResearchProvider] = []
+        for provider in candidates:
             base = {
                 "provider_id": provider.provider_id,
                 "capability": capability,
@@ -101,14 +130,60 @@ class ResearchProviderRegistry:
             if str(tenant_id or "").strip() not in provider.allowed_tenants:
                 attempts.append({**base, "status": "tenant_not_allowed"})
                 continue
-            selected.append(provider)
-            attempts.append({
-                **base,
-                "status": "selected",
-                "authority": provider.authority,
-                "deadline_ms": provider.deadline_ms,
-            })
-        return tuple(selected), attempts
+            eligible.append(provider)
+        deployments = tuple(ToolDeployment(
+            deployment_id=provider.provider_id,
+            capabilities=(capability_map[capability],),
+            policy=ToolPolicy(
+                allowed_tenants=provider.allowed_tenants,
+                allowed_claim_classes=tuple(
+                    str(value) for value in (provider.source_policy or {}).get(
+                        "allowed_claim_types", ()
+                    )
+                ),
+                authority_score={
+                    "regulatory_registry": 100,
+                    "official_source_index": 90,
+                    "tenant_approved_repository": 80,
+                }[provider.authority],
+                freshness_state=(
+                    "fresh" if (provider.source_policy or {}).get("freshness_status") == "fresh"
+                    else "stale" if (provider.source_policy or {}).get("freshness_status") == "stale"
+                    else "unknown"
+                ),
+                side_effect_class="external_read",
+                cost_units=1 if provider.billing_class == "paid" else 0,
+            ),
+            health=ToolHealth(status="unknown"),
+        ) for provider in eligible)
+        requirement = ToolRequirement(
+            capability=capability_map[capability], tenant_id=tenant_id,
+            max_latency_ms=max((row.deadline_ms for row in eligible), default=1800),
+            max_cost_units=1000, permitted_side_effects=("external_read",),
+        )
+        receipt = select_tool_deployments(
+            requirement, deployments, max_results=limit,
+        )
+        by_id = {row.provider_id: row for row in eligible}
+        selected = tuple(by_id[row] for row in receipt.selected_deployment_ids)
+        selected_ids = set(receipt.selected_deployment_ids)
+        for provider in eligible:
+            base = {"provider_id": provider.provider_id, "capability": capability}
+            if provider.provider_id in selected_ids:
+                attempts.append({
+                    **base, "status": "selected", "authority": provider.authority,
+                    "deadline_ms": provider.deadline_ms,
+                })
+            else:
+                candidate = next(
+                    row for row in receipt.candidates
+                    if row.deployment_id == provider.provider_id
+                )
+                attempts.append({
+                    **base, "status": "policy_rejected",
+                    "reasons": list(candidate.reasons),
+                })
+        return selected, attempts, receipt
 
 
 def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRegistry:

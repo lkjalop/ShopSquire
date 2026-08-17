@@ -9,8 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from src.app.services.procurement_case_state import ProcurementCaseState
 from src.app.services.procurement_decision_run import (
@@ -20,6 +22,50 @@ from src.app.services.procurement_decision_run import (
 from src.app.services.temporal_conflicts import TemporalClaim, detect_temporal_conflicts
 
 logger = logging.getLogger("shopsquire.procurement_decision")
+
+
+class ProcurementDecisionCoordinator:
+    """Own one shadow vertical while the legacy core remains its stage implementation.
+
+    The coordinator owns invocation, cancellation checkpoints, timing truth and
+    immutable run persistence. It grants no commercial authority and does not
+    reinterpret the legacy result.
+    """
+
+    def __init__(self, db: Any, envelope: Any) -> None:
+        self.db = db
+        self.envelope = envelope
+
+    def evaluate(self, execute: Callable[[], Any]) -> Any:
+        cancellation = getattr(self.envelope, "cancellation", None)
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
+        started = time.perf_counter()
+        response = execute()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
+        try:
+            deadline_ms = max(100, min(int(os.getenv(
+                "PROCUREMENT_DECISION_SHADOW_DEADLINE_MS", "30000",
+            )), 120_000))
+        except (TypeError, ValueError):
+            deadline_ms = 30_000
+        response.extras["procurement_decision_coordinator"] = {
+            "schema_version": "procurement-decision-coordinator-shadow-v1",
+            "mode": "shadow_owner_legacy_stage_adapter",
+            "elapsed_ms": round(elapsed_ms, 1),
+            "deadline_ms": deadline_ms,
+            "deadline_status": "exceeded_observed" if elapsed_ms > deadline_ms else "within_deadline",
+            "buyer_visible_authority": False,
+            "commercial_authority_granted": False,
+        }
+        return response
+
+    def persist(self, response: Any) -> None:
+        record_procurement_decision_run_safely(
+            self.db, envelope=self.envelope, response=response,
+        )
 
 
 def _digest(value: Any) -> str:
@@ -110,8 +156,15 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
             status = "degraded"
         output = item.as_dict()
         stage = str(item.stage)
-        stage_id = f"stage-{index:02d}-{stage.casefold().replace('_', '-')}"
-        input_refs, output_refs = _artifact_refs(stage)
+        stage_id = str(getattr(item, "stage_id", "") or (
+            f"stage-{index:02d}-{stage.casefold().replace('_', '-')}"
+        ))
+        emitted_inputs = tuple(getattr(item, "input_artifact_refs", ()) or ())
+        emitted_outputs = tuple(getattr(item, "output_artifact_refs", ()) or ())
+        emitted_dependencies = tuple(getattr(item, "dependency_stage_ids", ()) or ())
+        fallback_inputs, fallback_outputs = _artifact_refs(stage)
+        input_refs = emitted_inputs or fallback_inputs
+        output_refs = emitted_outputs or fallback_outputs
         receipts.append(StageReceipt(
             stage=stage, stage_id=stage_id, status=status,
             started_at=started.isoformat(), completed_at=now.isoformat(),
@@ -121,7 +174,10 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
             dependency_stages=(receipts[-1].stage,) if receipts else (),
             input_artifact_refs=input_refs,
             output_artifact_refs=output_refs,
-            dependency_stage_ids=(receipts[-1].stage_id,) if receipts else (),
+            dependency_stage_ids=(
+                emitted_dependencies
+                or ((receipts[-1].stage_id,) if receipts else ())
+            ),
         ))
     application = response.extras.get("case_patch_application")
     changed = list(application.get("changed_paths") or []) if isinstance(application, dict) else []
@@ -191,6 +247,7 @@ def record_procurement_decision_run_safely(db, *, envelope: Any, response: Any) 
 
 
 __all__ = [
+    "ProcurementDecisionCoordinator",
     "invalidations_for_changed_paths", "record_procurement_decision_run",
     "record_procurement_decision_run_safely",
 ]
