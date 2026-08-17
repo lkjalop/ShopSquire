@@ -41,6 +41,8 @@ import {
   type TraceLeafTab,
 } from './decision-trace/traceNavigation';
 import { useMarketHippographTrace } from '../hooks/useMarketHippographTrace';
+import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from '../hooks/useDecisionTraceData';
+import DecisionRunTracePanel from './decision-trace/DecisionRunTracePanel';
 
 export { TRACE_LEAF_LABELS, TRACE_SECTIONS, normalizeTraceLeaf, traceSectionForLeaf } from './decision-trace/traceNavigation';
 export type { TraceLeafTab } from './decision-trace/traceNavigation';
@@ -718,6 +720,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     apiKey: effectiveApiKey,
     canSeeOperatorDraft,
     revision: procurementRevision,
+  });
+  const shoppingCaseId = shoppingCaseIdFromTraceEvents(events);
+  const decisionRunTrace = useDecisionTraceData({
+    active: activeTab === 'audit', caseId: shoppingCaseId,
   });
   const selectTraceLeaf = (leaf: TraceLeafTab) => {
     setActiveTab(leaf);
@@ -4148,14 +4154,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
 
               {activeTab === 'audit' && (
-                <AuditTracePanel
-                  allocationView={allocationView}
-                  loading={auditLoading}
-                  error={auditError}
-                  auditTrail={auditTrail}
-                  onRetry={() => selectTraceLeaf('audit')}
-                  classNames={styles}
-                />
+                <>
+                  <DecisionRunTracePanel
+                    data={decisionRunTrace.data}
+                    status={decisionRunTrace.status}
+                    classNames={styles}
+                  />
+                  <AuditTracePanel
+                    allocationView={allocationView}
+                    loading={auditLoading}
+                    error={auditError}
+                    auditTrail={auditTrail}
+                    onRetry={() => selectTraceLeaf('audit')}
+                    classNames={styles}
+                  />
+                </>
               )}
 
               {activeTab === 'raw' && (trace || events.length > 0) && (

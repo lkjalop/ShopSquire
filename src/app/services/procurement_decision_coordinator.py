@@ -17,6 +17,7 @@ from src.app.services.procurement_decision_run import (
     InvalidationReason, StageReceipt, create_decision_run,
     create_decision_snapshot, persist_decision_run,
 )
+from src.app.services.temporal_conflicts import TemporalClaim, detect_temporal_conflicts
 
 logger = logging.getLogger("shopsquire.procurement_decision")
 
@@ -41,6 +42,23 @@ _INVALIDATION_STAGES = {
     "fulfilment": ("commercial", "fulfilment", "response"),
     "policies": ("interpretation", "evidence", "fit", "commercial", "fulfilment", "response"),
 }
+
+_STAGE_INPUTS: dict[str, tuple[str, ...]] = {
+    "interpretation": ("buyer:outcome", "case:constraints"),
+    "evidence": ("interpretation:hypotheses", "evidence:watermarks"),
+    "catalog_retrieval": ("interpretation:hypotheses", "catalog:exact"),
+    "fit": ("requirements:accepted", "catalog:exact"),
+    "commercial": ("fit:verdicts", "inventory:current", "price:current"),
+    "fulfilment": ("commercial:shelves", "supplier:offers", "delivery:observations"),
+    "response": ("fit:verdicts", "commercial:shelves", "fulfilment:options"),
+}
+
+
+def _artifact_refs(stage: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    key = str(stage).casefold().replace("-", "_").replace(" ", "_")
+    inputs = _STAGE_INPUTS.get(key, ("case:state",))
+    output = (f"{key}:output",)
+    return inputs, output
 
 
 def invalidations_for_changed_paths(paths: list[str] | tuple[str, ...]) -> tuple[InvalidationReason, ...]:
@@ -76,7 +94,7 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
         policy_snapshot_id=str(response.extras.get("policy_snapshot_id") or "") or None,
     )
     receipts: list[StageReceipt] = []
-    for item in response.stage_results:
+    for index, item in enumerate(response.stage_results):
         latency = max(0.0, float(getattr(item, "latency_ms", 0.0) or 0.0))
         started = now - timedelta(milliseconds=latency)
         raw_status = str(getattr(item, "status", "ok") or "ok").lower()
@@ -91,22 +109,36 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
         else:
             status = "degraded"
         output = item.as_dict()
+        stage = str(item.stage)
+        stage_id = f"stage-{index:02d}-{stage.casefold().replace('_', '-')}"
+        input_refs, output_refs = _artifact_refs(stage)
         receipts.append(StageReceipt(
-            stage=str(item.stage), status=status,
+            stage=stage, stage_id=stage_id, status=status,
             started_at=started.isoformat(), completed_at=now.isoformat(),
             input_hash=snapshot.state_hash,
             output_hash=_digest(output) if status == "completed" else None,
             reason_code=None if status == "completed" else f"legacy_stage_{raw_status}",
             dependency_stages=(receipts[-1].stage,) if receipts else (),
+            input_artifact_refs=input_refs,
+            output_artifact_refs=output_refs,
+            dependency_stage_ids=(receipts[-1].stage_id,) if receipts else (),
         ))
     application = response.extras.get("case_patch_application")
     changed = list(application.get("changed_paths") or []) if isinstance(application, dict) else []
+    raw_claims = response.extras.get("temporal_claims")
+    temporal_claims: list[TemporalClaim] = []
+    if isinstance(raw_claims, list):
+        for raw_claim in raw_claims[:128]:
+            if isinstance(raw_claim, dict):
+                temporal_claims.append(TemporalClaim.model_validate(raw_claim))
+    conflicts = detect_temporal_conflicts(temporal_claims)
     run = create_decision_run(
         snapshot,
         idempotency_key=f"recommendation:{envelope.trace_id}",
         status="degraded" if response.degraded else "completed",
         stage_receipts=tuple(receipts),
         invalidations=invalidations_for_changed_paths(changed),
+        temporal_conflicts=conflicts,
         now=now,
     )
     persisted = persist_decision_run(db, run)
@@ -128,6 +160,9 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
             for item in persisted.stage_receipts
         ],
         "invalidations": [item.model_dump(mode="json") for item in persisted.invalidations],
+        "temporal_conflicts": [
+            item.model_dump(mode="json") for item in persisted.temporal_conflicts
+        ],
         "evidence_watermarks": [
             item.model_dump(mode="json") for item in snapshot.evidence_watermarks
         ],
@@ -143,6 +178,10 @@ def record_procurement_decision_run_safely(db, *, envelope: Any, response: Any) 
     try:
         record_procurement_decision_run(db, envelope=envelope, response=response)
     except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("procurement decision run rollback failed")
         logger.exception("procurement decision run persistence failed: %s", exc)
         response.extras["procurement_decision_run"] = {
             "persistence_status": "failed",

@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from src.app.models.orm import ProcurementDecisionRunRecord
 from src.app.services.procurement_case_state import ProcurementCaseState
+from src.app.services.temporal_conflicts import TemporalConflictReceipt
 
 
 def _utc(value: str) -> datetime:
@@ -64,6 +65,7 @@ class StageReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     stage: str = Field(min_length=1, max_length=80)
+    stage_id: str | None = Field(default=None, min_length=1, max_length=120)
     status: StageStatus
     started_at: str
     completed_at: str
@@ -71,6 +73,9 @@ class StageReceipt(BaseModel):
     output_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     reason_code: str | None = Field(default=None, max_length=160)
     dependency_stages: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+    input_artifact_refs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
+    output_artifact_refs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
+    dependency_stage_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
 
     @model_validator(mode="after")
     def validate_timing_and_output(self) -> "StageReceipt":
@@ -125,6 +130,7 @@ class DecisionRun(BaseModel):
     status: Literal["completed", "degraded", "failed", "cancelled"]
     stage_receipts: tuple[StageReceipt, ...] = ()
     invalidations: tuple[InvalidationReason, ...] = ()
+    temporal_conflicts: tuple[TemporalConflictReceipt, ...] = ()
     created_at: str
     completed_at: str
     commercial_authority_granted: Literal[False] = False
@@ -175,6 +181,7 @@ def create_decision_run(
     status: Literal["completed", "degraded", "failed", "cancelled"],
     stage_receipts: tuple[StageReceipt, ...] = (),
     invalidations: tuple[InvalidationReason, ...] = (),
+    temporal_conflicts: tuple[TemporalConflictReceipt, ...] = (),
     now: datetime | None = None,
 ) -> DecisionRun:
     timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
@@ -191,6 +198,7 @@ def create_decision_run(
         status=status,
         stage_receipts=stage_receipts,
         invalidations=invalidations,
+        temporal_conflicts=temporal_conflicts,
         created_at=timestamp,
         completed_at=timestamp,
     )
@@ -224,18 +232,38 @@ def persist_decision_run(db, run: DecisionRun) -> DecisionRun:
         payload_hash=payload_hash, payload_json=payload,
         created_at=_utc(run.created_at),
     ))
+    from src.app.services.decision_dependency_graph import (
+        derive_decision_dependency_edges,
+        persist_decision_dependency_edges,
+    )
+    persist_decision_dependency_edges(db, derive_decision_dependency_edges(
+        run_id=run.run_id, tenant_id=snapshot.tenant_id, case_id=snapshot.case_id,
+        stage_receipts=run.stage_receipts,
+    ))
     db.commit()
     return run
 
 
-def load_decision_runs(db, *, tenant_id: str, case_id: str) -> list[DecisionRun]:
-    rows = db.execute(select(ProcurementDecisionRunRecord).where(
+def load_decision_runs(
+    db, *, tenant_id: str, case_id: str, limit: int | None = None,
+) -> list[DecisionRun]:
+    query = select(ProcurementDecisionRunRecord).where(
         ProcurementDecisionRunRecord.tenant_id == tenant_id,
         ProcurementDecisionRunRecord.case_id == case_id,
-    ).order_by(
-        ProcurementDecisionRunRecord.case_revision.asc(),
-        ProcurementDecisionRunRecord.created_at.asc(),
-    )).scalars().all()
+    )
+    if limit is None:
+        query = query.order_by(
+            ProcurementDecisionRunRecord.case_revision.asc(),
+            ProcurementDecisionRunRecord.created_at.asc(),
+        )
+        rows = db.execute(query).scalars().all()
+    else:
+        bounded = max(1, min(int(limit), 100))
+        query = query.order_by(
+            ProcurementDecisionRunRecord.case_revision.desc(),
+            ProcurementDecisionRunRecord.created_at.desc(),
+        ).limit(bounded)
+        rows = list(reversed(db.execute(query).scalars().all()))
     return [DecisionRun.model_validate(row.payload_json) for row in rows]
 
 

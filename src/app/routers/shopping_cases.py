@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from src.app.models.db import get_db
 from src.app.models.orm import (
@@ -193,6 +193,72 @@ def _tenant(value: str | None) -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@router.get("/{case_id}/decision-runs")
+def get_case_decision_runs(
+    case_id: str,
+    uid: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Return buyer-safe immutable run history and its dependency projection."""
+    from src.app.services.decision_dependency_graph import (
+        load_decision_dependency_edges,
+    )
+    from src.app.services.procurement_decision_run import load_decision_runs
+    from src.app.models.orm import ProcurementDecisionRunRecord
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    runs = load_decision_runs(db, tenant_id=tenant_id, case_id=case_id, limit=limit)
+    history_count = int(db.execute(select(func.count()).select_from(
+        ProcurementDecisionRunRecord
+    ).where(
+        ProcurementDecisionRunRecord.tenant_id == tenant_id,
+        ProcurementDecisionRunRecord.case_id == case_id,
+    )).scalar_one())
+    latest = runs[-1] if runs else None
+    edges = load_decision_dependency_edges(
+        db, tenant_id=tenant_id, case_id=case_id,
+        run_id=latest.run_id if latest else None,
+    ) if latest else []
+
+    def project(run):
+        return {
+            "run_id": run.run_id,
+            "case_revision": run.snapshot.case_revision,
+            "knowledge_cutoff": run.snapshot.knowledge_cutoff,
+            "evaluation_time": run.snapshot.evaluation_time,
+            "status": run.status,
+            "stage_receipts": [row.model_dump(mode="json") for row in run.stage_receipts],
+            "invalidations": [row.model_dump(mode="json") for row in run.invalidations],
+            "temporal_conflicts": [
+                row.model_dump(mode="json") for row in run.temporal_conflicts
+            ],
+            "evidence_watermarks": [
+                row.model_dump(mode="json") for row in run.snapshot.evidence_watermarks
+            ],
+            "commercial_authority_granted": False,
+        }
+
+    return {
+        "schema_version": "shopping-case-decision-runs-v1",
+        "case_id": case_id,
+        "history_count": history_count,
+        "history_returned": len(runs),
+        "latest": project(latest) if latest else None,
+        "history": [project(run) for run in runs],
+        "dependency_edges": [edge.model_dump(mode="json") for edge in edges],
+        "authority": "decision_evidence_only",
+    }
 
 
 @router.post("/{case_id}/narration-preview")

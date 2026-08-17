@@ -76,3 +76,34 @@ def test_unresolved_and_skipped_legacy_stages_never_project_as_completed():
     assert [row["reason_code"] for row in projection["stage_receipts"]] == [
         "legacy_stage_clarify", "legacy_stage_skipped",
     ]
+
+
+def test_coordinator_persists_temporal_conflicts_without_resolving_them():
+    db = _db()
+    state = ProcurementCaseState(case_id="case-conflict", revision=2, objective="fleet")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="can it arrive", uid="buyer", tenant_id="portfolio", trace_id="trace-conflict",
+        session={"procurement_case_state": state.model_dump(mode="json")},
+    )
+    response = CoreResponse(envelope=envelope, lane="PROCUREMENT")
+    response.stage_results = [StageResult(stage="commercial", status="ok")]
+    response.extras["temporal_claims"] = [
+        {
+            "claim_id": "supplier", "subject": "offer:a", "attribute": "lead_time_days",
+            "value": 8, "valid_from": "2026-08-17T00:00:00+00:00",
+            "observed_at": "2026-08-17T01:00:00+00:00", "source": "supplier",
+            "source_authority": "supplier_attested",
+        },
+        {
+            "claim_id": "carrier", "subject": "offer:a", "attribute": "lead_time_days",
+            "value": 12, "valid_from": "2026-08-17T00:00:00+00:00",
+            "observed_at": "2026-08-17T02:00:00+00:00", "source": "carrier",
+            "source_authority": "carrier_observed",
+        },
+    ]
+
+    projection = record_procurement_decision_run(db, envelope=envelope, response=response)
+
+    assert projection["temporal_conflicts"][0]["status"] == "unresolved"
+    stored = load_decision_runs(db, tenant_id="portfolio", case_id="case-conflict")
+    assert stored[0].temporal_conflicts[0].resolution_owner == "supplier"

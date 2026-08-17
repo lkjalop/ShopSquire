@@ -153,6 +153,23 @@ class ProcurementDecisionRunRecord(Base):
     created_at: Mapped[str] = mapped_column(TIMESTAMP)
 
 
+class ProcurementDecisionDependencyRecord(Base):
+    """Immutable artifact/stage edge used for bounded invalidation traversal."""
+
+    __tablename__ = "procurement_decision_dependencies"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "edge_id", name="uq_decision_dependency_tenant"),
+    )
+
+    edge_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    run_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    source_ref: Mapped[str] = mapped_column(Text)
+    target_ref: Mapped[str] = mapped_column(Text)
+    relation: Mapped[str] = mapped_column(Text)
+
+
 class RequirementProposal(Base):
     __tablename__ = "requirement_proposals"
     __table_args__ = (
