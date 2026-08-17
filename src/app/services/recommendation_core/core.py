@@ -29,6 +29,14 @@ from src.app.services.recommendation_core.exact_product_fit_coordinator import (
     coordinate_exact_product_fit,
 )
 from src.app.services.recommendation_core.plan import derive_plan
+from src.app.services.recommendation_core.response_stage import (
+    execute_clarify,
+    execute_inventory_summary,
+    execute_off_catalog,
+    execute_policy_answer,
+    execute_procurement_handoff,
+    execute_support_handoff,
+)
 from src.app.services.recommendation_core.turn_router import (
     TurnDecision,
     active_router_model,
@@ -2564,42 +2572,6 @@ def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,
                                                 "fails": 0, "closest_match_mode": False}
 
 
-def _exec_off_catalog(db, envelope: TurnEnvelope, decision: TurnDecision,
-                      resp: CoreResponse, limit: int) -> None:
-    # only reachable with refusal_granted (router clamp AND plan validator both enforce it)
-    node_label = decision.requested_category_label or decision.node_path or "that category"
-    resp.off_catalog = {"class": decision.node_handle, "label": node_label,
-                        "supplier_rfq_offer": True}
-
-
-def _exec_clarify(db, envelope: TurnEnvelope, decision: TurnDecision,
-                  resp: CoreResponse, limit: int) -> None:
-    resp.clarify.append({"question": "Could you tell me a bit more about what you need "
-                                     "(budget, brand, or intended use)?",
-                         "reason": "low_routing_confidence"})
-
-
-def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
-                        resp: CoreResponse, limit: int) -> None:
-    from src.app.services.policy_answer_service import policy_answer
-
-    answer = policy_answer(envelope.query, tenant_id=envelope.tenant_id)
-    resp.extras["policy_topic"] = answer["topic"]
-    resp.extras["policy_source"] = answer["source"]
-    resp.extras["policy_answered"] = answer["answered"]
-    resp.extras["action_executed"] = answer["action_executed"]
-    resp.set_message(answer["message"], MsgPriority.LANE_BASE)
-
-
-def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
-                          resp: CoreResponse, limit: int) -> None:
-    from src.app.services.support_handoff_advice import prepare_support_handoff
-
-    advice = prepare_support_handoff(envelope.query, tenant_id=envelope.tenant_id)
-    resp.extras.update({key: value for key, value in advice.items() if key != "message"})
-    resp.set_message(advice["message"], MsgPriority.LANE_BASE)
-
-
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> None:
     if decision.case_operation in ("status", "summary", "amendment"):
@@ -2650,24 +2622,13 @@ def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision
     resp.set_message(advice["message"], MsgPriority.LANE_BASE)
 
 
-def _exec_inventory_summary(db, envelope: TurnEnvelope, decision: TurnDecision,
-                            resp: CoreResponse, limit: int) -> None:
-    from src.app.services.inventory_read_advice import inventory_summary
-
-    advice = inventory_summary(resp.products, tenant_id=envelope.tenant_id)
-    resp.extras["inventory_source"] = advice["source"]
-    resp.extras["inventory_answered"] = advice["answered"]
-    resp.extras["action_executed"] = advice["action_executed"]
-    resp.set_message(advice["message"], MsgPriority.LANE_BASE)
-
-
 _EXECUTORS: Dict[str, Any] = {
     "retrieve": _exec_retrieve,
     "fit_check": _exec_fit_check,
-    "off_catalog_honesty": _exec_off_catalog,
-    "clarify": _exec_clarify,
-    "policy_answer": _exec_policy_answer,
-    "handoff_support": _exec_handoff_support,
-    "handoff_procurement": _exec_handoff_procurement,
-    "inventory_summary": _exec_inventory_summary,
+    "off_catalog_honesty": execute_off_catalog,
+    "clarify": execute_clarify,
+    "policy_answer": execute_policy_answer,
+    "handoff_support": execute_support_handoff,
+    "handoff_procurement": execute_procurement_handoff,
+    "inventory_summary": execute_inventory_summary,
 }
