@@ -36,8 +36,19 @@ _CONTRACT_NODES = ("el-6-6", "el-6-11-2")
 
 
 @pytest.fixture(autouse=True)
-def _ground_v2_contract_catalog():
+def _ground_v2_contract_catalog(monkeypatch):
     """Ground after the function-scoped migrated-database reset."""
+    # Contract-shape certification must not silently become a live Ollama benchmark.
+    # Provider latency is certified separately with explicit receipts and deadlines.
+    monkeypatch.setenv("USE_MOCK_LLM", "1")
+    monkeypatch.setenv("ROUTER_MODEL_ENABLED", "0")
+    monkeypatch.setenv("SKIP_OBSERVER_ENDPOINTS", "/api/v1/recommend")
+    # Shape compatibility is neither a provider benchmark nor an audit-store
+    # durability benchmark.  Those boundaries have their own focused suites.
+    monkeypatch.setattr(
+        "src.app.services.recommendation_response_finalizer.log_decision",
+        lambda **_kwargs: "contract-shape-trace",
+    )
     with db_session() as db:
         ensure_tables(db)
         existing_nodes = {
