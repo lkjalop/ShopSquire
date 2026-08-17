@@ -15,6 +15,7 @@ _OPTIONAL_ROUTERS = (
     ("hippograph", "src.app.routers.hippograph", "router"),
     ("decision_replay", "src.app.routers.decision_replay", "router"),
     ("market_ingestion_admin", "src.app.routers.market_ingestion_admin", "router"),
+    ("procurement_certification", "src.app.routers.procurement_certification", "router"),
 )
 
 
