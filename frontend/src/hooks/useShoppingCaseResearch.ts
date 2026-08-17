@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { AmbiguityExploration } from '../components/AmbiguityExplorationPanel';
+import type { ProductShelfProjection } from '../components/ProductShelvesPanel';
+import type { SupplierContinuation } from '../components/SupplierContinuationCard';
 import { apiUrl, safeJson } from '../lib/api';
 import { csrfHeaders } from '../lib/csrf';
 
@@ -18,6 +20,51 @@ type ResearchRequest = {
   refreshAuthorized?: boolean;
   deadlineMs?: number;
 };
+
+type StateUpdate<T> = T | ((current: T) => T);
+
+export type ShoppingCasePresentationState = {
+  activeShoppingCase: ActiveShoppingCase | null;
+  ambiguityExploration: AmbiguityExploration | null;
+  productShelves: ProductShelfProjection | null;
+  supplierContinuation: SupplierContinuation | null;
+};
+
+export type ShoppingCasePresentationAction =
+  | { type: 'active.replaced'; value: StateUpdate<ActiveShoppingCase | null> }
+  | { type: 'ambiguity.replaced'; value: StateUpdate<AmbiguityExploration | null> }
+  | { type: 'shelves.replaced'; value: StateUpdate<ProductShelfProjection | null> }
+  | { type: 'supplier.replaced'; value: StateUpdate<SupplierContinuation | null> }
+  | { type: 'case.cleared' };
+
+export const initialShoppingCasePresentationState: ShoppingCasePresentationState = {
+  activeShoppingCase: null,
+  ambiguityExploration: null,
+  productShelves: null,
+  supplierContinuation: null,
+};
+
+const applyUpdate = <T,>(current: T, update: StateUpdate<T>): T => (
+  typeof update === 'function' ? (update as (value: T) => T)(current) : update
+);
+
+export function shoppingCasePresentationReducer(
+  state: ShoppingCasePresentationState,
+  action: ShoppingCasePresentationAction,
+): ShoppingCasePresentationState {
+  switch (action.type) {
+    case 'active.replaced':
+      return { ...state, activeShoppingCase: applyUpdate(state.activeShoppingCase, action.value) };
+    case 'ambiguity.replaced':
+      return { ...state, ambiguityExploration: applyUpdate(state.ambiguityExploration, action.value) };
+    case 'shelves.replaced':
+      return { ...state, productShelves: applyUpdate(state.productShelves, action.value) };
+    case 'supplier.replaced':
+      return { ...state, supplierContinuation: applyUpdate(state.supplierContinuation, action.value) };
+    case 'case.cleared':
+      return initialShoppingCasePresentationState;
+  }
+}
 
 const requestHeaders = (idempotencyKey?: string) => ({
   'Content-Type': 'application/json',
@@ -46,8 +93,23 @@ async function postShoppingCase(path: string, body: Record<string, unknown>, ide
  * Rendering and buyer-facing copy deliberately remain outside this hook.
  */
 export function useShoppingCaseResearch() {
-  const [activeShoppingCase, setActiveShoppingCase] = useState<ActiveShoppingCase | null>(null);
-  const [ambiguityExploration, setAmbiguityExploration] = useState<AmbiguityExploration | null>(null);
+  const [presentation, dispatchPresentation] = useReducer(
+    shoppingCasePresentationReducer,
+    initialShoppingCasePresentationState,
+  );
+  const { activeShoppingCase, ambiguityExploration, productShelves, supplierContinuation } = presentation;
+  const setActiveShoppingCase = useCallback((value: StateUpdate<ActiveShoppingCase | null>) => {
+    dispatchPresentation({ type: 'active.replaced', value });
+  }, []);
+  const setAmbiguityExploration = useCallback((value: StateUpdate<AmbiguityExploration | null>) => {
+    dispatchPresentation({ type: 'ambiguity.replaced', value });
+  }, []);
+  const setProductShelves = useCallback((value: StateUpdate<ProductShelfProjection | null>) => {
+    dispatchPresentation({ type: 'shelves.replaced', value });
+  }, []);
+  const setSupplierContinuation = useCallback((value: StateUpdate<SupplierContinuation | null>) => {
+    dispatchPresentation({ type: 'supplier.replaced', value });
+  }, []);
   const [researchState, setResearchState] = useState<ShoppingCaseResearchState>('idle');
   const controllerRef = useRef<AbortController | null>(null);
   const executionRef = useRef<{ caseId: string; uid: string; executionId: string } | null>(null);
@@ -319,6 +381,10 @@ export function useShoppingCaseResearch() {
     setActiveShoppingCase,
     ambiguityExploration,
     setAmbiguityExploration,
+    productShelves,
+    setProductShelves,
+    supplierContinuation,
+    setSupplierContinuation,
     researchState,
     executeResearch,
     cancelResearch,

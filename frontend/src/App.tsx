@@ -380,13 +380,15 @@ export default function App() {
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
-  const [productShelves, setProductShelves] = useState<ProductShelfProjection | null>(null);
-  const [supplierContinuation, setSupplierContinuation] = useState<SupplierContinuation | null>(null);
   const {
     ambiguityExploration,
     setAmbiguityExploration,
     activeShoppingCase,
     setActiveShoppingCase,
+    productShelves,
+    setProductShelves,
+    supplierContinuation,
+    setSupplierContinuation,
     executeResearch: executeShoppingCaseResearch,
     acceptRequirementProposal: executeRequirementAcceptance,
     submitManualSpecifications: executeManualSpecifications,
