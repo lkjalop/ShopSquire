@@ -40,6 +40,10 @@ commerce_idempotency_conflicts_total = Counter(
     "Commerce request idempotency conflicts.",
     ("conflict_type",),
 )
+recommendation_audit_capacity_rejections_total = Counter(
+    "shopsquire_recommendation_audit_capacity_rejections_total",
+    "Recommendation audit writes rejected before enqueue because the bounded outbox was full.",
+)
 database_pool_checked_out = Gauge(
     "shopsquire_database_pool_checked_out",
     "Currently checked-out SQLAlchemy connections.",
@@ -82,6 +86,7 @@ __all__ = [
     "discovery_engine_outcomes_total",
     "model_late_results_total",
     "official_parser_outcomes_total",
+    "recommendation_audit_capacity_rejections_total",
     "observe_database_pool",
     "record_model_outcome",
 ]

@@ -12,6 +12,7 @@ from src.app.services.recommendation_audit_outbox import (
     recommendation_audit_outbox_metrics,
     recover_pending_recommendation_audits,
 )
+from src.app.services import recommendation_audit_outbox as audit_outbox
 
 
 def _database():
@@ -116,3 +117,38 @@ def test_terminal_failure_is_dead_lettered_and_visible_to_operator(monkeypatch):
     assert health["dead_letter_count"] == 1
     assert health["health"] == "degraded"
     assert health["oldest_pending_age_seconds"] == 0.0
+
+
+def test_capacity_rejection_uses_cross_worker_redis_projection(monkeypatch):
+    engine = _database()
+
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+
+        def incr(self, key):
+            self.values[key] = int(self.values.get(key, 0)) + 1
+            return self.values[key]
+
+        def get(self, key):
+            return self.values.get(key)
+
+    fake = FakeRedis()
+    monkeypatch.setattr(audit_outbox, "_capacity_redis_client", lambda: fake)
+    audit_outbox._record_capacity_rejection("portfolio")
+    audit_outbox._record_capacity_rejection("portfolio")
+
+    with Session(engine) as db:
+        health = recommendation_audit_outbox_metrics(db, tenant_id="portfolio")
+    assert health["capacity_rejection_count"] == 2
+    assert health["capacity_rejection_metric_scope"] == "redis_cross_worker"
+
+
+def test_capacity_rejection_labels_process_fallback(monkeypatch):
+    engine = _database()
+    monkeypatch.setattr(audit_outbox, "_capacity_redis_client", lambda: None)
+    monkeypatch.setitem(audit_outbox._CAPACITY_REJECTIONS, "fallback", 4)
+    with Session(engine) as db:
+        health = recommendation_audit_outbox_metrics(db, tenant_id="fallback")
+    assert health["capacity_rejection_count"] == 4
+    assert health["capacity_rejection_metric_scope"] == "process_fallback"

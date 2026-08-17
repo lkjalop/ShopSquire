@@ -14,11 +14,69 @@ from src.app.models.orm import RecommendationAuditOutboxRecord
 
 _METRIC_LOCK = threading.Lock()
 _CAPACITY_REJECTIONS: dict[str, int] = {}
+_CAPACITY_REDIS: Any | None = None
+_CAPACITY_REDIS_INITIALIZED = False
+_CAPACITY_METRIC_PREFIX = "shopsquire:recommendation_audit:capacity_rejections:v1"
+
+
+def _capacity_redis_client() -> Any | None:
+    """Return a fail-fast Redis client once, without making Redis authoritative.
+
+    Redis provides the cross-worker aggregate. The process counter remains an
+    explicitly labelled fallback for local/degraded profiles.
+    """
+    global _CAPACITY_REDIS, _CAPACITY_REDIS_INITIALIZED
+    with _METRIC_LOCK:
+        if _CAPACITY_REDIS_INITIALIZED:
+            return _CAPACITY_REDIS
+        _CAPACITY_REDIS_INITIALIZED = True
+        try:
+            from src.app.services.redis_factory import create_redis_client
+
+            candidate = create_redis_client(connect_timeout=0.05, socket_timeout=0.1)
+            if candidate is not None:
+                candidate.ping()
+                _CAPACITY_REDIS = candidate
+        except Exception:
+            _CAPACITY_REDIS = None
+        return _CAPACITY_REDIS
+
+
+def _capacity_key(tenant_id: str) -> str:
+    tenant_hash = hashlib.sha256(str(tenant_id).encode("utf-8")).hexdigest()[:20]
+    return f"{_CAPACITY_METRIC_PREFIX}:{tenant_hash}"
 
 
 def _record_capacity_rejection(tenant_id: str) -> None:
     with _METRIC_LOCK:
         _CAPACITY_REJECTIONS[tenant_id] = _CAPACITY_REJECTIONS.get(tenant_id, 0) + 1
+    try:
+        from src.app.observability.pilot_runtime_metrics import (
+            recommendation_audit_capacity_rejections_total,
+        )
+
+        recommendation_audit_capacity_rejections_total.inc()
+    except Exception:
+        pass
+    redis_client = _capacity_redis_client()
+    if redis_client is not None:
+        try:
+            redis_client.incr(_capacity_key(tenant_id))
+        except Exception:
+            # The local counter remains truthful for this process. Do not call
+            # the aggregate cross-worker value authoritative after Redis fails.
+            pass
+
+
+def _capacity_rejection_projection(tenant_id: str) -> tuple[int, str]:
+    redis_client = _capacity_redis_client()
+    if redis_client is not None:
+        try:
+            return int(redis_client.get(_capacity_key(tenant_id)) or 0), "redis_cross_worker"
+        except Exception:
+            pass
+    with _METRIC_LOCK:
+        return int(_CAPACITY_REJECTIONS.get(tenant_id, 0)), "process_fallback"
 
 
 def _max_attempts() -> int:
@@ -230,8 +288,7 @@ def recommendation_audit_outbox_metrics(
         )).total_seconds()) for row in pending),
         default=0.0,
     )
-    with _METRIC_LOCK:
-        rejected = int(_CAPACITY_REJECTIONS.get(tenant_id, 0))
+    rejected, rejection_metric_scope = _capacity_rejection_projection(tenant_id)
     return {
         "schema_version": "recommendation-audit-outbox-health-v1",
         "tenant_id": tenant_id,
@@ -240,6 +297,7 @@ def recommendation_audit_outbox_metrics(
         "oldest_pending_age_seconds": round(oldest_age, 3),
         "retry_attempt_count": sum(int(row.attempts or 0) for row in rows if row.status == "retry"),
         "capacity_rejection_count": rejected,
+        "capacity_rejection_metric_scope": rejection_metric_scope,
         "dead_letter_count": statuses["dead_letter"],
         "health": "degraded" if statuses["dead_letter"] or statuses["enqueue_degraded"] else "healthy",
         "authority": "operator_observability_only",
