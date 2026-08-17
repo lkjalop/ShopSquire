@@ -30,11 +30,23 @@ def project_price_baselines(
             "minimum_required": 3, "authority": "descriptive_baseline_only",
         }
     errors = {"seasonal_naive": [], "ewma": []}
+    evaluation_pairs: list[dict[str, Any]] = []
     for index in range(1, len(values)):
         history = values[:index]
         seasonal = history[-season_length] if len(history) >= season_length else history[-1]
+        ewma_prediction = _ewma(history, alpha)
         errors["seasonal_naive"].append(abs(float(values[index] - seasonal)))
-        errors["ewma"].append(abs(float(values[index]) - _ewma(history, alpha)))
+        errors["ewma"].append(abs(float(values[index]) - ewma_prediction))
+        evaluation_pairs.append({
+            "target_observation_id": rows[index].get("observation_id"),
+            "target_known_at": rows[index].get("known_at"),
+            "actual_minor_units": values[index],
+            "predictions_minor_units": {
+                "seasonal_naive": seasonal,
+                "ewma": round(ewma_prediction, 2),
+            },
+            "training_observation_count": len(history),
+        })
     mae = {name: round(sum(rows_) / len(rows_), 4) for name, rows_ in errors.items()}
     winner = min(mae, key=lambda name: (mae[name], name))
     return {
@@ -46,6 +58,8 @@ def project_price_baselines(
             "seasonal_naive": values[-season_length] if len(values) >= season_length else values[-1],
             "ewma": round(_ewma(values, alpha), 2),
         },
+        "evaluation_pairs": evaluation_pairs,
+        "evaluation_semantics": "prequential_each_actual_scored_from_prior_observations_only",
         "authority": "descriptive_baseline_only",
         "pricing_authority_granted": False,
     }

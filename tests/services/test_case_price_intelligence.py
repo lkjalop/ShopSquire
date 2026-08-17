@@ -17,6 +17,15 @@ def test_price_baselines_are_causal_measured_and_non_authoritative():
     assert result["observation_count"] == 4
     assert set(result["mae_minor_units"]) == {"seasonal_naive", "ewma"}
     assert result["selected_baseline"] in result["mae_minor_units"]
+    assert len(result["evaluation_pairs"]) == 3
+    assert result["evaluation_pairs"][0] == {
+        "target_observation_id": "price-2",
+        "target_known_at": "2026-08-02T00:00:00Z",
+        "actual_minor_units": 110_00,
+        "predictions_minor_units": {"seasonal_naive": 100_00, "ewma": 100_00.0},
+        "training_observation_count": 1,
+    }
+    assert result["evaluation_semantics"].startswith("prequential")
     assert result["pricing_authority_granted"] is False
 
 

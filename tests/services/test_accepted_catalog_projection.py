@@ -112,6 +112,33 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
     assert all(row.freshness_status == "fresh" for row in titan.availability)
 
 
+def test_quantity_projects_a_separate_deadline_shelf_through_shared_reducer():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(
+            db,
+            accepted_claims=[],
+            requested_quantity=30,
+            now=datetime(2026, 8, 8, 12, tzinfo=timezone.utc),
+        )
+
+    deadline = next(
+        row for row in projection.shelves
+        if row.shelf_id == "shared:available_by_deadline"
+    )
+    assert deadline.decision_view == "available_by_deadline"
+    products = [*deadline.initial, *deadline.next_page]
+    assert products
+    assert all(item.requested_quantity == 30 for item in products)
+    assert all(
+        item.quantity_fit in {"enough_now", "partial", "unavailable", "unknown"}
+        for item in products
+    )
+    assert all(item.commercial_decision.cart_authority == "none" for item in products)
+
+
 def test_conflicting_exact_configuration_observations_remain_contested():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

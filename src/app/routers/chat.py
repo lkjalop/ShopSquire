@@ -3543,6 +3543,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             _projection = project_accepted_catalog(
                 db, accepted_claims=[], desired_outcome=_retained_case_purpose,
                 tenant_id=_request_tenant_id(request),
+                requested_quantity=(
+                    int(data["requested_quantity"])
+                    if isinstance(data.get("requested_quantity"), int)
+                    and not isinstance(data.get("requested_quantity"), bool)
+                    and int(data["requested_quantity"]) > 0
+                    else None
+                ),
                 hypothesis_labels={
                     str(item.get("hypothesis_id") or f"hypothesis_{index + 1}"): str(
                         item.get("label") or item.get("hypothesis_id") or f"Interpretation {index + 1}"
