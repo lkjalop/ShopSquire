@@ -38,6 +38,7 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
+from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIASES
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
                                                 primary_sold_node, search_nodes, sells_within,
                                                 sold_nodes)
@@ -106,14 +107,6 @@ _SEMANTIC_REFUSAL_MIN_MARGIN = 0.08
 
 # Model-facing synonyms for the one bounded procurement lane. These are aliases, not new
 # capabilities: the facade still delegates PROCUREMENT to the established fulfillment path.
-_LANE_ALIASES = {
-    "BULK": "PROCUREMENT",
-    "BULK_QUOTE": "PROCUREMENT",
-    "QUOTE": "PROCUREMENT",
-    "RFQ": "PROCUREMENT",
-}
-
-
 def _reroute_host_node(db, envelope: TurnEnvelope, relationship: str) -> Optional[str]:
     """The DEVICE a named workload runs on (M3-C1 / review-8 #3). The OLD reroute target was
     'most-classified sold node', which GPT-5.6 showed can be PHARMACY or accessories for a mixed
@@ -174,7 +167,7 @@ def active_router_model() -> str:
 _router_model = active_router_model
 
 
-def _default_llm_fn(prompt: str, timeout: float) -> str:
+def _legacy_default_llm_fn(prompt: str, timeout: float) -> str:
     started = time.monotonic()
     model = _router_model()
     metrics: Dict[str, Any] = {
@@ -304,6 +297,29 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
             1,
         )
         _ROUTER_CALL_STATE.metrics = metrics
+
+
+def _default_llm_fn(prompt: str, timeout: float) -> str:
+    """Compatibility seam; execution ownership lives in router_model_call."""
+    from src.app.services.recommendation_core.router_model_call import execute_router_model
+
+    model = _router_model()
+    rendered, metrics = execute_router_model(
+        prompt,
+        timeout,
+        model=model,
+        http_post=_router_http_post,
+        injected_transport=_router_http_post is not _DEFAULT_ROUTER_HTTP_POST,
+        gate=_ROUTER_GATE,
+        runtime_contract=router_runtime_contract(),
+    )
+    _ROUTER_CALL_STATE.metrics = metrics
+    if metrics.get("outcome") not in {"ok", "disabled", "mock_disabled", "queue_timeout"}:
+        logger.warning(
+            "router model call failed: outcome=%s model=%s error=%s",
+            metrics.get("outcome"), model, metrics.get("error_type"),
+        )
+    return rendered
 
 
 def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
@@ -1697,13 +1713,20 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
                             for key, values in variant_vocabulary.items()},
                            separators=(",", ":")) + "\n") \
         if variant_vocabulary else ""
-    return (_instruction_prefix(tuple(sorted(req_keys)), tuple(use_case_keys)) + "\n" + guide + variants + context + pending_context +
-            f'MESSAGE: "{envelope.query[:400]}"\n' + budget + image + research +
-            "CANDIDATE CATEGORIES (listed handle or null only):\n" + lines +
-            "\nResolve MESSAGE now. Do not copy the schema's example values. For a product-commerce "
-            "request with no fitting handle, return OFF_CATALOG and a specific non-null "
-            "wanted_category; avoid ambiguous umbrella nouns, coined phrases, and accessory "
-            "categories.\nJSON:")
+    from src.app.services.recommendation_core.router_prompt import compose_router_prompt
+
+    return compose_router_prompt(
+        instruction_prefix=_instruction_prefix(tuple(sorted(req_keys)), tuple(use_case_keys)),
+        guide=guide,
+        variants=variants,
+        prior_context=context,
+        pending_context=pending_context,
+        message=envelope.query,
+        budget=budget,
+        image=image,
+        research=research,
+        candidate_lines=lines,
+    )
 
 
 def _repair_pending_clarification_relation(
@@ -1738,10 +1761,9 @@ def _repair_pending_clarification_relation(
     )
     try:
         raw = fn(prompt, min(float(timeout), 4.0))
-        value = json.loads(raw) if raw else {}
-        relation = str((value or {}).get("clarification_relation") or "").strip().lower()
-        if relation in {"answer", "interrupt", "supersede", "ambiguous"}:
-            return relation
+        from src.app.services.recommendation_core.router_parser import parse_clarification_relation
+
+        return parse_clarification_relation(raw)
     except Exception as exc:
         logger.info("clarification relation repair unavailable: %s", repr(exc)[:120])
     return "ambiguous"
@@ -1893,7 +1915,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if db is not None:
             model_snapshot = db.begin_nested()
         raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked, prior), timeout)
-        data = json.loads(raw) if raw else None
+        from src.app.services.recommendation_core.router_parser import parse_router_payload
+
+        data = parse_router_payload(raw)
     except Exception:
         data = None
     finally:
@@ -1919,9 +1943,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         )
 
     # clamp 1: lane ∈ LANES
-    lane = str(data.get("lane") or "").strip().upper()
-    lane = _LANE_ALIASES.get(lane, lane)
-    if lane not in LANES:
+    from src.app.services.recommendation_core.router_policy_clamp import clamp_lane
+
+    lane = clamp_lane(data.get("lane"))
+    if lane is None:
         return _bounded_fallback_decision(db, envelope, cands, reason="invalid_lane")
     # EDGE-HINT CONTINUITY CLAMP: the chat edge has already classified a bounded follow-up.
     # Only let EXPLAIN/COMPARE correct the model when a real prior shortlist exists. This fixes
