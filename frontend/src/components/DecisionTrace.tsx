@@ -23,6 +23,7 @@ import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './Procurem
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 import ProcurementTracePanel from './decision-trace/ProcurementTracePanel';
 import HippographEvidencePanel from './decision-trace/HippographEvidencePanel';
+import HippographViewSelector from './decision-trace/HippographViewSelector';
 import ProcurementEventTable from './decision-trace/ProcurementEventTable';
 import ProcurementAuditPanel from './decision-trace/ProcurementAuditPanel';
 import ProcurementEconomicsPanel from './decision-trace/ProcurementEconomicsPanel';
@@ -2519,6 +2520,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               {activeTab === 'evidence' && (
                 <div style={{ padding: '12px 14px' }}>
                   <DisruptionEvidenceTrace allocationView={allocationView} />
+                  {(shoppingCaseId || procurementCaseId) && (
+                    <HippographViewSelector
+                      active={activeTab === 'evidence'}
+                      caseId={String(shoppingCaseId || procurementCaseId)}
+                      apiKey={effectiveApiKey}
+                    />
+                  )}
                   <HippographEvidenceSurface insights={hippographInsights} />
                   {/* N1 (2026-07-07): the trust hierarchy IS the layout — trusted store records first
                       as flat rows; external evidence (web) rendered as bordered, badged quotes. */}
