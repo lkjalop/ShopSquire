@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from src.app.services.case_research_plan import build_case_research_plan
 from src.app.services.shopping_case_interpretation_jobs import (
     consume_completed_case_interpretation,
     execute_case_interpretation_job,
+    recover_pending_case_interpretations,
     schedule_case_interpretation,
 )
 
@@ -160,3 +161,25 @@ def test_completed_fallback_does_not_claim_model_proposal_authority(monkeypatch)
         )[1]
     assert stored.status == "completed"
     assert projected["authority"] == "none"
+
+
+def test_restart_reclaims_stale_running_interpretation(monkeypatch):
+    engine = _database()
+    monkeypatch.setenv("OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED", "1")
+    monkeypatch.setenv("CASE_INTERPRETATION_RUNNING_STALE_SEC", "30")
+    monkeypatch.setattr(
+        "src.app.workers.task_runner.submit_task", lambda *_args, **_kwargs: "task-5",
+    )
+    plan = build_case_research_plan("novel acoustic workload", allow_open_world=True)
+    assert plan is not None
+    with Session(engine) as db:
+        schedule_case_interpretation(db, case=_case(db), plan=plan)
+        job = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
+        job.status = "running"
+        job.updated_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+    assert recover_pending_case_interpretations() == 1
+    with Session(engine) as db:
+        job = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
+    assert job.status == "retry"
+    assert job.error_code == "stale_running_reclaimed"

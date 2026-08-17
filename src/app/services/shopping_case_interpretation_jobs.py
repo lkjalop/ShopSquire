@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
@@ -265,6 +265,19 @@ def recover_pending_case_interpretations(*, limit: int = 100) -> int:
     from src.app.workers.task_runner import submit_task
 
     with db_session() as db:
+        try:
+            stale_after = max(30, min(int(os.getenv(
+                "CASE_INTERPRETATION_RUNNING_STALE_SEC", "120",
+            )), 3600))
+        except (TypeError, ValueError):
+            stale_after = 120
+        db.execute(update(ShoppingCaseInterpretationJob).where(
+            ShoppingCaseInterpretationJob.status == "running",
+            ShoppingCaseInterpretationJob.updated_at < _now() - timedelta(seconds=stale_after),
+        ).values(
+            status="retry", error_code="stale_running_reclaimed", updated_at=_now(),
+        ))
+        db.commit()
         rows = db.execute(select(ShoppingCaseInterpretationJob).where(
             ShoppingCaseInterpretationJob.status.in_((
                 "queued", "retry", "enqueue_degraded",

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -144,6 +144,19 @@ def recover_pending_recommendation_audits(*, limit: int = 100) -> int:
     from src.app.workers.task_runner import submit_task
 
     with db_session() as db:
+        try:
+            stale_after = max(30, min(int(os.getenv(
+                "RECOMMEND_AUDIT_RUNNING_STALE_SEC", "300",
+            )), 3600))
+        except (TypeError, ValueError):
+            stale_after = 300
+        db.execute(update(RecommendationAuditOutboxRecord).where(
+            RecommendationAuditOutboxRecord.status == "running",
+            RecommendationAuditOutboxRecord.updated_at < _now() - timedelta(seconds=stale_after),
+        ).values(
+            status="retry", error_code="stale_running_reclaimed", updated_at=_now(),
+        ))
+        db.commit()
         rows = db.execute(select(RecommendationAuditOutboxRecord).where(
             RecommendationAuditOutboxRecord.status.in_((
                 "queued", "retry", "enqueue_degraded",
