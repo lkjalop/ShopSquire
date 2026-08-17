@@ -66,7 +66,11 @@ test('live OT research stays in one case and exposes real provider receipts', as
   expect(result.status).toBe('research_completed');
   expect(['live_network', 'evidence_cache']).toContain(result.research.execution_mode);
   if (result.research.execution_mode === 'live_network') {
-    expect(result.research.provider_accounting.external_calls).toBeGreaterThanOrEqual(2);
+    // A reviewed canonical origin can be fetched directly without paying the
+    // discovery cost. Novel-source certification separately requires a real
+    // SearXNG discovery receipt.
+    expect(result.research.provider_accounting.external_calls).toBeGreaterThanOrEqual(1);
+    expect(result.research.provider_accounting.official_origin_fetches).toBeGreaterThanOrEqual(1);
   } else {
     expect(result.research.provider_accounting.cache_hits).toBeGreaterThan(0);
   }

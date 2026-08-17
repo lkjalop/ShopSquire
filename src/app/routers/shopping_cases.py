@@ -250,6 +250,11 @@ def get_case_decision_runs(
             "commercial_authority_granted": False,
         }
 
+    views = None
+    if latest:
+        from src.app.services.decision_trace_views import project_decision_trace_views
+
+        views = project_decision_trace_views(latest=latest, history=runs)
     return {
         "schema_version": "shopping-case-decision-runs-v1",
         "case_id": case_id,
@@ -258,6 +263,7 @@ def get_case_decision_runs(
         "latest": project(latest) if latest else None,
         "history": [project(run) for run in runs],
         "dependency_edges": [edge.model_dump(mode="json") for edge in edges],
+        "views": views,
         "authority": "decision_evidence_only",
     }
 
@@ -1032,6 +1038,7 @@ def select_fulfillment_continuation(
         requested_quantity=body.requested_quantity, available_now=body.available_now,
         idempotency_key=idempotency_key, offers=offers,
         deadline_days=body.deadline_days,
+        use_canonical_case_revision=True,
     )
     if error:
         raise HTTPException(status_code=409, detail={"code": error})
@@ -1125,6 +1132,10 @@ def confirm_fulfillment_cart(
         raise HTTPException(status_code=409, detail={
             "code": "stale_fulfillment_revision", "current_revision": selection.revision,
         })
+    if int(case.revision or 1) != body.expected_revision:
+        raise HTTPException(status_code=409, detail={
+            "code": "stale_case_revision", "current_revision": int(case.revision or 1),
+        })
     try:
         target_sku, quantity, offer = resolve_confirmed_cart_target(
             selection, selected_offer_id=body.selected_offer_id,
@@ -1166,10 +1177,23 @@ def confirm_fulfillment_cart(
         uid=body.uid, expected_revision=selection.revision,
         idempotency_key=idempotency_key, selected_offer_id=body.selected_offer_id,
         cart_plan_id=proposed["plan_id"], cart_result=applied,
+        use_canonical_case_revision=True,
     )
     if error:
         raise HTTPException(status_code=409, detail={"code": error})
     assert recorded is not None
+    from src.app.services.shopping_case_decision_persistence import (
+        persist_fulfilment_selection_decision,
+    )
+
+    decision_run = persist_fulfilment_selection_decision(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=recorded.revision,
+        retained_purpose=case.retained_purpose or "Buyer fulfilment decision",
+        selection=recorded,
+    )
     try:
         log_trace_event(
             trace_id=case_id.removeprefix("sc-"),
@@ -1203,6 +1227,7 @@ def confirm_fulfillment_cart(
         "substitution_authorized": bool(offer and offer.relationship == "compatible_substitute"),
         "supplier_offer_provenance": offer.provenance if offer else None,
         "supplier_send": "not_performed", "idempotent_replay": False,
+        "procurement_decision_run": decision_run,
     }
 
 

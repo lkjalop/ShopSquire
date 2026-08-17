@@ -55,6 +55,7 @@ export function useShoppingCaseActions({
         unitPriceCents: item.price_cents,
         currency: item.currency || 'AUD',
         availableNow,
+        revision: Number(ambiguityExploration.interpretation_job?.case_revision || 1),
         deadlineDays: 10,
         choices: [],
         selectionKey: `portfolio-select-${crypto.randomUUID()}`,

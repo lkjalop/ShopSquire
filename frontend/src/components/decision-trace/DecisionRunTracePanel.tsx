@@ -1,14 +1,22 @@
+import { useState } from 'react';
+
+
 export default function DecisionRunTracePanel({ data, status, classNames }: {
   data: any;
   status: 'idle' | 'loading' | 'ready' | 'unavailable';
   classNames: Record<string, string>;
 }) {
+  const [view, setView] = useState<'changed' | 'known' | 'fulfil'>('changed');
   if (status === 'idle') return null;
   if (status === 'loading') return <div className={classNames.empty}>Loading revisioned decision evidence...</div>;
   if (status === 'unavailable' || !data?.latest) {
     return <div className={classNames.empty}>No revisioned decision run is available. No historical state is inferred.</div>;
   }
   const run = data.latest;
+  const views = data.views || {};
+  const selectedView = view === 'changed'
+    ? views.what_changed : view === 'known'
+      ? views.what_was_known_then : views.who_can_fulfil_now;
   return (
     <section className={classNames.summaryPane} data-testid="decision-run-trace">
       <h3>Decision snapshot and temporal replay</h3>
@@ -18,6 +26,37 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
       </p>
       <p>Evaluation time: <time dateTime={run.evaluation_time}>{run.evaluation_time}</time></p>
       <p>Commerce authority: none - this trace cannot mutate cart, RFQ, payment or shipment.</p>
+      <h4>Ask the decision record</h4>
+      <div role="group" aria-label="Decision record views">
+        <button type="button" aria-pressed={view === 'changed'} onClick={() => setView('changed')}>What changed?</button>{' '}
+        <button type="button" aria-pressed={view === 'known'} onClick={() => setView('known')}>What was known then?</button>{' '}
+        <button type="button" aria-pressed={view === 'fulfil'} onClick={() => setView('fulfil')}>Who can fulfil now?</button>
+      </div>
+      {selectedView && (
+        <div data-testid="decision-record-view">
+          {view === 'changed' && (
+            <p>
+              Revision {selectedView.from_revision ?? 'initial'} → {selectedView.to_revision}.{' '}
+              {selectedView.invalidation_count || 0} invalidation(s) recorded.
+            </p>
+          )}
+          {view === 'known' && (
+            <p>
+              Evidence cutoff {selectedView.knowledge_cutoff}. Future evidence is excluded from this replay.
+            </p>
+          )}
+          {view === 'fulfil' && (
+            <>
+              <p>{selectedView.evidence_warning}</p>
+              <ul>{(selectedView.supplier_candidates || []).map((candidate: any, index: number) => (
+                <li key={`${candidate.supplier_reference}:${candidate.offered_sku}:${index}`}>
+                  {candidate.supplier_reference}: {candidate.quantity_available ?? 'undisclosed'} × {candidate.offered_sku || 'configuration undisclosed'}; {candidate.response_status}
+                </li>
+              ))}</ul>
+            </>
+          )}
+        </div>
+      )}
       <h4>Stage receipts</h4>
       <ul>
         {(run.stage_receipts || []).map((receipt: any) => (

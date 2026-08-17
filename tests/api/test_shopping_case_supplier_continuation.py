@@ -1,5 +1,6 @@
 import pathlib
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,7 +79,7 @@ def _select(client: TestClient, *, key: str = "select-supplier-1") -> dict:
         "/api/v1/shopping-cases/sc-supplier-1/fulfillment-selections",
         headers={"Idempotency-Key": key},
         json={
-            "uid": "buyer-1", "expected_revision": 0, "choice": "substitute",
+            "uid": "buyer-1", "expected_revision": 1, "choice": "substitute",
             "preferred_sku": "PREFERRED", "substitute_sku": "SUBSTITUTE",
             "requested_quantity": 30, "available_now": 12,
         },
@@ -93,6 +94,7 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
     replay = _select(http)
     assert replay["selection_id"] == selection["selection_id"]
     assert selection["supplier_send"] == "not_performed"
+    assert selection["revision"] == 2
     assert selection["procurement_decision_run"]["persistence_status"] == "persisted"
     assert selection["procurement_decision_run"]["commercial_authority_granted"] is False
     history = http.get(
@@ -104,6 +106,16 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
         "commercial", "fulfilment", "response",
     }
     assert history.json()["dependency_edges"]
+    assert history.json()["views"]["what_changed"]["to_revision"] == 2
+    assert history.json()["views"]["what_was_known_then"]["future_evidence_excluded"] is True
+    fulfilment_view = history.json()["views"]["who_can_fulfil_now"]
+    assert fulfilment_view["requested_quantity"] == 30
+    assert fulfilment_view["supplier_candidates"]
+    assert "not a live stock promise" in fulfilment_view["evidence_warning"]
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT revision FROM shopping_cases WHERE case_id='sc-supplier-1'"
+        )).scalar_one() == 2
     substitute = next(row for row in selection["offers"] if row["relationship"] == "compatible_substitute")
 
     rejected = http.post(
@@ -129,6 +141,8 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
     assert first.json()["confirmed_sku"] == "SUBSTITUTE"
     assert first.json()["confirmed_quantity"] == 30
     assert first.json()["supplier_offer_provenance"] == substitute["provenance"]
+    assert first.json()["revision"] == 3
+    assert first.json()["procurement_decision_run"]["case_revision"] == 3
     second = http.post(
         f"/api/v1/shopping-cases/sc-supplier-1/fulfillment-selections/{selection['selection_id']}/confirm-cart",
         headers={"Idempotency-Key": "confirm-supplier-1"},
@@ -142,6 +156,9 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
     cart = http.get("/api/v1/cart", params={"uid": "buyer-1"}).json()
     assert [(row["sku"], row["quantity"]) for row in cart["items"]] == [("SUBSTITUTE", 30)]
     with engine.connect() as conn:
+        case_revision = conn.execute(text(
+            "SELECT revision FROM shopping_cases WHERE case_id='sc-supplier-1'"
+        )).scalar_one()
         selection_count = conn.execute(text(
             "SELECT COUNT(*) FROM shopping_case_fulfillment_selections WHERE case_id='sc-supplier-1'"
         )).scalar_one()
@@ -150,3 +167,106 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
         )).scalar_one()
     assert selection_count == 1
     assert plan_count == 1
+    assert case_revision == 3
+
+
+def test_real_inventory_observation_advances_case_and_selectively_recomputes(client) -> None:
+    http, engine = client
+    selection = _select(http, key="select-before-stock-correction")
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "observation_id": "inventory-correction-0001",
+        "expected_revision": selection["revision"],
+        "kind": "inventory_quantity",
+        "subject_ref": "configuration:PREFERRED",
+        "location_ref": "warehouse:nearest-eligible",
+        "value": {"quantity": 4, "unit": "unit"},
+        "source_type": "inventory_system",
+        "evidence_ref": "inventory-ledger:row-44",
+        "known_at": now,
+        "effective_at": now,
+    }
+    observed = http.post(
+        "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
+        json=payload,
+    )
+    assert observed.status_code == 201, observed.text
+    result = observed.json()
+    assert result["case_revision"] == 3
+    assert result["changed_ref"] == "inventory:current"
+    assert result["recomputed_stages"] == ["commercial", "fulfilment", "response"]
+    assert result["external_calls"] == result["rfq_calls"] == result["cart_mutations"] == 0
+    replay = http.post(
+        "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
+        json=payload,
+    )
+    assert replay.status_code == 201
+    assert replay.json()["idempotent_replay"] is True
+
+    history = http.get(
+        "/api/v1/shopping-cases/sc-supplier-1/decision-runs?uid=buyer-1",
+    ).json()
+    assert history["history_count"] == 2
+    assert history["latest"]["case_revision"] == 3
+    assert history["latest"]["invalidations"][0]["changed_path"] == "fulfilment.inventory"
+    assert history["views"]["what_changed"]["from_revision"] == 2
+    assert history["views"]["what_changed"]["to_revision"] == 3
+    assert history["history"][0]["case_revision"] == 2
+
+    stale_confirmation = http.post(
+        f"/api/v1/shopping-cases/sc-supplier-1/fulfillment-selections/{selection['selection_id']}/confirm-cart",
+        headers={"Idempotency-Key": "stale-after-inventory-correction"},
+        json={
+            "uid": "buyer-1",
+            "expected_revision": selection["revision"],
+            "selected_offer_id": None,
+            "substitution_authorized": False,
+        },
+    )
+    assert stale_confirmation.status_code == 409
+    assert stale_confirmation.json()["detail"]["code"] == "stale_case_revision"
+    assert http.get("/api/v1/cart", params={"uid": "buyer-1"}).json()["items"] == []
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT COUNT(*) FROM shopping_case_operational_observations"
+        )).scalar_one() == 1
+
+
+@pytest.mark.parametrize(("kind", "value", "changed_ref"), [
+    ("price", {"amount_cents": 525_000, "currency": "AUD"}, "price:current"),
+    ("supplier_lead_time", {"days": 14}, "delivery:observations"),
+    ("quote_validity", {"valid_until": "2026-08-31T00:00:00+00:00"}, "supplier:offers"),
+    ("supplier_response", {"status": "rejected"}, "supplier:offers"),
+])
+def test_operational_fact_classes_are_append_only_and_non_authoritative(
+    client, kind, value, changed_ref,
+) -> None:
+    http, engine = client
+    selection = _select(http, key=f"select-before-{kind}")
+    now = datetime.now(timezone.utc).isoformat()
+    response = http.post(
+        "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
+        json={
+            "observation_id": f"operational-{kind}-0001",
+            "expected_revision": selection["revision"],
+            "kind": kind,
+            "subject_ref": "configuration:PREFERRED",
+            "location_ref": "facility:eligible",
+            "value": value,
+            "source_type": "supplier" if kind.startswith("supplier") else "human_admin",
+            "evidence_ref": f"operator-ledger:{kind}",
+            "known_at": now,
+            "effective_at": now,
+        },
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["changed_ref"] == changed_ref
+    assert result["recomputed_stages"] == ["commercial", "fulfilment", "response"]
+    assert result["commercial_authority_granted"] is False
+    with engine.connect() as conn:
+        stored = conn.execute(text(
+            "SELECT kind, value_json FROM shopping_case_operational_observations"
+        )).one()
+    assert stored[0] == kind
+    assert stored[1]

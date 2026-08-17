@@ -40,6 +40,19 @@ test('inventory disturbance projects selective invalidation and unresolved deliv
       { edge_id: 'e1', source_ref: 'inventory:current', target_ref: 'stage:stage-commercial', relation: 'consumed_by' },
       { edge_id: 'e2', source_ref: 'stage:stage-commercial', target_ref: 'commercial:shelves', relation: 'produced_by' },
     ],
+    views: {
+      what_changed: { from_revision: 1, to_revision: 2, invalidation_count: 1 },
+      what_was_known_then: {
+        knowledge_cutoff: '2026-08-17T09:05:00+00:00', future_evidence_excluded: true,
+      },
+      who_can_fulfil_now: {
+        evidence_warning: 'Latest recorded evidence, not a live stock promise.',
+        supplier_candidates: [{
+          supplier_reference: 'supplier-approved', offered_sku: 'SKU-1',
+          quantity_available: 12, response_status: 'conditional',
+        }],
+      },
+    },
     authority: 'decision_evidence_only',
   } }));
   await page.route('**/api/v1/decisions/trace-disturbance/audit-trail', (route) => route.fulfill({ json: {} }));
@@ -53,4 +66,9 @@ test('inventory disturbance projects selective invalidation and unresolved deliv
   await expect(panel).toContainText('inventory.current invalidated commercial, fulfilment, response');
   await expect(panel).toContainText('lead_time_days: unresolved; resolution owner supplier');
   await expect(panel).toContainText('Commerce authority: none');
+  await expect(panel.getByTestId('decision-record-view')).toContainText('Revision 1 → 2');
+  await panel.getByRole('button', { name: 'What was known then?' }).click();
+  await expect(panel.getByTestId('decision-record-view')).toContainText('Future evidence is excluded');
+  await panel.getByRole('button', { name: 'Who can fulfil now?' }).click();
+  await expect(panel.getByTestId('decision-record-view')).toContainText('supplier-approved: 12 × SKU-1; conditional');
 });

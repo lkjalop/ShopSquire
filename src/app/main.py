@@ -24,6 +24,7 @@ from src.app.routers.auth import router as auth_router
 from src.app.routers.account import router as account_router
 from src.app.routers.cart import router as cart_router
 from src.app.routers.shopping_cases import router as shopping_cases_router
+from src.app.routers.shopping_case_operations import router as shopping_case_operations_router
 from src.app.routers.privacy import router as privacy_router
 from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
@@ -2223,6 +2224,7 @@ def create_app() -> FastAPI:
     register_routers(app, (
         router_registration("cart", cart_router),
         router_registration("shopping_cases", shopping_cases_router),
+        router_registration("shopping_case_operations", shopping_case_operations_router),
         # C1: confirm-tier plan apply (V2 cart lane)
         router_registration("cart_mutations", cart_mutations_router),
         router_registration("privacy", privacy_router),

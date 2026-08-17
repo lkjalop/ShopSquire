@@ -316,6 +316,7 @@ def select_fulfillment_option(
     choice: Choice, preferred_sku: str, requested_quantity: int, available_now: int,
     idempotency_key: str, offers: Sequence[SupplierOfferInput],
     deadline_days: int | None = None,
+    use_canonical_case_revision: bool = False,
 ) -> tuple[FulfillmentSelection | None, str | None]:
     replay = db.execute(select(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
@@ -324,25 +325,47 @@ def select_fulfillment_option(
     )).scalar_one_or_none()
     if replay:
         return _decode(replay), None
-    current = db.execute(select(func.coalesce(func.max(
-        ShoppingCaseFulfillmentSelection.revision,
-    ), 0)).where(
-        ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
-        ShoppingCaseFulfillmentSelection.case_id == case_id,
-    )).scalar_one()
+    if use_canonical_case_revision:
+        from src.app.services.shopping_case_revision import (
+            advance_material_case_revision,
+            canonical_case_revision,
+        )
+
+        current = canonical_case_revision(
+            db, tenant_id=tenant_id, case_id=case_id,
+            fallback=expected_revision,
+        )
+    else:
+        current = db.execute(select(func.coalesce(func.max(
+            ShoppingCaseFulfillmentSelection.revision,
+        ), 0)).where(
+            ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
+            ShoppingCaseFulfillmentSelection.case_id == case_id,
+        )).scalar_one()
     if int(current) != expected_revision:
-        return None, f"stale_fulfillment_revision:{current}"
+        return None, f"stale_case_revision:{current}" if use_canonical_case_revision else (
+            f"stale_fulfillment_revision:{current}"
+        )
+    next_revision = expected_revision + 1
+    if use_canonical_case_revision:
+        next_revision = advance_material_case_revision(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            expected_revision=expected_revision,
+            reason="buyer_selected_fulfillment_option",
+        )
     normalized = normalize_supplier_offers(
         offers, requested_quantity=requested_quantity,
         available_now=available_now, deadline_days=deadline_days,
     )
     selection_id = "fs-" + hashlib.sha256(
-        f"{tenant_id}|{case_id}|{expected_revision + 1}|{idempotency_key}".encode()
+        f"{tenant_id}|{case_id}|{next_revision}|{idempotency_key}".encode()
     ).hexdigest()[:24]
     stamp = datetime.now(timezone.utc)
     row = ShoppingCaseFulfillmentSelection(
         selection_id=selection_id, tenant_id=tenant_id, case_id=case_id, uid=uid,
-        revision=expected_revision + 1, status="selected", choice=choice,
+        revision=next_revision, status="selected", choice=choice,
         preferred_sku=preferred_sku, requested_quantity=requested_quantity,
         available_now=available_now,
         offers_json=[item.model_dump(mode="json") for item in normalized],
@@ -402,6 +425,7 @@ def record_cart_confirmation(
     db, *, tenant_id: str, case_id: str, selection_id: str, uid: str,
     expected_revision: int, idempotency_key: str, selected_offer_id: str | None,
     cart_plan_id: str, cart_result: dict[str, Any],
+    use_canonical_case_revision: bool = False,
 ) -> tuple[FulfillmentSelection | None, str | None]:
     row = db.execute(select(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
@@ -419,6 +443,20 @@ def record_cart_confirmation(
     if current.revision != expected_revision:
         return None, f"stale_fulfillment_revision:{current.revision}"
     next_revision = current.revision + 1
+    if use_canonical_case_revision:
+        from src.app.services.shopping_case_revision import advance_material_case_revision
+
+        try:
+            next_revision = advance_material_case_revision(
+                db,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                expected_revision=current.revision,
+                reason="buyer_confirmed_fulfillment_cart_change",
+            )
+        except ValueError:
+            db.rollback()
+            return None, "case_revision_conflict"
     changed = db.execute(update(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
         ShoppingCaseFulfillmentSelection.case_id == case_id,

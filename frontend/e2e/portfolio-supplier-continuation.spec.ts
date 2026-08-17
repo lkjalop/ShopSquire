@@ -22,9 +22,10 @@ test.beforeEach(async ({ request }) => {
 test('high-value bulk request shows governed fulfilment choices and explicit exact confirmation', async ({ page }) => {
   test.setTimeout(150_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+  const uid = `portfolio-supplier-${suffix}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
-    `portfolio-supplier-${suffix}`,
+    uid,
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
@@ -59,7 +60,14 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   await expect(choices).not.toContainText(/Wait 8 days.*misses requested deadline/i);
   await expect(choices).toContainText(/Ask suppliers for 27 compatible units/i);
 
+  const selectionResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+      && /\/api\/v1\/shopping-cases\/[^/]+\/fulfillment-selections$/.test(response.url())
+  ));
   await choices.getByRole('button', { name: /Ask suppliers for 27 compatible units/i }).click();
+  const selectionResponse = await selectionResponsePromise;
+  expect(selectionResponse.ok()).toBeTruthy();
+  const selectionResult = await selectionResponse.json();
   const offers = continuation.getByTestId('supplier-offers');
   await expect(offers).toContainText(/27 × SCORP-126982 in 8 days/i);
   await expect(offers).toContainText(/SCORP-126982: unable to fulfil/i);
@@ -84,8 +92,49 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.screenshot({ path: process.env.PORTFOLIO_SUPPLIER_SCREENSHOT_PATH });
   }
+  const confirmationResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST' && /\/confirm-cart$/.test(response.url())
+  ));
   await continuation.getByRole('button', { name: 'Confirm exact cart change' }).click();
+  const confirmationResponse = await confirmationResponsePromise;
+  expect(confirmationResponse.ok()).toBeTruthy();
+  const confirmationResult = await confirmationResponse.json();
   await expect(continuation.getByRole('button', { name: 'Cart updated' })).toBeVisible({ timeout: 30_000 });
+  const caseId = String(selectionResult.case_id);
+  const now = new Date().toISOString();
+  const observation = await page.request.post(
+    `/api/v1/shopping-cases/${caseId}/operational-observations`,
+    {
+      headers: { 'x-api-key': process.env.OWNER_API_KEY || 'local-owner-key' },
+      data: {
+        observation_id: `browser-stock-correction-${suffix}`,
+        expected_revision: confirmationResult.revision,
+        kind: 'inventory_quantity',
+        subject_ref: `configuration:${confirmationResult.confirmed_sku}`,
+        location_ref: 'warehouse:nearest-eligible',
+        value: { quantity: 2, unit: 'unit' },
+        source_type: 'inventory_system',
+        evidence_ref: `browser-inventory-ledger:${suffix}`,
+        known_at: now,
+        effective_at: now,
+      },
+    },
+  );
+  expect(observation.ok(), await observation.text()).toBeTruthy();
+  const observationResult = await observation.json();
+  expect(observationResult.recomputed_stages).toEqual(['commercial', 'fulfilment', 'response']);
+  expect(observationResult.cart_mutations).toBe(0);
+
+  const historyResponse = await page.request.get(
+    `/api/v1/shopping-cases/${caseId}/decision-runs?uid=${encodeURIComponent(uid)}`,
+  );
+  expect(historyResponse.ok()).toBeTruthy();
+  const history = await historyResponse.json();
+  expect(history.latest.case_revision).toBe(observationResult.case_revision);
+  expect(history.views.what_changed.from_revision).toBe(confirmationResult.revision);
+  expect(history.views.what_changed.to_revision).toBe(observationResult.case_revision);
+  expect(history.views.what_was_known_then.future_evidence_excluded).toBe(true);
+  expect(history.views.who_can_fulfil_now.evidence_warning).toContain('not a live stock promise');
   await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection: 30 ×/i)).toBeVisible();
 });
 

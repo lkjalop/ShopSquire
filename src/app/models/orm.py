@@ -304,6 +304,32 @@ class ShoppingCaseFulfillmentSelection(Base):
     updated_at: Mapped[str] = mapped_column(TIMESTAMP)
 
 
+class ShoppingCaseOperationalObservationRecord(Base):
+    """Append-only stock, price, quote, and supplier fact for one case revision."""
+
+    __tablename__ = "shopping_case_operational_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "observation_id", name="uq_case_operational_observation_tenant",
+        ),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    observation_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    case_revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(Text)
+    subject_ref: Mapped[str] = mapped_column(Text)
+    location_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_json: Mapped[dict] = mapped_column(JSON)
+    source_type: Mapped[str] = mapped_column(Text)
+    evidence_ref: Mapped[str] = mapped_column(Text)
+    known_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    effective_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    decision_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
 class HippographJourneyEdgeRecord(Base):
     """Immutable typed journey evidence used for tenant-scoped temporal replay."""
 

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import DecisionRunTracePanel from '../DecisionRunTracePanel';
@@ -29,6 +29,14 @@ describe('DecisionRunTracePanel', () => {
         invalidations: [{ code: 'changed', changed_path: 'requested_quantity', invalidated_stages: ['commercial', 'fulfilment'] }],
       },
       dependency_edges: [{ edge_id: 'edge-1', source_ref: 'inventory:current', target_ref: 'stage:commercial', relation: 'consumed_by' }],
+      views: {
+        what_changed: { from_revision: 6, to_revision: 7, invalidation_count: 1 },
+        what_was_known_then: { knowledge_cutoff: '2026-08-17T01:00:00+00:00', future_evidence_excluded: true },
+        who_can_fulfil_now: {
+          evidence_warning: 'Latest evidence, not a live stock promise.',
+          supplier_candidates: [{ supplier_reference: 'supplier-a', quantity_available: 12, offered_sku: 'SKU-A', response_status: 'conditional' }],
+        },
+      },
     }} />);
     expect(screen.getByTestId('decision-run-trace')).toHaveTextContent('Revision 7');
     expect(screen.getByText(/Commerce authority: none/)).toBeInTheDocument();
@@ -36,5 +44,10 @@ describe('DecisionRunTracePanel', () => {
     expect(screen.getByText(/requested_quantity invalidated commercial, fulfilment/)).toBeInTheDocument();
     expect(screen.getByText(/ToolScope inventory_availability: selected/i)).toBeInTheDocument();
     expect(screen.getByText(/case_interpretation:sci-1: current/i)).toBeInTheDocument();
+    expect(screen.getByTestId('decision-record-view')).toHaveTextContent('Revision 6 → 7');
+    fireEvent.click(screen.getByRole('button', { name: 'What was known then?' }));
+    expect(screen.getByTestId('decision-record-view')).toHaveTextContent('Future evidence is excluded');
+    fireEvent.click(screen.getByRole('button', { name: 'Who can fulfil now?' }));
+    expect(screen.getByTestId('decision-record-view')).toHaveTextContent('supplier-a: 12 × SKU-A; conditional');
   });
 });
