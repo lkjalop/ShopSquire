@@ -32,6 +32,8 @@ def test_readiness_reports_stub_when_no_carrier(monkeypatch):
     assert r["ready"] is False and r["stub"] is True
     assert "no carrier" in r["reason"].lower()
     assert all(v is False for v in r["configured"].values())
+    assert r["tool_selection_receipt"]["outcome"] == "no_eligible_deployment"
+    assert r["tool_selection_receipt"]["commercial_authority_granted"] is False
 
 
 def test_readiness_reports_ready_when_carrier_configured(monkeypatch):

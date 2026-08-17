@@ -60,3 +60,15 @@ def test_read_stage_cannot_escalate_to_rfq_or_cart_write():
     ])
     assert receipt.outcome == "no_eligible_deployment"
     assert receipt.candidates[0].reasons == ("side_effect_not_permitted",)
+
+
+def test_explicit_wildcard_policy_allows_any_tenant():
+    deployment = _deployment("local-catalog", capability="catalog_lookup", effect="none")
+    deployment = deployment.model_copy(update={
+        "policy": deployment.policy.model_copy(update={"allowed_tenants": ("*",)}),
+    })
+    receipt = select_tool_deployments(
+        ToolRequirement(capability="catalog_lookup", tenant_id="tenant-any"),
+        [deployment],
+    )
+    assert receipt.selected_deployment_ids == ("local-catalog",)

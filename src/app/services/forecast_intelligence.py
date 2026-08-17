@@ -330,6 +330,18 @@ def evaluate_inventory_forecast(
             "materialized": False,
         }
     )
+    from src.app.services.operational_tool_scope import operational_read_receipt
+    from src.app.services.tool_capability_selector import ToolCapability
+    receipt = operational_read_receipt(
+        capability=ToolCapability.FORECAST_OBSERVATION_READ,
+        tenant_id=tenant,
+        deployment_id="reconciled_active_purchase_facts",
+        enabled=source.get("status") == "available",
+        freshness_state="fresh" if source.get("status") == "available" else "unknown",
+        health_status="healthy" if source.get("status") == "available" else "degraded",
+        authority_score=85,
+    )
+    result["tool_selection_receipt"] = receipt.model_dump(mode="json")
     if not materialize:
         return result
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

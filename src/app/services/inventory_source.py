@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional
 
+from src.app.services.operational_tool_scope import operational_read_receipt
+from src.app.services.tool_capability_selector import ToolCapability
+
 
 def _legacy_levels(skus: List[str]) -> Dict[str, int]:
     from src.app.services.inventory_query_service import batch_stock_levels
@@ -59,3 +62,31 @@ def stock_levels(
         return legacy  # flag off → legacy only (default behaviour unchanged)
     canonical = (canonical_fn or _canonical_levels)(skus, tenant_id) or {}
     return _overlay(legacy, canonical)
+
+
+def stock_levels_with_receipt(
+    skus: List[str], *, tenant_id: str = "default",
+    legacy_fn: Optional[Callable[[List[str]], Dict[str, int]]] = None,
+    canonical_fn: Optional[Callable[[List[str], str], Dict[str, int]]] = None,
+) -> Dict[str, object]:
+    """Return inventory values and the deterministic source-selection receipt."""
+    from src.app.services import commerce_catalog
+
+    canonical_enabled = commerce_catalog.catalog_enabled()
+    levels = stock_levels(
+        skus, tenant_id=tenant_id, legacy_fn=legacy_fn, canonical_fn=canonical_fn,
+    )
+    receipt = operational_read_receipt(
+        capability=ToolCapability.INVENTORY_AVAILABILITY,
+        tenant_id=tenant_id,
+        deployment_id=(
+            "commerce_catalog.inventory_level" if canonical_enabled
+            else "legacy_inventory_query"
+        ),
+        enabled=True, freshness_state="unknown", health_status="healthy",
+        authority_score=90 if canonical_enabled else 55,
+    )
+    return {
+        "levels": levels,
+        "tool_selection_receipt": receipt.model_dump(mode="json"),
+    }

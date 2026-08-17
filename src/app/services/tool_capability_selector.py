@@ -96,7 +96,7 @@ def _score(requirement: ToolRequirement, deployment: ToolDeployment) -> tuple[in
         reasons.append("deployment_disabled")
     if requirement.capability not in deployment.capabilities:
         reasons.append("capability_missing")
-    if requirement.tenant_id not in policy.allowed_tenants:
+    if "*" not in policy.allowed_tenants and requirement.tenant_id not in policy.allowed_tenants:
         reasons.append("tenant_not_allowed")
     if (
         requirement.required_claim_class

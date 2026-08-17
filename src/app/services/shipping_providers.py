@@ -293,7 +293,7 @@ def get_default_shipping_provider() -> BaseShippingProvider:
     return EasyPostProvider()
 
 
-def shipping_readiness() -> Dict[str, Any]:
+def shipping_readiness(*, tenant_id: str = "default") -> Dict[str, Any]:
     """Honest, network-free report of whether a REAL carrier is configured.
 
     Shipping honesty (Track 6): callers must know whether a label would be a real shipment or a
@@ -310,16 +310,30 @@ def shipping_readiness() -> Dict[str, Any]:
         "shipstation": bool(ss.key and ss.secret),
     }
     ready = any(configured.values())
+    selected_provider = get_default_shipping_provider().name
+    from src.app.services.operational_tool_scope import operational_read_receipt
+    from src.app.services.tool_capability_selector import ToolCapability
+    receipt = operational_read_receipt(
+        capability=ToolCapability.CARRIER_SERVICE_READ,
+        tenant_id=tenant_id,
+        deployment_id=f"carrier:{selected_provider}",
+        enabled=ready,
+        freshness_state="not_applicable",
+        health_status="unknown" if ready else "unhealthy",
+        authority_score=75,
+        side_effect_class="external_read",
+    )
     return {
         "ready": ready,
         "stub": not ready,
-        "provider": get_default_shipping_provider().name,
+        "provider": selected_provider,
         "configured": configured,
         "reason": (
             "live carrier configured"
             if ready
             else "no carrier API key configured — labels are stubs, not real shipments"
         ),
+        "tool_selection_receipt": receipt.model_dump(mode="json"),
     }
 
 

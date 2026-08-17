@@ -15,7 +15,9 @@ from src.app.services.sourcing_backpressure import (
     SourcingBackpressurePolicy,
     SourcingQueueState,
 )
+from src.app.services.operational_tool_scope import operational_read_receipt
 from src.app.services.temporal_authority_repository import supplier_response_expectation
+from src.app.services.tool_capability_selector import ToolCapability
 
 
 def _utc(value: datetime | str | None) -> datetime | None:
@@ -163,11 +165,18 @@ def supplier_pressure_projection(
         ), {"tenant": tenant_id, "supplier": supplier_id, "facility": facility_id,
             "now": stamp.isoformat()}).fetchone()
         if policy is None or queue is None:
+            receipt = operational_read_receipt(
+                capability=ToolCapability.SUPPLIER_OFFER_READ,
+                tenant_id=tenant_id,
+                deployment_id=f"supplier_ledger:{supplier_id}:{facility_id}",
+                enabled=False, health_status="unhealthy", authority_score=90,
+            )
             output.append({
                 "supplier_id": supplier_id, "supplier_facility_id": facility_id,
                 "status": "degraded", "external_contact_authority": "blocked",
                 "reason_codes": ["supplier_policy_missing" if policy is None else "supplier_queue_missing"],
                 "source_health": {"status": "missing"},
+                "tool_selection_receipt": receipt.model_dump(mode="json"),
             })
             continue
         expires = _utc(str(queue[3]))
@@ -215,6 +224,15 @@ def supplier_pressure_projection(
             status = "watch"
         else:
             status = "healthy"
+        receipt = operational_read_receipt(
+            capability=ToolCapability.SUPPLIER_OFFER_READ,
+            tenant_id=tenant_id,
+            deployment_id=f"supplier_ledger:{supplier_id}:{facility_id}",
+            enabled=not stale,
+            freshness_state="stale" if stale else "fresh",
+            health_status="degraded" if stale else "healthy",
+            authority_score=90,
+        )
         output.append({
             "supplier_id": supplier_id, "supplier_facility_id": facility_id,
             "status": status,
@@ -236,6 +254,7 @@ def supplier_pressure_projection(
                               "source_id": str(queue[0]), "source_version": str(queue[1]),
                               "observed_at": observed.isoformat() if observed else None,
                               "expires_at": expires.isoformat() if expires else None},
+            "tool_selection_receipt": receipt.model_dump(mode="json"),
         })
     return output
 

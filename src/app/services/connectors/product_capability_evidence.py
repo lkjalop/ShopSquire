@@ -76,6 +76,7 @@ class ProductCapabilityResolution:
     unknown_claim_keys: tuple[str, ...] = ()
     conflicts: tuple[dict[str, Any], ...] = ()
     attempts: tuple[dict[str, Any], ...] = ()
+    tool_selection_receipt: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +92,7 @@ class ProductCapabilityResolution:
             "unknown_claim_keys": list(self.unknown_claim_keys),
             "conflicts": list(self.conflicts),
             "attempts": list(self.attempts),
+            "tool_selection_receipt": self.tool_selection_receipt,
             "commercial_authority_granted": False,
         }
 
@@ -154,16 +156,56 @@ class ProductCapabilityEvidenceRegistry:
         tenant_id: str = "default",
     ) -> ProductCapabilityResolution:
         requested = tuple(dict.fromkeys(str(key).strip() for key in claim_keys if str(key).strip()))
+        from src.app.services.tool_capability_selector import (
+            ToolCapability, ToolDeployment, ToolHealth, ToolPolicy, ToolRequirement,
+            select_tool_deployments,
+        )
+        allowed_tenants = tuple(self._allowed_tenants)
+        deployments = tuple(
+            ToolDeployment(
+                deployment_id=provider.provider_id,
+                capabilities=(ToolCapability.OEM_PRODUCT_SPECIFICATION,),
+                policy=ToolPolicy(
+                    allowed_tenants=allowed_tenants,
+                    authority_score=95,
+                    freshness_state="unknown",
+                    side_effect_class="external_read",
+                    cost_units=0,
+                ),
+                health=ToolHealth(status="unknown"),
+            )
+            for provider in self._providers
+            if provider.provider_id in self._policies
+        )
+        selection = select_tool_deployments(
+            ToolRequirement(
+                capability=ToolCapability.OEM_PRODUCT_SPECIFICATION,
+                tenant_id=str(tenant_id or "default"),
+                max_cost_units=0,
+                permitted_side_effects=("none", "external_read") if allow_live else ("none",),
+            ),
+            deployments,
+            max_results=max(1, len(deployments)),
+        )
+        selection_dict = selection.model_dump(mode="json")
         if "*" not in self._allowed_tenants and str(tenant_id or "").strip() not in self._allowed_tenants:
             return ProductCapabilityResolution(
                 status="blocked",
                 identity=identity,
                 unknown_claim_keys=requested,
                 attempts=({"provider_id": None, "status": "tenant_not_allowed"},),
+                tool_selection_receipt=selection_dict,
             )
         attempts: list[dict[str, Any]] = []
         gathered: list[dict[str, Any]] = []
+        selected_ids = set(selection.selected_deployment_ids)
         for provider in self._providers:
+            if provider.provider_id not in selected_ids:
+                attempts.append({
+                    "provider_id": provider.provider_id,
+                    "status": "not_selected_by_tool_scope",
+                })
+                continue
             policy = self._policies.get(provider.provider_id)
             if policy is None:
                 attempts.append({"provider_id": provider.provider_id, "status": "rejected", "reason": "source_policy_missing"})
@@ -256,6 +298,7 @@ class ProductCapabilityEvidenceRegistry:
             unknown_claim_keys=unknown,
             conflicts=tuple(conflicts),
             attempts=tuple(attempts),
+            tool_selection_receipt=selection_dict,
         )
 
     @staticmethod

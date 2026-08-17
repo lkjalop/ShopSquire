@@ -69,6 +69,8 @@ def test_registry_accepts_identity_bound_allowlisted_official_claims():
     assert result.accepted_claims[0]["attribute_key"] == "ram_gb"
     assert result.unknown_claim_keys == ("gpu_vram_gb",)
     assert result.attempts[0]["status"] == "accepted"
+    assert result.tool_selection_receipt["selected_deployment_ids"] == ["manufacturer-spec"]
+    assert result.tool_selection_receipt["commercial_authority_granted"] is False
 
 
 def test_registry_rejects_identity_mismatch_and_poisoned_publisher():

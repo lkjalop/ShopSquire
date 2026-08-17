@@ -1,8 +1,6 @@
 """Inventory source adapter — canonical-over-legacy stock selection (the buyer-procurement-truth seam)."""
 from __future__ import annotations
 
-import pytest
-
 from src.app.services import inventory_source as isrc
 
 
@@ -33,3 +31,13 @@ def test_overlay_is_pure():
 
 def test_empty_skus():
     assert isrc.stock_levels([]) == {}
+
+
+def test_inventory_read_exposes_provider_neutral_selection_receipt(monkeypatch):
+    monkeypatch.setattr("src.app.services.commerce_catalog.catalog_enabled", lambda: False)
+    result = isrc.stock_levels_with_receipt(
+        ["SKU-A"], legacy_fn=lambda _skus: {"SKU-A": 4},
+    )
+    assert result["levels"] == {"SKU-A": 4}
+    assert result["tool_selection_receipt"]["capability"] == "inventory_availability"
+    assert result["tool_selection_receipt"]["commercial_authority_granted"] is False
