@@ -64,6 +64,8 @@ def project_decision_trace_views(*, latest: Any, history: Iterable[Any]) -> dict
             "selected_sku": state.get("selected_sku"),
             "requested_quantity": state.get("requested_quantity"),
             "available_now": fulfilment.get("available_now"),
+            "allocation_projection": fulfilment.get("allocation_projection"),
+            "price_intelligence": fulfilment.get("price_intelligence"),
             "selection": fulfilment.get("choice"),
             "supplier_candidates": _supplier_candidates(fulfilment),
             "resolution_owner": (state.get("authority") or {}).get("resolution_owner"),

@@ -274,10 +274,17 @@ def persist_fulfilment_selection_decision(
             case_id=case_id, revision=case_revision, objective=retained_purpose,
         ).model_dump(mode="python")
         prior_watermarks = ()
+    selected_sku = str(selection.preferred_sku)
+    if selection.selected_offer_id:
+        selected_offer = next(
+            (row for row in selection.offers if row.offer_id == selection.selected_offer_id), None,
+        )
+        if selected_offer is not None:
+            selected_sku = str(selected_offer.offered_sku)
     state_data.update({
         "revision": case_revision,
         "objective": retained_purpose,
-        "selected_sku": str(selection.preferred_sku),
+        "selected_sku": selected_sku,
         "requested_quantity": int(selection.requested_quantity),
         "fulfilment": {
             "selection_id": selection.selection_id,
@@ -316,7 +323,7 @@ def persist_fulfilment_selection_decision(
     fulfilment = _receipt(
         stage="fulfilment", index=1, now=now, snapshot_hash=snapshot.state_hash,
         output=selection_json,
-        inputs=("commercial:quantity-gap", "supplier:offers"),
+        inputs=("commercial:quantity-gap", "supplier:offers", "delivery:observations"),
         outputs=("fulfilment:buyer-selection",),
         dependency_stage_id=commercial.stage_id,
     )

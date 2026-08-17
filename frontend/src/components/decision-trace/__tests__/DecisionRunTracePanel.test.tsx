@@ -34,6 +34,7 @@ describe('DecisionRunTracePanel', () => {
         what_was_known_then: { knowledge_cutoff: '2026-08-17T01:00:00+00:00', future_evidence_excluded: true },
         who_can_fulfil_now: {
           evidence_warning: 'Latest evidence, not a live stock promise.',
+          allocation_projection: { allocated_units: 12, shortfall_units: 18 },
           supplier_candidates: [{ supplier_reference: 'supplier-a', quantity_available: 12, offered_sku: 'SKU-A', response_status: 'conditional' }],
         },
       },
@@ -48,6 +49,7 @@ describe('DecisionRunTracePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'What was known then?' }));
     expect(screen.getByTestId('decision-record-view')).toHaveTextContent('Future evidence is excluded');
     fireEvent.click(screen.getByRole('button', { name: 'Who can fulfil now?' }));
+    expect(screen.getByTestId('decision-record-view')).toHaveTextContent('12 allocated; 18 shortfall');
     expect(screen.getByTestId('decision-record-view')).toHaveTextContent('supplier-a: 12 × SKU-A; conditional');
   });
 });

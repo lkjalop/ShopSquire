@@ -112,7 +112,17 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
         kind: 'inventory_quantity',
         subject_ref: `configuration:${confirmationResult.confirmed_sku}`,
         location_ref: 'warehouse:nearest-eligible',
-        value: { quantity: 2, unit: 'unit' },
+        value: {
+          quantity: 2,
+          unit: 'unit',
+          sku: confirmationResult.confirmed_sku,
+          facility_kind: 'warehouse',
+          destination_id: 'buyer-destination-token',
+          destination_kind: 'region',
+          deadline_days: 10,
+          lead_time_days: 1,
+          lane_capacity_units: 2,
+        },
         source_type: 'inventory_system',
         evidence_ref: `browser-inventory-ledger:${suffix}`,
         known_at: now,
@@ -126,6 +136,10 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   expect(observationResult.operational_projection).toMatchObject({
     available_now: 2, requested_quantity: 30, remaining_quantity: 28,
     quantity_outcome: 'shortfall',
+  });
+  expect(observationResult.operational_projection.allocation).toMatchObject({
+    status: 'partial', allocated_units: 2, shortfall_units: 28,
+    authority: 'advisory_only', execution_allowed: false,
   });
   expect(observationResult.cart_mutations).toBe(0);
 

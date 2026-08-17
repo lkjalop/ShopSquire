@@ -31,6 +31,8 @@ from src.app.services.procurement_decision_run import (
     persist_decision_run,
 )
 from src.app.services.shopping_case_revision import advance_material_case_revision
+from src.app.services.case_price_intelligence import project_price_baselines
+from src.app.services.shopping_case_allocation_projection import project_case_allocation
 
 
 ObservationKind = Literal[
@@ -126,7 +128,7 @@ def _receipt(
 
 def _apply_operational_consequence(
     *, state_data: dict[str, Any], fulfilment: dict[str, Any],
-    observation: OperationalObservationInput,
+    observation: OperationalObservationInput, facts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Compute the bounded commercial consequence of the newly observed fact."""
 
@@ -161,6 +163,14 @@ def _apply_operational_consequence(
         response_status = str(observation.value["status"])
         fulfilment["supplier_response_status"] = response_status
         projection["supplier_response_status"] = response_status
+    if observation.kind in {"inventory_quantity", "supplier_lead_time", "supplier_response"}:
+        allocation = project_case_allocation(state_data=state_data, observations=facts)
+        fulfilment["allocation_projection"] = allocation
+        projection["allocation"] = allocation
+    if observation.kind == "price":
+        price_intelligence = project_price_baselines(facts)
+        fulfilment["price_intelligence"] = price_intelligence
+        projection["price_intelligence"] = price_intelligence
     fulfilment["operational_projection"] = projection
     return projection
 
@@ -202,7 +212,22 @@ def record_case_operational_observation(
         prior_edges, changed_refs=(changed_ref,),
     )
     invalidations = invalidations_for_changed_paths((changed_path,))
-    recomputed = invalidations[0].invalidated_stages
+    allowed = invalidations[0].invalidated_stages
+    stage_names = {
+        receipt.stage_id: receipt.stage for receipt in prior.stage_receipts if receipt.stage_id
+    }
+    traversed_names = {
+        stage_names[stage_id]
+        for stage_id in traversal.affected_stage_ids if stage_id in stage_names
+    }
+    # The persisted dependency graph decides which allowed stages are affected.
+    # Older runs may predate dependency edges, so retain an explicit degraded
+    # fallback instead of silently doing no work.
+    recomputed = tuple(stage for stage in allowed if stage in traversed_names)
+    recomputation_basis = "persisted_dependency_edges"
+    if not recomputed:
+        recomputed = allowed
+        recomputation_basis = "typed_invalidation_fallback"
 
     new_revision = advance_material_case_revision(
         db,
@@ -247,7 +272,7 @@ def record_case_operational_observation(
     fulfilment["operational_observations"] = facts[-128:]
     fulfilment["latest_operational_observation"] = facts[-1]
     operational_projection = _apply_operational_consequence(
-        state_data=state_data, fulfilment=fulfilment, observation=observation,
+        state_data=state_data, fulfilment=fulfilment, observation=observation, facts=facts,
     )
     state_data.update({
         "revision": new_revision,
@@ -306,6 +331,7 @@ def record_case_operational_observation(
         "changed_path": changed_path,
         "changed_ref": changed_ref,
         "recomputed_stages": list(recomputed),
+        "recomputation_basis": recomputation_basis,
         "operational_projection": operational_projection,
         "dependency_traversal": traversal.model_dump(mode="json"),
         "knowledge_cutoff": snapshot.knowledge_cutoff,

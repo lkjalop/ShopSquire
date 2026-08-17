@@ -48,6 +48,13 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
           {view === 'fulfil' && (
             <>
               <p>{selectedView.evidence_warning}</p>
+              {selectedView.allocation_projection && (
+                <p>
+                  Advisory allocation: {selectedView.allocation_projection.allocated_units ?? 0} allocated;
+                  {' '}{selectedView.allocation_projection.shortfall_units ?? 'unknown'} shortfall.
+                  {' '}No stock was reserved.
+                </p>
+              )}
               <ul>{(selectedView.supplier_candidates || []).map((candidate: any, index: number) => (
                 <li key={`${candidate.supplier_reference}:${candidate.offered_sku}:${index}`}>
                   {candidate.supplier_reference}: {candidate.quantity_available ?? 'undisclosed'} × {candidate.offered_sku || 'configuration undisclosed'}; {candidate.response_status}

@@ -204,11 +204,19 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     assert result["case_revision"] == 3
     assert result["changed_ref"] == "inventory:current"
     assert result["recomputed_stages"] == ["commercial", "fulfilment", "response"]
-    assert result["operational_projection"] == {
+    assert result["recomputation_basis"] == "persisted_dependency_edges"
+    assert {
+        key: result["operational_projection"][key]
+        for key in (
+            "kind", "available_now", "requested_quantity",
+            "remaining_quantity", "quantity_outcome",
+        )
+    } == {
         "kind": "inventory_quantity", "available_now": 4,
         "requested_quantity": 30, "remaining_quantity": 26,
         "quantity_outcome": "shortfall",
     }
+    assert result["operational_projection"]["allocation"]["status"] == "not_evaluated"
     assert result["external_calls"] == result["rfq_calls"] == result["cart_mutations"] == 0
     replay = http.post(
         "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
@@ -277,7 +285,13 @@ def test_operational_fact_classes_are_append_only_and_non_authoritative(
     assert response.status_code == 201, response.text
     result = response.json()
     assert result["changed_ref"] == changed_ref
-    assert result["recomputed_stages"] == ["commercial", "fulfilment", "response"]
+    expected_stages = (
+        ["fulfilment", "response"]
+        if changed_ref in {"supplier:offers", "delivery:observations"}
+        else ["commercial", "fulfilment", "response"]
+    )
+    assert result["recomputed_stages"] == expected_stages
+    assert result["recomputation_basis"] == "persisted_dependency_edges"
     assert result["commercial_authority_granted"] is False
     with engine.connect() as conn:
         stored = conn.execute(text(
