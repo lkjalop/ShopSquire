@@ -123,6 +123,10 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   expect(observation.ok(), await observation.text()).toBeTruthy();
   const observationResult = await observation.json();
   expect(observationResult.recomputed_stages).toEqual(['commercial', 'fulfilment', 'response']);
+  expect(observationResult.operational_projection).toMatchObject({
+    available_now: 2, requested_quantity: 30, remaining_quantity: 28,
+    quantity_outcome: 'shortfall',
+  });
   expect(observationResult.cart_mutations).toBe(0);
 
   const historyResponse = await page.request.get(
@@ -135,6 +139,7 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   expect(history.views.what_changed.to_revision).toBe(observationResult.case_revision);
   expect(history.views.what_was_known_then.future_evidence_excluded).toBe(true);
   expect(history.views.who_can_fulfil_now.evidence_warning).toContain('not a live stock promise');
+  expect(history.views.who_can_fulfil_now.available_now).toBe(2);
   await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection: 30 ×/i)).toBeVisible();
 });
 

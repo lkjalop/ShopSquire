@@ -1055,6 +1055,11 @@ def select_fulfillment_continuation(
         retained_purpose=case.retained_purpose or "Buyer fulfilment decision",
         selection=selected,
     )
+    # The selection service commits the buyer choice before this projection is
+    # created.  Commit the immutable run as part of the route transaction;
+    # otherwise Session close rolls the flushed run back and a later stock or
+    # quote observation sees a revision with no causal decision record.
+    db.commit()
     try:
         counts: dict[str, int] = {}
         for offer in selected.offers:
@@ -1194,6 +1199,7 @@ def confirm_fulfillment_cart(
         retained_purpose=case.retained_purpose or "Buyer fulfilment decision",
         selection=recorded,
     )
+    db.commit()
     try:
         log_trace_event(
             trace_id=case_id.removeprefix("sc-"),

@@ -101,13 +101,14 @@ class OperationalObservationInput(BaseModel):
 
 def _receipt(
     *, stage: str, index: int, now: datetime, state_hash: str,
-    changed_ref: str, prior_stage_id: str | None,
+    changed_ref: str, prior_stage_id: str | None, projection: dict[str, Any],
 ) -> StageReceipt:
     stage_id = f"stage-observation-{index:02d}-{stage}"
     output = {
         "stage": stage,
         "authority": "deterministic_selective_recomputation",
         "commercial_side_effect": "none",
+        "projection": projection,
     }
     return StageReceipt(
         stage=stage,
@@ -121,6 +122,47 @@ def _receipt(
         output_artifact_refs=(f"{stage}:output",),
         dependency_stage_ids=(prior_stage_id,) if prior_stage_id else (),
     )
+
+
+def _apply_operational_consequence(
+    *, state_data: dict[str, Any], fulfilment: dict[str, Any],
+    observation: OperationalObservationInput,
+) -> dict[str, Any]:
+    """Compute the bounded commercial consequence of the newly observed fact."""
+
+    requested = state_data.get("requested_quantity")
+    projection: dict[str, Any] = {"kind": observation.kind}
+    if observation.kind == "inventory_quantity":
+        available = int(observation.value["quantity"])
+        fulfilment["available_now"] = available
+        projection.update({"available_now": available})
+        if isinstance(requested, int):
+            projection.update({
+                "requested_quantity": requested,
+                "remaining_quantity": max(0, requested - available),
+                "quantity_outcome": "enough_now" if available >= requested else "shortfall",
+            })
+    elif observation.kind == "price":
+        amount = int(observation.value["amount_cents"])
+        currency = str(observation.value["currency"]).upper()
+        fulfilment.update({"unit_price_cents": amount, "currency": currency})
+        projection.update({"unit_price_cents": amount, "currency": currency})
+        if isinstance(requested, int):
+            projection["total_price_cents"] = amount * requested
+    elif observation.kind == "supplier_lead_time":
+        days = int(observation.value["days"])
+        fulfilment["supplier_lead_time_days"] = days
+        projection["supplier_lead_time_days"] = days
+    elif observation.kind == "quote_validity":
+        valid_until = str(observation.value["valid_until"])
+        fulfilment["quote_valid_until"] = valid_until
+        projection["quote_valid_until"] = valid_until
+    else:
+        response_status = str(observation.value["status"])
+        fulfilment["supplier_response_status"] = response_status
+        projection["supplier_response_status"] = response_status
+    fulfilment["operational_projection"] = projection
+    return projection
 
 
 def record_case_operational_observation(
@@ -188,8 +230,6 @@ def record_case_operational_observation(
         effective_at=effective_at,
         created_at=now,
     )
-    db.add(row)
-
     state_data = prior.snapshot.case_state.model_dump(mode="python")
     fulfilment = dict(state_data.get("fulfilment") or {})
     facts = list(fulfilment.get("operational_observations") or [])
@@ -206,6 +246,9 @@ def record_case_operational_observation(
     })
     fulfilment["operational_observations"] = facts[-128:]
     fulfilment["latest_operational_observation"] = facts[-1]
+    operational_projection = _apply_operational_consequence(
+        state_data=state_data, fulfilment=fulfilment, observation=observation,
+    )
     state_data.update({
         "revision": new_revision,
         "objective": retained_purpose,
@@ -232,6 +275,7 @@ def record_case_operational_observation(
             state_hash=snapshot.state_hash,
             changed_ref=changed_ref,
             prior_stage_id=dependency,
+            projection=operational_projection,
         )
         receipts.append(receipt)
         dependency = receipt.stage_id
@@ -245,6 +289,14 @@ def record_case_operational_observation(
     )
     persist_decision_run(db, run, commit=False)
     row.decision_run_id = run.run_id
+    # Add the append-only observation only after the decision run has flushed.
+    # Otherwise that flush inserts the still-incomplete row, and assigning its
+    # run id afterwards creates a second UPDATE.  Some SQLite certification
+    # profiles recreate/adopt this table between sessions, making that update
+    # vulnerable to a stale-row result even though the enclosing case CAS is
+    # valid.  A single insert with the final linkage is also the clearer
+    # append-only transaction shape for PostgreSQL.
+    db.add(row)
     db.commit()
     return {
         "observation_id": observation.observation_id,
@@ -254,6 +306,7 @@ def record_case_operational_observation(
         "changed_path": changed_path,
         "changed_ref": changed_ref,
         "recomputed_stages": list(recomputed),
+        "operational_projection": operational_projection,
         "dependency_traversal": traversal.model_dump(mode="json"),
         "knowledge_cutoff": snapshot.knowledge_cutoff,
         "evaluation_time": snapshot.evaluation_time,

@@ -6,17 +6,17 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 from src.app.models.db import get_db
 from src.app.models.orm import Base
+from src.app.security.idempotency import IdempotencyMiddleware
 from tests.utils import default_headers
 
 
-def _engine():
+def _engine(database_path: pathlib.Path):
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:", future=True,
-        connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        f"sqlite+pysqlite:///{database_path.as_posix()}", future=True,
+        connect_args={"check_same_thread": False},
     )
     schema = pathlib.Path("db/schema.sql")
     if schema.exists():
@@ -32,10 +32,11 @@ def _engine():
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+def client(monkeypatch, tmp_path):
+    database_path = tmp_path / "supplier-continuation.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{database_path.as_posix()}")
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
-    engine = _engine()
+    engine = _engine(database_path)
     import src.app.models.db as dbmod
     original = dbmod.engine
     dbmod.engine = engine
@@ -62,6 +63,14 @@ def client(monkeypatch):
     from src.app.main import create_app
     app = create_app()
     app.state.engine = engine
+    # This suite certifies the endpoint's durable, case-revision-bound
+    # idempotency records.  The global HTTP middleware uses the process's
+    # operational database and is covered separately; leaving both active in
+    # an in-memory fixture can replay a response from a prior ephemeral DB.
+    app.user_middleware = [
+        row for row in app.user_middleware if row.cls is not IdempotencyMiddleware
+    ]
+    app.middleware_stack = app.build_middleware_stack()
 
     def db_override():
         with Session(engine) as db:
@@ -195,6 +204,11 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     assert result["case_revision"] == 3
     assert result["changed_ref"] == "inventory:current"
     assert result["recomputed_stages"] == ["commercial", "fulfilment", "response"]
+    assert result["operational_projection"] == {
+        "kind": "inventory_quantity", "available_now": 4,
+        "requested_quantity": 30, "remaining_quantity": 26,
+        "quantity_outcome": "shortfall",
+    }
     assert result["external_calls"] == result["rfq_calls"] == result["cart_mutations"] == 0
     replay = http.post(
         "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
@@ -211,6 +225,7 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     assert history["latest"]["invalidations"][0]["changed_path"] == "fulfilment.inventory"
     assert history["views"]["what_changed"]["from_revision"] == 2
     assert history["views"]["what_changed"]["to_revision"] == 3
+    assert history["views"]["who_can_fulfil_now"]["available_now"] == 4
     assert history["history"][0]["case_revision"] == 2
 
     stale_confirmation = http.post(
