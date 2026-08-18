@@ -108,7 +108,8 @@ def record_order_transition_outcome(
     if isinstance(raw_lines, str):
         raw_lines = json.loads(raw_lines)
     realized = status in {"paid", "returned"}
-    return record_commercial_outcome(
+    observed = datetime.now(timezone.utc)
+    outcome = record_commercial_outcome(
         db,
         tenant_id=str(values.get("tenant_id") or "default"),
         outcome_id=f"{order_id}:{status}", order_id=order_id,
@@ -117,8 +118,25 @@ def record_order_transition_outcome(
         currency=str(values.get("currency")) if realized else None,
         line_items=list(raw_lines or []),
         source_authority="authenticated_order_transition",
-        observed_at=datetime.now(timezone.utc),
+        observed_at=observed,
+        commit=False,
     )
+    if status == "paid":
+        from src.app.services.price_forecast_outcomes import (
+            settle_price_forecasts_for_purchase,
+        )
+
+        settle_price_forecasts_for_purchase(
+            db,
+            tenant_id=str(values.get("tenant_id") or "default"),
+            outcome_id=f"{order_id}:{status}",
+            line_items=list(raw_lines or []),
+            currency=str(values.get("currency")),
+            observed_at=observed,
+            commit=False,
+        )
+    db.commit()
+    return outcome
 
 
 def project_realized_commercial_outcomes(

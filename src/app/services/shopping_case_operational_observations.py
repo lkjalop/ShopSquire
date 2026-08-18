@@ -38,6 +38,7 @@ from src.app.services.shopping_case_commercial_projection import (
     project_case_commercial_decision,
 )
 from src.app.services.operational_tool_scope import operational_read_receipt
+from src.app.services.price_forecast_outcomes import persist_price_forecast_candidates
 from src.app.services.tool_capability_selector import ToolCapability
 
 
@@ -341,6 +342,32 @@ def record_case_operational_observation(
         evaluation_time=now,
         tenant_price_facts=tenant_price_facts,
     )
+    forecast_candidates = []
+    if observation.kind == "price":
+        price_projection = operational_projection.get("price_intelligence") or {}
+        forecast_candidates = persist_price_forecast_candidates(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            case_revision=new_revision,
+            subject_ref=observation.subject_ref,
+            projection=price_projection,
+            source_observation_ids=[
+                str(item.get("observation_id") or "")
+                for item in (tenant_price_facts or facts)
+            ],
+            forecast_created_at=now,
+            commit=False,
+        )
+        if forecast_candidates:
+            forecast_ids = [row.forecast_id for row in forecast_candidates]
+            fulfilment["pending_price_forecast_ids"] = forecast_ids
+            operational_projection["price_forecast_candidates"] = {
+                "count": len(forecast_ids),
+                "forecast_ids": forecast_ids,
+                "target_semantics": "next_observed_unit_price",
+                "commercial_authority_granted": False,
+            }
     state_data.update({
         "revision": new_revision,
         "objective": retained_purpose,

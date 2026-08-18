@@ -16,6 +16,7 @@ from src.app.repositories.catalog import CatalogRepository
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.pii_crypto import encrypt_pii, pii_hash
 from src.app.services.inventory_guard import reserve_inventory_for_order, release_inventory_for_order
+from src.app.services.post_purchase_satisfaction import SatisfactionSubmission
 
 
 def _record_post_order_outcome(
@@ -585,3 +586,47 @@ def update_status(
         if target in {"paid", "returned"}:
             _record_commercial_outcome(db, order_id=order_id, status=target)
         return {"updated": True, "order_id": order_id, "status": target}
+
+
+@router.post("/{order_id}/satisfaction", status_code=201)
+def submit_order_satisfaction(
+    order_id: str,
+    req: SatisfactionSubmission,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    db=Depends(get_db),
+) -> Dict:
+    """Record affirmative feedback; delivery or silence never implies satisfaction."""
+
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.post_purchase_satisfaction import (
+        record_post_purchase_satisfaction,
+    )
+
+    try:
+        row = record_post_purchase_satisfaction(
+            db,
+            tenant_id=str(current_tenant_id() or "default"),
+            order_id=order_id,
+            submission=req,
+            actor_class="human_operator",
+            source_authority=f"authenticated_role:{role}",
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status_code = 404 if code == "satisfaction_order_not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": code}) from exc
+    _record_post_order_outcome(
+        db, order_id=order_id, kind="satisfaction",
+        status=f"rating_{row.rating}", authority=row.source_authority,
+    )
+    return {
+        "submission_id": row.submission_id,
+        "order_id": row.order_id,
+        "rating": row.rating,
+        "fulfilled_as_expected": row.fulfilled_as_expected,
+        "would_recommend": row.would_recommend,
+        "reason_codes": list(row.reason_codes_json or []),
+        "actor_class": row.actor_class,
+        "authority": "affirmative_human_submission",
+        "commercial_authority_granted": False,
+    }

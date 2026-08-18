@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from src.app.models.orm import Base, CommercialOutcomeRecord
+from src.app.models.orm import Base, CommercialOutcomeRecord, PriceForecastCandidateRecord
 from src.app.services.commercial_outcome_ledger import (
     project_realized_commercial_outcomes,
     record_commercial_outcome,
@@ -75,6 +75,7 @@ def test_amount_without_currency_fails_closed():
 def test_committed_order_transition_projects_server_prices_without_pii():
     engine = create_engine("sqlite:///:memory:")
     CommercialOutcomeRecord.__table__.create(engine)
+    PriceForecastCandidateRecord.__table__.create(engine)
     with engine.begin() as connection:
         connection.execute(text("""
             CREATE TABLE draft_orders (

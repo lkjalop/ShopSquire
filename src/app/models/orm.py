@@ -403,6 +403,57 @@ class CommercialOutcomeRecord(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
 
 
+class PriceForecastCandidateRecord(Base):
+    """Forecast fixed at decision time and settled only from a later actual."""
+
+    __tablename__ = "price_forecast_candidates"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "forecast_id", name="uq_price_forecast_candidate_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    forecast_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    case_revision: Mapped[int] = mapped_column(Integer)
+    subject_ref: Mapped[str] = mapped_column(Text)
+    model_id: Mapped[str] = mapped_column(Text)
+    model_version: Mapped[str] = mapped_column(Text)
+    predicted_minor_units: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(Text)
+    source_observation_ids_json: Mapped[list] = mapped_column(JSON)
+    forecast_created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    target_semantics: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    settled_outcome_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_minor_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_observed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    absolute_error_minor_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
+class PostPurchaseSatisfactionRecord(Base):
+    """Explicit human-submitted post-purchase observation; never inferred."""
+
+    __tablename__ = "post_purchase_satisfaction"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "submission_id", name="uq_satisfaction_submission_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    submission_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    order_id: Mapped[str] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    fulfilled_as_expected: Mapped[bool] = mapped_column(Boolean)
+    would_recommend: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    reason_codes_json: Mapped[list] = mapped_column(JSON)
+    actor_class: Mapped[str] = mapped_column(Text)
+    source_authority: Mapped[str] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
 class HippographJourneyEdgeRecord(Base):
     """Immutable typed journey evidence used for tenant-scoped temporal replay."""
 
