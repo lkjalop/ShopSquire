@@ -1733,6 +1733,20 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
         above_budget = [c for c in bf_cards
                         if c.sku not in in_ids and (c.price_cents or 0) > (bmax or 0)]
     universe = in_budget + above_budget
+    from src.app.services.recommendation_core.legacy_card_commercial_projection import (
+        project_legacy_card_commercial_decision,
+    )
+
+    requested_quantity = int(envelope.session.get("requested_quantity") or 1)
+    deadline_value = envelope.session.get("deadline_days")
+    deadline_days = int(deadline_value) if isinstance(deadline_value, (int, float)) else None
+    for card in universe:
+        card.commercial_decision = project_legacy_card_commercial_decision(
+            card,
+            budget_per_unit_cents=envelope.budget_max_cents,
+            requested_quantity=requested_quantity,
+            deadline_days=deadline_days,
+        )
     used: set = set()
     bands: list = []
 

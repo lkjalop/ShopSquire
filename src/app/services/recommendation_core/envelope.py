@@ -231,12 +231,16 @@ class ProductCard:
     stock_source: Optional[str] = None
     why: List[str] = field(default_factory=list)
     fit: Optional[Dict[str, Any]] = None      # attribute_registry.evaluate_requirements output
+    commercial_decision: Optional[Dict[str, Any]] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"sku": self.sku, "name": self.title, "price": (self.price_cents or 0) / 100.0,
-                "price_cents": self.price_cents, "currency": self.currency, "brand": self.brand,
-                "image_url": self.image_url, "stock": self.stock, "why": list(self.why),
-                "workload_fit": self.fit}
+        payload = {"sku": self.sku, "name": self.title, "price": (self.price_cents or 0) / 100.0,
+                   "price_cents": self.price_cents, "currency": self.currency, "brand": self.brand,
+                   "image_url": self.image_url, "stock": self.stock, "why": list(self.why),
+                   "workload_fit": self.fit}
+        if self.commercial_decision is not None:
+            payload["commercial_decision"] = self.commercial_decision
+        return payload
 
 
 class MsgPriority:
