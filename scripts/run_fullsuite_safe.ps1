@@ -1,23 +1,20 @@
 <#
 .SYNOPSIS
   Memory-safe full test suite runner.
-  - Runs each test shard in a fresh subprocess (already the case with pytest)
-  - Pauses between heavy shards to let Python GC and OS reclaim memory
-  - Skips shards that require live infrastructure (Playwright, browser, e2e)
-    unless explicitly opted-in via $env:RUN_E2E=1
-  - Logs results to scripts/runs/ (not .testlogs/ - which is gitignored as local)
+  - Runs each test shard in a fresh subprocess.
+  - Pauses between heavy shards to let Python GC and the OS reclaim memory.
+  - Skips shards that require live infrastructure unless explicitly opted in.
+  - Logs results to scripts/runs/.
 
 .NOTES
-  32 GB RAM machine: VSCode (~7 GB) + WSL2 (6 GB cap via .wslconfig) already
-  consumes ~13 GB. Each pytest shard with full FastAPI app = ~1.5-2 GB.
-  Run shards sequentially, not in parallel.
+  Run shards sequentially because each pytest shard loads the FastAPI app.
 #>
 
 $ErrorActionPreference = 'Continue'
-$runE2E   = $env:RUN_E2E   -eq '1'
+$runE2E = $env:RUN_E2E -eq '1'
 $runBrowser = $env:RUN_BROWSER -eq '1'
+$resumeAfter = $env:FULLSUITE_RESUME_AFTER
 
-# Ordered from fastest/cheapest to most expensive
 $coreShards = @(
   'tests/services',
   'tests/api',
@@ -49,26 +46,36 @@ $rootFiles = Get-ChildItem tests -File -Filter 'test_*.py' |
   Select-Object -ExpandProperty FullName
 
 $all = $coreShards + $rootFiles
-if ($runE2E)    { $all += $e2eShards }
+if ($runE2E) { $all += $e2eShards }
 if ($runBrowser) { $all += @('tests/redteam') }
+if ($resumeAfter) {
+  $resumeIndex = [array]::IndexOf($all, $resumeAfter)
+  if ($resumeIndex -lt 0) {
+    throw "FULLSUITE_RESUME_AFTER target was not found: $resumeAfter"
+  }
+  if ($resumeIndex -ge ($all.Count - 1)) {
+    $all = @()
+  } else {
+    $all = $all[($resumeIndex + 1)..($all.Count - 1)]
+  }
+}
 
 $outDir = Join-Path $PSScriptRoot 'runs'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $logFile = Join-Path $outDir "fullsuite_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
 $failures = @()
-$passes   = @()
+$passes = @()
 
 "=== ShopSquire Full Suite: $(Get-Date) ===" | Tee-Object -FilePath $logFile
 
 foreach ($t in $all) {
   if (-not (Test-Path $t)) { continue }
 
-  # --- memory guard: warn if free RAM < 8 GB before each shard ---
   $freeGB = [math]::Round(
     (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB, 1)
   if ($freeGB -lt 8) {
-    Write-Warning "Low memory ($freeGB GB free) before shard '$t' — waiting 15s..."
+    Write-Warning "Low memory ($freeGB GB free) before shard '$t'; waiting 15s..."
     Start-Sleep 15
     $freeGB = [math]::Round(
       (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB, 1)
@@ -79,21 +86,20 @@ foreach ($t in $all) {
     }
   }
 
-  Write-Host "`n=== RUNNING: $t (free RAM: $freeGB GB) ===" -ForegroundColor Cyan
+  "`n=== RUNNING: $t (free RAM: $freeGB GB) ===" |
+    Tee-Object -FilePath $logFile -Append
   $result = & python -m pytest -q --tb=short $t 2>&1
-  $code   = $LASTEXITCODE
+  $code = $LASTEXITCODE
   $result | Tee-Object -FilePath $logFile -Append
 
   if ($code -eq 0 -or $code -eq 5) {
-    # exit 5 = no tests collected — treat as pass
     $passes += $t
-    Write-Host "=== PASS: $t ===" -ForegroundColor Green
+    "=== PASS: $t ===" | Tee-Object -FilePath $logFile -Append
   } else {
     $failures += $t
-    Write-Host "=== FAIL($code): $t ===" -ForegroundColor Red
+    "=== FAIL($code): $t ===" | Tee-Object -FilePath $logFile -Append
   }
 
-  # Brief pause between shards so Python GC/OS can reclaim memory
   Start-Sleep 2
 }
 

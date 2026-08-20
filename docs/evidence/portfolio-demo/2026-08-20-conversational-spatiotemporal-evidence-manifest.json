@@ -1,0 +1,21 @@
+{
+  "schema_version": "portfolio-evidence-manifest-v1",
+  "generated_at": "2026-08-20T21:24:00+10:00",
+  "artifacts": [
+    {
+      "name": "2026-08-20-conversational-spatiotemporal-browser-certificate.json",
+      "bytes": 2033,
+      "sha256": "db0e9da31854be228725a51c2f3edac3fdee9c7c7db80e417491b76d06f2e0c9"
+    },
+    {
+      "name": "2026-08-20-conversational-spatiotemporal-showcase.png",
+      "bytes": 425671,
+      "sha256": "192d3049396c638f7e7a862cc875b3a506f2fd8f84da7f72d1300f92e0ddb3be"
+    },
+    {
+      "name": "2026-08-20-conversational-spatiotemporal-showcase.webm",
+      "bytes": 131439,
+      "sha256": "57e80539fdac05a4c82adefb42713832fcd2d6bb2dfd0cac37e1a65e90c279f4"
+    }
+  ]
+}
