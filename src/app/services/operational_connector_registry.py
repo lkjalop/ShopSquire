@@ -81,6 +81,30 @@ def enroll_operational_connector(
     return row
 
 
+def load_operational_connector(
+    db: Any, *, tenant_id: str, connector_id: str,
+) -> OperationalConnectorEnrollment | None:
+    row = db.execute(select(OperationalConnectorEnrollmentRecord).where(
+        OperationalConnectorEnrollmentRecord.tenant_id == tenant_id,
+        OperationalConnectorEnrollmentRecord.connector_id == connector_id,
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    return OperationalConnectorEnrollment(
+        connector_id=row.connector_id,
+        tenant_id=row.tenant_id,
+        kind=row.kind,
+        capability=row.capability,
+        endpoint_origin=row.endpoint_origin,
+        auth_mode=row.auth_mode,
+        credential_ref=row.credential_ref,
+        allowed_schema_versions=tuple(row.allowed_schema_versions_json or []),
+        freshness_sla_seconds=row.freshness_sla_seconds,
+        execution_mode=row.execution_mode,
+        enabled=bool(row.enabled),
+    )
+
+
 def record_operational_connector_run(
     db: Any,
     enrollment: OperationalConnectorEnrollment,
@@ -186,6 +210,6 @@ def project_operational_connector_health(
 
 
 __all__ = [
-    "enroll_operational_connector", "project_operational_connector_health",
-    "record_operational_connector_run",
+    "enroll_operational_connector", "load_operational_connector",
+    "project_operational_connector_health", "record_operational_connector_run",
 ]

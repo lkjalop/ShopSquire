@@ -10,6 +10,7 @@ from src.app.services.operational_connector_contracts import (
 )
 from src.app.services.operational_connector_registry import (
     enroll_operational_connector,
+    load_operational_connector,
     project_operational_connector_health,
     record_operational_connector_run,
 )
@@ -62,6 +63,10 @@ def test_fixture_is_configured_and_fresh_but_never_live():
     assert row["fresh"] is True
     assert row["live"] is False
     assert row["external_calls"] == row["paid_calls"] == 0
+    loaded = load_operational_connector(
+        db, tenant_id="portfolio", connector_id=enrollment.connector_id,
+    )
+    assert loaded == enrollment
 
 
 def test_live_requires_observed_network_call_and_becomes_stale():

@@ -225,6 +225,8 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     assert result["ingestion_mode"] == "operator_submitted_observation"
     assert result["evidence_watermark"]["source"].startswith("inventory_system:")
     assert result["external_calls"] == result["rfq_calls"] == result["cart_mutations"] == 0
+
+
     replay = http.post(
         "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
         json=payload,
@@ -266,6 +268,70 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
         assert conn.execute(text(
             "SELECT COUNT(*) FROM shopping_case_operational_observations"
         )).scalar_one() == 1
+
+
+def test_enrolled_wms_delivery_replaces_operator_intake_identity(client) -> None:
+    http, _engine = client
+    selection = _select(http, key="select-before-enrolled-wms")
+    enrollment = http.post(
+        "/api/v1/shopping-cases/operational-connectors/enroll",
+        headers={"x-api-key": "local-owner-key"},
+        json={
+            "connector_id": "portfolio-wms",
+            "tenant_id": "default",
+            "kind": "wms",
+            "capability": "inventory_availability",
+            "endpoint_origin": "http://127.0.0.1:9999",
+            "auth_mode": "none",
+            "credential_ref": None,
+            "allowed_schema_versions": ["wms-v1"],
+            "freshness_sla_seconds": 3600,
+            "execution_mode": "certification_fixture",
+            "enabled": True,
+        },
+    )
+    assert enrollment.status_code == 201, enrollment.text
+    now = datetime.now(timezone.utc).isoformat()
+    delivered = http.post(
+        "/api/v1/shopping-cases/sc-supplier-1/connector-deliveries",
+        json={
+            "expected_revision": selection["revision"],
+            "delivery": {
+                "delivery_id": "wms-delivery-0001",
+                "connector_id": "portfolio-wms",
+                "tenant_id": "default",
+                "source_schema_version": "wms-v1",
+                "watermark_before": "41",
+                "watermark_after": "42",
+                "observed_at": now,
+                "facts": [{
+                    "fact_id": "wms-fact-stock-0001",
+                    "subject_ref": "configuration:PREFERRED",
+                    "location_ref": "warehouse:sydney",
+                    "effective_at": now,
+                    "data": {"quantity": 7, "unit": "unit"},
+                }],
+            },
+        },
+    )
+    assert delivered.status_code == 201, delivered.text
+    result = delivered.json()
+    assert result["starting_revision"] == selection["revision"]
+    assert result["ending_revision"] == selection["revision"] + 1
+    assert result["normalization_receipt"]["normalized_count"] == 1
+    assert result["normalization_receipt"]["external_calls"] == 0
+    assert result["cart_mutations"] == result["supplier_sends"] == 0
+    observation = result["observations"][0]
+    assert observation["ingestion_mode"] == "enrolled_connector:certification_fixture"
+    assert observation["tool_selection_receipt"]["selected_deployment_ids"] == [
+        "operational_connector:portfolio-wms"
+    ]
+    health = http.get("/api/v1/shopping-cases/operational-connectors/health")
+    assert health.status_code == 200, health.text
+    connector = health.json()["connectors"][0]
+    assert connector["configured"] is connector["policy_ready"] is True
+    assert connector["fresh"] is True
+    assert connector["live"] is False
 
 
 @pytest.mark.parametrize(("kind", "value", "changed_ref"), [

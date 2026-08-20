@@ -227,6 +227,8 @@ def record_case_operational_observation(
     case_id: str,
     retained_purpose: str,
     observation: OperationalObservationInput,
+    deployment_id: str | None = None,
+    ingestion_mode: str = "operator_submitted_observation",
 ) -> dict[str, Any]:
     existing = db.execute(select(ShoppingCaseOperationalObservationRecord).where(
         ShoppingCaseOperationalObservationRecord.tenant_id == tenant_id,
@@ -394,7 +396,7 @@ def record_case_operational_observation(
         # This route is a governed operator intake seam, not proof that a live
         # WMS/carrier/supplier connector is enrolled.  A real adapter can use
         # the same capability while emitting its own deployment identity.
-        deployment_id=f"operator_intake:{observation.source_type}",
+        deployment_id=deployment_id or f"operator_intake:{observation.source_type}",
         enabled=True,
         freshness_state="fresh",
         health_status="unknown",
@@ -455,7 +457,7 @@ def record_case_operational_observation(
         "recomputation_basis": recomputation_basis,
         "operational_projection": operational_projection,
         "tool_selection_receipt": tool_receipt,
-        "ingestion_mode": "operator_submitted_observation",
+        "ingestion_mode": ingestion_mode,
         "evidence_watermark": watermark.model_dump(mode="json"),
         "dependency_traversal": traversal.model_dump(mode="json"),
         "knowledge_cutoff": snapshot.knowledge_cutoff,
