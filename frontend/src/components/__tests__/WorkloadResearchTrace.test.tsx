@@ -29,6 +29,10 @@ describe('WorkloadResearchTrace', () => {
         decision: 'exploration_allowed',
         cart_authority: 'none',
         provider_accounting: { external_calls: 0, paid_calls: 0 },
+        canonical_truth: {
+          research_execution: 'NOT_ATTEMPTED', evidence_status: 'NONE',
+          freshness: 'UNKNOWN', decision_status: 'PROVISIONAL', commerce_authority: 'NONE',
+        },
       },
     }]} />);
 
@@ -38,6 +42,9 @@ describe('WorkloadResearchTrace', () => {
     expect(trace).toHaveTextContent(/simulate a cyber attack/i);
     expect(trace).toHaveTextContent(/Status: not executed/i);
     expect(trace).toHaveTextContent(/External calls: 0/i);
+    expect(screen.getByTestId('canonical-procurement-truth')).toHaveTextContent(
+      /research: not attempted.*evidence: none.*freshness: unknown/i,
+    );
     expect(trace).toHaveTextContent(/not an external fetch or verified product fit/i);
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
   });

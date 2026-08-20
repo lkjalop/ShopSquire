@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from src.app.services.procurement_truth_adjudicator import adjudicate_procurement_truth
+
 
 def _supplier_candidates(fulfilment: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
@@ -35,7 +37,14 @@ def project_decision_trace_views(*, latest: Any, history: Iterable[Any]) -> dict
     state = latest.snapshot.case_state.model_dump(mode="json")
     fulfilment = dict(state.get("fulfilment") or {})
     invalidations = [row.model_dump(mode="json") for row in latest.invalidations]
+    watermarks = [row.model_dump(mode="json") for row in latest.snapshot.evidence_watermarks]
+    canonical_truth = adjudicate_procurement_truth(
+        state_data=state,
+        evidence_watermarks=watermarks,
+        evaluated_at=latest.snapshot.evaluation_time,
+    ).model_dump(mode="json")
     return {
+        "canonical_truth": canonical_truth,
         "what_changed": {
             "from_revision": previous.snapshot.case_revision if previous else None,
             "to_revision": latest.snapshot.case_revision,
@@ -51,9 +60,7 @@ def project_decision_trace_views(*, latest: Any, history: Iterable[Any]) -> dict
         "what_was_known_then": {
             "knowledge_cutoff": latest.snapshot.knowledge_cutoff,
             "evaluation_time": latest.snapshot.evaluation_time,
-            "evidence_watermarks": [
-                row.model_dump(mode="json") for row in latest.snapshot.evidence_watermarks
-            ],
+            "evidence_watermarks": watermarks,
             "future_evidence_excluded": True,
         },
         "who_can_fulfil_now": {

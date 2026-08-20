@@ -14,6 +14,7 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
   }
   const run = data.latest;
   const views = data.views || {};
+  const truth = views.canonical_truth;
   const selectedView = view === 'changed'
     ? views.what_changed : view === 'known'
       ? views.what_was_known_then : views.who_can_fulfil_now;
@@ -26,6 +27,20 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
       </p>
       <p>Evaluation time: <time dateTime={run.evaluation_time}>{run.evaluation_time}</time></p>
       <p>Commerce authority: none - this trace cannot mutate cart, RFQ, payment or shipment.</p>
+      {truth && (
+        <div data-testid="canonical-procurement-truth">
+          <h4>Canonical procurement truth</h4>
+          <p>
+            Research {truth.research_execution}; evidence {truth.evidence_status}; freshness{' '}
+            {truth.freshness}; decision {truth.decision_status}; commerce authority{' '}
+            {truth.commerce_authority}.
+          </p>
+          <p>
+            External calls {truth.external_calls}; paid calls {truth.paid_calls}; cart mutations{' '}
+            {truth.cart_mutations}; supplier sends {truth.supplier_sends}.
+          </p>
+        </div>
+      )}
       <h4>Ask the decision record</h4>
       <div role="group" aria-label="Decision record views">
         <button type="button" aria-pressed={view === 'changed'} onClick={() => setView('changed')}>What changed?</button>{' '}

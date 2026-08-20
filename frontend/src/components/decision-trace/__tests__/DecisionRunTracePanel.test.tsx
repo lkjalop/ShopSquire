@@ -30,6 +30,11 @@ describe('DecisionRunTracePanel', () => {
       },
       dependency_edges: [{ edge_id: 'edge-1', source_ref: 'inventory:current', target_ref: 'stage:commercial', relation: 'consumed_by' }],
       views: {
+        canonical_truth: {
+          research_execution: 'COMPLETE', evidence_status: 'ACCEPTED_COMPLETE',
+          freshness: 'CURRENT', decision_status: 'QUALIFIED', commerce_authority: 'NONE',
+          external_calls: 2, paid_calls: 0, cart_mutations: 0, supplier_sends: 0,
+        },
         what_changed: { from_revision: 6, to_revision: 7, invalidation_count: 1 },
         what_was_known_then: { knowledge_cutoff: '2026-08-17T01:00:00+00:00', future_evidence_excluded: true },
         who_can_fulfil_now: {
@@ -42,6 +47,9 @@ describe('DecisionRunTracePanel', () => {
     }} />);
     expect(screen.getByTestId('decision-run-trace')).toHaveTextContent('Revision 7');
     expect(screen.getByText(/Commerce authority: none/)).toBeInTheDocument();
+    expect(screen.getByTestId('canonical-procurement-truth')).toHaveTextContent(
+      /Research COMPLETE; evidence ACCEPTED_COMPLETE; freshness CURRENT; decision QUALIFIED/i,
+    );
     expect(screen.getByText(/lead_time_days: unresolved/)).toBeInTheDocument();
     expect(screen.getByText(/requested_quantity invalidated commercial, fulfilment/)).toBeInTheDocument();
     expect(screen.getByText(/ToolScope inventory_availability: selected/i)).toBeInTheDocument();

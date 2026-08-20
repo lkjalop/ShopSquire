@@ -65,6 +65,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const queryProposal = officialResearch?.query_proposal || {};
   const publisherOriginVerification = officialResearch?.publisher_origin_verification || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
+  const canonicalTruth = provisionalExploration?.canonical_truth;
   const retainedObligations = events
     .filter(isShoppingCaseObligationEvent)
     .flatMap((event) => Array.isArray(event?.payload?.obligations) ? event.payload.obligations : []);
@@ -112,6 +113,20 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     <section data-testid="workload-research-trace">
       <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>Research and product-fit authorization</h3>
       <div style={{ display: 'grid', gap: 8 }}>
+        {canonicalTruth && (
+          <div data-testid="canonical-procurement-truth" style={{ border: '1px solid #0f766e', padding: 10, borderRadius: 6 }}>
+            <strong>Canonical procurement truth</strong>
+            <div style={{ marginTop: 5 }}>
+              Research: <strong>{words(canonicalTruth.research_execution)}</strong>
+              {' · '}Evidence: <strong>{words(canonicalTruth.evidence_status)}</strong>
+              {' · '}Freshness: <strong>{words(canonicalTruth.freshness)}</strong>
+            </div>
+            <div>
+              Decision: <strong>{words(canonicalTruth.decision_status)}</strong>
+              {' · '}Commerce authority: <strong>{words(canonicalTruth.commerce_authority)}</strong>
+            </div>
+          </div>
+        )}
         {provisionalExploration?.research_plan_id && (
           <div data-testid="provisional-research-plan" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
             <strong>Bounded research plan</strong>

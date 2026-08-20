@@ -11,6 +11,10 @@ from src.app.services.case_research_plan import (
     CaseResearchObligation,
 )
 from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
+from src.app.services.procurement_truth_adjudicator import (
+    CanonicalProcurementTruth,
+    adjudicate_exploration_truth,
+)
 
 
 class CaseQuestionProjection(BaseModel):
@@ -53,6 +57,7 @@ class ShoppingCaseTruthProjection(BaseModel):
     publisher_candidates: list[dict] = Field(default_factory=list, max_length=12)
     interpretation_job: dict | None = None
     timing_envelope: ShoppingCaseFastLaneTiming | None = None
+    canonical_truth: CanonicalProcurementTruth | None = None
 
     @model_validator(mode="after")
     def validate_case_identity_and_hypotheses(self) -> "ShoppingCaseTruthProjection":
@@ -62,4 +67,8 @@ class ShoppingCaseTruthProjection(BaseModel):
         for ambiguity in self.ambiguity_objects:
             if not set(ambiguity.hypothesis_ids).issubset(hypothesis_ids):
                 raise ValueError("ambiguity_hypothesis_mismatch")
+        if self.canonical_truth is None:
+            self.canonical_truth = adjudicate_exploration_truth(
+                self.model_dump(mode="python", exclude={"canonical_truth"})
+            )
         return self

@@ -50,6 +50,14 @@ def test_projection_preserves_one_identity_and_hypothesis_set_for_panel_and_trac
     assert rendered["retained_purpose"].startswith("I need to simulate")
     assert 1 <= len(rendered["interpretations"]) <= 3
     assert rendered["timing_envelope"]["total_ms"] == 10.5
+    truth = rendered["canonical_truth"]
+    assert truth["research_execution"] == "NOT_ATTEMPTED"
+    assert truth["evidence_status"] == "NONE"
+    assert truth["freshness"] == "UNKNOWN"
+    assert truth["decision_status"] == "PROVISIONAL"
+    assert truth["commerce_authority"] == "NONE"
+    assert truth["external_calls"] == truth["paid_calls"] == 0
+    assert truth["cart_mutations"] == truth["supplier_sends"] == 0
 
 
 def test_projection_rejects_panel_trace_identity_drift():
