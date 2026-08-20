@@ -65,3 +65,20 @@ def test_disturbance_certificate_is_hidden_when_disabled(monkeypatch):
         "/api/v1/certification/procurement/disturbances/evaluate", json=_request(),
     )
     assert response.status_code == 404
+
+
+def test_conversational_spatiotemporal_certificate_is_live_api_sealed(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_CERTIFICATION_ENABLED", "1")
+    response = TestClient(app, headers=OWNER_HEADERS).post(
+        "/api/v1/certification/procurement/conversational-spatiotemporal/evaluate",
+        json={},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["passed"] is True
+    assert payload["invariants"]["destination_move_applied"] is True
+    assert payload["invariants"]["workload_query_excludes_destinations"] is True
+    assert payload["invariants"]["zero_calls_before_authorization"] is True
+    assert payload["invariants"]["no_cart_mutation"] is True
+    assert payload["canonical_truth"]["commerce_authority"] == "NONE"
+    assert len(payload["artifact_sha256"]) == 64

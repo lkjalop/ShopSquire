@@ -38,6 +38,12 @@ function authHeaders(extra: Record<string, string> = {}, includeJsonContentType 
   };
 }
 
+export function apiRequestHeaders(
+  extra: Record<string, string> = {}, includeJsonContentType = false,
+): Record<string, string> {
+  return authHeaders(extra, includeJsonContentType);
+}
+
 export function getApiBase(): string {
   return API_BASE;
 }

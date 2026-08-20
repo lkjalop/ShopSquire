@@ -1,0 +1,41 @@
+.page {
+  min-height: 100vh;
+  padding: 32px;
+  color: #e2e8f0;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(14, 116, 144, .28), transparent 35%),
+    radial-gradient(circle at 85% 15%, rgba(22, 163, 74, .18), transparent 30%),
+    #07111f;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.shell { max-width: 1500px; margin: 0 auto; }
+.eyebrow { color: #67e8f9; text-transform: uppercase; letter-spacing: .18em; font-size: 12px; }
+.title { margin: 8px 0 6px; font-size: clamp(30px, 4vw, 54px); line-height: 1.05; color: #f8fafc; }
+.subtitle { max-width: 900px; margin: 0; color: #94a3b8; font-size: 17px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 26px; }
+.badge { padding: 7px 11px; border: 1px solid #155e75; border-radius: 999px; background: rgba(8, 145, 178, .12); color: #a5f3fc; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+.card { grid-column: span 4; padding: 18px; border: 1px solid rgba(148, 163, 184, .22); border-radius: 14px; background: rgba(15, 23, 42, .82); box-shadow: 0 18px 55px rgba(0, 0, 0, .22); }
+.wide { grid-column: span 8; }
+.full { grid-column: 1 / -1; }
+.card h2 { margin: 0 0 12px; color: #f8fafc; font-size: 17px; }
+.turn { padding: 12px; border-left: 3px solid #22d3ee; background: rgba(15, 118, 110, .12); color: #dbeafe; }
+.turn + .turn { margin-top: 10px; border-color: #4ade80; }
+.metricGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.metric { padding: 10px; border-radius: 9px; background: #0f1d31; }
+.metric span { display: block; color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.metric strong { display: block; margin-top: 5px; color: #f8fafc; font-size: 15px; overflow-wrap: anywhere; }
+.flow { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.bar { flex: 1; height: 10px; overflow: hidden; border-radius: 999px; background: #1e293b; }
+.bar > span { display: block; height: 100%; background: linear-gradient(90deg, #22d3ee, #4ade80); }
+.success { color: #86efac; }
+.warning { color: #fcd34d; }
+.muted { color: #94a3b8; }
+.hash { overflow-wrap: anywhere; color: #67e8f9; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.error { max-width: 800px; margin: 100px auto; padding: 24px; border: 1px solid #ef4444; border-radius: 12px; background: #2b1118; }
+
+@media (max-width: 1000px) {
+  .card, .wide { grid-column: 1 / -1; }
+  .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

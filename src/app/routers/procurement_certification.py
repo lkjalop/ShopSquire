@@ -4,14 +4,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from src.app.platform.tenant_context import current_tenant_id
-from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role
+from src.app.security.auth import ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, require_role
+from src.app.services.conversational_procurement_certificate import (
+    TURN_ONE,
+    TURN_TWO,
+    build_conversational_procurement_certificate,
+)
 from src.app.services.procurement_scenario_harness import (
     ProcurementScenario,
     run_procurement_scenario,
@@ -26,6 +31,14 @@ class DisturbanceCertificationRequest(BaseModel):
     scenario: ProcurementScenario
     knowledge_cutoff: datetime
     evaluation_time: datetime
+
+
+class ConversationalCertificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_one: str = TURN_ONE
+    turn_two: str = TURN_TWO
+    interpretation_instant: datetime = datetime(2026, 8, 20, tzinfo=timezone.utc)
 
 
 def _enabled() -> bool:
@@ -69,6 +82,22 @@ def evaluate_disturbance_certificate(
     ).encode("utf-8")
     artifact["artifact_sha256"] = hashlib.sha256(encoded).hexdigest()
     return artifact
+
+
+@router.post("/conversational-spatiotemporal/evaluate")
+def evaluate_conversational_certificate(
+    request: ConversationalCertificationRequest,
+    _role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER, ROLE_MERCHANT])),
+) -> dict[str, Any]:
+    if not _enabled():
+        raise HTTPException(status_code=404, detail="portfolio_certification_disabled")
+    if request.interpretation_instant.tzinfo is None:
+        raise HTTPException(status_code=422, detail="certification_cutoffs_require_timezone")
+    return build_conversational_procurement_certificate(
+        turn_one=request.turn_one,
+        turn_two=request.turn_two,
+        interpretation_instant=request.interpretation_instant,
+    )
 
 
 __all__ = ["router"]
