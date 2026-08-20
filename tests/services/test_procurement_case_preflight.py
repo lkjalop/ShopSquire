@@ -111,3 +111,34 @@ def test_competing_stale_revision_is_rejected(monkeypatch) -> None:
         assert str(exc) == "case_revision_conflict"
     else:
         raise AssertionError("stale competing patch was accepted")
+
+
+def test_temporal_patch_persists_resolution_in_same_case_revision(monkeypatch) -> None:
+    db = _db()
+    state = _seed(db)
+    monkeypatch.setattr("src.app.deps.hash_uid", lambda _uid: "buyer-hash")
+
+    result = apply_case_patches_before_evaluation(
+        db,
+        tenant_id="tenant-a",
+        uid="buyer",
+        session_epoch="epoch-1",
+        trace_id="trace-temporal",
+        session={
+            "procurement_case_state": state,
+            "case_patch_idempotency_key": "request-temporal",
+        },
+        patches=({
+            "operation": "set",
+            "path": "temporal.original_expression",
+            "value": "within four days",
+        },),
+    )
+
+    assert result.state.revision == 2
+    assert result.state.temporal is not None
+    assert result.state.temporal.resolution_status == "resolved"
+    assert result.state.temporal.required_by is not None
+    assert result.state.temporal.interpretation_instant is not None
+    assert result.state.temporal.calendar_version is not None
+    assert result.application["commerce_authority"] is False

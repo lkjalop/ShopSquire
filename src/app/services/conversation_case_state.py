@@ -545,7 +545,9 @@ def ensure_case_state(
         db, tenant_id=tenant_id, case_id=case_id, fallback=1,
     )
     typed_anchor = {**state, "case_id": case_id, "revision": revision}
-    state["procurement_case_state"] = project_legacy_case_anchor(typed_anchor).model_dump(mode="json")
+    state["procurement_case_state"] = project_legacy_case_anchor(
+        typed_anchor, interpretation_instant=timestamp,
+    ).model_dump(mode="json")
     db.execute(
         text(
             "INSERT INTO conversation_case_state "
@@ -587,6 +589,7 @@ def record_typed_case_patch_set(
         ProcurementCaseState,
         apply_case_patch_set,
         project_legacy_case_anchor,
+        resolve_temporal_constraint,
     )
 
     row = db.execute(
@@ -625,9 +628,18 @@ def record_typed_case_patch_set(
         typed = ProcurementCaseState.model_validate({**typed_raw, "revision": version})
     else:
         typed = project_legacy_case_anchor({**state, "case_id": case_id, "revision": version})
+    timestamp = _now(now_iso)
     normalized = [item if isinstance(item, CasePatch) else CasePatch.model_validate(item) for item in patches]
     result = apply_case_patch_set(typed, expected_revision=version, patches=normalized)
     updated_typed = result.state
+    if updated_typed.temporal is not None and any(
+        patch.path.startswith("temporal.") for patch in normalized
+    ):
+        updated_typed = updated_typed.model_copy(update={
+            "temporal": resolve_temporal_constraint(
+                updated_typed.temporal, interpretation_instant=timestamp,
+            ),
+        })
 
     # The nested typed state is canonical. Keep only unambiguous flat fields for
     # V2/legacy readers while they are strangled behind typed projections.
@@ -646,7 +658,6 @@ def record_typed_case_patch_set(
     if len(updated_typed.destinations) == 1:
         state["destination"] = updated_typed.destinations[0].location_ref
 
-    timestamp = _now(now_iso)
     db.execute(
         text(
             "INSERT INTO conversation_case_amendment "

@@ -42,6 +42,16 @@ class TemporalConstraint(BaseModel):
     required_by: str | None = None
     timezone: str = "Australia/Sydney"
     as_of: str | None = None
+    interpretation_instant: str | None = None
+    resolved_utc_instant: str | None = None
+    calendar_source: str | None = None
+    calendar_version: str | None = None
+    resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    resolution_status: Literal["not_attempted", "resolved", "ambiguous", "unresolved"] = (
+        "not_attempted"
+    )
+    unresolved_reason: str | None = Field(default=None, max_length=200)
+    clarification_question: str | None = Field(default=None, max_length=500)
 
     @field_validator("timezone")
     @classmethod
@@ -49,7 +59,7 @@ class TemporalConstraint(BaseModel):
         ZoneInfo(value)
         return value
 
-    @field_validator("required_by", "as_of")
+    @field_validator("required_by", "as_of", "interpretation_instant", "resolved_utc_instant")
     @classmethod
     def aware_timestamp(cls, value: str | None) -> str | None:
         if value is None:
@@ -58,6 +68,21 @@ class TemporalConstraint(BaseModel):
         if parsed.tzinfo is None:
             raise ValueError("temporal_timestamp_requires_timezone")
         return value
+
+    @model_validator(mode="after")
+    def resolution_is_fail_closed(self) -> "TemporalConstraint":
+        if self.resolution_status == "resolved":
+            if not all((
+                self.required_by,
+                self.resolved_utc_instant,
+                self.interpretation_instant,
+                self.calendar_source,
+                self.calendar_version,
+            )):
+                raise ValueError("resolved_temporal_authority_incomplete")
+        elif self.resolution_status in {"ambiguous", "unresolved"} and self.required_by is not None:
+            raise ValueError("unresolved_temporal_authority_cannot_set_deadline")
+        return self
 
 
 class ProcurementCaseState(BaseModel):
@@ -142,6 +167,35 @@ _SET_PATHS = {
     "budget.currency", "budget.scope", "temporal.required_by", "temporal.as_of",
     "temporal.original_expression", "temporal.timezone", "destinations",
 }
+
+
+def resolve_temporal_constraint(
+    constraint: TemporalConstraint,
+    *,
+    interpretation_instant: datetime | str,
+) -> TemporalConstraint:
+    """Attach deterministic resolution authority without advancing case revision."""
+    expression = constraint.original_expression or constraint.required_by
+    if not expression:
+        return constraint
+    from src.app.services.temporal_expression_authority import resolve_temporal_expression
+
+    resolution = resolve_temporal_expression(
+        expression,
+        timezone_name=constraint.timezone,
+        interpretation_instant=interpretation_instant,
+    )
+    return constraint.model_copy(update={
+        "required_by": resolution.resolved_utc_instant,
+        "interpretation_instant": resolution.interpretation_instant,
+        "resolved_utc_instant": resolution.resolved_utc_instant,
+        "calendar_source": resolution.calendar_source,
+        "calendar_version": resolution.calendar_version,
+        "resolution_confidence": resolution.confidence,
+        "resolution_status": resolution.status,
+        "unresolved_reason": resolution.unresolved_reason,
+        "clarification_question": resolution.clarification_question,
+    })
 
 
 def _copy_state(state: ProcurementCaseState) -> dict[str, Any]:
@@ -297,7 +351,11 @@ def compile_spatiotemporal_query(
     )
 
 
-def project_legacy_case_anchor(anchor: dict[str, Any]) -> ProcurementCaseState:
+def project_legacy_case_anchor(
+    anchor: dict[str, Any],
+    *,
+    interpretation_instant: datetime | str | None = None,
+) -> ProcurementCaseState:
     """Loss-minimizing adapter while existing chat/core consumers use the flat case anchor."""
     semantic = anchor.get("semantic_resolution") if isinstance(anchor.get("semantic_resolution"), dict) else {}
     workloads: list[str] = []
@@ -341,6 +399,10 @@ def project_legacy_case_anchor(anchor: dict[str, Any]) -> ProcurementCaseState:
         timezone=str(anchor.get("timezone") or "Australia/Sydney"),
         as_of=anchor.get("as_of"),
     ) if deadline or anchor.get("as_of") else None
+    if temporal is not None and interpretation_instant is not None:
+        temporal = resolve_temporal_constraint(
+            temporal, interpretation_instant=interpretation_instant,
+        )
     return ProcurementCaseState(
         case_id=str(anchor.get("case_id") or "legacy-unbound"),
         revision=int(anchor.get("revision") or 1),

@@ -13,6 +13,7 @@ from src.app.services.procurement_case_state import (
     apply_case_patch_set,
     compile_spatiotemporal_query,
     project_legacy_case_anchor,
+    resolve_temporal_constraint,
 )
 from src.app.services.recommendation_core.turn_router import _bounded_case_patches
 
@@ -170,6 +171,45 @@ def test_unknown_or_unresolved_time_never_becomes_a_promise() -> None:
     assert query.required_by is None
     assert "required_by" in query.unresolved_fields
     assert query.promise_authority == "none"
+
+
+def test_resolved_temporal_authority_compiles_to_calculation_only() -> None:
+    unresolved = TemporalConstraint(
+        original_expression="within four days",
+        timezone="Australia/Sydney",
+        as_of="2026-08-16T12:00:00+10:00",
+    )
+    resolved = resolve_temporal_constraint(
+        unresolved, interpretation_instant="2026-08-16T02:00:00+00:00",
+    )
+    state = _case().model_copy(update={"temporal": resolved})
+
+    query = compile_spatiotemporal_query(
+        state, query_type="delivery_feasibility",
+        query_purpose="fulfilment_computation", metrics=["arrival_probability"],
+    )
+
+    assert resolved.resolution_status == "resolved"
+    assert resolved.resolved_utc_instant == "2026-08-20T02:00:00+00:00"
+    assert query.required_by == datetime(2026, 8, 20, 2, 0, tzinfo=timezone.utc)
+    assert query.promise_authority == "calculation_only"
+
+
+def test_legacy_relative_deadline_is_resolved_at_case_creation() -> None:
+    projected = project_legacy_case_anchor(
+        {
+            "case_id": "legacy-relative",
+            "quantity": 12,
+            "destination": "Sydney",
+            "deadline": "within four days",
+            "timezone": "Australia/Sydney",
+        },
+        interpretation_instant="2026-08-16T02:00:00+00:00",
+    )
+
+    assert projected.temporal is not None
+    assert projected.temporal.resolution_status == "resolved"
+    assert projected.temporal.required_by == "2026-08-20T02:00:00+00:00"
 
 
 def test_legacy_anchor_projection_preserves_compatibility() -> None:
