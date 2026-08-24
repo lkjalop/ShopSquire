@@ -70,6 +70,7 @@ jobs:
       DISABLE_TRACING: "1"
       DECISION_LOG_PREWARM_ON_START: "0"
       AUTO_SEED_CATALOG_ON_START: "0"
+      PORTFOLIO_CERTIFICATION_ENABLED: "1"
       CV_PROVIDER: basic
       CV_VISION_ENABLED: "0"
       CV_OCR_PROVIDER: disabled
@@ -155,6 +156,8 @@ jobs:
           timeout 60s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-reupgrade.log
           poetry run python scripts/seed_demo_data.py
           poetry run python -m scripts.seed_portable_catalog
+          poetry run python scripts/seed_gaming_laptops.py
+          poetry run python -m scripts.seed_reviewed_product_evidence
           poetry run python -m scripts.seed_suppliers
       - name: React component battery
         run: |

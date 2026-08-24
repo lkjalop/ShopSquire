@@ -198,6 +198,7 @@ try {
     $env:USE_MOCK_LLM = "1"
     $env:USE_OLLAMA_INTENT = "0"
     $env:MODEL_WARMUP_ON_STARTUP = "0"
+    $env:AUTO_SEED_CATALOG_ON_START = "0"
     $env:EMAIL_CONNECTOR_IDENTITY_MODE = "shared_secret"
     $env:GMAIL_INGEST_SECRET = "local-browser-ingress-only"
     $env:LIVE_GMAIL_INGEST_SECRET = "local-browser-ingress-only"
@@ -270,6 +271,16 @@ try {
             Join-Path $ArtifactRoot "portable-catalog-seed.log"
         ) | Out-Null
     Assert-NativeSuccess "portable_catalog_seed"
+    python scripts/seed_gaming_laptops.py *>&1 |
+        Tee-Object -FilePath (
+            Join-Path $ArtifactRoot "gaming-catalog-seed.log"
+        ) | Out-Null
+    Assert-NativeSuccess "gaming_catalog_seed"
+    python -m scripts.seed_reviewed_product_evidence *>&1 |
+        Tee-Object -FilePath (
+            Join-Path $ArtifactRoot "reviewed-evidence-seed.log"
+        ) | Out-Null
+    Assert-NativeSuccess "reviewed_evidence_seed"
     python -m scripts.seed_suppliers *>&1 |
         Tee-Object -FilePath (
             Join-Path $ArtifactRoot "supplier-seed.log"
