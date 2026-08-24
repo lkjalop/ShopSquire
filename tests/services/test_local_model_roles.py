@@ -12,7 +12,13 @@ def test_local_role_uses_gateway_and_fixture_artifact_without_commerce_authority
     assert text == "HELLO"
 
 
-def test_unverified_artifact_fails_before_transport():
+def test_unverified_artifact_fails_before_transport(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "src.app.services.local_model_roles.verify_ollama_artifact",
+        lambda **_kwargs: SimpleNamespace(status="mismatch"),
+    )
     called = False
 
     def transport(*_args):

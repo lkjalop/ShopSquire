@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.app.models.orm import (
     HippographJourneyEdgeRecord, ProductAvailabilityObservation, ProductConfiguration,
@@ -77,9 +78,17 @@ def load_journey_edges(
     )
     if case_id is not None:
         query = query.where(HippographJourneyEdgeRecord.case_id == case_id)
-    rows = db.execute(query.order_by(
-        HippographJourneyEdgeRecord.observed_at.asc(), HippographJourneyEdgeRecord.edge_id.asc(),
-    ).limit(max(1, int(limit)))).scalars().all()
+    try:
+        # The read-only graph is optional evidence infrastructure. A clean
+        # test/degraded deployment can legitimately predate its migration; use
+        # a savepoint so PostgreSQL remains usable after an absent-table read.
+        with db.begin_nested():
+            rows = db.execute(query.order_by(
+                HippographJourneyEdgeRecord.observed_at.asc(),
+                HippographJourneyEdgeRecord.edge_id.asc(),
+            ).limit(max(1, int(limit)))).scalars().all()
+    except SQLAlchemyError:
+        return []
     return [TypedJourneyEdge(
         edge_id=row.edge_id, tenant_id=row.tenant_id,
         source_id=row.source_id, source_kind=row.source_kind,
@@ -100,17 +109,21 @@ def load_configuration_availability_edges(
     db, *, tenant_id: str, limit: int = 5000,
 ) -> list[TypedJourneyEdge]:
     """Project the durable exact-configuration availability ledger into typed edges."""
-    rows = db.execute(select(
-        ProductAvailabilityObservation, ProductConfiguration,
-    ).join(
-        ProductConfiguration,
-        ProductConfiguration.id == ProductAvailabilityObservation.configuration_id,
-    ).where(
-        ProductConfiguration.tenant_id == tenant_id,
-    ).order_by(
-        ProductAvailabilityObservation.observed_at.asc(),
-        ProductAvailabilityObservation.id.asc(),
-    ).limit(max(1, int(limit)))).all()
+    try:
+        with db.begin_nested():
+            rows = db.execute(select(
+                ProductAvailabilityObservation, ProductConfiguration,
+            ).join(
+                ProductConfiguration,
+                ProductConfiguration.id == ProductAvailabilityObservation.configuration_id,
+            ).where(
+                ProductConfiguration.tenant_id == tenant_id,
+            ).order_by(
+                ProductAvailabilityObservation.observed_at.asc(),
+                ProductAvailabilityObservation.id.asc(),
+            ).limit(max(1, int(limit)))).all()
+    except SQLAlchemyError:
+        return []
     return [TypedJourneyEdge(
         edge_id=f"availability-{observation.id}", tenant_id=tenant_id,
         source_id=f"configuration:{configuration.id}", source_kind="configuration",
