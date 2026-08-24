@@ -148,6 +148,8 @@ try {
     $env:CELERY_HMAC_KEY = "local-browser-worker-signing-key"
     $env:SHOPSQUIRE_RUNTIME_PROFILE = "demo_v2"
     $env:RECOMMEND_CORE_MODE = "primary"
+    $env:RECOMMEND_LEGACY_DELEGATE_ENABLED = "0"
+    $env:RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED = "1"
     $env:RECOMMEND_CART_SERVE = "1"
     $env:RECOMMEND_PROCUREMENT_ADVICE_MODE = "on"
     $env:RECOMMEND_POLICY_ANSWER_MODE = "on"

@@ -153,6 +153,7 @@ jobs:
           grep -q '20260874_post_purchase_satisfaction' proof-artifacts/migration-current.log
           timeout 60s poetry run alembic downgrade -1 2>&1 | tee proof-artifacts/migration-rollback.log
           timeout 60s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-reupgrade.log
+          poetry run python scripts/seed_demo_data.py
           poetry run python -m scripts.seed_portable_catalog
           poetry run python -m scripts.seed_suppliers
       - name: React component battery
