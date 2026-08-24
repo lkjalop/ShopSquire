@@ -3,8 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 async function requirementScreenshot(page: Page): Promise<Buffer> {
   await page.setViewportSize({ width: 760, height: 760 });
   await page.setContent(`
-    <main data-testid="requirements" style="width:680px;padding:28px;background:#172033;color:#fff;font:18px/1.45 Arial,sans-serif">
-      <h1 style="font-size:24px">Recommended Hardware Specifications</h1>
+    <main data-testid="requirements" style="width:680px;padding:28px;background:#fff;color:#000;font:20px/1.5 Arial,sans-serif">
+      <h1 style="font-size:26px">Recommended Hardware Specifications</h1>
       <ul>
         <li><b>Processor (CPU):</b> Intel Core i7/i9 or AMD Ryzen 7/9; 8+ physical cores and hardware virtualisation.</li>
         <li><b>Memory (RAM):</b> 32GB minimum; 64GB recommended for a full digital twin and multiple virtual machines.</li>

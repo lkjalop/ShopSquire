@@ -74,6 +74,9 @@ jobs:
       CV_PROVIDER: basic
       CV_VISION_ENABLED: "0"
       CV_OCR_PROVIDER: disabled
+      CV_SELECTIVE_OCR_PROVIDER: tesseract
+      CV_SELECTIVE_OCR_TIMEOUT_S: "12"
+      CV_QR_TIMEOUT_S: "12"
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       # Functional journeys own semantic/procurement behavior, not quota behavior.
       # Quota contracts have dedicated tests; sharing a tenant-level allowance here
@@ -142,6 +145,11 @@ jobs:
           # The Node install below uses a separately versioned browser cache and
           # cannot satisfy the Python package's expected Chromium revision.
           poetry run python -m playwright install --with-deps chromium
+          # The uploaded-requirements certificate exercises the bounded, local,
+          # read-only OCR path. Enrol and inventory its native dependency instead
+          # of inheriting whatever happens to be present on the hosted image.
+          sudo apt-get install --yes tesseract-ocr
+          tesseract --version
           npm ci --prefix frontend
           npm ci --prefix src/frontend/admin-react
           npx --prefix frontend playwright install --with-deps chromium

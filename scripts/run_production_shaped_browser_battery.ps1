@@ -199,6 +199,13 @@ try {
     $env:USE_OLLAMA_INTENT = "0"
     $env:MODEL_WARMUP_ON_STARTUP = "0"
     $env:AUTO_SEED_CATALOG_ON_START = "0"
+    # The requirements-image slice uses bounded, read-only local OCR while the
+    # general vision provider remains disabled. QR inspection must complete before
+    # extracted text can be offered as provisional evidence.
+    $env:CV_OCR_PROVIDER = "disabled"
+    $env:CV_SELECTIVE_OCR_PROVIDER = "tesseract"
+    $env:CV_SELECTIVE_OCR_TIMEOUT_S = "12"
+    $env:CV_QR_TIMEOUT_S = "12"
     $env:EMAIL_CONNECTOR_IDENTITY_MODE = "shared_secret"
     $env:GMAIL_INGEST_SECRET = "local-browser-ingress-only"
     $env:LIVE_GMAIL_INGEST_SECRET = "local-browser-ingress-only"
