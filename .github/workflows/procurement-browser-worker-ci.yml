@@ -252,18 +252,6 @@ jobs:
         # A fresh Node/Chromium process per spec also makes the certificate
         # reproducible on Windows and Linux without a long-lived worker leak.
         run: timeout 2400s poetry run python scripts/run_playwright_memory_safe.py --frontend frontend
-      - name: Seal hosted browser certificate
-        run: |
-          test -s proof-artifacts/conversational-spatiotemporal-browser-certificate.json
-          test -s proof-artifacts/conversational-spatiotemporal-showcase.png
-          poetry run python scripts/seal_browser_artifacts.py \
-            proof-artifacts \
-            proof-artifacts/conversational-spatiotemporal-manifest.json \
-            --certificate conversational-spatiotemporal-browser-certificate.json \
-            --archive proof-artifacts/conversational-spatiotemporal-evidence.zip \
-            --git-head "$GITHUB_SHA" \
-            --runtime-profile hosted-clean-checkout-postgresql-browser \
-            --runtime-endpoint http://127.0.0.1:8080
       - name: Policy-trace and closed-loop regressions
         env:
           RUN_LIVE_BROWSER_TESTS: "1"
@@ -302,6 +290,21 @@ jobs:
               "matched_signatures": 0,
           }, indent=2), encoding="utf-8")
           PY
+      # Seal only after every live request and log gate has completed. Otherwise
+      # backend.log can continue growing after its digest is recorded, leaving
+      # the loose uploaded evidence inconsistent with the sealed archive.
+      - name: Seal hosted browser certificate
+        run: |
+          test -s proof-artifacts/conversational-spatiotemporal-browser-certificate.json
+          test -s proof-artifacts/conversational-spatiotemporal-showcase.png
+          poetry run python scripts/seal_browser_artifacts.py \
+            proof-artifacts \
+            proof-artifacts/conversational-spatiotemporal-manifest.json \
+            --certificate conversational-spatiotemporal-browser-certificate.json \
+            --archive proof-artifacts/conversational-spatiotemporal-evidence.zip \
+            --git-head "$GITHUB_SHA" \
+            --runtime-profile hosted-clean-checkout-postgresql-browser \
+            --runtime-endpoint http://127.0.0.1:8080
       - name: Inventory retained proof
         if: always()
         run: |
