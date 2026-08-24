@@ -53,6 +53,8 @@ def execute_router_model(
         digest = configured_digest("ROUTER_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST")
         if injected_transport:
             digest = "0" * 64
+        metrics["model_artifact_digest"] = digest
+        metrics["artifact_verification_requested"] = bool(digest)
 
         def transport(model_prompt, deployment, request):
             payload: dict[str, Any] = {

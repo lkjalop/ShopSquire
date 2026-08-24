@@ -347,3 +347,22 @@ def test_canonical_parsers_complete_model_omissions_at_case_intake() -> None:
     assert [patch["value"] for patch in by_path["workloads"]] == [
         "game_development", "engineering_simulation",
     ]
+
+
+def test_canonical_completion_does_not_reemit_inherited_commercial_fields() -> None:
+    patches = _complete_canonical_case_patches(
+        ({
+            "operation": "move_quantity", "path": "destinations",
+            "quantity": 3, "from_ref": "Adelaide", "to_ref": "Brisbane",
+        },),
+        query=(
+            "Move 3 units from Adelaide to Brisbane. Keep the quantity, budget, "
+            "workloads, and deadline unchanged."
+        ),
+        requested_quantity=37,
+        total_budget_cents=18_500_000,
+        budget_scope="total",
+        settlement_currency="AUD",
+    )
+
+    assert [patch["path"] for patch in patches] == ["destinations"]

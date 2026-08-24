@@ -507,7 +507,7 @@ def _evaluate_bounded_case_patches(
             ]
         try:
             patch = CasePatch.model_validate(candidate_item)
-        except ValidationError as exc:
+        except ValidationError:
             reject(index, candidate_item, "schema_validation_failed", "CasePatch")
             continue
         is_grounded, predicate = grounded(patch)
@@ -552,9 +552,31 @@ def _complete_canonical_case_patches(
         })
         paths.add(path)
 
-    if requested_quantity is not None and "requested_quantity" not in paths:
+    # ``requested_quantity`` and budget values can be inherited into the final
+    # decision from the active case.  Completion is an intake projection, so it
+    # may emit them only when this buyer utterance independently grounds them.
+    # Otherwise an amendment such as "move 3 from Adelaide to Brisbane" would
+    # silently rewrite retained quantity/budget alongside the one requested edit.
+    from src.app.services.bulk_intent import quantity_value_mentioned
+    quantity_is_current = bool(
+        requested_quantity is not None
+        and quantity_value_mentioned(query, requested_quantity)
+    )
+    if quantity_is_current and "requested_quantity" not in paths:
         add("set", "requested_quantity", requested_quantity, "canonical_quantity_grammar")
-    if total_budget_cents is not None:
+
+    from src.app.services.budget_grammar import parse_budget
+    parsed_budget = parse_budget(query)
+    budget_is_current = bool(
+        total_budget_cents is not None
+        and parsed_budget is not None
+        and total_budget_cents in {
+            int(amount) * 100
+            for amount in (parsed_budget.budget_min, parsed_budget.budget_max)
+            if amount is not None
+        }
+    )
+    if budget_is_current:
         if "budget.amount_minor" not in paths:
             add("set", "budget.amount_minor", total_budget_cents, "canonical_budget_grammar")
         if "budget.currency" not in paths:

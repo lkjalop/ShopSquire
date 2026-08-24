@@ -71,6 +71,7 @@ async def execute_enrolled_official_research(
     budget_cents: int | None,
     runtime_status: dict[str, Any],
     configured_search_url: str,
+    consent_receipt: dict[str, Any],
     cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Fetch, compile, reconcile and rerank one enrolled-source case.
@@ -81,6 +82,11 @@ async def execute_enrolled_official_research(
 
     if plan.publisher_status != "resolved_enrolled":
         raise ValueError("enrolled_research_plan_required")
+    if consent_receipt.get("authorized") is not True:
+        raise EnrolledResearchUnavailable(403, {
+            "code": "research_consent_receipt_required",
+            "message": "No research call was dispatched because explicit consent is missing.",
+        })
     sources = [dict(source) for source in approved_sources]
     _validate_source_policies(sources, source_candidate_ids=list(plan.source_candidate_ids))
     source_domains = sorted({
@@ -156,6 +162,34 @@ async def execute_enrolled_official_research(
     }
     research["canonical_direct_ready"] = canonical_direct_ready
     record_external_research_runtime_observation(research)
+    from src.app.services.evidence_synthesis_ledger import (
+        build_evidence_synthesis_ledger,
+    )
+
+    synthesis = build_evidence_synthesis_ledger(
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        query=plan.retained_purpose,
+        purpose=plan.retained_purpose,
+        consent_receipt=consent_receipt,
+        research=research,
+        approved_sources=sources,
+        candidate_configuration_ids=candidate_configuration_ids,
+    )
+    research["evidence_synthesis_ledger"] = synthesis.model_dump(mode="json")
+    # Only a provider-observed run may let the new ledger narrow executable
+    # claims. Historical unit fixtures predate source-execution receipts; keep
+    # their compatibility projection while the ledger correctly labels their
+    # trust status as unresolved/rejected. Live and cache-backed runs always
+    # carry source execution rows from ``official_workload_research``.
+    if research.get("source_execution"):
+        accepted_claim_ids = {
+            row.claim_id for row in synthesis.claims if row.status == "accepted"
+        }
+        research["claims"] = [
+            claim for claim in research["claims"]
+            if str(claim.get("claim_id") or "") in accepted_claim_ids
+        ]
     after = project_accepted_catalog(
         db,
         accepted_claims=research["claims"],
@@ -262,6 +296,10 @@ async def execute_enrolled_official_research(
         "ambiguity_exploration": exploration,
         "evidence_outcome": outcome,
         "research_delta": delta,
+        "decision_trace": {
+            "research_trust": synthesis.decision_trace_projection,
+            "evidence_synthesis_ledger_id": synthesis.ledger_id,
+        },
         "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),

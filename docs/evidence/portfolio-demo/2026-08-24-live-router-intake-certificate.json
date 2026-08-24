@@ -1,0 +1,533 @@
+{
+  "authority_statement": "This certificate proves live local-model intake into canonical case state; it grants no network, cart, supplier, payment, reservation, or purchase authority.",
+  "certification_status": "passed",
+  "execution_mode": "live_local_model",
+  "external_network_certified": false,
+  "gate_failures": [],
+  "interpretation_instant": "2026-08-24T00:00:00+00:00",
+  "invariant_checks": {
+    "all_rejections_have_reason_and_predicate": true,
+    "amendment_applied": true,
+    "both_turns_used_live_model": true,
+    "case_revision_bound_to_each_turn": true,
+    "deadline_resolved_with_authority": true,
+    "destinations_extracted": true,
+    "held_out_turn_one_absent_from_router_prompt": true,
+    "held_out_turn_two_absent_from_router_prompt": true,
+    "model_artifact_identity_recorded": true,
+    "no_commerce_authority_granted": true,
+    "quantity_extracted": true,
+    "retained_fields_not_rewritten_by_amendment": true,
+    "router_latency_recorded": true,
+    "temporal_expression_retained": true,
+    "total_budget_extracted": true,
+    "workloads_extracted": true
+  },
+  "rejected_patch_count": 0,
+  "router_executions": [
+    {
+      "artifact_verification_requested": true,
+      "decode_ms": 5216.8,
+      "http_status": 200,
+      "load_ms": 351.2,
+      "model": "qwen3:14b",
+      "model_artifact_digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
+      "model_execution_ms": 6059.7,
+      "model_version": "qwen3:14b",
+      "outcome": "ok",
+      "output_tokens": 233,
+      "policy_version": "semantic-authority-v1",
+      "prompt_eval_ms": 491.7,
+      "prompt_tokens": 2343,
+      "prompt_version": "recommend-router-v2",
+      "provider": "ollama",
+      "provider_internal_overhead_ms": 29.8,
+      "provider_overhead_ms": 4659.3,
+      "provider_total_ms": 6089.5,
+      "queue_ms": 0.0,
+      "transport_overhead_ms": 4629.5,
+      "wall_ms": 10719.0
+    },
+    {
+      "artifact_verification_requested": true,
+      "decode_ms": 1260.8,
+      "http_status": 200,
+      "load_ms": 344.4,
+      "model": "qwen3:14b",
+      "model_artifact_digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
+      "model_execution_ms": 1966.1,
+      "model_version": "qwen3:14b",
+      "outcome": "ok",
+      "output_tokens": 65,
+      "policy_version": "semantic-authority-v1",
+      "prompt_eval_ms": 360.9,
+      "prompt_tokens": 2582,
+      "prompt_version": "recommend-router-v2",
+      "provider": "ollama",
+      "provider_internal_overhead_ms": 30.2,
+      "provider_overhead_ms": 33.9,
+      "provider_total_ms": 1996.3,
+      "queue_ms": 0.0,
+      "transport_overhead_ms": 3.7,
+      "wall_ms": 2000.0
+    }
+  ],
+  "scenario": {
+    "turn_one": "Equip our Brisbane lab with 37 engineering laptops for game engine development and engineering simulation. Cap total spend at AUD 185,000. Deliver 22 to Brisbane and 15 to Adelaide within five days.",
+    "turn_two": "Move 3 units from Adelaide to Brisbane. Keep the quantity, budget, workloads, and deadline unchanged."
+  },
+  "scenario_hash": "1f21c7c40394067563fcc2e1abc9fbcee453d4e674f0780e397ea0665038b131",
+  "schema_version": "live-router-intake-certificate.v1",
+  "seal_sha256": "83a02665469a14f9270cd35bfa04445a297c36ecb3c627da4984b41257021a0f",
+  "synthetic_scenario": true,
+  "turns": [
+    {
+      "canonical_case": {
+        "authority": {},
+        "budget": {
+          "amount_minor": 18500000,
+          "currency": "AUD",
+          "scope": "total"
+        },
+        "candidate_skus": [],
+        "case_id": "held-out-router-37",
+        "destinations": [
+          {
+            "location_kind": "unknown",
+            "location_ref": "Brisbane",
+            "quantity": 22
+          },
+          {
+            "location_kind": "unknown",
+            "location_ref": "Adelaide",
+            "quantity": 15
+          }
+        ],
+        "fulfilment": {},
+        "objective": null,
+        "policies": {},
+        "requested_quantity": 37,
+        "requirements": {},
+        "research": {},
+        "revision": 2,
+        "schema_version": "procurement_case_state.v1",
+        "selected_sku": null,
+        "temporal": {
+          "as_of": null,
+          "calendar_source": "iana_tzdb",
+          "calendar_version": "tzdata:2025.3:Australia/Sydney",
+          "clarification_question": null,
+          "interpretation_instant": "2026-08-24T00:00:00+00:00",
+          "original_expression": "within five days",
+          "required_by": "2026-08-29T00:00:00+00:00",
+          "resolution_confidence": 1.0,
+          "resolution_status": "resolved",
+          "resolved_utc_instant": "2026-08-29T00:00:00+00:00",
+          "timezone": "Australia/Sydney",
+          "unresolved_reason": null
+        },
+        "workloads": [
+          "game_development",
+          "engineering_simulation"
+        ]
+      },
+      "decision": {
+        "audience_contexts": [],
+        "authorization_changes": [
+          "subject_action:defaulted"
+        ],
+        "brand_action": "keep",
+        "brand_filter": null,
+        "budget_cap_mode": "hard",
+        "budget_scope": "total",
+        "case_operation": "none",
+        "case_patches": [
+          {
+            "operation": "set",
+            "path": "destinations",
+            "value": [
+              {
+                "location_kind": "unknown",
+                "location_ref": "Brisbane",
+                "quantity": 22
+              },
+              {
+                "location_kind": "unknown",
+                "location_ref": "Adelaide",
+                "quantity": 15
+              }
+            ]
+          },
+          {
+            "operation": "set",
+            "path": "requested_quantity",
+            "reason": "canonical_quantity_grammar",
+            "value": 37
+          },
+          {
+            "operation": "set",
+            "path": "budget.amount_minor",
+            "reason": "canonical_budget_grammar",
+            "value": 18500000
+          },
+          {
+            "operation": "set",
+            "path": "budget.currency",
+            "reason": "settlement_currency_authority",
+            "value": "AUD"
+          },
+          {
+            "operation": "set",
+            "path": "budget.scope",
+            "reason": "bounded_budget_scope",
+            "value": "total"
+          },
+          {
+            "operation": "set",
+            "path": "temporal.original_expression",
+            "reason": "canonical_temporal_expression_grammar",
+            "value": "within five days"
+          },
+          {
+            "operation": "add",
+            "path": "workloads",
+            "reason": "data_owned_workload_phrase",
+            "value": "game_development"
+          },
+          {
+            "operation": "add",
+            "path": "workloads",
+            "reason": "data_owned_workload_phrase",
+            "value": "engineering_simulation"
+          }
+        ],
+        "clarification_relation": "none",
+        "compare_targets": [],
+        "confidence": 0.0,
+        "coverage_abstention_shadow": {
+          "concepts": [
+            {
+              "interpretations": [],
+              "material": true,
+              "query_span": "Brisbane and 15 to Adelaide within five days",
+              "status": "unresolved",
+              "text": "Brisbane and 15 to Adelaide within five days"
+            }
+          ],
+          "confidence": 0.25,
+          "desired_outcome": "Equip our Brisbane lab with 37 engineering laptops for game engine development and engineering simulation. Cap total spend at AUD 185,000. Deliver 22 to Brisbane and 15 to Adelaide within five days.",
+          "evidence_questions": [
+            {
+              "material": true,
+              "purpose": "resolve_performance_target",
+              "question": "Should this workload run locally, remotely, or in a hybrid setup, and what scale or result target must it support?",
+              "question_id": "workload_architecture"
+            }
+          ],
+          "material_unknowns": [
+            {
+              "description": "Authoritative meaning and requirements for Brisbane and 15 to Adelaide within five days",
+              "material": true,
+              "resolution_source": "research",
+              "unknown_id": "purpose-1"
+            }
+          ],
+          "product_category_candidates": [],
+          "proposal_origin": "coverage_abstention",
+          "proposed_action": "research_then_clarify",
+          "validation": "valid",
+          "workload_hypotheses": []
+        },
+        "exact_product_sku": null,
+        "exclude_brand": null,
+        "lane": "PROCUREMENT",
+        "model_proposal": {
+          "audience_contexts": [],
+          "brand": null,
+          "budget_scope": "total",
+          "case_patch_rejections": [],
+          "case_patches": [
+            {
+              "operation": "set",
+              "path": "destinations",
+              "value": [
+                {
+                  "location_kind": "unknown",
+                  "location_ref": "Brisbane",
+                  "quantity": 22
+                },
+                {
+                  "location_kind": "unknown",
+                  "location_ref": "Adelaide",
+                  "quantity": 15
+                }
+              ]
+            },
+            {
+              "operation": "set",
+              "path": "requested_quantity",
+              "reason": "canonical_quantity_grammar",
+              "value": 37
+            },
+            {
+              "operation": "set",
+              "path": "budget.amount_minor",
+              "reason": "canonical_budget_grammar",
+              "value": 18500000
+            },
+            {
+              "operation": "set",
+              "path": "budget.currency",
+              "reason": "settlement_currency_authority",
+              "value": "AUD"
+            },
+            {
+              "operation": "set",
+              "path": "budget.scope",
+              "reason": "bounded_budget_scope",
+              "value": "total"
+            },
+            {
+              "operation": "set",
+              "path": "temporal.original_expression",
+              "reason": "canonical_temporal_expression_grammar",
+              "value": "within five days"
+            },
+            {
+              "operation": "add",
+              "path": "workloads",
+              "reason": "data_owned_workload_phrase",
+              "value": "game_development"
+            },
+            {
+              "operation": "add",
+              "path": "workloads",
+              "reason": "data_owned_workload_phrase",
+              "value": "engineering_simulation"
+            }
+          ],
+          "clarification_relation": null,
+          "exclude_brand": null,
+          "handle": "el-6-6",
+          "lane": "PROCUREMENT",
+          "operational_constraints": {
+            "delivery_window_days": 5
+          },
+          "procurement_context": "current_order",
+          "quantity": 37,
+          "requirements": {},
+          "subject_action": null,
+          "total_budget": 185000,
+          "use_cases": [
+            "engineering_simulation",
+            "game_development"
+          ],
+          "workload_entities": []
+        },
+        "node_handle": "el-6-6",
+        "node_path": "Electronics > Computers > Laptops",
+        "operational_constraints": {
+          "delivery_window_days": 5
+        },
+        "preferred_brand": null,
+        "prior_shortlist": [],
+        "procurement_context": "current_order",
+        "product_type_options": [],
+        "quantity": 37,
+        "quantity_explicit": true,
+        "refusal_granted": false,
+        "relationship": "buy",
+        "request_scope": "product",
+        "requested_category_label": "Computers > Laptops",
+        "requested_product_node": "el-6-6",
+        "requirements": {},
+        "secondary_lanes": [],
+        "semantic_proposal": {},
+        "sort": "price_asc",
+        "source": "model",
+        "subject_action": "uncertain",
+        "subject_from_session": false,
+        "total_budget_cents": 18500000,
+        "use_case_variants": {},
+        "use_cases": [
+          "engineering_simulation",
+          "game_development"
+        ],
+        "workload_entities": [],
+        "workloads": []
+      },
+      "rejected_patches": [],
+      "turn": 1
+    },
+    {
+      "canonical_case": {
+        "authority": {},
+        "budget": {
+          "amount_minor": 18500000,
+          "currency": "AUD",
+          "scope": "total"
+        },
+        "candidate_skus": [],
+        "case_id": "held-out-router-37",
+        "destinations": [
+          {
+            "location_kind": "unknown",
+            "location_ref": "Brisbane",
+            "quantity": 25
+          },
+          {
+            "location_kind": "unknown",
+            "location_ref": "Adelaide",
+            "quantity": 12
+          }
+        ],
+        "fulfilment": {},
+        "objective": null,
+        "policies": {},
+        "requested_quantity": 37,
+        "requirements": {},
+        "research": {},
+        "revision": 3,
+        "schema_version": "procurement_case_state.v1",
+        "selected_sku": null,
+        "temporal": {
+          "as_of": null,
+          "calendar_source": "iana_tzdb",
+          "calendar_version": "tzdata:2025.3:Australia/Sydney",
+          "clarification_question": null,
+          "interpretation_instant": "2026-08-24T00:00:00+00:00",
+          "original_expression": "within five days",
+          "required_by": "2026-08-29T00:00:00+00:00",
+          "resolution_confidence": 1.0,
+          "resolution_status": "resolved",
+          "resolved_utc_instant": "2026-08-29T00:00:00+00:00",
+          "timezone": "Australia/Sydney",
+          "unresolved_reason": null
+        },
+        "workloads": [
+          "game_development",
+          "engineering_simulation"
+        ]
+      },
+      "decision": {
+        "audience_contexts": [],
+        "authorization_changes": [
+          "handle:defaulted",
+          "quantity:defaulted",
+          "budget_scope:defaulted",
+          "subject_action:defaulted",
+          "procurement_context:defaulted"
+        ],
+        "brand_action": "keep",
+        "brand_filter": null,
+        "budget_cap_mode": "hard",
+        "budget_scope": "total",
+        "case_operation": "none",
+        "case_patches": [
+          {
+            "from_ref": "Adelaide",
+            "operation": "move_quantity",
+            "path": "destinations",
+            "quantity": 3,
+            "to_ref": "Brisbane"
+          }
+        ],
+        "clarification_relation": "none",
+        "compare_targets": [],
+        "confidence": 0.0,
+        "coverage_abstention_shadow": {
+          "concepts": [
+            {
+              "interpretations": [],
+              "material": true,
+              "query_span": "Brisbane",
+              "status": "unresolved",
+              "text": "Brisbane"
+            }
+          ],
+          "confidence": 0.25,
+          "desired_outcome": "Move 3 units from Adelaide to Brisbane. Keep the quantity, budget, workloads, and deadline unchanged.",
+          "evidence_questions": [
+            {
+              "material": true,
+              "purpose": "resolve_performance_target",
+              "question": "Should this workload run locally, remotely, or in a hybrid setup, and what scale or result target must it support?",
+              "question_id": "workload_architecture"
+            }
+          ],
+          "material_unknowns": [
+            {
+              "description": "Authoritative meaning and requirements for Brisbane",
+              "material": true,
+              "resolution_source": "research",
+              "unknown_id": "purpose-1"
+            }
+          ],
+          "product_category_candidates": [],
+          "proposal_origin": "coverage_abstention",
+          "proposed_action": "research_then_clarify",
+          "validation": "valid",
+          "workload_hypotheses": []
+        },
+        "exact_product_sku": null,
+        "exclude_brand": null,
+        "lane": "PROCUREMENT",
+        "model_proposal": {
+          "audience_contexts": [],
+          "brand": null,
+          "budget_scope": null,
+          "case_patch_rejections": [],
+          "case_patches": [
+            {
+              "from_ref": "Adelaide",
+              "operation": "move_quantity",
+              "path": "destinations",
+              "quantity": 3,
+              "to_ref": "Brisbane"
+            }
+          ],
+          "clarification_relation": null,
+          "exclude_brand": null,
+          "handle": null,
+          "lane": "PROCUREMENT",
+          "operational_constraints": {},
+          "procurement_context": null,
+          "quantity": null,
+          "requirements": {},
+          "subject_action": null,
+          "total_budget": null,
+          "use_cases": [],
+          "workload_entities": []
+        },
+        "node_handle": "el-6-6",
+        "node_path": "Electronics > Computers > Laptops",
+        "operational_constraints": {},
+        "preferred_brand": null,
+        "prior_shortlist": [],
+        "procurement_context": "current_order",
+        "product_type_options": [],
+        "quantity": 37,
+        "quantity_explicit": false,
+        "refusal_granted": false,
+        "relationship": "buy",
+        "request_scope": "product",
+        "requested_category_label": null,
+        "requested_product_node": "el-6-6",
+        "requirements": {},
+        "secondary_lanes": [],
+        "semantic_proposal": {},
+        "sort": null,
+        "source": "model",
+        "subject_action": "continue",
+        "subject_from_session": true,
+        "total_budget_cents": 18500000,
+        "use_case_variants": {},
+        "use_cases": [],
+        "workload_entities": [],
+        "workloads": []
+      },
+      "rejected_patches": [],
+      "turn": 2
+    }
+  ]
+}

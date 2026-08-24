@@ -757,6 +757,7 @@ async def research_official_sources(
             "discovery_status": "not_needed",
             "discovery_reason": None,
             "discovery_result_count": 0,
+            "discovery_queries": list(_source_discovery_queries(source)),
             "deadline_status": "within_deadline",
             "parser_coverage": {
                 "pages_fetched": 0,

@@ -1620,6 +1620,7 @@ async def _research_shopping_case_with_db(
     )
 
     try:
+        consent_recorded_at = _now().isoformat()
         return await execute_enrolled_official_research(
             db,
             plan=plan,
@@ -1636,6 +1637,14 @@ async def _research_shopping_case_with_db(
             configured_search_url=str(
                 os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
             ).strip(),
+            consent_receipt={
+                "authorized": body.research_authorized,
+                "event": "shopping_case_research_request",
+                "recorded_at": consent_recorded_at,
+                "scope": "case_bound_official_research",
+                "research_plan_id": body.research_plan_id,
+                "execution_id": body.execution_id,
+            },
             cancellation_requested=request_cancelled,
         )
     except EnrolledResearchUnavailable as exc:
