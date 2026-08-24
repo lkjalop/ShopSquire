@@ -360,10 +360,15 @@ def stop_consumer() -> None:
         _consumer_thread.join(timeout=10)
 
 
-def shutdown_fallback_pool() -> None:
-    """Clean shutdown of the in-process fallback pool."""
+def shutdown_fallback_pool(*, wait: bool = False) -> None:
+    """Clean shutdown of the in-process fallback pool.
+
+    Runtime lifespan shutdown remains non-blocking by default. Test/session
+    ownership boundaries may wait so executor threads are demonstrably gone
+    before resource-leak certification runs.
+    """
     global _fallback_pool, _fallback_slots
     if _fallback_pool is not None:
-        _fallback_pool.shutdown(wait=False)
+        _fallback_pool.shutdown(wait=wait, cancel_futures=True)
         _fallback_pool = None
         _fallback_slots = None

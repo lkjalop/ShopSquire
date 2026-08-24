@@ -105,7 +105,9 @@ def test_fixed_pack_recommend_route_consistency_for_ms_texti():
     r = client.get("/api/v1/recommend/suggest", params=params)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body.get("status") in {"review_required", "ok", None}, body
+    assert body.get("status") in {"review_required", "ok", "no_verified_result", None}, body
+    if body.get("status") == "no_verified_result":
+        assert body.get("action_executed") is False, body
     sec = body.get("security") if isinstance(body.get("security"), dict) else {}
     assert str(sec.get("policy_route") or "") == "visual_sanitized", sec
     assert bool(sec.get("image_untrusted")) is True, sec

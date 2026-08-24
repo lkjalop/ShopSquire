@@ -1775,6 +1775,7 @@ export default function App() {
           shoppingCaseActionPath.interpretation(), {
             uid,
             retained_purpose: q,
+            session_epoch: conversationEpoch,
             // The current storefront is the pinned laptop category. The backend
             // clamps buyer-named categories against it before exposing any shelf.
             storefront_taxonomy_handle: 'el-6-6',
@@ -1820,6 +1821,12 @@ export default function App() {
           }
           if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(interpretation.product_shelves as ProductShelfProjection);
+          }
+          if (Number.isInteger(interpretation?.requested_quantity)) {
+            setConfirmedSlots((previous) => ({
+              ...(previous || {}),
+              order_quantity: Number(interpretation.requested_quantity),
+            }));
           }
           setTraceId(normalizeTraceId(interpretation.trace_id || interpretation.case_id || null));
           setMessages(prev => [...prev, {

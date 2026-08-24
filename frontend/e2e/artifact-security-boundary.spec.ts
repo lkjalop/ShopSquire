@@ -70,6 +70,9 @@ test('malicious or incompletely inspected image is blocked, traced, and records 
   await expect(page.getByTestId('trace-trust-strip').getByText(/Commercial actions blocked/i)).toBeVisible();
   await expect(panel.getByText(/commercial actions: blocked/i)).toBeVisible();
   await expect(panel.getByRole('heading', { name: 'Monitoring delivery' })).toBeVisible();
-  await expect(panel.getByText(/no_receiver: skipped/i)).toBeVisible();
+  // Local runs may intentionally have no receiver.  The production-shaped
+  // battery enrolls a loopback SIEM receiver and must expose successful
+  // delivery instead.  In both cases the outcome is explicit and auditable.
+  await expect(panel.getByText(/(no_receiver: skipped|siem_webhook: sent)/i)).toBeVisible();
   await expect(panel.getByText(/Event schema: shopsquire.security.v1/i)).toBeVisible();
 });

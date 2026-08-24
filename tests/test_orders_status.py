@@ -38,6 +38,11 @@ def _apply_schema():
         for stmt in statements:
             conn.execute(text(stmt))
         conn.commit()
+    # db/schema.sql is the legacy bootstrap surface.  Order status projection
+    # now also writes the migration/ORM-owned commercial outcome ledger, so
+    # materialize the current metadata on this file-isolated SQLite engine.
+    from src.app.models.orm import Base
+    Base.metadata.create_all(engine)
 
 
 def _set_engine_override():

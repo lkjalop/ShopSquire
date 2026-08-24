@@ -31,7 +31,7 @@ _STOP = {
     "a", "an", "and", "are", "as", "at", "be", "buyer", "current", "do",
     "for", "from", "generic", "hardware", "i", "in", "is", "it", "large",
     "local", "named", "of", "official", "only", "or", "requirements", "scope",
-    "software", "system", "the", "to", "use", "with", "workload",
+    "software", "system", "the", "to", "use", "with", "work", "workload",
 }
 _GENERIC_ACTIVATION_PHRASES = {
     "requirement", "system requirement", "hardware requirement",

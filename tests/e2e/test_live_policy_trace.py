@@ -19,6 +19,7 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
     base_url = os.getenv("LIVE_SHOPPER_URL", "http://localhost:5173").rstrip("/")
     calls: list[str] = []
     console_errors: list[str] = []
+    http_errors: list[tuple[int, str]] = []
     page_errors: list[str] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
@@ -31,7 +32,19 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         )
         page.on(
             "console",
-            lambda message: console_errors.append(message.text) if message.type == "error" else None,
+            lambda message: console_errors.append(message.text)
+            if message.type == "error"
+            and not (
+                message.text
+                == "Failed to load resource: the server responded with a status of 404 (Not Found)"
+            )
+            else None,
+        )
+        page.on(
+            "response",
+            lambda response: http_errors.append((response.status, response.url))
+            if response.status >= 400
+            else None,
         )
         page.on("pageerror", lambda error: page_errors.append(str(error)))
 
@@ -58,7 +71,7 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
 
         tabs = [
             ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
-            ("Reasoning", "Why"), ("Reasoning", "Intent"),
+            ("Reasoning", "Intent"),
             ("Reasoning", "Memory"), ("Reasoning", "Complexity"),
             ("Evidence & Risk", "Evidence"), ("Evidence & Risk", "Multimodal"),
             ("Evidence & Risk", "Security"),
@@ -82,6 +95,18 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
                     "button",
                     name=re.compile(r"^Show empty panels"),
                 ).click()
+                # Toggling empty panels refreshes the modal projection; do not
+                # keep locators rooted in the detached pre-toggle subtree.
+                modal = page.get_by_test_id("decision-trace-modal")
+                modal.get_by_role(
+                    "button",
+                    name=re.compile(rf"^{re.escape(section_name)}\b"),
+                ).click()
+                modal = page.get_by_test_id("decision-trace-modal")
+                leaf_tab = modal.get_by_role(
+                    "tab",
+                    name=re.compile(rf"^{re.escape(tab_name)}\b"),
+                )
             leaf_tab.click()
             page.wait_for_timeout(200)
             assert modal.get_attribute("data-trace-id") == trace_id
@@ -95,6 +120,15 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         modal.get_by_role("button", name="Reasoning", exact=True).click()
         modal.get_by_role("tab", name="Intent", exact=True).click()
         assert "lane: policy question" in modal.inner_text().lower()
+        unexpected_http_errors = [
+            (status, url)
+            for status, url in http_errors
+            if not (
+                status == 404
+                and re.search(r"/api/v1/decisions/[0-9a-f-]+$", url)
+            )
+        ]
+        assert not unexpected_http_errors
         assert not console_errors
         assert not page_errors
         browser.close()

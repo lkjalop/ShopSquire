@@ -934,7 +934,13 @@ async def triage(
     qr_reason_summaries: List[str] = []
     try:
         from src.app.rules.barcode_decode import decode_barcodes
-        if fast:
+        # PDF/TXT requirements have already crossed the strict binary gate and
+        # been converted to a sanitized image. QR decoding is explicitly marked
+        # not-applicable for this lane below, so a decoder that cannot interpret
+        # the rendered page must not downgrade otherwise valid buyer evidence.
+        if is_requirement_document:
+            qr = []
+        elif fast:
             try:
                 qr = await _run_bounded_image_work(
                     _functools.partial(

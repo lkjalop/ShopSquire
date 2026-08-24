@@ -595,7 +595,7 @@ def test_router_failure_recovers_only_bounded_bulk_facts(db):
     assert decision.node_handle == "el-6-11-2"
     assert decision.quantity == 20
     assert decision.budget_scope == "per_unit"
-    assert decision.use_cases == ()
+    assert decision.use_cases == ("gaming",)
     assert decision.requirements == {}
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 def _claim(key: str, value: int, unit: str) -> dict[str, object]:
@@ -26,17 +27,50 @@ def _claim(key: str, value: int, unit: str) -> dict[str, object]:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
-        body = json.dumps({
-            "results": [{
-                "title": "Enrolled official workstation requirements",
-                "url": "https://docs.vendor.example/workstation/requirements-2026",
-                "snippet": "Recommended local interactive simulation workstation requirements.",
-                "claim_candidates": [
-                    _claim("ram_gb", 32, "GB"),
-                    _claim("gpu_vram_gb", 8, "GB"),
+        request = urlparse(self.path)
+        query = parse_qs(request.query).get("q", [""])[0]
+        if request.path == "/search":
+            # This is deliberately a SearX-compatible discovery *fixture*, not a
+            # representation of live web research. It makes the production-shaped
+            # browser certificate deterministic while preserving the real HTTP,
+            # consent, accounting, allowlist and fail-closed application paths.
+            body_payload = {
+                "query": query,
+                "results": [
+                    {
+                        "title": "System Requirements",
+                        "url": "https://www.agisoft.com/downloads/system-requirements/",
+                        "content": "Candidate official Agisoft system requirements page; not accepted as authority.",
+                        "engine": "synthetic_certificate_fixture",
+                    },
+                    {
+                        "title": "Candidate official requirements publisher",
+                        "url": "https://docs.factoryio.com/manual/system-requirements/",
+                        "content": "Potential official workload requirements source; not accepted as authority.",
+                        "engine": "synthetic_certificate_fixture",
+                    },
+                    {
+                        "title": "Candidate vendor documentation",
+                        "url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+                        "content": "Potential official platform documentation; not accepted as authority.",
+                        "engine": "synthetic_certificate_fixture",
+                    },
                 ],
-            }],
-        }).encode("utf-8")
+                "unresponsive_engines": [],
+            }
+        else:
+            body_payload = {
+                "results": [{
+                    "title": "Enrolled official workstation requirements",
+                    "url": "https://docs.vendor.example/workstation/requirements-2026",
+                    "snippet": "Recommended local interactive simulation workstation requirements.",
+                    "claim_candidates": [
+                        _claim("ram_gb", 32, "GB"),
+                        _claim("gpu_vram_gb", 8, "GB"),
+                    ],
+                }],
+            }
+        body = json.dumps(body_payload).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

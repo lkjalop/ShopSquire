@@ -673,7 +673,8 @@ def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
 
 
 def best_supplier_cost(db, sku: str, *, tenant_id: str = "default",
-                       currency: str = "AUD") -> Optional[Dict[str, Any]]:
+                       currency: str = "AUD",
+                       as_of: datetime | str | None = None) -> Optional[Dict[str, Any]]:
     """Current tenant/SKU supplier cost with provenance.
 
     A demo estimate is deliberately returned as ``simulation_only``.  Callers may
@@ -698,7 +699,9 @@ def best_supplier_cost(db, sku: str, *, tenant_id: str = "default",
                      "currency": str(currency).upper()}).fetchall()
     except Exception:
         return None
-    now = datetime.now(timezone.utc)
+    now = _effective_timestamp(as_of) if as_of is not None else datetime.now(timezone.utc)
+    if now is None:
+        return None
     row = None
     for candidate in rows:
         valid_from = _effective_timestamp(candidate[14])

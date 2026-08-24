@@ -91,7 +91,13 @@ test('ambiguous workload explores locally before optional research without cart 
   await expect(page.getByText(/^Found 0 products$/i)).toHaveCount(0);
   await expect(shelves).toContainText(/best across accepted shared needs/i);
   await expect(shelves).toContainText(/mobile workstation/i);
-  await expect(shelves).toContainText(/desktop workstation/i);
+  expect(ambiguousTurn?.catalog_candidate_set).toMatchObject({
+    status: 'eligible',
+    taxonomy_handle: 'el-6-6',
+    taxonomy_source: 'explicit_query',
+    reason: 'query_specific_catalog_candidates',
+  });
+  await expect(shelves).not.toContainText(/desktop workstation/i);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   const traceId = ambiguousTurn?.trace_id;

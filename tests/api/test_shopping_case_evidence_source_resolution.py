@@ -17,6 +17,9 @@ def _client() -> TestClient:
     Base.metadata.create_all(engine)
     app = FastAPI()
     app.include_router(router)
+    # Async case routes run their transaction on a bounded worker and resolve
+    # the engine from app state rather than the request dependency override.
+    app.state.test_engine = engine
 
     def db_override():
         with Session(engine) as db:

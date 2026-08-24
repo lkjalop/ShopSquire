@@ -151,6 +151,7 @@ class CreateCaseInterpretationRequest(BaseModel):
     uid: str = Field(min_length=1, max_length=200)
     retained_purpose: str = Field(min_length=3, max_length=500)
     storefront_taxonomy_handle: str | None = Field(default=None, min_length=2, max_length=160)
+    session_epoch: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ProposeCaseCartMutationRequest(BaseModel):
@@ -440,10 +441,39 @@ def create_case_interpretation(
     from src.app.services.case_research_plan import (
         build_case_research_plan, plan_hypothesis_labels,
     )
+    from src.app.services.product_identity import resolve_product_alias
 
     fast_lane_started = perf_counter()
     stage_started = fast_lane_started
     tenant_id = _tenant(x_tenant_id)
+    # An enrolled exact identity is stronger than an open-ended workload phrase.
+    # Keep it on the deterministic catalogue/chat lane so ambiguity handling can
+    # qualify the workload without replacing the buyer's named configuration.
+    try:
+        exact_product = resolve_product_alias(
+            db,
+            tenant_id=tenant_id,
+            query=body.retained_purpose,
+        )
+    except Exception:
+        # The alias index is migration-owned and may be absent in a deliberately
+        # minimal compatibility database. In that case the normal candidate
+        # and research-plan rules remain the safe fallback.
+        exact_product = None
+    if exact_product is None:
+        from src.app.services.recommendation_core.turn_router import (
+            _explicit_catalog_product_identity,
+        )
+
+        _product_node, exact_sku = _explicit_catalog_product_identity(
+            db,
+            tenant_id,
+            body.retained_purpose,
+        )
+        if exact_sku is not None:
+            exact_product = (exact_sku, "deterministic_catalog_sku")
+    if exact_product is not None:
+        return Response(status_code=204)
     from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
 
     candidate_set = build_case_catalog_candidate_set(
@@ -501,6 +531,33 @@ def create_case_interpretation(
     )
     db.add(case)
     db.commit()
+    from src.app.services.bulk_intent import extract_quantity_span
+
+    unit_nouns = [
+        segment.strip()
+        for segment in str(candidate_set.taxonomy_label or "").split(">")
+        if segment.strip()
+    ]
+    quantity_span = extract_quantity_span(
+        body.retained_purpose,
+        unit_nouns=unit_nouns,
+    )
+    requested_quantity = quantity_span[0] if quantity_span is not None else None
+    if body.session_epoch:
+        from src.app.deps import hash_uid
+        from src.app.services.conversation_case_state import ensure_case_state
+
+        ensure_case_state(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            session_epoch=body.session_epoch,
+            subject_ref=hash_uid(body.uid),
+            authoritative_anchor={
+                "objective": plan.retained_purpose,
+                "requested_quantity": requested_quantity,
+            },
+        )
     interpretation_job = None
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_interpretation_jobs import (
@@ -585,6 +642,11 @@ def create_case_interpretation(
         "product_shelves": projection.model_dump(mode="json"),
         "catalog_candidate_set": candidate_set.model_dump(mode="json"),
         "interpretation_job": interpretation_job,
+        "requested_quantity": requested_quantity,
+        "confirmed_slots": (
+            {"order_quantity": requested_quantity}
+            if requested_quantity is not None else {}
+        ),
         "assistant_message": (
             "I created a provisional shopping case from your outcome. The shelves are local "
             "catalog exploration, not verified fit. Answer the one material question or authorize "

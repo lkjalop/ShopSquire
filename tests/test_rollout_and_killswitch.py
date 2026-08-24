@@ -34,23 +34,24 @@ def _restore_flags():
         f.write(_ORIGINAL_FLAGS)
 
 
-def test_kill_switch_blocks_pricing():
-    _write_flags({"USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100, "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 100}}, "KILL_SWITCH": True})
+def test_kill_switch_blocks_pricing(monkeypatch):
+    flags = {"USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100, "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 100}}, "KILL_SWITCH": True}
+    monkeypatch.setattr("src.app.routers.pricing._ff_get_flags", lambda: flags)
     r = client.get("/api/v1/pricing/suggest", params={"uid": "u1", "cart_total_cents": 12000})
     assert r.status_code == 503
 
 
-def test_rollout_gating():
-    _write_flags({"USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 0, "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 0}}, "KILL_SWITCH": False})
+def test_rollout_gating(monkeypatch):
+    flags = {"USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 0, "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 0}}, "KILL_SWITCH": False}
+    monkeypatch.setattr("src.app.routers.pricing._ff_get_flags", lambda: flags)
     r = client.get("/api/v1/pricing/suggest", params={"uid": "someuser", "cart_total_cents": 12000})
     assert r.status_code == 200
     body = r.json()
     assert body.get("eligible") is False
 
 
-def test_autonomy_scope_blocks_support():
-    _write_flags(
-        {
+def test_autonomy_scope_blocks_support(monkeypatch):
+    flags = {
             "USE_AGENT_CAPABILITIES": True,
             "KILL_SWITCH": False,
             "AUTONOMY": {
@@ -63,7 +64,7 @@ def test_autonomy_scope_blocks_support():
                 },
             },
         }
-    )
+    monkeypatch.setattr("src.app.routers.support._ff_get_flags", lambda: flags)
     r = client.post("/api/v1/support/answer", params={"question": "where is my order?"})
     assert r.status_code == 503
     body = r.json()

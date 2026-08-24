@@ -18,7 +18,14 @@ def test_match_use_cases_prefers_game_development_over_generic_game():
 
 def test_match_use_cases_ignores_collision_prone_short_abbreviations():
     assert R.match_use_cases("five A100 servers for my data team") == []
-    assert R.match_use_cases("gaming laptop") == []
+
+
+def test_match_use_cases_recovers_explicit_gaming_laptop_phrase():
+    assert R.match_use_cases("I need gaming laptops for a studio") == ["gaming"]
+
+
+def test_match_use_cases_recovers_generic_work_laptop_phrase():
+    assert R.match_use_cases("what laptops for work should I buy") == ["office"]
 
 
 def test_match_use_cases_recovers_stable_diffusion_workload():
@@ -105,3 +112,9 @@ def test_scaffold_verticals_load_empty_bound_to_taxonomy():
     for v in ("home", "appliances", "furniture"):
         assert R.list_use_cases(v) == []
         assert R.load_use_cases(v).get("host_nodes")
+
+
+def test_case_workloads_retain_multiple_explicit_procurement_dimensions():
+    assert R.match_case_workloads(
+        "Engineering laptops for Unreal Engine, large CAD models and simulation."
+    ) == ["game_development", "engineering_simulation"]

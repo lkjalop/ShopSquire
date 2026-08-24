@@ -41,6 +41,7 @@ from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIAS
 from src.app.services.recommendation_core.router_prompt import (
     _instruction_prefix,
 )
+from src.app.services.http_defaults import DEFAULT_OUTBOUND_TIMEOUT
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
                                                 primary_sold_node, search_nodes, sells_within,
                                                 sold_nodes)
@@ -97,6 +98,7 @@ def _router_http_post(url: str, **kwargs: Any) -> Any:
                 _ROUTER_HTTP_CLIENT = httpx.Client(
                     follow_redirects=False,
                     trust_env=False,
+                    timeout=DEFAULT_OUTBOUND_TIMEOUT,
                 )
     return _ROUTER_HTTP_CLIENT.post(url, **kwargs)
 
@@ -380,9 +382,15 @@ class TurnDecision:
                 "case_patches": [dict(item) for item in self.case_patches]}
 
 
-def _bounded_case_patches(
+@dataclass(frozen=True)
+class CasePatchEvaluation:
+    accepted: Tuple[Dict[str, Any], ...]
+    rejections: Tuple[Dict[str, Any], ...]
+
+
+def _evaluate_bounded_case_patches(
     data: Dict[str, Any], query: str | None = None,
-) -> Tuple[Dict[str, Any], ...]:
+) -> CasePatchEvaluation:
     """Validate model-proposed case operations without applying them.
 
     When the buyer query is supplied, changed values must also be grounded in
@@ -394,20 +402,62 @@ def _bounded_case_patches(
 
     raw = data.get("case_patches")
     if not isinstance(raw, list):
-        return ()
+        return CasePatchEvaluation(accepted=(), rejections=())
     accepted: list[Dict[str, Any]] = []
+    rejections: list[Dict[str, Any]] = []
     normalized_query = " ".join(str(query or "").casefold().split())
 
-    def grounded(patch: CasePatch) -> bool:
+    def reject(index: int, item: Dict[str, Any], reason: str, predicate: str) -> None:
+        receipt = {
+            "schema_version": "case_patch_rejection.v1",
+            "patch_index": index,
+            "operation": str(item.get("operation") or "unknown")[:40],
+            "path": str(item.get("path") or "unknown")[:120],
+            "reason": reason,
+            "rejecting_predicate": predicate,
+            "utterance_present": bool(normalized_query),
+        }
+        rejections.append(receipt)
+        logger.info("case patch rejected: %s", json.dumps(receipt, sort_keys=True))
+
+    def numeric_value_grounded(value: int) -> bool:
+        from src.app.services.bulk_intent import quantity_value_mentioned
+
+        return quantity_value_mentioned(query, value)
+
+    def grounded(patch: CasePatch) -> tuple[bool, str]:
         if not normalized_query:
-            return True
+            return True, "no_utterance_clamp_requested"
         if patch.operation == "move_quantity":
-            return bool(
+            result = bool(
                 patch.quantity is not None
-                and str(patch.quantity) in normalized_query
+                and numeric_value_grounded(patch.quantity)
                 and str(patch.from_ref or "").casefold() in normalized_query
                 and str(patch.to_ref or "").casefold() in normalized_query
             )
+            return result, "move_quantity_span_and_locations"
+        if patch.path == "budget.amount_minor" and isinstance(patch.value, int):
+            from src.app.services.budget_grammar import parse_budget
+
+            parsed = parse_budget(query or "")
+            authorized = {
+                int(amount) * 100
+                for amount in (
+                    getattr(parsed, "budget_min", None),
+                    getattr(parsed, "budget_max", None),
+                )
+                if amount is not None
+            }
+            return patch.value in authorized, "canonical_budget_grammar"
+        if patch.path == "budget.scope":
+            from src.app.services.budget_grammar import classify_budget_scope
+
+            return (
+                str(patch.value) == classify_budget_scope(query or ""),
+                "canonical_budget_scope_grammar",
+            )
+        if patch.path == "requested_quantity" and isinstance(patch.value, int):
+            return numeric_value_grounded(patch.value), "canonical_quantity_grammar"
         values: list[Any]
         if patch.path == "destinations" and isinstance(patch.value, list):
             values = [
@@ -421,14 +471,15 @@ def _bounded_case_patches(
             values = [patch.value]
         for value in values:
             if value is None:
-                return False
+                return False, "non_null_value"
             candidate = str(value).casefold()
-            if patch.path == "budget.amount_minor" and isinstance(value, int):
-                candidate = str(value // 100)
-            if candidate not in normalized_query:
-                return False
-        return True
-    for item in raw[:8]:
+            if isinstance(value, int):
+                if not numeric_value_grounded(value):
+                    return False, "canonical_numeric_grounding"
+            elif candidate not in normalized_query:
+                return False, "literal_buyer_span"
+        return True, "literal_buyer_span"
+    for index, item in enumerate(raw[:8]):
         if not isinstance(item, dict):
             continue
         candidate_item = dict(item)
@@ -456,12 +507,88 @@ def _bounded_case_patches(
             ]
         try:
             patch = CasePatch.model_validate(candidate_item)
-        except ValidationError:
+        except ValidationError as exc:
+            reject(index, candidate_item, "schema_validation_failed", "CasePatch")
             continue
-        if not grounded(patch):
+        is_grounded, predicate = grounded(patch)
+        if not is_grounded:
+            reject(index, candidate_item, "buyer_grounding_failed", predicate)
             continue
         accepted.append(patch.model_dump(mode="json", exclude_none=True))
-    return tuple(accepted)
+    return CasePatchEvaluation(
+        accepted=tuple(accepted), rejections=tuple(rejections),
+    )
+
+
+def _bounded_case_patches(
+    data: Dict[str, Any], query: str | None = None,
+) -> Tuple[Dict[str, Any], ...]:
+    """Compatibility projection for callers that need only accepted patches."""
+    return _evaluate_bounded_case_patches(data, query).accepted
+
+
+def _complete_canonical_case_patches(
+    patches: Tuple[Dict[str, Any], ...],
+    *,
+    query: str,
+    requested_quantity: int | None,
+    total_budget_cents: int | None,
+    budget_scope: str,
+    settlement_currency: str,
+) -> Tuple[Dict[str, Any], ...]:
+    """Complete durable intake from already-authorized deterministic parsers.
+
+    Model proposals remain useful, but a correctly parsed quantity, budget,
+    deadline or data-owned workload must not disappear merely because the model
+    omitted the parallel case-patch field. These patches grant no commerce
+    authority and are still validated atomically by the case reducer.
+    """
+    completed = [dict(patch) for patch in patches]
+    paths = {str(patch.get("path") or "") for patch in completed}
+
+    def add(operation: str, path: str, value: Any, reason: str) -> None:
+        completed.append({
+            "operation": operation, "path": path, "value": value, "reason": reason,
+        })
+        paths.add(path)
+
+    if requested_quantity is not None and "requested_quantity" not in paths:
+        add("set", "requested_quantity", requested_quantity, "canonical_quantity_grammar")
+    if total_budget_cents is not None:
+        if "budget.amount_minor" not in paths:
+            add("set", "budget.amount_minor", total_budget_cents, "canonical_budget_grammar")
+        if "budget.currency" not in paths:
+            # Bind the currency to a money-shaped mention. A free-standing code is
+            # unsafe here: procurement text commonly contains workload acronyms
+            # such as "CAD models", which must not override "AUD 220,000".
+            explicit_currency = _re.search(
+                r"\b(AUD|USD|CAD|NZD|SGD|HKD|GBP|EUR|JPY)\b\s*[$€£¥]?\s*\d",
+                query,
+                _re.IGNORECASE,
+            )
+            currency = (
+                explicit_currency.group(1).upper()
+                if explicit_currency else str(settlement_currency or "AUD").upper()
+            )
+            add("set", "budget.currency", currency, "settlement_currency_authority")
+        if budget_scope in {"per_unit", "total"} and "budget.scope" not in paths:
+            add("set", "budget.scope", budget_scope, "bounded_budget_scope")
+
+    from src.app.services.temporal_expression_authority import extract_temporal_expression
+
+    expression = extract_temporal_expression(query)
+    if expression and "temporal.original_expression" not in paths:
+        add(
+            "set", "temporal.original_expression", expression,
+            "canonical_temporal_expression_grammar",
+        )
+
+    if "workloads" not in paths:
+        from src.app.services.use_case_registry import match_case_workloads
+
+        for workload in match_case_workloads(query):
+            add("add", "workloads", workload, "data_owned_workload_phrase")
+    return tuple(completed)
 
 
 def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -813,6 +940,13 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         envelope.query,
         defs_union(DEFAULT_VERTICALS),
     )
+    from src.app.services import use_case_registry as use_cases_registry
+
+    # This remains deterministic fallback authority: only an exact, multiword phrase
+    # declared by the data-owned registry is recoverable while the model is unavailable.
+    # Compatibility with the selected sold taxonomy node is checked below before the
+    # profile can authorize provisional catalogue exploration.
+    registry_use_cases = use_cases_registry.match_use_cases(envelope.query)
     named_handles = set(_query_named_sold_handles(db, envelope))
     node = None
     subject_action = "switch"
@@ -831,6 +965,18 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         session.get("pending_clarification")
         if isinstance(session.get("pending_clarification"), dict) else {}
     )
+    pending_budget_answer = bool(
+        str(pending.get("question_id") or "") == "budget_scope"
+        and classify_budget_scope(envelope.query) in {"per_unit", "total"}
+    )
+    if pending_budget_answer and quantity is None:
+        accepted_quantity = (session.get("accepted_constraints") or {}).get("quantity")
+        if (
+            isinstance(accepted_quantity, int)
+            and not isinstance(accepted_quantity, bool)
+            and 1 <= accepted_quantity <= 100_000
+        ):
+            quantity = accepted_quantity
     pending_semantic = (
         pending.get("semantic_context")
         if isinstance(pending.get("semantic_context"), dict) else {}
@@ -846,6 +992,15 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         # explicit commercial facts below, but leave the product node unresolved.
         node = None
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
+    if pending_budget_answer and node is None and not unresolved_case:
+        prior = get_node(str(session.get("prior_node") or ""))
+        if (
+            prior is not None
+            and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True
+        ):
+            node = prior
+    if pending_budget_answer and node is not None:
+        subject_action = "continue"
     if node is None and quantity is not None and active_procurement and not unresolved_case:
         prior = get_node(str(session.get("prior_node") or ""))
         if (prior is not None
@@ -880,11 +1035,18 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
             source=f"fallback:{reason}",
             quantity=quantity,
+            quantity_explicit=(parsed_quantity is not None),
             total_budget_cents=total_budget_cents,
             budget_scope=budget_scope,
             semantic_proposal=semantic,
             requirements=explicit_requirements,
+            clarification_relation=("answer" if pending_budget_answer else "none"),
         )
+
+    compatible_use_cases = tuple(
+        use_case for use_case in registry_use_cases
+        if node.handle in set(use_cases_registry.host_nodes_for([use_case]))
+    )
 
     budget_scope = classify_budget_scope(envelope.query)
     if budget_scope == "unknown" and subject_action == "continue":
@@ -899,17 +1061,15 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         if parsed_budget is not None and parsed_budget.budget_max is not None:
             total_budget_cents = int(parsed_budget.budget_max) * 100
 
-    semantic = _semantic_proposal_or_relation_fallback(
-        {},
-        query=envelope.query,
-        requirements={},
-        persisted_context=pending_semantic,
+    semantic = {} if pending_budget_answer else _semantic_proposal_or_relation_fallback(
+        {}, query=envelope.query, requirements={}, persisted_context=pending_semantic,
     )
     from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
 
     if not explicit_requirements:
         semantic = unresolved_purpose_proposal(
             query=envelope.query,
+            use_cases=compatible_use_cases,
             node_path=node.full_path,
             existing_semantic=semantic,
         )
@@ -922,10 +1082,13 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         requested_product_node=node.handle,
         subject_action=subject_action,
         quantity=quantity,
+        quantity_explicit=(parsed_quantity is not None),
         total_budget_cents=total_budget_cents,
         budget_scope=budget_scope,
         semantic_proposal=semantic,
+        use_cases=compatible_use_cases,
         requirements=explicit_requirements,
+        clarification_relation=("answer" if pending_budget_answer else "none"),
     )
 
 
@@ -1636,6 +1799,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 request_scope="product",
                 relationship="buy",
                 quantity=explicit_quantity[0],
+                quantity_explicit=True,
                 total_budget_cents=total_cents,
                 budget_scope=scope,
                 subject_action="switch",
@@ -1919,7 +2083,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                     requirements[definition.key] = accepted_predicates
 
     operational_constraints = _bounded_operational_constraints(data, envelope.query)
-    case_patches = _bounded_case_patches(data, envelope.query)
+    case_patch_evaluation = _evaluate_bounded_case_patches(data, envelope.query)
+    case_patches = case_patch_evaluation.accepted
 
     from src.app.services.recommendation_core.intent_resolver import (audience_context_keys,
                                                                       normalize_use_case)
@@ -2395,7 +2560,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 or node.full_path.startswith(workload_host.full_path + " >")
                 or same_product_head
             )
-            if related:
+            # An inferred workload host may narrow an accepted product class,
+            # but it must never broaden an explicit/more-specific class. For
+            # example, the generic office host "Computers" cannot replace the
+            # buyer/model-authorized "Laptops" node.
+            workload_is_broader = node.full_path.startswith(
+                workload_host.full_path + " >"
+            )
+            if related and not workload_is_broader:
                 node = workload_host
                 routing_source = "model+specific_workload_host"
             elif (node.handle not in explicitly_named and not explicitly_named
@@ -2494,7 +2666,21 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         else:
             lane = "SEARCH"
 
+    case_patches = _complete_canonical_case_patches(
+        case_patches,
+        query=envelope.buyer_query or envelope.query,
+        requested_quantity=quantity,
+        total_budget_cents=total_budget_cents,
+        budget_scope=budget_scope,
+        settlement_currency=envelope.currency,
+    )
     proposal = _bounded_model_proposal(data)
+    # The visible proposal uses the same accepted/completed projection as the
+    # decision trace. Never re-project raw model patches without buyer grounding.
+    proposal["case_patches"] = [dict(item) for item in case_patches]
+    proposal["case_patch_rejections"] = [
+        dict(receipt) for receipt in case_patch_evaluation.rejections
+    ]
     semantic_query = (
         envelope.buyer_query or envelope.query
         if clarification_relation in {"interrupt", "supersede"}
@@ -2543,6 +2729,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "clarification_relation": clarification_relation,
         "product_type_options": list(product_type_options),
         "case_patches": [dict(item) for item in case_patches],
+        "case_patch_rejections": [
+            dict(receipt) for receipt in case_patch_evaluation.rejections
+        ],
     }
     anchored_product_sku = explicit_product_sku
     accepted_constraints = (

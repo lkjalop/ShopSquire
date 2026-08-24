@@ -16,8 +16,9 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-def _seed_catalog():
+def _seed_catalog(engine=None):
     from sqlalchemy import text
+    from sqlalchemy.orm import Session
     from src.app.models.db import db_session
     from src.app.services.taxonomy_registry import (
         add_sold_node,
@@ -25,7 +26,8 @@ def _seed_catalog():
         upsert_classification,
     )
     from scripts.seed_gaming_laptops import ensure_gaming_catalog
-    with db_session() as db:
+    session_scope = Session(engine) if engine is not None else db_session()
+    with session_scope as db:
         ensure_gaming_catalog(db)
         ensure_tables(db)
         add_sold_node(db, node_handle="el-6-11-2", tenant_id="default")
@@ -46,9 +48,34 @@ def _seed_catalog():
         db.commit()
 
 
-def test_bulk_availability_query_wired_end_to_end():
+def test_bulk_availability_query_wired_end_to_end(monkeypatch):
+    monkeypatch.setenv("USE_MOCK_LLM", "1")
+    monkeypatch.setenv("TASK_ALLOW_INPROCESS_FALLBACK", "0")
+    # Taxonomy persistence itself has dedicated tests. This integration gate
+    # isolates the quantity/horizon-to-availability wiring from SQLite's
+    # cross-session schema/locking behavior.
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.core.grounding_status",
+        lambda *args, **kwargs: "grounded",
+    )
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.evidence.grounding_status",
+        lambda *args, **kwargs: "grounded",
+    )
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+    from src.app.models.db import set_engine
+    from src.app.models.orm import Base
+    engine = create_engine(
+        "sqlite://", future=True, poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    set_engine(engine)
+    app = create_app()
+    app.state.engine = engine
     _seed_catalog()  # GAM-* gaming laptops ($1,199–1,799) WITH inventory (stock > 10)
-    client = TestClient(create_app())
+    client = TestClient(app)
     r = client.get(
         "/api/v1/recommend/suggest",
         params={

@@ -4,6 +4,12 @@ from src.app.services.case_research_plan import (
 )
 
 
+def test_generic_work_laptop_browse_does_not_open_publisher_research() -> None:
+    assert build_case_research_plan(
+        "what laptops for work? budget 1500 to 1900, I need about 100"
+    ) is None
+
+
 def test_adjacent_enrolled_applications_become_open_world_not_false_authority():
     plan = build_case_research_plan(
         "I need a laptop for drone photogrammetry, GIS and very large 3D models.",

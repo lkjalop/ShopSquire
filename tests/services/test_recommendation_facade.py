@@ -306,6 +306,9 @@ def test_typed_ingress_blocks_quota_before_core(monkeypatch):
 
 def test_typed_default_finalizer_persists_canonical_trace(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    # Exercise the synchronous finalizer contract directly; asynchronous
+    # outbox durability and worker projection have separate tests.
+    monkeypatch.setenv("RECOMMEND_AUDIT_ASYNC", "0")
     monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _rec())
     monkeypatch.setattr(
         "src.app.services.token_budget.TokenBudget.check_budget",

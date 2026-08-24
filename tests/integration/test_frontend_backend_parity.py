@@ -28,10 +28,12 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
 from src.app.main import create_app
-from src.app.models.db import db_session
+from src.app.models.db import db_session, get_engine, set_engine
+from src.app.models.orm import Base
 from tests.utils import default_headers, write_feature_flags
 from tests.v2_catalog_fixture import grounded_v2_catalog
 
@@ -62,10 +64,21 @@ _VALID_STOCK = {"in_stock", "low_stock", "very_low_stock", "out_of_stock", None}
 
 @pytest.fixture(scope="module", autouse=True)
 def _seed():
+    original_engine = get_engine()
+    isolated_engine = create_engine(
+        "sqlite://", future=True, poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(isolated_engine)
+    set_engine(isolated_engine)
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
     write_feature_flags(_PRODUCT_PATH_FLAGS)
     _orig_narration = os.environ.get("RECOMMEND_NARRATION_MODE")
+    _orig_mock = os.environ.get("USE_MOCK_LLM")
+    _orig_fallback = os.environ.get("TASK_ALLOW_INPROCESS_FALLBACK")
     os.environ["RECOMMEND_NARRATION_MODE"] = "skip"  # fast + deterministic
+    os.environ["USE_MOCK_LLM"] = "1"
+    os.environ["TASK_ALLOW_INPROCESS_FALLBACK"] = "0"
     with grounded_v2_catalog(
         _CATALOG,
         node_handle="el-6-6",
@@ -76,13 +89,24 @@ def _seed():
         os.environ.pop("RECOMMEND_NARRATION_MODE", None)
     else:
         os.environ["RECOMMEND_NARRATION_MODE"] = _orig_narration
+    if _orig_mock is None:
+        os.environ.pop("USE_MOCK_LLM", None)
+    else:
+        os.environ["USE_MOCK_LLM"] = _orig_mock
+    if _orig_fallback is None:
+        os.environ.pop("TASK_ALLOW_INPROCESS_FALLBACK", None)
+    else:
+        os.environ["TASK_ALLOW_INPROCESS_FALLBACK"] = _orig_fallback
+    set_engine(original_engine)
     if _orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(_orig_flags)
 
 
 def _suggest(uid: str, query: str) -> dict:
-    client = TestClient(create_app(), headers=default_headers())
+    app = create_app()
+    app.state.engine = get_engine()
+    client = TestClient(app, headers=default_headers())
     r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
     assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:400]}"
     body = r.json()
@@ -126,7 +150,10 @@ def test_top_level_contract(i, query):
 
 # ── Per-product item contract (the fields the grid renders) ──────────────────
 def test_product_item_contract():
-    body = _suggest("fbp-items", "laptop for work under 1500")
+    # Keep this a catalog-contract query. A workload-qualified "for work"
+    # request correctly requires external capability evidence and may return no
+    # products, which is certified by the research gates instead.
+    body = _suggest("fbp-items", "show me laptops under 1500")
     items = _items(body)
     assert items, f"expected seeded products to surface; got none: {str(body)[:300]}"
     for p in items:

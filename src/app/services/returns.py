@@ -263,6 +263,13 @@ def capture_evidence(
             ocr_provider = ocr_cfg.get("provider")
         except Exception:
             ocr_provider = None
+        # An explicit runtime provider is an operator/test selection and must
+        # override the model-pack default. Otherwise CV_OCR_PROVIDER=embedded
+        # still silently invoked Tesseract, defeating deterministic offline
+        # certification and misreporting the provider actually requested.
+        forced_ocr_provider = str(os.getenv("CV_OCR_PROVIDER") or "").strip()
+        if forced_ocr_provider:
+            ocr_provider = forced_ocr_provider
 
         cv_result = run_pipeline(safe_images, pack=pack, roi_model_path=roi_model_path, ocr_provider=ocr_provider)
     except Exception:

@@ -1,6 +1,7 @@
 param(
     [string]$ArtifactRoot = "",
-    [switch]$KeepServices
+    [switch]$KeepServices,
+    [string[]]$PlaywrightSpec = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,8 +36,13 @@ if (-not [System.IO.Path]::IsPathRooted($ArtifactRoot)) {
     )
 }
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
+$env:CONVERSATIONAL_SPATIOTEMPORAL_CERTIFICATE_PATH = Join-Path `
+    $ArtifactRoot "conversational-spatiotemporal-browser-certificate.json"
+$env:CONVERSATIONAL_SPATIOTEMPORAL_SCREENSHOT_PATH = Join-Path `
+    $ArtifactRoot "conversational-spatiotemporal-showcase.png"
 $processes = @()
 $receiverProcess = $null
+$officialProviderProcess = $null
 
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new(
@@ -163,6 +169,30 @@ try {
     # COMMITTED and make the browser proof depend on a developer's local flags.
     $env:FULFILLMENT_AUTO_DRAFT_ON_COMMIT = "1"
     $env:GATE_PROCUREMENT = "1"
+    # The canonical portfolio certificate is an explicitly gated, read-only
+    # surface. Enable it only inside this disposable production-shaped stack.
+    $env:PORTFOLIO_CERTIFICATION_ENABLED = "1"
+    # Enrol a disposable, explicit research proof stack. These settings mirror
+    # hosted CI and grant authority only to the synthetic/local certificate
+    # tenant; application defaults remain disabled and fail closed.
+    $env:EXTERNAL_RESEARCH_ENABLED = "1"
+    $officialPort = Get-FreeTcpPort
+    $env:EXTERNAL_RESEARCH_SEARCH_URL = (
+        "http://127.0.0.1:$officialPort/search?q={query}&format=json"
+    )
+    $env:EXTERNAL_RESEARCH_ALLOW_PRIVATE = "1"
+    $env:EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = "1"
+    $env:EXTERNAL_RESEARCH_PROVIDER_ID = "local_synthetic_discovery_fixture"
+    $env:EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS = "free"
+    $env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST = "default"
+    $env:EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = "local-certificate-source-reviewer"
+    $env:EXTERNAL_RESEARCH_SOURCE_LICENCE = "test-fixture"
+    $env:OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST = "docs.vendor.example"
+    $env:PRODUCT_CAPABILITY_TENANT_ALLOWLIST = "default"
+    $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
+    $env:SEMANTIC_RESEARCH_FIXTURES_ENABLED = "1"
+    $env:SEMANTIC_RESEARCH_FIXTURE_ID = "siemens_digital_twin_qualified_contract"
+    $env:SEMANTIC_SIMULATION_AUTHORITY_ENABLED = "1"
     $env:USE_MOCK_LLM = "1"
     $env:USE_OLLAMA_INTENT = "0"
     $env:MODEL_WARMUP_ON_STARTUP = "0"
@@ -194,8 +224,17 @@ try {
     $env:PLAYWRIGHT_BASE_URL = $storefrontUrl
     $env:BACKEND_SMOKE_URL = $backendUrl
     $env:SIEM_WEBHOOK_URL = "http://127.0.0.1:$siemPort/events"
+    $env:OFFICIAL_REQUIREMENTS_API_URL = (
+        "http://127.0.0.1:$officialPort/requirements?q={query}"
+    )
     $env:SECURITY_HANDOFF_INLINE = "1"
 
+    $officialProviderProcess = Start-Process -FilePath python -ArgumentList @(
+        (Join-Path $resolvedRepo "tests/fixtures/fake_official_requirements_provider.py"),
+        "--port", "$officialPort"
+    ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput (Join-Path $ArtifactRoot "official-provider.out.log") `
+        -RedirectStandardError (Join-Path $ArtifactRoot "official-provider.err.log")
     $receiverProcess = Start-Process -FilePath python -ArgumentList @(
         (Join-Path $resolvedRepo "scripts/security_handoff_test_receiver.py"),
         "--port", "$siemPort", "--output", (Join-Path $ArtifactRoot "siem-events.jsonl")
@@ -213,6 +252,14 @@ try {
     python -m alembic upgrade head *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "migration.log") | Out-Null
     Assert-NativeSuccess "live_migration"
+    python -m alembic current *>&1 |
+        Tee-Object -FilePath (Join-Path $ArtifactRoot "migration-current.log") | Out-Null
+    Assert-NativeSuccess "live_migration_current"
+    $migrationCurrent = Get-Content `
+        -LiteralPath (Join-Path $ArtifactRoot "migration-current.log") -Raw
+    if ($migrationCurrent -notmatch "20260874") {
+        throw "live_migration_revision_mismatch:expected=20260874"
+    }
     python scripts/seed_demo_data.py *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "seed.log") | Out-Null
     Assert-NativeSuccess "live_seed"
@@ -267,10 +314,16 @@ try {
                 -Uri $storefrontUrl -TimeoutSec 2
             $admin = Invoke-WebRequest -UseBasicParsing `
                 -Uri $adminUrl -TimeoutSec 2
+            $official = Invoke-WebRequest -UseBasicParsing `
+                -Uri "http://127.0.0.1:$officialPort/requirements?q=health" -TimeoutSec 2
+            $search = Invoke-WebRequest -UseBasicParsing `
+                -Uri "http://127.0.0.1:$officialPort/search?q=health&format=json" -TimeoutSec 5
             if (
                 $health.StatusCode -eq 200 -and
                 $store.StatusCode -eq 200 -and
-                $admin.StatusCode -eq 200
+                $admin.StatusCode -eq 200 -and
+                $official.StatusCode -eq 200 -and
+                $search.StatusCode -eq 200
             ) {
                 $stackReady = $true
                 break
@@ -305,17 +358,26 @@ try {
     try {
         $reactExitFile = Join-Path $ArtifactRoot "react-playwright.exit"
         $env:SHOPSQUIRE_CHILD_EXIT_FILE = $reactExitFile
-        $reactProcess = Start-Process -FilePath python -ArgumentList @(
+        $reactArguments = @(
             (Join-Path $resolvedRepo "scripts/run_child_process.py"),
-            "npx.cmd", "playwright", "test", "--reporter=line", "--workers=1"
-        ) -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru `
+            "python", (Join-Path $resolvedRepo "scripts/run_playwright_memory_safe.py"),
+            "--frontend", (Join-Path $resolvedRepo "frontend")
+        )
+        foreach ($spec in $PlaywrightSpec) {
+            $reactArguments += @("--spec", $spec)
+        }
+        $reactProcess = Start-Process -FilePath python -ArgumentList $reactArguments `
+            -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (
                 Join-Path $ArtifactRoot "react-playwright.log"
             ) -RedirectStandardError (
                 Join-Path $ArtifactRoot "react-playwright.err.log"
         )
+        $reactTimeoutSec = if ($PlaywrightSpec) {
+            600 * [Math]::Max(1, $PlaywrightSpec.Count)
+        } else { 2400 }
         $reactExit = Wait-BoundedProcess `
-            -Process $reactProcess -TimeoutSec 600 -Label "react_playwright" `
+            -Process $reactProcess -TimeoutSec $reactTimeoutSec -Label "react_playwright" `
             -ExitFile $reactExitFile
     }
     finally {
@@ -323,28 +385,31 @@ try {
         Pop-Location
     }
 
-    $env:RUN_LIVE_BROWSER_TESTS = "1"
-    $env:LIVE_SHOPPER_URL = $storefrontUrl
-    $env:LIVE_ADMIN_URL = $adminUrl
-    $spaExitFile = Join-Path $ArtifactRoot "spa-regressions.exit"
-    $env:SHOPSQUIRE_CHILD_EXIT_FILE = $spaExitFile
-    $spaProcess = Start-Process -FilePath python -ArgumentList @(
-        (Join-Path $resolvedRepo "scripts/run_child_process.py"),
-        "python", "-m", "pytest", "-vv", "-s",
-        "tests/e2e/test_procurement_malicious_reply_playwright.py",
-        "tests/e2e/test_live_allocation_workbench.py",
-        "tests/e2e/test_live_policy_trace.py",
-        "tests/e2e/test_live_procurement_closed_loop.py"
-    ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (
-            Join-Path $ArtifactRoot "spa-regressions.log"
-        ) -RedirectStandardError (
-            Join-Path $ArtifactRoot "spa-regressions.err.log"
-    )
-    $spaExit = Wait-BoundedProcess `
-        -Process $spaProcess -TimeoutSec 600 -Label "spa_regressions" `
-        -ExitFile $spaExitFile
-    Remove-Item Env:SHOPSQUIRE_CHILD_EXIT_FILE -ErrorAction SilentlyContinue
+    $spaExit = 0
+    if (-not $PlaywrightSpec) {
+        $env:RUN_LIVE_BROWSER_TESTS = "1"
+        $env:LIVE_SHOPPER_URL = $storefrontUrl
+        $env:LIVE_ADMIN_URL = $adminUrl
+        $spaExitFile = Join-Path $ArtifactRoot "spa-regressions.exit"
+        $env:SHOPSQUIRE_CHILD_EXIT_FILE = $spaExitFile
+        $spaProcess = Start-Process -FilePath python -ArgumentList @(
+            (Join-Path $resolvedRepo "scripts/run_child_process.py"),
+            "python", "-m", "pytest", "-vv", "-s",
+            "tests/e2e/test_procurement_malicious_reply_playwright.py",
+            "tests/e2e/test_live_allocation_workbench.py",
+            "tests/e2e/test_live_policy_trace.py",
+            "tests/e2e/test_live_procurement_closed_loop.py"
+        ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput (
+                Join-Path $ArtifactRoot "spa-regressions.log"
+            ) -RedirectStandardError (
+                Join-Path $ArtifactRoot "spa-regressions.err.log"
+        )
+        $spaExit = Wait-BoundedProcess `
+            -Process $spaProcess -TimeoutSec 600 -Label "spa_regressions" `
+            -ExitFile $spaExitFile
+        Remove-Item Env:SHOPSQUIRE_CHILD_EXIT_FILE -ErrorAction SilentlyContinue
+    }
 
     # A 200 response is not sufficient when a caught SQL error poisoned the
     # request transaction and forced silent compatibility fallbacks. Treat the
@@ -384,8 +449,10 @@ try {
         Set-Content -Path $abortGatePath -Encoding UTF8
     $transactionAbortExit = if ($abortHits.Count -gt 0) { 1 } else { 0 }
     $siemEventsPath = Join-Path $ArtifactRoot "siem-events.jsonl"
-    $siemTelemetryExit = 1
-    if (Test-Path -LiteralPath $siemEventsPath) {
+    # A targeted functional spec is not expected to emit a security handoff.
+    # The complete battery retains the canonical SIEM delivery gate below.
+    $siemTelemetryExit = if ($PlaywrightSpec) { 0 } else { 1 }
+    if (-not $PlaywrightSpec -and (Test-Path -LiteralPath $siemEventsPath)) {
         $siemRows = @(Get-Content -LiteralPath $siemEventsPath | Where-Object { $_.Trim() })
         if ($siemRows.Count -gt 0) {
             $canonicalRows = @($siemRows | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
@@ -420,6 +487,9 @@ catch {
     throw
 }
 finally {
+    if ($officialProviderProcess -and -not $officialProviderProcess.HasExited) {
+        Stop-ProcessTree -ProcessId $officialProviderProcess.Id
+    }
     if ($receiverProcess -and -not $receiverProcess.HasExited) {
         Stop-ProcessTree -ProcessId $receiverProcess.Id
     }

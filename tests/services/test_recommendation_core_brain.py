@@ -954,7 +954,7 @@ def test_router_bounded_fallback_on_garbage_model(db):
     for bad in ("", "not json", json.dumps({"lane": "INVENTED_LANE"})):
         d = route_turn(db, _env("gaming laptop"), llm_fn=lambda p, t, b=bad: b)
         assert d.lane == "SEARCH" and d.source.startswith("fallback:")
-        assert d.requirements == {} and d.use_cases == ()
+        assert d.requirements == {} and d.use_cases == ("gaming",)
 
 
 def test_router_records_bounded_proposal_and_authorization_changes(db):
@@ -972,7 +972,9 @@ def test_router_records_bounded_proposal_and_authorization_changes(db):
     assert decision.model_proposal["handle"] == "invented-root-node"
     assert decision.node_handle is None
     assert decision.requirements == {}
-    assert decision.use_cases == ()
+    # The invented model workload is rejected, while the buyer's exact phrase
+    # independently resolves to the enrolled local gaming profile.
+    assert decision.use_cases == ("gaming",)
     assert decision.brand_filter is None and decision.exclude_brand is None
     assert decision.quantity is None
     assert {"handle:clamped", "requirements:clamped", "use_cases:clamped", "brand:clamped",
@@ -1473,6 +1475,55 @@ def test_invalid_case_patch_is_visible_rejection_not_legacy_degradation(db, monk
     assert "did not apply" in response.message.lower()
 
 
+def test_full_laptop_intake_survives_model_case_patch_omissions(db):
+    query = (
+        "We need 60 engineering laptops for Unreal Engine, large CAD models and simulation. "
+        "Send 40 to Sydney and 20 to Perth. At least 30 must arrive within four days. "
+        "Budget is AUD 220,000 total."
+    )
+    raw = json.dumps({
+        "lane": "PROCUREMENT",
+        "handle": "el-6-6",
+        "requirements": {},
+        "quantity": 60,
+        "total_budget": 220_000,
+        "budget_scope": "total",
+        "use_cases": ["game_development", "engineering_simulation"],
+        "subject_action": "switch",
+        "procurement_context": "new_order",
+        # Simulate the observed live-model defect: only destinations were copied
+        # into durable patches even though the top-level extraction was correct.
+        "case_patches": [{
+            "operation": "set",
+            "path": "destinations",
+            "value": [
+                {"location_ref": "Sydney", "quantity": 40},
+                {"location_ref": "Perth", "quantity": 20},
+            ],
+        }],
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(
+        db, _env(query, currency="AUD"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    by_path = {}
+    for patch in decision.case_patches:
+        by_path.setdefault(patch["path"], []).append(patch)
+
+    assert by_path["requested_quantity"][0]["value"] == 60
+    assert by_path["budget.amount_minor"][0]["value"] == 22_000_000
+    assert by_path["budget.currency"][0]["value"] == "AUD"
+    assert by_path["temporal.original_expression"][0]["value"] == "within four days"
+    assert [patch["value"] for patch in by_path["workloads"]] == [
+        "game_development", "engineering_simulation",
+    ]
+    assert decision.model_proposal["case_patches"] == [
+        dict(patch) for patch in decision.case_patches
+    ]
+
+
 def test_procurement_plan_retrieves_before_advisory_handoff():
     decision = TurnDecision(
         lane="PROCUREMENT", node_handle="el-6-6", requirements={}, quantity=20,
@@ -1751,7 +1802,10 @@ def test_compare_with_own_node_keeps_node_retrieval(db):
     resp = recommend_turn(db, _env("compare the gaming laptops", session=sess),
                           llm_fn=_route_stub("COMPARE", "el-6-11-2"))
     assert (resp.extras.get("evidence") or {}).get("retrieval_mode") != "prior_shortlist"
-    assert [p.sku for p in resp.products] == ["LAP-2"]             # the node's own subtree
+    assert [p.sku for p in resp.products] == ["LAP-2", "LAP-1"]
+    # LAP-1 is classified broadly but has direct product-title evidence that it
+    # is a gaming laptop; this remains a fresh node/text retrieval, not leakage
+    # from the one-item prior shortlist.
 
 
 def test_continuation_fragment_drift_keeps_prior_subject(db):
@@ -1802,7 +1856,7 @@ def test_text_retrieval_persists_subject_for_brand_only_followup(db):
         llm_fn=_route_stub("SEARCH", None),
     )
     inferred = first.extras["constraints_used"]["node_handle"]
-    assert inferred == "el-6"
+    assert inferred == "el-6-11-2"
 
     session = {
         "prior_node": inferred,
@@ -1830,12 +1884,22 @@ def test_text_retrieval_persists_subject_for_brand_only_followup(db):
 def test_brand_filter_zero_match_is_honest_not_ignored(db):
     """A brand filter that matches nothing shows an honest empty + message — NEVER the
     unfiltered slate (a grid that silently ignored the filter is the answer-shape lie)."""
-    # MSI exists in the catalog (clamp passes) but not under Gaming Laptops (el-6-11-2 has
-    # only LAP-2/Asus classified) → zero matches within the node
-    resp = recommend_turn(db, _env("only msi gaming laptops", session={}),
-                          llm_fn=_route_stub("FILTER", "el-6-11-2", refine={"brand": "MSI"}))
+    # Keep the brand real while placing its product outside the requested taxonomy.
+    # MSI is no longer suitable test data here because its product name itself is
+    # strong gaming-laptop retrieval evidence even though its stored node is broad.
+    db.execute(text(
+        "INSERT INTO products (id, sku, name, price_cents, specs, brand) VALUES "
+        "('p3','CHR-1','Lenovo Executive Office Chair',89900,'{}','Lenovo')"
+    ))
+    from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+    add_sold_node(db, node_handle="fr-7-7")
+    upsert_classification(
+        db, sku="CHR-1", node_handle="fr-7-7", source="test", status="approved",
+    )
+    resp = recommend_turn(db, _env("only lenovo gaming laptops", session={}),
+                          llm_fn=_route_stub("FILTER", "el-6-11-2", refine={"brand": "Lenovo"}))
     assert resp.products == []
-    assert "MSI" in resp.message                                  # honest, names the brand
+    assert "Lenovo" in resp.message                               # honest, names the brand
 
 
 def test_filter_continuation_inherits_budget_and_requirements(db):
@@ -1912,12 +1976,13 @@ def test_stated_constraints_beat_session(db):
 def test_fresh_search_never_inherits_session_constraints(db):
     """Context-rot guard: a NEW search resets — yesterday's budget must not haunt a new hunt."""
     session = {"accepted_constraints": {"budget_max_cents": 230000,
-                                        "requirements": {"ram_gb": [[">=", 16]]}}}
+                                        "requirements": {"ram_gb": [[">=", 64]]}}}
     resp = recommend_turn(db, _env("gaming laptop", session=session),
                           llm_fn=_route_stub("SEARCH", "el-6-11-2"))
     cu = resp.extras["constraints_used"]
     assert cu["budget_max_cents"] is None and cu["budget_inherited"] is False
-    assert "ram_gb" not in (cu["requirements"] or {})
+    assert cu["requirements_inherited"] is False
+    assert cu["requirements"]["ram_gb"] == [[">=", 16.0]]
 
 
 def test_explicit_subject_switch_does_not_inherit_on_explain_lane(db):
@@ -2018,6 +2083,41 @@ def test_model_unavailable_bulk_search_keeps_quantity_while_scope_is_blocked(db)
     assert response.extras["decision"]["budget_scope"] == "unknown"
     assert response.clarify and response.clarify[0]["id"] == "budget_scope"
     assert response.products == []
+
+
+def test_budget_scope_answer_preserves_explicit_bulk_quantity(db):
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "budget_min_cents": 120_000,
+            "budget_max_cents": 150_000,
+            "quantity": 25,
+        },
+        "pending_clarification": {
+            "question_id": "budget_scope",
+            "state": "pending",
+        },
+    }
+    payload = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "requirements": {},
+        "quantity": None,
+        "budget_scope": "per_unit",
+        "subject_action": "switch",
+        "clarification_relation": "answer",
+        "confidence": 0.9,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("per item", session=session),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert response.extras["requested_quantity"] == 25
+    assert response.extras["decision"]["subject_action"] == "continue"
+    assert response.extras["decision"]["budget_scope"] == "per_unit"
 
 
 def test_mixed_choose_confirm_preserves_original_evidence_blocker_in_trace(db):
@@ -3172,6 +3272,28 @@ def test_product_noun_negative_battery_keeps_ordinary_search_authorized(db):
     assert decision.coverage_abstention_shadow == {}
     assert plan.semantic_authority_state == "not_material"
     assert plan.needs_concept_resolution is False
+
+
+def test_explicit_gaming_laptop_phrase_uses_enrolled_profile_for_local_exploration(db):
+    decision = route_turn(
+        db,
+        _env("I need gaming laptops for a studio."),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert decision.use_cases == ("gaming",)
+    assert decision.semantic_proposal["proposal_origin"] == "coverage_abstention"
+
+    response = recommend_turn(
+        db,
+        _env("I need gaming laptops for a studio."),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+    assert response.extras["provisional_catalog_authority"]["covered_profiles"] == ["gaming"]
+    assert all(
+        "needs current external requirements" not in item["text"].lower()
+        for item in response.clarify
+    )
 
 
 def test_product_noun_unresolved_purpose_cannot_emit_catalog_products(db):

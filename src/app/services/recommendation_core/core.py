@@ -353,6 +353,32 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 decision, workload_entities=tuple(inherited_entities))
     if _parsed_turn_budget is None and decision.total_budget_cents is not None:
         decision = dataclasses.replace(decision, total_budget_cents=None)
+    # Resolving a pending budget-scope question is the continuation of the
+    # buyer's original bulk request, even when a sparse/fallback router labels
+    # the two-word answer as a fresh search.  The quantity was already explicit
+    # buyer evidence on the prior turn; preserve it without asking the model to
+    # repeat or infer a consequential count.
+    _pending = (
+        (envelope.session or {}).get("pending_clarification")
+        if isinstance((envelope.session or {}).get("pending_clarification"), dict)
+        else {}
+    )
+    if (
+        decision.quantity is None
+        and str(_pending.get("question_id") or "") == "budget_scope"
+        and decision.clarification_relation == "answer"
+        and _accepted.get("quantity") is not None
+    ):
+        try:
+            _clarified_quantity = int(_accepted["quantity"])
+        except (TypeError, ValueError):
+            _clarified_quantity = 0
+        if 1 <= _clarified_quantity <= 100_000:
+            decision = dataclasses.replace(
+                decision,
+                quantity=_clarified_quantity,
+                subject_action="continue",
+            )
     if _parsed_turn_budget is None and _explicit_turn_scope == "total":
         _prior_total = _accepted.get("total_budget_cents")
         decision = dataclasses.replace(

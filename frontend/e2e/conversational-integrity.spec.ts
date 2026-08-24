@@ -2,6 +2,9 @@ import { expect, test, type Page, type Response } from '@playwright/test';
 
 function responseEvents(response: Response): Promise<any[]> {
   return response.text().then((body) => {
+    if ((response.headers()['content-type'] || '').includes('application/json')) {
+      try { return [JSON.parse(body)]; } catch { return []; }
+    }
     return body.split('\n')
       .filter((line) => line.startsWith('data: '))
       .map((line) => {
@@ -28,7 +31,13 @@ async function latestEventWith(response: Response, field: string): Promise<any> 
 async function sendToChat(page: Page, query: string): Promise<Response> {
   const responsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST'
-      && /\/api\/v1\/chat\/(?:stream|query)(?:\?|$)/.test(response.url())
+      && (
+        /\/api\/v1\/chat\/(?:stream|query)(?:\?|$)/.test(response.url())
+        || (
+          /\/api\/v1\/shopping-cases\/interpretations(?:\?|$)/.test(response.url())
+          && response.status() !== 204
+        )
+      )
   ), { timeout: 90_000 });
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(query);

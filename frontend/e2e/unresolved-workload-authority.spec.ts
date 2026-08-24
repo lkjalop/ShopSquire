@@ -2,7 +2,16 @@ import { test, expect, type Page } from '@playwright/test';
 
 async function send(page: Page, text: string) {
   const responsePromise = page.waitForResponse(
-    response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
+    response => (
+      response.request().method() === 'POST'
+      && (
+      /\/api\/v1\/chat\/(stream|query)(?:\?|$)/.test(response.url())
+      || (
+        /\/api\/v1\/shopping-cases\/interpretations(?:\?|$)/.test(response.url())
+        && response.status() !== 204
+      )
+      )
+    ),
     { timeout: 65_000 },
   );
   const input = page.getByPlaceholder('Type your message...');
@@ -51,7 +60,9 @@ for (const scenario of unresolvedCases) {
     const result = await send(page, scenario.query);
     const traceId = String(result.decision_trace_id || result.trace_id || '');
     expect(traceId).not.toBe('');
-    await expect(page.getByText(/current external requirements|approved official sources|cannot qualify/i).first())
+    await expect(page.getByText(
+      /provisional shopping case|external research not yet authorized|approved-source research/i,
+    ).first())
       .toBeVisible();
     await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
@@ -61,6 +72,8 @@ for (const scenario of unresolvedCases) {
     await modal.getByRole('button', { name: /^Research & Fit/ }).click();
     await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
     await expect(modal.getByTestId('workload-research-trace'))
-      .toContainText(/uninterpreted|research candidate|consent required/i);
+      .toContainText(
+        /no bounded workload entity was proposed|resolve which proposed workload scope|buyer consent recorded: no/i,
+      );
   });
 }

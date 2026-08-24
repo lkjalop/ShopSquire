@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
 from src.app.main import create_app
-from src.app.models.db import db_session
+from src.app.models.db import db_session, get_engine, set_engine
+from src.app.models.orm import Base
 from src.app.services.recommendation_response_finalizer import finalize_core_response
 from src.app.services.taxonomy_registry import (
     add_sold_node,
@@ -49,6 +51,15 @@ def _ground_v2_contract_catalog(monkeypatch):
         "src.app.services.recommendation_response_finalizer.log_decision",
         lambda **_kwargs: "contract-shape-trace",
     )
+    original_engine = get_engine()
+    isolated_engine = create_engine(
+        "sqlite://",
+        future=True,
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(isolated_engine)
+    set_engine(isolated_engine)
     with db_session() as db:
         ensure_tables(db)
         existing_nodes = {
@@ -94,39 +105,46 @@ def _ground_v2_contract_catalog(monkeypatch):
             tenant_id="default",
         )
         db.commit()
-    yield
-    with db_session() as db:
-        db.execute(
-            text(
-                "DELETE FROM product_classification "
-                "WHERE tenant_id = 'default' AND sku = :sku "
-                "AND source = 'v2_contract_fixture'"
-            ),
-            {"sku": _CONTRACT_SKU},
-        )
-        db.execute(
-            text("DELETE FROM inventory WHERE product_id = :sku"),
-            {"sku": _CONTRACT_SKU},
-        )
-        db.execute(
-            text("DELETE FROM products WHERE id = :sku"),
-            {"sku": _CONTRACT_SKU},
-        )
-        for node, existed in existing_nodes.items():
-            if not existed:
+    try:
+        yield
+    finally:
+        try:
+            with db_session() as db:
                 db.execute(
                     text(
-                        "DELETE FROM sold_taxonomy "
-                        "WHERE tenant_id = 'default' AND node_handle = :node"
+                        "DELETE FROM product_classification "
+                        "WHERE tenant_id = 'default' AND sku = :sku "
+                        "AND source = 'v2_contract_fixture'"
                     ),
-                    {"node": node},
+                    {"sku": _CONTRACT_SKU},
                 )
-        db.commit()
+                db.execute(
+                    text("DELETE FROM inventory WHERE product_id = :sku"),
+                    {"sku": _CONTRACT_SKU},
+                )
+                db.execute(
+                    text("DELETE FROM products WHERE id = :sku"),
+                    {"sku": _CONTRACT_SKU},
+                )
+                for node, existed in existing_nodes.items():
+                    if not existed:
+                        db.execute(
+                            text(
+                                "DELETE FROM sold_taxonomy "
+                                "WHERE tenant_id = 'default' AND node_handle = :node"
+                            ),
+                            {"node": node},
+                        )
+                db.commit()
+        finally:
+            set_engine(original_engine)
 
 
 def _suggest(uid: str, query: str) -> dict:
-    client = TestClient(create_app(), headers=default_headers())
-    r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
+    app = create_app()
+    app.state.engine = get_engine()
+    with TestClient(app, headers=default_headers()) as client:
+        r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
     assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:300]}"
     body = r.json()
     assert isinstance(body, dict), f"{uid}: body is {type(body).__name__}, expected dict"

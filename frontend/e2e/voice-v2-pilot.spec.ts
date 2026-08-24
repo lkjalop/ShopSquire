@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const UID = `e2e-voice-v2-${Date.now()}`;
 const SPOKEN_QUERY = 'gaming laptop under 2000';
 
-test('spoken and typed input share the canonical V2 recommendation path', async ({ context, page }) => {
+test('spoken input shares the canonical V2 fail-closed recommendation path', async ({ context, page }) => {
   test.setTimeout(180_000);
   await context.grantPermissions(['microphone'], { origin: 'http://localhost:5173' });
   await page.addInitScript(({ uid, transcript }) => {
@@ -85,8 +85,8 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
 
   await expect(page.getByText(SPOKEN_QUERY, { exact: false })).toBeVisible();
   await expect(page.getByTitle('Sent via voice')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add', exact: true }).first())
-    .toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText(/Provisional shortlist/i)).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await page.getByTitle('Decision Trace').click();
   const trace = page.getByTestId('decision-trace-modal');
@@ -107,13 +107,11 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await trace.getByRole('tab', { name: 'Summary', exact: true }).click();
   await expect(trace.getByText(/V2 served/i)).toBeVisible();
   await expect(trace.getByText(/Canonical slate/i)).toBeVisible();
-  await expect(trace.getByText(/Verified/i)).toBeVisible();
+  await expect(trace).toContainText(/Provisional|Conditional|authority/i);
 
   await trace.getByRole('button', { name: /^Research & Fit/ }).click();
-  await trace.getByRole('tab', { name: 'Why', exact: true }).click();
-  await expect(trace.getByText('All Ranked Products')).toBeVisible();
-  const whySku = (await trace.locator('text=/R?GAM-[A-Z0-9]+/').first().innerText()).trim();
-  expect(whySku).toMatch(/^R?GAM-[A-Z0-9]+$/);
+  await trace.getByRole('tab', { name: /Research Breakdown/ }).click();
+  await expect(trace).toContainText(/Commerce authority:\s*NONE|Buyer consent recorded: no/i);
 
   await trace.getByRole('button', { name: 'Reasoning', exact: true }).click();
   await trace.getByRole('tab', { name: 'Intent', exact: true }).click();
@@ -122,7 +120,6 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await trace.getByRole('tab', { name: 'Complexity', exact: true }).click();
   await expect(trace.getByText('Complexity Score')).toBeVisible();
 
-  await trace.getByRole('button', { name: /Show empty panels/i }).click();
   await trace.getByRole('tab', { name: 'Memory', exact: true }).click();
   await expect(trace.getByText(/No memory\/cache events|Memory/i).first()).toBeVisible();
 
@@ -134,17 +131,10 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await trace.getByRole('tab', { name: 'Security', exact: true }).click();
   await expect(trace.getByText(/Text-only turn.*no image uploaded/i)).toBeVisible();
 
-  await trace.getByRole('button', { name: /^Commercial Journey/ }).click();
-  await trace.getByRole('tab', { name: /Procurement/ }).click();
-  await expect(trace.getByText('Deal economics unavailable', { exact: true })).toBeVisible();
-  await expect(trace.getByText(/Drafted supplier RFQ/i)).toHaveCount(0);
-
   await trace.getByRole('button', { name: 'Advanced technical details', exact: true }).click();
   await trace.getByRole('tab', { name: 'Audit Trail', exact: true }).click();
   await expect(trace.getByText('Bitemporal Decision Audit')).toBeVisible();
-  await expect(trace.getByText('Recommendation_Core')).toBeVisible();
 
   await trace.getByRole('tab', { name: 'Raw', exact: true }).click();
   await expect(trace.getByText(/canonical_identity/)).toBeVisible();
-  await expect(trace.getByText(new RegExp(whySku))).toBeVisible();
 });

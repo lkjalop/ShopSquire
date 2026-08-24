@@ -175,3 +175,25 @@ def test_same_trace_is_idempotent_and_does_not_create_another_revision() -> None
     assert first["belief"]["revision"] == 1
     assert second["status"] == "already_persisted"
     assert second["belief"]["revision"] == 1
+
+
+def test_semantic_belief_does_not_advance_canonical_case_revision() -> None:
+    db = _db()
+    created = ensure_case_state(
+        db, tenant_id="tenant-a", case_id="semantic-1", session_epoch="epoch-1",
+        subject_ref="buyer", authoritative_anchor={},
+        now_iso="2026-08-07T01:00:00+00:00",
+    )
+
+    result = persist_semantic_belief(
+        db,
+        tenant_id="tenant-a", case_id="semantic-1", session_epoch="epoch-1",
+        semantic_decision=_decision(), accepted_evidence=[], compiled_requirements=[],
+        trace_id="trace-1", observed_at="2026-08-07T01:01:00+00:00",
+    )
+
+    row_version = db.execute(text(
+        "SELECT version FROM conversation_case_state WHERE id=:id"
+    ), {"id": created["case_state_id"]}).scalar_one()
+    assert result["status"] == "persisted"
+    assert row_version == created["version"]

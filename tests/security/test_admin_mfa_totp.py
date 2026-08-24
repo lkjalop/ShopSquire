@@ -11,7 +11,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from src.app.main import create_app
+from src.app import main as main_module
 from src.app.security import totp
 from src.app.security.auth import ROLE_OWNER
 
@@ -32,7 +32,12 @@ def client(monkeypatch):
         _ensure_table(db)
         db.execute(text("DELETE FROM admin_mfa_secrets WHERE principal = :p"), {"p": ROLE_OWNER})
         db.commit()
-    return TestClient(create_app())
+    # MFA is startup-time middleware configuration.  The suite-wide
+    # memory-safe app factory deliberately returns a per-DATABASE_URL
+    # singleton, so using it here would leave MFA enabled on the shared app
+    # after monkeypatch restores the environment.  Build the one deliberately
+    # configured app directly and keep the shared singleton unchanged.
+    return TestClient(main_module._original_create_app())
 
 
 def test_enroll_returns_secret_and_otpauth_uri(client):

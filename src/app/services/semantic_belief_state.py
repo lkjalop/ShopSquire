@@ -250,13 +250,15 @@ def persist_semantic_belief(
     )
     state["semantic_belief"] = belief
     timestamp = observed_at or datetime.now(timezone.utc).isoformat()
+    prior_state_json = row[2] or "{}"
     updated = db.execute(
         text(
-            "UPDATE conversation_case_state SET state_json=:state,version=version+1,"
-            "updated_at=:timestamp WHERE id=:id AND version=:version"
+            "UPDATE conversation_case_state SET state_json=:state,updated_at=:timestamp "
+            "WHERE id=:id AND version=:version AND state_json=:prior_state"
         ),
         {
             "state": json.dumps(state, sort_keys=True, separators=(",", ":")),
+            "prior_state": prior_state_json,
             "timestamp": timestamp,
             "id": row[0],
             "version": int(row[1]),

@@ -45,6 +45,10 @@ _RELATIVE_DURATION = re.compile(
     r"(?P<unit>hours?|days?|weeks?)$",
     re.IGNORECASE,
 )
+_RELATIVE_DURATION_SEARCH = re.compile(
+    r"\b(?:within|in)\s+(?:\d+|[a-z-]+)\s+(?:hours?|days?|weeks?)\b",
+    re.IGNORECASE,
+)
 _RELATIVE_WEEKDAY = re.compile(
     r"^(?:this|next|coming)\s+"
     r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)$",
@@ -188,4 +192,14 @@ def resolve_temporal_expression(
     )
 
 
-__all__ = ["TemporalResolutionRecord", "resolve_temporal_expression"]
+def extract_temporal_expression(text: str) -> str | None:
+    """Extract one closed relative deadline expression from buyer-authored text."""
+    matches = [" ".join(match.group(0).split()) for match in _RELATIVE_DURATION_SEARCH.finditer(
+        str(text or "")
+    )]
+    return matches[0] if len(matches) == 1 else None
+
+
+__all__ = [
+    "TemporalResolutionRecord", "extract_temporal_expression", "resolve_temporal_expression",
+]

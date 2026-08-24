@@ -15,7 +15,11 @@ from src.app.services.procurement_case_state import (
     project_legacy_case_anchor,
     resolve_temporal_constraint,
 )
-from src.app.services.recommendation_core.turn_router import _bounded_case_patches
+from src.app.services.recommendation_core.turn_router import (
+    _bounded_case_patches,
+    _complete_canonical_case_patches,
+    _evaluate_bounded_case_patches,
+)
 
 
 def _case() -> ProcurementCaseState:
@@ -284,3 +288,62 @@ def test_model_destination_kind_is_clamped_to_typed_unknown() -> None:
 
     assert accepted[0]["value"][0]["location_kind"] == "unknown"
     assert accepted[0]["value"][1]["location_kind"] == "unknown"
+
+
+def test_case_patch_grounding_uses_canonical_money_and_quantity_grammars() -> None:
+    accepted = _bounded_case_patches({
+        "case_patches": [
+            {"operation": "set", "path": "budget.amount_minor", "value": 22_000_000},
+            {"operation": "set", "path": "budget.scope", "value": "total"},
+            {"operation": "set", "path": "requested_quantity", "value": 1_200},
+        ],
+    }, "We need 1,200 units. Budget is AUD 220,000 total.")
+
+    assert [patch["path"] for patch in accepted] == [
+        "budget.amount_minor", "budget.scope", "requested_quantity",
+    ]
+
+
+def test_case_patch_grounding_accepts_number_word_move_and_receipts_rejection() -> None:
+    evaluation = _evaluate_bounded_case_patches({
+        "case_patches": [
+            {
+                "operation": "move_quantity", "path": "destinations",
+                "quantity": 5, "from_ref": "Perth", "to_ref": "Sydney",
+            },
+            {"operation": "set", "path": "requested_quantity", "value": 99},
+        ],
+    }, "Move five units from Perth to Sydney.")
+
+    assert evaluation.accepted[0]["operation"] == "move_quantity"
+    assert evaluation.rejections == ({
+        "schema_version": "case_patch_rejection.v1",
+        "patch_index": 1,
+        "operation": "set",
+        "path": "requested_quantity",
+        "reason": "buyer_grounding_failed",
+        "rejecting_predicate": "canonical_quantity_grammar",
+        "utterance_present": True,
+    },)
+
+
+def test_canonical_parsers_complete_model_omissions_at_case_intake() -> None:
+    query = (
+        "We need 60 engineering laptops for Unreal Engine, large CAD models and simulation. "
+        "At least 30 must arrive within four days. Budget is AUD 220,000."
+    )
+    patches = _complete_canonical_case_patches(
+        (), query=query, requested_quantity=60, total_budget_cents=22_000_000,
+        budget_scope="total", settlement_currency="AUD",
+    )
+
+    by_path = {}
+    for patch in patches:
+        by_path.setdefault(patch["path"], []).append(patch)
+    assert by_path["requested_quantity"][0]["value"] == 60
+    assert by_path["budget.amount_minor"][0]["value"] == 22_000_000
+    assert by_path["budget.currency"][0]["value"] == "AUD"
+    assert by_path["temporal.original_expression"][0]["value"] == "within four days"
+    assert [patch["value"] for patch in by_path["workloads"]] == [
+        "game_development", "engineering_simulation",
+    ]

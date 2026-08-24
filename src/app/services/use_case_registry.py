@@ -85,6 +85,32 @@ def match_use_cases(query: str) -> List[str]:
     )
 
 
+def match_case_workloads(query: str) -> List[str]:
+    """Return every explicitly grounded, data-owned procurement workload.
+
+    Unlike the single-best use-case fallback, a procurement case may legitimately
+    retain several simultaneous workloads. Only phrases explicitly curated for
+    durable case state are eligible; ordinary single-word use-case keywords do
+    not gain this authority automatically.
+    """
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+    if not normalized:
+        return []
+    padded = f" {normalized} "
+    matched: List[str] = []
+    for vertical in _VERTICALS:
+        rows = load_use_cases(vertical).get("use_cases") or {}
+        for key, row in rows.items():
+            phrases = (row or {}).get("case_workload_phrases") or []
+            if any(
+                f" {re.sub(r'[^a-z0-9]+', ' ', str(phrase).lower()).strip()} " in padded
+                for phrase in phrases
+                if str(phrase).strip()
+            ):
+                matched.append(str(key))
+    return apply_use_case_exclusions(list(dict.fromkeys(matched)))
+
+
 def list_variants(vertical: str, coarse: str) -> List[str]:
     uc = (load_use_cases(vertical).get("use_cases") or {}).get(str(coarse)) or {}
     return sorted((uc.get("variants") or {}).keys())

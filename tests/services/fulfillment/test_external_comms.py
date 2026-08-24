@@ -314,7 +314,10 @@ def test_validate_explicit_landed_quote_materializes_authoritative_supplier_offe
                                now_iso="2026-06-27T09:00:00+00:00", tenant_id="default")
 
     assert result.ok
-    offer = best_supplier_cost(db, "SKU-1", tenant_id="default", currency="AUD")
+    offer = best_supplier_cost(
+        db, "SKU-1", tenant_id="default", currency="AUD",
+        as_of="2026-06-27T09:00:00+00:00",
+    )
     assert offer is not None
     assert offer["supplier_id"] == "SUP-7"
     assert offer["purchase_unit_cost_cents"] == 111500

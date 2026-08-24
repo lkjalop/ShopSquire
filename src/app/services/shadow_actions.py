@@ -132,7 +132,10 @@ def propose_from_findings(findings: Optional[Iterable[Any]]) -> List[ShadowActio
 # ── persistence (log-only) ────────────────────────────────────────────────────
 def ensure_table(db) -> None:
     """Validate migration readiness without mutating schema at runtime."""
-    if "shadow_action" not in inspect(db.get_bind()).get_table_names():
+    # Inspect through the session's own connection. Inspecting the Engine can
+    # check out and close the same StaticPool connection used by an in-memory
+    # transaction, rolling back the caller's pending evidence as a side effect.
+    if "shadow_action" not in inspect(db.connection()).get_table_names():
         raise RuntimeError("shadow_action schema missing; run Alembic migrations")
 
 

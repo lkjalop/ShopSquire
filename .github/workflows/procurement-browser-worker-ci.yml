@@ -13,7 +13,7 @@ concurrency:
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -104,6 +104,23 @@ jobs:
       # Override developer .env files explicitly. The hosted backend listens
       # on 8080; a local 8099 value would only test connection refusal.
       VITE_API_BASE_URL: http://localhost:8080
+      EXTERNAL_RESEARCH_ENABLED: "1"
+      # Hermetic SearX-compatible fixture. This certificate proves governed
+      # transport and fail-closed semantics, not live public-web availability.
+      EXTERNAL_RESEARCH_SEARCH_URL: http://127.0.0.1:8099/search?q={query}&format=json
+      EXTERNAL_RESEARCH_ALLOW_PRIVATE: "1"
+      EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED: "1"
+      EXTERNAL_RESEARCH_PROVIDER_ID: hosted_ci_synthetic_discovery_fixture
+      EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS: free
+      OFFICIAL_REQUIREMENTS_API_URL: http://127.0.0.1:8099/requirements?q={query}
+      OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST: docs.vendor.example
+      EXTERNAL_RESEARCH_TENANT_ALLOWLIST: default
+      EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY: hosted-ci-source-policy-reviewer
+      EXTERNAL_RESEARCH_SOURCE_LICENCE: test-fixture
+      PRODUCT_CAPABILITY_TENANT_ALLOWLIST: default
+      OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED: "1"
+      CONVERSATIONAL_SPATIOTEMPORAL_CERTIFICATE_PATH: ../proof-artifacts/conversational-spatiotemporal-browser-certificate.json
+      CONVERSATIONAL_SPATIOTEMPORAL_SCREENSHOT_PATH: ../proof-artifacts/conversational-spatiotemporal-showcase.png
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -133,6 +150,7 @@ jobs:
           mkdir -p tmp proof-artifacts
           timeout 180s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-upgrade.log
           poetry run alembic current 2>&1 | tee proof-artifacts/migration-current.log
+          grep -q '20260874_post_purchase_satisfaction' proof-artifacts/migration-current.log
           timeout 60s poetry run alembic downgrade -1 2>&1 | tee proof-artifacts/migration-rollback.log
           timeout 60s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-reupgrade.log
           poetry run python -m scripts.seed_portable_catalog
@@ -144,6 +162,7 @@ jobs:
       - name: Start isolated backend and storefront
         run: |
           poetry run python scripts/security_handoff_test_receiver.py --port 18089 --output proof-artifacts/siem-events.jsonl > proof-artifacts/siem-receiver.log 2>&1 &
+          poetry run python tests/fixtures/fake_official_requirements_provider.py --port 8099 > proof-artifacts/official-provider.log 2>&1 &
           poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > proof-artifacts/backend.log 2>&1 &
           poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
           npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > proof-artifacts/storefront.log 2>&1 &
@@ -153,6 +172,8 @@ jobs:
                curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
                curl --fail --silent http://127.0.0.1:3001 >/dev/null &&
                curl --fail --silent http://127.0.0.1:18089/health >/dev/null &&
+               curl --fail --silent 'http://127.0.0.1:8099/requirements?q=health' >/dev/null &&
+               curl --fail --silent 'http://127.0.0.1:8099/search?q=health&format=json' >/dev/null &&
                timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping |
                  grep -q pong; then
               exit 0
@@ -214,10 +235,23 @@ jobs:
         run: |
           timeout 240s poetry run pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
       - name: Storefront Playwright battery
-        working-directory: frontend
         # One backend/database serves this suite. Serial execution prevents
         # cross-spec market signals and cart writes from contaminating peers.
-        run: timeout 600s npx playwright test --reporter=line --workers=1
+        # A fresh Node/Chromium process per spec also makes the certificate
+        # reproducible on Windows and Linux without a long-lived worker leak.
+        run: timeout 2400s poetry run python scripts/run_playwright_memory_safe.py --frontend frontend
+      - name: Seal hosted browser certificate
+        run: |
+          test -s proof-artifacts/conversational-spatiotemporal-browser-certificate.json
+          test -s proof-artifacts/conversational-spatiotemporal-showcase.png
+          poetry run python scripts/seal_browser_artifacts.py \
+            proof-artifacts \
+            proof-artifacts/conversational-spatiotemporal-manifest.json \
+            --certificate conversational-spatiotemporal-browser-certificate.json \
+            --archive proof-artifacts/conversational-spatiotemporal-evidence.zip \
+            --git-head "$GITHUB_SHA" \
+            --runtime-profile hosted-clean-checkout-postgresql-browser \
+            --runtime-endpoint http://127.0.0.1:8080
       - name: Policy-trace and closed-loop regressions
         env:
           RUN_LIVE_BROWSER_TESTS: "1"

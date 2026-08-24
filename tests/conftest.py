@@ -458,6 +458,61 @@ def pytest_sessionstart(session):
             Base.metadata.create_all(_session_eng)
         except Exception:
             pass
+        # Security connector identity and handoff delivery are migration-owned
+        # but have no ORM models. Mirror migration 20260835 in the ephemeral
+        # SQLite test database so endpoint shards exercise the durable contract.
+        try:
+            from sqlalchemy import text as _sql_text  # noqa: PLC0415
+            with _session_eng.begin() as _connection:
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS security_connector_subscription (
+                        connector_id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        credential_hash TEXT NOT NULL,
+                        allowed_event_families_json TEXT NOT NULL,
+                        allowed_source_ids_json TEXT NOT NULL,
+                        permitted_storage_targets_json TEXT NOT NULL,
+                        permitted_response_actions_json TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        credential_expires_at TEXT,
+                        last_seen_at TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS security_handoff_attempts (
+                        id TEXT PRIMARY KEY,
+                        decision_id TEXT,
+                        trace_id TEXT,
+                        tenant_id TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        max_attempts INTEGER NOT NULL DEFAULT 0,
+                        first_attempt_at TEXT,
+                        last_attempt_at TEXT,
+                        next_attempt_at TEXT,
+                        backoff_ms INTEGER NOT NULL DEFAULT 0,
+                        last_error TEXT,
+                        last_http_status INTEGER,
+                        payload_json TEXT NOT NULL,
+                        acknowledgement_id TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE INDEX IF NOT EXISTS ix_security_handoff_due
+                    ON security_handoff_attempts (status, next_attempt_at)
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE INDEX IF NOT EXISTS ix_security_handoff_tenant_trace
+                    ON security_handoff_attempts (tenant_id, trace_id)
+                """))
+        except Exception:
+            pass
         # Migration-owned auxiliary table used by endpoint tests. Production
         # creates this through Alembic; the ephemeral unit-test DB does not run
         # the migration chain.
@@ -579,6 +634,11 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         shutdown_narration_resources(wait=True)
     except Exception:
         pass
+    try:
+        from src.app.workers.task_runner import shutdown_fallback_pool
+        shutdown_fallback_pool(wait=True)
+    except Exception:
+        pass
     leaked_threads = [
         thread
         for thread in threading.enumerate()
@@ -643,6 +703,17 @@ def _reset_store_profile_cache():
             ("src.app.services.product_classifier", "reset_cache"),
             ("src.app.services.product_claim_guard", "reset_vocab_cache"),
             ("src.app.services.query_decomposer", "reset_cache"),
+            ("src.app.services.category_router", "reset_cache"),
+            ("src.app.services.product_taxonomy", "reset_cache"),
+            ("src.app.services.product_identity_agent", "reset_cache"),
+            ("src.app.services.recommend_candidate_classify", "reset_cache"),
+            ("src.app.services.recommend_persona", "reset_cache"),
+            ("src.app.services.recommend_ranking", "reset_cache"),
+            ("src.app.services.recommend_utils", "reset_cache"),
+            # The catalog-profile signature is count + max(updated_at). Tests
+            # can replace rows without changing either value, so its 5-minute
+            # runtime cache must not cross test boundaries.
+            ("src.app.services.catalog_profile", "invalidate_catalog_profile_cache"),
             # send-cage prohibited-claim profile-extension cache (fulfillment/draft) — clear so a
             # profile swap can't leak one vertical's prohibited patterns into the next test.
             ("src.app.services.fulfillment.draft", "reset_prohibited_cache"),
@@ -698,11 +769,17 @@ def _restore_db_engine():
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
         engine_changed = get_engine() is not original_engine
         session_factory_changed = db_module.SessionLocal is not original_session_factory
+        with _SINGLETONS_LOCK:
+            app_state_changed = any(
+                getattr(getattr(_app_inst, "state", None), "engine", None)
+                is not original_engine
+                for _app_inst in _SINGLETONS.values()
+            )
         if engine_changed:
             set_engine(original_engine)
         if session_factory_changed:
             db_module.SessionLocal = original_session_factory
-        if engine_changed or session_factory_changed:
+        if engine_changed or session_factory_changed or app_state_changed:
             # Re-align all singleton app.state.engine so that request handlers
             # use the same engine as db_session() after restoration.
             with _SINGLETONS_LOCK:

@@ -17,7 +17,7 @@
     "gaming": {
       "label": "Gaming",
       "description": "Playing games as the primary workload; not building, designing, compiling or rendering games.",
-      "keywords": ["game", "gaming", "fps", "esports", "play"],
+      "keywords": ["game", "gaming", "gaming laptop", "gaming laptops", "fps", "esports", "play"],
       "host_nodes": ["el-6-11-2", "el-6-11-1"],
       "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
       "budget_band_hint": [800, 1500],
@@ -33,6 +33,7 @@
       "description": "Building, designing, compiling, rendering or testing games and game-engine projects; not merely playing games.",
       "excludes": ["gaming"],
       "keywords": ["game development", "game design", "game engine", "unity", "unreal", "godot"],
+      "case_workload_phrases": ["unreal engine", "game development", "game engine"],
       "host_nodes": ["el-6-11-2", "el-6-6"],
       "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 6]},
       "budget_band_hint": [1600, 3000],
@@ -68,6 +69,15 @@
           "budget_band_hint": [2500, 5000]
         }
       }
+    },
+    "engineering_simulation": {
+      "label": "Engineering design and simulation",
+      "description": "Large engineering design models, CAD and local simulation workloads.",
+      "keywords": ["engineering laptop", "engineering laptops", "large cad", "large cad models", "engineering simulation"],
+      "case_workload_phrases": ["large cad models", "large cad", "cad", "simulation"],
+      "host_nodes": ["el-6-6", "el-6-11-2"],
+      "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+      "budget_band_hint": [1800, 4000]
     },
     "drawing": {
       "label": "Drawing / digital art",
@@ -136,7 +146,7 @@
     },
     "office": {
       "label": "Office / business",
-      "keywords": ["office", "business", "corporate", "productivity", "spreadsheets", "email"],
+      "keywords": ["office", "business", "corporate", "productivity", "spreadsheets", "email", "work laptop", "work laptops", "laptop for work", "laptops for work"],
       "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
       "budget_band_hint": [500, 1200],
       "variants": {

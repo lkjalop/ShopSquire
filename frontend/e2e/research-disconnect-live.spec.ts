@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 
+const BACKEND_URL = (process.env.BACKEND_SMOKE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 
 test('buyer disconnect during live discovery does not strand backend responsiveness', async ({ page, request }) => {
   test.setTimeout(150_000);
@@ -29,7 +30,7 @@ test('buyer disconnect during live discovery does not strand backend responsiven
   await page.context().close();
 
   const started = Date.now();
-  const health = await request.get('http://127.0.0.1:8080/healthz', { timeout: 15_000 });
+  const health = await request.get(`${BACKEND_URL}/healthz`, { timeout: 15_000 });
   expect(health.ok()).toBe(true);
   expect(Date.now() - started).toBeLessThan(15_000);
 });
@@ -64,7 +65,7 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
   await dispatched;
   expect(traceId).not.toBe('');
   await expect.poll(async () => {
-    const response = await request.get(`http://127.0.0.1:8080/api/v1/trace/${traceId}/events`);
+    const response = await request.get(`${BACKEND_URL}/api/v1/trace/${traceId}/events`);
     if (!response.ok()) return false;
     const body = await response.json();
     const events = Array.isArray(body) ? body : (body.events || []);
@@ -81,7 +82,7 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
   await page.context().close();
 
   await expect.poll(async () => {
-    const response = await request.get(`http://127.0.0.1:8080/api/v1/trace/${traceId}/events`);
+    const response = await request.get(`${BACKEND_URL}/api/v1/trace/${traceId}/events`);
     if (!response.ok()) return null;
     const body = await response.json();
     const events = Array.isArray(body) ? body : (body.events || []);

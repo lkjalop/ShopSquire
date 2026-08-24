@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 
 const UID = `e2e-procurement-${Date.now()}`;
+const API_KEY = process.env.VITE_API_KEY?.trim() || 'local-merchant-key';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -11,79 +12,30 @@ async function send(page: Page, text: string) {
   await input.press('Enter');
 }
 
-async function openProcurementTrace(page: Page) {
-  await page.getByTitle('Decision Trace').click();
-  const modal = page.getByTestId('decision-trace-modal');
-  await expect(modal).toBeVisible();
-  await modal.getByRole('button', { name: /^Commercial Journey/ }).click();
-  await modal.getByRole('tab', { name: /Procurement/ }).click();
-  await expect(modal.getByTestId('proc-drafted-rfq')).toBeVisible({ timeout: 45_000 });
-  return modal;
-}
-
-test('demo procurement journey: clear, bulk split, RFQ evidence, amendment and redraft', async ({ page }) => {
-  test.setTimeout(240_000);
+test('demo procurement journey: clear, exact cart line, amendment and delivery reconfirmation', async ({ page }) => {
+  test.setTimeout(180_000);
   await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), UID);
   await page.goto('/');
 
-  await test.step('clear the cart through NLP', async () => {
-    await send(page, 'clear my cart');
-    await expect(page.getByText(/cart is (?:already )?empty|cleared your cart|cart has been cleared/i).last())
-      .toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/Cart is empty/i)).toBeVisible();
+  await send(page, 'clear my cart');
+  await expect(page.getByText(/cart is (?:already )?empty|cleared your cart|cart has been cleared/i).last())
+    .toBeVisible({ timeout: 30_000 });
+
+  const seeded = await page.request.post('/api/v1/cart/items', {
+    headers: { 'x-api-key': API_KEY },
+    data: { uid: UID, sku: 'RGAM-0007', quantity: 10 },
   });
+  expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
-  await test.step('request and add 100 work laptops', async () => {
-    await send(page, 'what laptops for work? budget 1500 to 1900, I need about 100');
-    const add = page.getByRole('button', { name: 'Add', exact: true }).first();
-    const perItem = page.getByRole('button', { name: 'Per item', exact: true });
-    await expect(add.or(perItem)).toBeVisible({ timeout: 75_000 });
-    if (await perItem.isVisible().catch(() => false)) {
-      await perItem.click();
-    }
-    await expect(add).toBeVisible({ timeout: 75_000 });
-    await add.click();
-    await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('100');
-  });
-
-  let originalDraft = '';
-  await test.step('confirm the split and inspect the drafted supplier RFQ', async () => {
-    await expect(page.getByTestId('split-fulfillment-card')).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('split-confirm').click();
-    await expect(page.getByTestId('cart-sourcing-note')).toContainText(/RFQ.*drafted/i, { timeout: 45_000 });
-
-    const modal = await openProcurementTrace(page);
-    await expect(modal.getByTestId('proc-supplier-channel')).toContainText(/email|phone|portal|EDI|API|cXML/i);
-    await expect(modal.getByTestId('proc-supplier-terms')).not.toContainText(/^\s*—\s*$/);
-    originalDraft = await modal.getByTestId('proc-rfq-body').innerText();
-    expect(originalDraft.trim().length).toBeGreaterThan(40);
-    await modal.getByTitle('Close').click();
-  });
-
-  await test.step('amend the selected laptop to 60 and redraft', async () => {
-    await send(page, 'actually make the laptop 60 instead');
-    const card = page.getByTestId('multi-intent-card');
-    const inlineConfirm = page.getByRole('button', { name: /Confirm.*apply to cart/i });
-    await expect(card.or(inlineConfirm)).toBeVisible({ timeout: 75_000 });
-    if (await card.isVisible().catch(() => false)) {
-      const amendment = card.locator('[data-testid^="multi-intent-amend-"]').first();
-      await expect(amendment).toContainText('60');
-      await card.getByRole('button', { name: /Confirm qty|Apply all/i }).click();
-    } else {
-      await inlineConfirm.click();
-    }
-
-    const quantity = page.locator('[data-testid^="qty-"]').first();
-    await expect(quantity).toHaveText('60');
-    const reconfirm = page.getByTestId('split-confirm');
-    await expect(reconfirm).toBeVisible({ timeout: 30_000 });
-    await reconfirm.scrollIntoViewIfNeeded();
-    await reconfirm.click();
-    await expect(page.getByTestId('cart-sourcing-note')).toContainText(/RFQ.*drafted/i, { timeout: 45_000 });
-
-    const modal = await openProcurementTrace(page);
-    const amendedDraft = await modal.getByTestId('proc-rfq-body').innerText();
-    expect(amendedDraft.trim().length).toBeGreaterThan(40);
-    expect(amendedDraft).not.toEqual(originalDraft);
-  });
+  await send(page, 'increase the total units by another 5');
+  const apply = page.getByRole('button', { name: /Apply change|Confirm.*apply to cart/i });
+  await expect(apply).toBeVisible({ timeout: 75_000 });
+  await apply.click();
+  const quantity = page.locator('[data-testid^="qty-"]').first();
+  await expect(quantity).toHaveText('15');
+  await expect(page.locator('[data-testid^="qty-"]')).toHaveCount(1);
+  await expect(page.getByText(
+    /review and (?:re)?confirm the (?:revised|updated) delivery plan/i,
+  ).last()).toBeVisible();
+  await expect(page.getByText(/RFQ.*sent/i)).toHaveCount(0);
 });

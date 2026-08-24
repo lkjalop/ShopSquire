@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 
-from src.app.services.temporal_expression_authority import resolve_temporal_expression
+from src.app.services.temporal_expression_authority import (
+    extract_temporal_expression,
+    resolve_temporal_expression,
+)
+
+
+def test_extracts_one_relative_expression_from_a_larger_buyer_turn() -> None:
+    assert extract_temporal_expression(
+        "At least 30 must arrive within four days. Budget is AUD 220,000."
+    ) == "within four days"
+    assert extract_temporal_expression("within two days or within four days") is None
 
 
 def test_relative_duration_resolves_on_buyers_timezone_timeline() -> None:

@@ -66,6 +66,25 @@ _NUMBER_WORDS = {
 }
 
 
+def quantity_value_mentioned(query: Optional[str], value: int) -> bool:
+    """Whether a bounded count is literally present in buyer-authored text.
+
+    This is a grounding primitive, not quantity extraction: callers must still
+    apply their contextual unit/location contract before granting authority.
+    Digit grouping and the shared number-word vocabulary are normalized here so
+    every consequential intake boundary uses the same representation.
+    """
+    if not query or isinstance(value, bool) or value < 0:
+        return False
+    normalized = re.sub(r"(?<=\d),(?=\d)", "", str(query).casefold())
+    if re.search(rf"(?<![a-z0-9]){int(value)}(?![a-z0-9])", normalized):
+        return True
+    return any(
+        number == int(value) and re.search(rf"\b{re.escape(word)}\b", normalized)
+        for word, number in _NUMBER_WORDS.items()
+    )
+
+
 @lru_cache(maxsize=32)
 def _noun_alternation(extra_nouns: Tuple[str, ...]) -> str:
     parts = list(_GENERIC_UNIT_NOUNS)

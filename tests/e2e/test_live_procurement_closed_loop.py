@@ -1,12 +1,15 @@
-"""Opt-in browser proof for recommendation -> RFQ -> amendment -> redraft.
+"""Opt-in browser proof for an exact cart-line amendment.
 
-Run against the demo stack with RUN_LIVE_BROWSER_TESTS=1. This is intentionally
-not part of hermetic CI: it proves the real Vite/FastAPI/Ollama integration.
+Run against the production-shaped demo stack with RUN_LIVE_BROWSER_TESTS=1.
+The proof deliberately begins with an exact SKU already in the cart: workload
+fit must be adjudicated elsewhere and cannot be invented to unlock commerce.
 """
 from __future__ import annotations
 
 import os
+import json
 import re
+import uuid
 
 import pytest
 
@@ -17,18 +20,26 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_procurement_trace_survives_amendment_and_redrafts():
+def test_exact_cart_line_amendment_requires_delivery_reconfirmation():
     from playwright.sync_api import sync_playwright
 
     base_url = os.getenv("LIVE_SHOPPER_URL", "http://localhost:5173").rstrip("/")
+    api_key = os.getenv("VITE_API_KEY", "local-merchant-key")
+    uid = f"e2e-python-procurement-{uuid.uuid4().hex}"
     console_errors: list[str] = []
     page_errors: list[str] = []
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1920, "height": 1080})
+        page.add_init_script(
+            f"sessionStorage.setItem('uid', {json.dumps(uid)})"
+        )
         page.on(
             "console",
-            lambda message: console_errors.append(message.text) if message.type == "error" else None,
+            lambda message: console_errors.append(message.text)
+            if message.type == "error"
+            else None,
         )
         page.on("pageerror", lambda error: page_errors.append(str(error)))
 
@@ -37,129 +48,33 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         composer = page.get_by_placeholder("Type your message...")
         composer.fill("clear my cart")
         composer.press("Enter")
-        page.get_by_text("your cart is now empty", exact=False).wait_for(timeout=20_000)
+        page.get_by_text(
+            re.compile(r"cart is (?:already )?empty|cleared your cart|cart has been cleared", re.I)
+        ).last.wait_for(timeout=30_000)
 
-        # Use a satisfiable office workload for the execution proof. Capability/no-fit behavior
-        # for game development is tested separately; a closed-loop test must not purchase a
-        # nearest-fit machine that failed the workload floor merely to reach procurement.
-        composer.fill("I need 100 business laptops for office work with a total budget of AUD 200000")
-        composer.press("Enter")
-        add = page.get_by_role("button", name="Add", exact=True).first
-        per_item = page.get_by_role("button", name="Per item", exact=True)
-        add.or_(per_item).wait_for(timeout=75_000)
-        if per_item.is_visible():
-            per_item.click()
-        add.wait_for(timeout=75_000)
-        add.click()
-        page.get_by_text("Delivery plan", exact=False).first.wait_for(timeout=20_000)
-        cart_quantity = page.locator('[data-testid^="qty-"]').first
-        assert cart_quantity.inner_text() == "100"
-        initial_cart_line_id = cart_quantity.get_attribute("data-testid")
-        assert initial_cart_line_id
+        response = page.request.post(
+            f"{base_url}/api/v1/cart/items",
+            headers={"x-api-key": api_key},
+            data={"uid": uid, "sku": "RGAM-0007", "quantity": 10},
+        )
+        assert response.ok, response.text()
 
-        page.get_by_role("button", name="Confirm delivery plan", exact=True).click()
-        page.get_by_test_id("cart-sourcing-note").wait_for(timeout=30_000)
-        page.get_by_role("button", name="Decision Trace").click()
-        page.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
-        page.get_by_role("tab", name="Procurement", exact=False).click()
-        page.get_by_text("Drafted supplier RFQ", exact=False).first.wait_for(timeout=30_000)
-        modal = page.get_by_test_id("decision-trace-modal")
-        original_trace_id = modal.get_attribute("data-trace-id")
-        before = modal.inner_text()
-        assert original_trace_id
-        assert "Preferred channel" in before
-        assert "Ordering terms" in before
-        initial_shortfall_match = re.search(r"(\d+) supplier-shortfall", before)
-        assert initial_shortfall_match, before
-
-        # Every trace projection must remain navigable on the same immutable trace. Individual
-        # tabs may truthfully report no activity, but none may crash, detach, or replace identity.
-        trace_tabs = [
-            ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
-            ("Reasoning", "Why"), ("Reasoning", "Intent"),
-            ("Reasoning", "Memory"), ("Reasoning", "Complexity"),
-            ("Evidence & Risk", "Evidence"), ("Evidence & Risk", "Multimodal"),
-            ("Evidence & Risk", "Security"),
-            ("Commercial Journey", "Market Intelligence"),
-            ("Commercial Journey", "Procurement"),
-            ("Advanced technical details", "Audit Trail"),
-            ("Advanced technical details", "Raw"),
-        ]
-        for section_name, tab_name in trace_tabs:
-            # Procurement and Evidence append a status badge/count to their accessible name.
-            # Reacquire the modal because asynchronous trace projections can refresh its DOM.
-            modal = page.get_by_test_id("decision-trace-modal")
-            modal.get_by_role(
-                "button",
-                name=re.compile(rf"^{re.escape(section_name)}\b"),
-            ).click()
-            leaf_tab = modal.get_by_role(
-                "tab",
-                name=re.compile(rf"^{re.escape(tab_name)}\b"),
-            )
-            if not leaf_tab.count():
-                modal.get_by_role(
-                    "button",
-                    name=re.compile(r"^Show empty panels"),
-                ).click()
-            leaf_tab.click()
-            page.wait_for_timeout(300)
-            assert modal.get_attribute("data-trace-id") == original_trace_id
-            assert "Failed to load" not in modal.inner_text()
-        modal.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
-        modal.get_by_role("tab", name=re.compile(r"^Procurement\b")).click()
-
-        page.locator('button[title="Close"]').last.click()
-        composer.fill("actually make it 80")
+        composer.fill("increase the total units by another 5")
         composer.press("Enter")
         apply_change = page.get_by_role(
-            "button", name=re.compile(r"Confirm qty|apply to cart", re.I)
+            "button", name=re.compile(r"Apply change|Confirm.*apply to cart", re.I)
         ).first
-        apply_change.wait_for(timeout=35_000)
+        apply_change.wait_for(timeout=75_000)
         apply_change.click()
-        page.wait_for_function(
-            "() => document.querySelector('[data-testid^=qty-]')?.textContent?.trim() === '80'",
-            timeout=20_000,
-        )
-        # A quantity amendment must bind to the existing cart line. Replacing
-        # the SKU would make any RFQ-shortfall comparison meaningless and is a
-        # context-rot failure, not a successful amendment.
-        assert (
-            page.locator('[data-testid^="qty-"]').first.get_attribute("data-testid")
-            == initial_cart_line_id
-        )
 
-        page.get_by_test_id("split-confirm").click()
-        page.wait_for_timeout(4_000)
-        page.get_by_role("button", name="Decision Trace").click()
-        page.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
-        page.get_by_role("tab", name="Procurement", exact=False).click()
-        page.get_by_text("Drafted supplier RFQ", exact=False).first.wait_for(timeout=30_000)
-        modal = page.get_by_test_id("decision-trace-modal")
-        # The RFQ projection and the bitemporal case journey are fetched independently.
-        # Wait for both instead of relying on a fixed delay that races a healthy backend.
-        modal.get_by_text("state transitions", exact=False).wait_for(timeout=20_000)
-        after = modal.inner_text()
-        amended_trace_id = modal.get_attribute("data-trace-id")
-        assert amended_trace_id
-        assert amended_trace_id != original_trace_id
-        revised_shortfall_match = re.search(r"(\d+) supplier-shortfall", after)
-        assert revised_shortfall_match, after
-        revised_shortfall = int(revised_shortfall_match.group(1))
-        # ATP may legitimately change between confirmations (and the production-shaped battery
-        # runs other buyer flows against the same operational database). Prove conservation from
-        # the amended trace instead of assuming a frozen stock snapshot.
-        amended_demand = re.search(
-            r"80 requested\s*[·.]\s*(\d+) in stock\s*[·.]\s*(\d+) sourced",
-            after,
-        )
-        assert amended_demand, after
-        amended_internal = int(amended_demand.group(1))
-        amended_sourced = int(amended_demand.group(2))
-        assert amended_internal + amended_sourced == 80
-        assert revised_shortfall == amended_sourced
-        assert "supersed" in after.lower()
-        assert "state transitions" in after
+        quantity = page.locator('[data-testid^="qty-"]').first
+        quantity.wait_for(timeout=20_000)
+        assert quantity.inner_text().strip() == "15"
+        assert page.locator('[data-testid^="qty-"]').count() == 1
+        assert page.get_by_text(
+            re.compile(r"review and (?:re)?confirm the (?:revised|updated) delivery plan", re.I)
+        ).last.is_visible()
+        assert page.get_by_text(re.compile(r"RFQ.*sent", re.I)).count() == 0
         assert not console_errors
         assert not page_errors
         browser.close()

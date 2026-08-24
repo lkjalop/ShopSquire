@@ -303,7 +303,11 @@ def bounded_dependency_paths(
         fresh_until = row["properties"].get("fresh_until")
         if fresh_until:
             try:
-                if _utc(fresh_until) <= known_stamp:
+                # Freshness is an effective-time property of the exposure.
+                # ``known_at`` only bounds what revisions were available to
+                # the decision and must not resurrect evidence that had
+                # already expired at the requested effective instant.
+                if _utc(fresh_until) <= effective_stamp:
                     stale_edge_count += 1
                     continue
             except (TypeError, ValueError):

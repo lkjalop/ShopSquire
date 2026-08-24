@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -16,6 +16,14 @@ def _client() -> TestClient:
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE conversation_case_state ("
+            "id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, case_id TEXT NOT NULL, "
+            "session_epoch TEXT NOT NULL, subject_ref TEXT NOT NULL, version INTEGER NOT NULL, "
+            "state_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "UNIQUE (tenant_id, case_id, session_epoch))"
+        ))
     app = FastAPI()
     app.include_router(router)
     app.state.test_engine = engine
@@ -100,12 +108,64 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
     assert payload["supplier_send"] == "not_authorized"
 
 
+def test_interpretation_retains_buyer_authored_quantity_for_case_followups():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-fast-lane-quantity",
+        "session_epoch": "epoch-fast-lane-quantity",
+        "retained_purpose": "I need 20 laptops for CAD work.",
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_quantity"] == 20
+    assert payload["confirmed_slots"] == {"order_quantity": 20}
+
+
 def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
     client = _client()
     response = client.post("/api/v1/shopping-cases/interpretations", json={
         "uid": "buyer-local",
         "retained_purpose": "show me a normal everyday laptop",
     })
+    assert response.status_code == 204
+
+
+def test_interpretation_keeps_generic_work_laptop_procurement_on_chat_lane():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-work-laptops",
+        "retained_purpose": (
+            "what laptops for work? budget 1500 to 1900, I need about 100 "
+            "The stated budget is a per item budget."
+        ),
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+
+    assert response.status_code == 204
+
+
+def test_interpretation_preserves_enrolled_exact_sku_on_normal_chat_lane():
+    client = _client()
+    with client.app.state.test_engine.begin() as connection:
+        connection.execute(Product.__table__.insert().values(
+            id="product-rgam-0007",
+            sku="RGAM-0007",
+            name="HP OMEN MAX 16",
+            price_cents=449_900,
+            currency="AUD",
+            active=True,
+        ))
+
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-exact-sku",
+        "retained_purpose": (
+            "We need 18 RGAM-0007 laptops for a design studio, AUD 85000 total"
+        ),
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+
     assert response.status_code == 204
 
 

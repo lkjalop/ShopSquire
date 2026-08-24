@@ -262,8 +262,8 @@ def test_case_service_forwards_http_cancellation_to_discovery(monkeypatch):
         lambda **kwargs: {"effective": True},
     )
     monkeypatch.setattr(
-        "src.app.services.shopping_case_open_world_research.consume_open_world_query_proposal",
-        lambda current: (current, {"status": "not_used"}),
+        "src.app.services.shopping_case_open_world_research.consume_completed_case_interpretation",
+        lambda db, *, plan, **kwargs: (plan, {"status": "not_used"}),
     )
     monkeypatch.setattr(
         "src.app.services.open_world_research_discovery.discover_open_world_publishers_async",
@@ -285,6 +285,10 @@ def test_case_service_forwards_http_cancellation_to_discovery(monkeypatch):
     class Db:
         def commit(self):
             pass
+
+        def execute(self, _statement):
+            case = type("Case", (), {"revision": 1})()
+            return type("Result", (), {"scalar_one": lambda self: case})()
 
     result = execute_open_world_publisher_discovery(
         Db(), plan=plan, tenant_id="default", case_id="sc-cancel", uid="buyer",

@@ -68,6 +68,8 @@ ruff = "^0.3.0"
 mypy = "^1.8.0"
 types-redis = "^4.6.0.20240106"
 requests = "^2.31.0"
+reportlab = "^5.0.1"
+qrcode = "^8.2"
 
 [tool.coverage.run]
 source = ["src"]

@@ -687,14 +687,16 @@ class TestCheckoutInitiateEndpoint:
         from unittest.mock import patch
         client = self._get_app()
         settings = type("S", (), {"stripe_api_key": "sk_live_123", "feature_flags_path": "unused", "app_env": "prod"})()
-        with patch("src.app.routers.payments.get_settings", return_value=settings):
+        with patch.dict(os.environ, {"PAYMENT_EXECUTION_ENABLED": "1"}, clear=False), patch("src.app.routers.payments.get_settings", return_value=settings):
             with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
                 with patch("src.app.routers.payments.StripeClient") as mock_client:
                     mock_client.return_value.create_payment_intent.return_value = {
                         "id": "pi_live_123",
                         "client_secret": "cs_live_123",
                     }
-                    with patch(
+                    with patch("src.app.services.payment_attempts.open_attempt", return_value="attempt-test"), patch(
+                        "src.app.services.payment_attempts.mark_provider_created"
+                    ), patch(
                         "src.app.routers.payments.evaluate_transaction_firewall",
                         return_value={"action": "allow"},
                     ):
@@ -714,7 +716,7 @@ class TestCheckoutInitiateEndpoint:
         from unittest.mock import patch
         client = self._get_app()
         settings = type("S", (), {"stripe_api_key": "", "feature_flags_path": "unused", "app_env": "prod"})()
-        with patch.dict(os.environ, {"ALLOW_DEMO_CHECKOUT": "1"}, clear=False):
+        with patch.dict(os.environ, {"ALLOW_DEMO_CHECKOUT": "1", "PAYMENT_EXECUTION_ENABLED": "1"}, clear=False):
             with patch("src.app.routers.payments.get_settings", return_value=settings):
                 with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
                     resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 12345})
