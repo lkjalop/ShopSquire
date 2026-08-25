@@ -144,6 +144,23 @@ def test_known_use_case_and_product_category_combine_for_coverage():
     assert coverage == {}
 
 
+def test_common_university_assignments_and_video_calls_remain_covered():
+    coverage = _coverage(
+        "I need a portable laptop for university assignments and video calls under $1800."
+    )
+
+    assert coverage == {}
+
+
+def test_fictional_technical_workload_still_fails_closed_after_coverage_extension():
+    coverage = _coverage(
+        "I need a mobile workstation for the fictional GeoStrata Coupled Solver X."
+    )
+
+    assert coverage["validation"] == "valid"
+    assert coverage["concepts"][0]["status"] == "unresolved"
+
+
 def test_research_consent_sentence_is_not_a_new_workload_concept():
     proposal = _coverage(
         "Use the prior workload. I consent to that research using approved official sources."

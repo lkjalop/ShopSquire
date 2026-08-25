@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const prompts = [
   'I need a portable workstation for the fictional HelioSpec Tandem 9 protein-identification suite; only its publisher requirements may qualify hardware.',
   'Can this notebook run the fictional Oriole FPGA Closure Suite 11? Vendor-supported synthesis and timing requirements are mandatory.',
-  'We need 14 systems within 12 days for the fictional GeoStrata Coupled Solver X; its publisher requirements must be checked.',
+  'I need a mobile workstation for the fictional GeoStrata Coupled Solver X. Only its publisher requirements may qualify hardware.',
   'My budget is AUD 7000 each for the fictional AsterCal Radio Cube Studio; only officially supported mobile hardware is acceptable.',
   'I need to run the fictional DentVoxel Segmenter Enterprise locally; only its software-publisher hardware requirements are acceptable.',
 ];

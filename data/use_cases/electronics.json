@@ -111,7 +111,7 @@
     },
     "student": {
       "label": "Student",
-      "keywords": ["student", "study", "school", "notes", "essays", "university", "college"],
+      "keywords": ["student", "study", "school", "notes", "essays", "assignments", "university", "college", "video calls"],
       "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
       "budget_band_hint": [500, 1200],
       "variants": {

@@ -14,7 +14,11 @@ async function openBuyer(browser: Browser, label: string) {
 }
 
 async function send(page: Page, text: string) {
-  const responsePromise = page.waitForResponse(
+  const chatResponse = page.waitForResponse(
+    response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
+    { timeout: 90_000 },
+  );
+  const firstResponse = page.waitForResponse(
     response => (
       /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
       || /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url())
@@ -24,14 +28,11 @@ async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(text);
   await input.press('Enter');
-  let response = await responsePromise;
-  if (/\/shopping-cases\/interpretations$/.test(response.url())) {
-    if (response.status() !== 204) return response.json();
-    response = await page.waitForResponse(
-      candidate => /\/api\/v1\/chat\/(stream|query)$/.test(candidate.url()),
-      { timeout: 90_000 },
-    );
+  const first = await firstResponse;
+  if (/\/shopping-cases\/interpretations$/.test(first.url()) && first.status() !== 204) {
+    return first.json();
   }
+  const response = /\/chat\/(stream|query)$/.test(first.url()) ? first : await chatResponse;
   const body = await response.text();
   if (!body.includes('data:')) return JSON.parse(body);
   const frames = body.replaceAll('\r\n', '\n').split('\n\n');
@@ -96,10 +97,6 @@ test('a Rockwell Emulate3D pivot supersedes gaming and researches its enrolled s
   const gaming = await send(page, 'help me with a gaming laptop? is 4000 ok?');
   expect(gaming.ambiguity_exploration).toBeFalsy();
 
-  const researchResponse = page.waitForResponse(
-    response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
-    { timeout: 90_000 },
-  );
   const emulate = await send(
     page,
     'actually i need something to simulate PLCs? what do you know of Rockwell Emulate3D?',
@@ -119,6 +116,10 @@ test('a Rockwell Emulate3D pivot supersedes gaming and researches its enrolled s
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toContainText(/Rockwell Emulate3D/i);
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
+  const researchResponse = page.waitForResponse(
+    response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
+    { timeout: 90_000 },
+  );
   await panel.getByRole('button', { name: /Research approved sources/i }).click();
   const research = await (await researchResponse).json();
   expect(research.authorization?.basis).toBe('buyer_action');

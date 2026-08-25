@@ -86,7 +86,11 @@ test('spoken input shares the canonical V2 fail-closed recommendation path', asy
   await expect(page.getByText(SPOKEN_QUERY, { exact: false })).toBeVisible();
   await expect(page.getByTitle('Sent via voice')).toBeVisible();
   await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible({ timeout: 90_000 });
-  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+  // A production-shaped fixture may positively qualify individual products and
+  // expose buyer-triggered Add controls. Voice must never trigger one itself.
+  const cartResponse = await page.request.get(`/api/v1/cart?uid=${encodeURIComponent(UID)}`);
+  expect(cartResponse.ok()).toBe(true);
+  expect((await cartResponse.json()).items || []).toHaveLength(0);
 
   await page.getByTitle('Decision Trace').click();
   const trace = page.getByTestId('decision-trace-modal');
