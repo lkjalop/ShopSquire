@@ -1690,8 +1690,25 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
         cap["verdict"] = "within_budget"
         # fill-only: a lane-base message (closest-match / compare) outranks this confirm — the
         # CAPABILITY_WITHIN_BUDGET priority (< LANE_BASE) reproduces the old `if not message` guard.
-        resp.set_message((f"The best fit for {phrase} starts at ${floor / 100:,.0f}, within "
-                          f"your ${bmax / 100:,.0f} budget."), MsgPriority.CAPABILITY_WITHIN_BUDGET)
+        direct_affordability_question = bool(re.search(
+            r"\b(?:enough|ok|okay|acceptable|afford)\b",
+            envelope.buyer_query or envelope.query,
+            re.IGNORECASE,
+        ))
+        message_priority = (
+            MsgPriority.CAPABILITY_STATEMENT
+            if direct_affordability_question
+            else MsgPriority.CAPABILITY_WITHIN_BUDGET
+        )
+        if bmax >= floor * 1.45:
+            resp.set_message((f"Yes - ${bmax / 100:,.0f} is ample for {phrase}. Strong fits start "
+                              f"at ${floor / 100:,.0f}, within your ${bmax / 100:,.0f} budget; spending the full amount "
+                              "is only necessary for premium performance headroom."),
+                             message_priority)
+        else:
+            resp.set_message((f"Yes - the best fit for {phrase} starts at ${floor / 100:,.0f}, within "
+                              f"your ${bmax / 100:,.0f} budget."),
+                             message_priority)
     else:
         cap["verdict"] = "below_budget"
         if resp.products:

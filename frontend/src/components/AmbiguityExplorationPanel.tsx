@@ -50,11 +50,12 @@ type Props = {
   onApprovePublisherCandidate?: (
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => Promise<void>;
+  autoResearchEnabled?: boolean;
 };
 
 export default function AmbiguityExplorationPanel({
   exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
-  onSubmitSpecifications, onApprovePublisherCandidate,
+  onSubmitSpecifications, onApprovePublisherCandidate, autoResearchEnabled = false,
 }: Props) {
   const [showSourceResolver, setShowSourceResolver] = useState(false);
   const [sourceHint, setSourceHint] = useState('');
@@ -84,27 +85,29 @@ export default function AmbiguityExplorationPanel({
     }
   };
   return (
-    <section data-testid="ambiguity-exploration" style={{ margin: 12, padding: 12, border: '1px solid #93c5fd', borderRadius: 10 }}>
-      <strong>Purpose</strong>
-      <div>{exploration.retained_purpose}</div>
-      <div style={{ marginTop: 7, fontSize: 12 }}>
+    <section data-testid="ambiguity-exploration" style={{ margin: 12, padding: 14, border: '1px solid #93c5fd', borderRadius: 10, background: '#f8fbff' }}>
+      <strong style={{ fontSize: 16 }}>Research needed for a reliable product fit</strong>
+      <div style={{ marginTop: 5, color: '#334155' }}>{exploration.retained_purpose}</div>
+      <div style={{ marginTop: 7, fontSize: 12, color: '#475569' }}>
         Status: {exploration.status === 'researched'
           ? 'Researched — scoped product requirements compiled; remaining gaps stay conditional'
           : exploration.status === 'context_only'
             ? 'Context researched — no authoritative product requirements were established'
             : exploration.status === 'unresolved'
               ? 'Discovery completed — no publisher origin or requirement claim has been accepted'
-              : 'Provisional — external research not yet authorized'}
+              : autoResearchEnabled
+                ? 'External research enabled by tenant policy — approved public-source research starts automatically'
+                : 'External research disabled by tenant policy — use a link, upload, or typed requirements'}
       </div>
       {exploration.interpretations?.length > 0 && (
-        <div style={{ marginTop: 9 }}>
-          <strong>Current interpretations</strong>
+        <details style={{ marginTop: 9, fontSize: 12 }}>
+          <summary>Why research is needed</summary>
           <ul>{exploration.interpretations.map((item, index) => (
             <li key={item.hypothesis_id || index}>{item.label || item.hypothesis_id || `Interpretation ${index + 1}`}</li>
           ))}</ul>
-        </div>
+        </details>
       )}
-      {question && <div data-testid="high-information-question" style={{ marginTop: 8 }}><strong>One question:</strong> {question}</div>}
+      {question && <div data-testid="high-information-question" style={{ marginTop: 10, padding: 9, borderRadius: 7, background: '#fff' }}><strong>To narrow it down:</strong> {question}</div>}
       {exploration.publisher_candidates && exploration.publisher_candidates.length > 0 && (
         <div data-testid="publisher-candidates" style={{ marginTop: 9, padding: 9, border: '1px solid #fdba74', borderRadius: 8 }}>
           <strong>Possible publisher sources — ownership not yet verified</strong>
@@ -145,7 +148,7 @@ export default function AmbiguityExplorationPanel({
         </div>
       )}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
-        {exploration.status === 'provisional' && Boolean(exploration.research_plan_id) && (
+        {exploration.status === 'provisional' && Boolean(exploration.research_plan_id) && !autoResearchEnabled && (
           <button type="button" onClick={() => onResearch(false)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
             {openWorldDiscovery ? 'Discover official sources' : 'Research approved sources'}
           </button>
@@ -168,7 +171,7 @@ export default function AmbiguityExplorationPanel({
           setShowManualSpecifications((value) => !value);
           onEnterSpecifications();
         }} style={secondaryActionStyle}>Enter specifications</button>
-        <span style={{ fontSize: 12, alignSelf: 'center' }}>Continue provisionally below</span>
+        <span style={{ fontSize: 12, alignSelf: 'center', color: '#475569' }}>No product is qualified until the material gap is resolved.</span>
       </div>
       {showManualSpecifications && onSubmitSpecifications && (
         <div data-testid="manual-requirement-entry" style={{ marginTop: 10, border: '1px solid #cbd5e1', borderRadius: 8, padding: 9 }}>

@@ -21,7 +21,7 @@ class BuyerEvidenceSourceCandidate(BaseModel):
     source_id: str
     publisher: str
     canonical_url: str
-    match_basis: Literal["canonical_url", "canonical_descendant", "vendor_name"]
+    match_basis: Literal["canonical_url", "canonical_descendant", "enrolled_domain", "vendor_name"]
     review_status: str
     research_eligible: bool
 
@@ -89,6 +89,14 @@ def resolve_buyer_evidence_source(
                 reason="official_evidence_url_must_be_https_without_credentials",
             )
         submitted_host, submitted_path = submitted
+        host_sources: dict[str, dict[str, Any]] = {}
+        for source in registry:
+            if submitted_host in {
+                str(domain).strip().lower().rstrip(".")
+                for domain in source.get("allowed_domains") or []
+            }:
+                source_id = str(source.get("source_id") or "")
+                host_sources[source_id] = source
         for source in registry:
             for canonical in source.get("canonical_entrypoints") or []:
                 canonical_key = _origin_key(str(canonical))
@@ -103,6 +111,14 @@ def resolve_buyer_evidence_source(
                 if submitted_path.startswith(canonical_path.rstrip("/") + "/"):
                     matches.append(_candidate(source, "canonical_descendant", str(canonical)))
                     break
+        # A buyer may paste an obsolete or moved page on a domain owned by exactly one
+        # enrolled source. Resolve it to that source's reviewed canonical entrypoint;
+        # never fetch or trust the arbitrary pasted path itself.
+        if not matches and len(host_sources) == 1:
+            source = next(iter(host_sources.values()))
+            entrypoints = list(source.get("canonical_entrypoints") or [])
+            if entrypoints:
+                matches.append(_candidate(source, "enrolled_domain", str(entrypoints[0])))
     else:
         query_words = _words(str(vendor_name))
         if not query_words:

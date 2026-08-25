@@ -5,6 +5,7 @@ param(
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $environment = @{
     EXTERNAL_RESEARCH_ENABLED = '1'
+    EXTERNAL_RESEARCH_AUTO_AUTHORIZED = '1'
     EXTERNAL_RESEARCH_SEARCH_URL = 'http://127.0.0.1:8888/search?q={query}&format=json'
     EXTERNAL_RESEARCH_ALLOW_PRIVATE = '1'
     EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = '1'
@@ -14,6 +15,12 @@ $environment = @{
     # returned. Research consent never waits for this local model.
     OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = '1'
     OPEN_WORLD_QUERY_MODEL = 'qwen3:14b'
+    ROUTER_MODEL_ENABLED = '1'
+    ROUTER_MODEL = 'qwen3:14b'
+    ROUTER_MODEL_DIGEST = 'bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8'
+    OLLAMA_DEFAULT_MODEL = 'qwen3:14b'
+    OLLAMA_MEDIUM_MODEL = 'qwen3:14b'
+    USE_OLLAMA_INTENT = '1'
     EXTERNAL_RESEARCH_TENANT_ALLOWLIST = 'default,portfolio-demo'
     EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = 'leoma-project-owner'
     EXTERNAL_RESEARCH_SOURCE_LICENCE = 'portfolio-demo-policy-v1'
@@ -22,6 +29,10 @@ $environment = @{
     MULTI_INTENT_PLANNER_ENABLED = '1'
     MULTI_INTENT_LLM_BINDING_ENABLED = '1'
     SHOPSQUIRE_RUNTIME_PROFILE = 'demo_v2'
+    # The production-shaped buyer turn includes local-model routing, catalog
+    # adjudication, trace persistence, and security postflight. A cold model plus
+    # Windows I/O can legitimately exceed the API's conservative default.
+    CHAT_UPSTREAM_TIMEOUT_SEC = '45'
     RECOMMEND_CORE_MODE = 'primary'
     RECOMMEND_CART_SERVE = '1'
     RECOMMEND_PROCUREMENT_ADVICE_MODE = 'on'

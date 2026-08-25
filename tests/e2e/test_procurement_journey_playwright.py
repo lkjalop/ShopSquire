@@ -146,10 +146,10 @@ def test_buyer_storefront_renders_procurement_check():
         page.get_by_role("button", name="Ask Me!").click()
         msg = page.get_by_placeholder("Type your message...")
         msg.wait_for(timeout=10000)
-        # The AUD demo catalog's competitive-gaming floor starts above $2,000. Keep this
-        # procurement smoke on an eligible product so it tests sourcing/fulfilment rendering,
-        # not the separately covered below-capability-budget response.
-        msg.fill("I need 20 gaming laptops for an esports lab, $3000 each within two weeks")
+        # Use the enrolled office profile and a quantity above the seeded network stock.
+        # This keeps the smoke focused on allocation + shortfall presentation; gaming
+        # capability and open-world workload research have separate browser gates.
+        msg.fill("We need 60 office laptops, budget is $1500 per laptop")
         msg.press("Enter")
         # The V2 advisory path renders backend fulfillment_options through BulkAlternatives;
         # committed/legacy paths use the sourcing or fulfilment cards. All are governed previews.

@@ -19,6 +19,7 @@ type ResearchRequest = {
   uid: string;
   refreshAuthorized?: boolean;
   deadlineMs?: number;
+  authorizationBasis?: 'buyer_action' | 'tenant_policy';
 };
 
 type StateUpdate<T> = T | ((current: T) => T);
@@ -246,6 +247,7 @@ export function useShoppingCaseResearch() {
     uid,
     refreshAuthorized = false,
     deadlineMs = 20_000,
+    authorizationBasis = 'buyer_action',
   }: ResearchRequest) => {
     const exploration = ambiguityExploration;
     if (!exploration?.case_id) {
@@ -286,6 +288,7 @@ export function useShoppingCaseResearch() {
             .map((item) => item.hypothesis_id)
             .filter((value): value is string => Boolean(value)),
           research_authorized: true,
+          authorization_basis: authorizationBasis,
           refresh_authorized: refreshAuthorized,
           execution_id: executionId,
         }),

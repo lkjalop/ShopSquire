@@ -126,6 +126,14 @@ def test_slate_disposition_clears_authoritative_empty_but_retains_for_clarify():
     assert to_legacy(clarifying)["slate_disposition"] == "retain"
     clarifying.extras["semantic_resolution"] = {"catalog_authority": "blocked"}
     assert to_legacy(clarifying)["slate_disposition"] == "clear"
+    clarifying.extras["provisional_catalog_authority"] = {
+        "status": "allowed",
+        "scope": "covered_profile_exploration_only",
+    }
+    provisional = to_legacy(clarifying)
+    assert provisional["slate_disposition"] == "retain"
+    assert provisional["provisional_catalog_authority"]["status"] == "allowed"
+    clarifying.extras.pop("provisional_catalog_authority")
     clarifying.extras.pop("semantic_resolution")
     clarifying.extras["workload_authorization"] = {"status": "blocked"}
     assert to_legacy(clarifying)["slate_disposition"] == "clear"

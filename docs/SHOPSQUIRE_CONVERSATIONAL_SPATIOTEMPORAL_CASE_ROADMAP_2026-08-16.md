@@ -2,6 +2,38 @@
 
 Date: 2026-08-16
 
+## Execution update and reordered roadmap (2026-08-20)
+
+The original vertical slice is implemented on
+`agent/spatiotemporal-certification-20260820`. The remaining sequence is no
+longer implementation-first; it is evidence-first:
+
+1. **Open the deterministic portfolio recording gate.** Re-run the focused
+   backend, frontend, and exact Chromium certificate against an isolated database
+   migrated to Alembic head. Record only fixture-backed claims.
+2. **Publish the evidence package.** Capture the final 60--75 second product
+   video, generate a fresh browser certificate, screenshot, video, hashes, and
+   manifest, and keep `live_network_certified=false` visible.
+3. **Repair release hygiene.** Regenerate the tracked Docker pytest result removed
+   during local storage cleanup, classify the five remaining untracked documents,
+   and finish with an intentional clean release diff.
+4. **Run release gates.** Rehearse PostgreSQL migration through
+   `20260874_post_purchase_satisfaction`, run the memory-safe full test shards,
+   and run the production-shaped Playwright battery.
+5. **Open the live-operations gate.** Only after the release gates are green,
+   exercise enrolled WMS, pricing, supplier, and carrier connectors and issue a
+   separate live-network certificate. This does not block the deterministic
+   portfolio video.
+
+Current recording evidence on 2026-08-20:
+
+- focused backend certificate suite: 16 passed;
+- adjudication/showcase frontend suite: 19 passed;
+- isolated recording database: migrated through `20260874`;
+- exact Chromium conversational certificate: 1 passed, every invariant true;
+- current certificate boundary: deterministic fixture, zero paid calls, zero cart
+  mutations, zero supplier sends, and no live-network certification.
+
 ## Verdict
 
 ShopSquire's next problem is not adding another retrieval, graph, forecasting or
@@ -114,7 +146,11 @@ These papers support the architectural direction; they do not certify the
 ShopSquire implementation. Browser artifacts and deterministic tests remain the
 implementation evidence.
 
-## Required next vertical slice
+## Completed vertical slice (historical implementation sequence)
+
+The four items below were delivered by commits `236e532f`, `8adf1fb4`,
+`c8107547`, and `cbc0352e`. They remain here as the design record, not as pending
+work.
 
 ### 1. Case creation must consume typed patches before retrieval
 
@@ -245,16 +281,17 @@ Then authorize research and assert:
 
 ## Honest current status
 
-This slice establishes and persists the missing contract. It does not yet prove
-the full natural-language browser journey green. Remaining work is:
+The deterministic two-turn browser journey is implemented, rendered, and freshly
+green. It is ready for rehearsal and fixture-backed portfolio recording. The
+certificate proves retained typed state, temporal authority, query-purpose
+separation, zero pre-consent calls, revision binding, protected allocation,
+proposal-only supplier shortfall, and no premature commerce mutation.
 
-1. load the typed case before the model/router call;
-2. resolve and persist typed patches before downstream retrieval;
-3. add temporal expression authority;
-4. wire the compiled query into ATP/forecast/PromiseGraph/allocation/supplier paths;
-5. replace contradictory Decision Trace projections with one adjudicator;
-6. run and seal the multi-turn browser certificate.
+It does **not** prove live WMS, carrier, pricing, or supplier traffic. It also does
+not replace the outstanding PostgreSQL rehearsal, memory-safe full-suite run, or
+production-shaped browser battery. Those are release and live-operations gates,
+not blockers for an explicitly labelled deterministic portfolio demonstration.
 
 Temporal GraphRAG, forecasting foundation models, and advanced market intelligence
-remain later improvements. They will not repair state continuity and should not
-precede this wiring.
+remain later improvements. They should follow release certification and connector
+operationalization rather than delay the current portfolio recording.

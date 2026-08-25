@@ -3360,10 +3360,100 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         if isinstance(data.get("semantic_resolution"), dict)
         else {}
     )
+    provisional_catalog_authority = (
+        data.get("provisional_catalog_authority")
+        if isinstance(data.get("provisional_catalog_authority"), dict)
+        else {}
+    )
     semantic_catalog_blocked = (
         str(semantic_resolution.get("catalog_authority") or "").strip().lower()
         == "blocked"
+        and str(provisional_catalog_authority.get("status") or "").strip().lower()
+        != "allowed"
     )
+    routed_subject_action = str(
+        routed_decision.get("subject_action") or "uncertain"
+    ).strip().lower()
+    literal_buyer_turn = str(submitted_query or "").strip()
+    explicit_replacement_turn = bool(re.search(
+        r"\b(?:actually|instead|rather\s+than|change(?:d)?\s+(?:my|the)\s+(?:mind|request)|"
+        r"new\s+(?:request|search)|what\s+i\s+(?:really\s+)?need)\b",
+        literal_buyer_turn,
+        re.IGNORECASE,
+    ))
+    named_workload_replacement = bool(
+        explicit_replacement_turn
+        and re.search(
+            r"\b(?:simulate|simulation|software|platform|application|program|workload|run)\b",
+            literal_buyer_turn,
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\b[A-Z][a-z][A-Za-z0-9.+-]*(?:\s+[A-Z0-9][A-Za-z0-9.+-]*)+\b",
+            literal_buyer_turn,
+        )
+    )
+    active_case_subject_replaced = bool(
+        active_shopping_case_id
+        and (
+            named_workload_replacement
+            or (
+                not case_commercial_obligations
+                and (
+                    routed_subject_action == "switch"
+                    or routed_clarification_relation == "supersede"
+                    or (
+                        semantic_catalog_blocked
+                        and explicit_replacement_turn
+                    )
+                )
+            )
+        )
+    )
+    if active_case_subject_replaced:
+        # The literal turn, rather than clarification-expanded prose, is the root
+        # of the replacement case. It must not inherit the old product node,
+        # purpose, research consent, or visible decision trace.
+        prior_case_id = active_shopping_case_id
+        prior_case_purpose = active_shopping_case_purpose
+        active_shopping_case_id = None
+        active_shopping_case_purpose = None
+        pending_clarification_consumed = bool(pending_clarification)
+        pending_clarification_suspended = False
+        routed_clarification_relation = "supersede"
+        routed_decision = dict(routed_decision)
+        routed_decision.update({
+            "subject_action": "switch",
+            "clarification_relation": "supersede",
+            "node_handle": None,
+            "node_path": None,
+            "use_cases": [],
+            "prior_shortlist": [],
+            "subject_from_session": False,
+        })
+        try:
+            db.execute(sql_text(
+                "UPDATE shopping_cases SET status='superseded',updated_at=CURRENT_TIMESTAMP "
+                "WHERE tenant_id=:tenant_id AND case_id=:case_id AND status='active'"
+            ), {"tenant_id": tenant_id, "case_id": prior_case_id})
+            db.commit()
+            log_trace_event(
+                trace_id=str(prior_case_id).removeprefix("sc-"),
+                event_type="shopping_case_subject_superseded",
+                source_type="stage",
+                source_id="Conversation_Subject_Boundary",
+                target_type="shopping_case",
+                target_id=str(prior_case_id),
+                tenant_id=tenant_id,
+                payload={
+                    "prior_purpose": prior_case_purpose,
+                    "replacement_turn": literal_buyer_turn[:500],
+                    "commercial_authority": "none",
+                },
+            )
+        except Exception:
+            db.rollback()
+            logger.warning("shopping-case subject supersession audit failed", exc_info=True)
     response_slots_for_output = dict(response_confirmed_slots)
     same_case_commercial_interruption = bool(
         active_shopping_case_id and case_commercial_obligations
@@ -3498,13 +3588,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         from src.app.services.case_research_plan import build_case_research_plan
 
         _case_research_plan = build_case_research_plan(
-            active_shopping_case_purpose or str(q or "")[:500]
+            active_shopping_case_purpose or str(submitted_query or q or "")[:500]
         )
     except Exception as exc:
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
         semantic_catalog_blocked
-        or bool((data.get("post_catalog_adjudication") or {}).get("research_needed"))
         or (
             turn_intent == "SEARCH"
             and not products
@@ -3520,7 +3609,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if provisional_exploration_needed and _case_research_plan is None:
         try:
             _case_research_plan = build_case_research_plan(
-                active_shopping_case_purpose or str(q or "")[:500],
+                active_shopping_case_purpose or str(submitted_query or q or "")[:500],
                 allow_open_world=True,
             )
         except Exception as exc:
@@ -3539,7 +3628,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     }
                     for item in _case_research_plan.hypotheses
                 ]
-            _retained_case_purpose = active_shopping_case_purpose or str(q or "")[:500]
+            _retained_case_purpose = active_shopping_case_purpose or str(submitted_query or q or "")[:500]
             _projection = project_accepted_catalog(
                 db, accepted_claims=[], desired_outcome=_retained_case_purpose,
                 tenant_id=_request_tenant_id(request),
@@ -3559,6 +3648,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 },
             )
             ambiguous_product_shelves = _projection.model_dump(mode="json")
+            if (
+                semantic_catalog_blocked
+                or active_case_subject_replaced
+                or (
+                    _case_research_plan is not None
+                    and _case_research_plan.publisher_status == "unresolved"
+                )
+            ):
+                # Discovery has not established even the governing publisher yet.
+                # Showing architecture-wide products here looks like a recommendation
+                # and creates the unrelated 12-card wall reported in the live UI.
+                ambiguous_product_shelves = None
             _questions = [
                 item for item in list(next_questions or [])
                 if isinstance(item, dict)
@@ -3609,6 +3710,24 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     if _case_research_plan is not None else []
                 ),
             }
+            if active_case_subject_replaced and _case_research_plan is not None:
+                products = []
+                material_question_text = str(
+                    (ambiguity_exploration.get("next_question") or {}).get("text") or ""
+                ).strip()
+                named_workload = re.search(
+                    r"\b([A-Z][a-z][A-Za-z0-9.+-]*(?:\s+[A-Z0-9][A-Za-z0-9.+-]*){1,4})\b",
+                    literal_buyer_turn,
+                )
+                workload_label = (
+                    named_workload.group(1) if named_workload else "this newly named workload"
+                )
+                assistant_message = (
+                    "I treated this as a new workload and cleared the earlier gaming assumptions. "
+                    "Before I recommend hardware, I need current authoritative requirements for "
+                    f"{workload_label}."
+                    + (f" {material_question_text}" if material_question_text else "")
+                )
             if not active_shopping_case_id and ambiguity_exploration.get("case_id"):
                 # The legacy chat path can discover ambiguity after the fast
                 # interpretation endpoint returned 204. Materialize the same

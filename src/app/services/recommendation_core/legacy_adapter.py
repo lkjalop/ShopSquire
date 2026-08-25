@@ -114,9 +114,13 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
             "latency_ms": route_stage.get("latency_ms"),
         }
     semantic_resolution = core.extras.get("semantic_resolution") or {}
+    provisional_catalog_authority = core.extras.get("provisional_catalog_authority") or {}
     workload_authorization = core.extras.get("workload_authorization") or {}
     material_fit_blocked = (
-        str(semantic_resolution.get("catalog_authority") or "").lower() == "blocked"
+        (
+            str(semantic_resolution.get("catalog_authority") or "").lower() == "blocked"
+            and str(provisional_catalog_authority.get("status") or "").lower() != "allowed"
+        )
         or str(workload_authorization.get("status") or "").lower() == "blocked"
     )
     slate_disposition = (
@@ -160,6 +164,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "fulfillment_options": core.extras.get("fulfillment_options"),
         "sourcing_intent": core.extras.get("sourcing_intent"),
         "semantic_resolution": core.extras.get("semantic_resolution"),
+        "provisional_catalog_authority": core.extras.get("provisional_catalog_authority"),
         "infrastructure_alternatives": core.extras.get("infrastructure_alternatives"),
         "semantic_requirement_compilation": core.extras.get("semantic_requirement_compilation"),
         "semantic_evidence": core.extras.get("semantic_evidence"),

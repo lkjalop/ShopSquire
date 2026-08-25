@@ -250,6 +250,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     # Affordability question: "is $1800 enough?", "would 1500 be enough?", or
     # "do I have enough at $1000?". This is a proposed maximum, not a product specification.
     m = (re.search(rf"\b(?:is|would|will|could)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?enough\b", q)
+         or re.search(rf"\b(?:is|would)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?(?:ok|okay|acceptable)\b{_UNIT_GUARD}", q)
          or re.search(rf"\benough\b[^\d$â‚¬Â£]{{0,18}}(?:at|with|on)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q))
     if m:
         v = _to_int(m.group(1), m.group(2))
@@ -257,6 +258,19 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
             return BudgetParse(None, v, "ceiling")
 
     m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
+
+    # A singular product price ("I need a 4000 laptop") is a target tier,
+    # not permission to ignore the amount and start at the cheapest item. The
+    # singular article separates it from quantities such as "need 100 laptops".
+    m = re.search(
+        rf"\b(?:need|want|looking\s+for)\s+(?:a|an|one)\s+"
+        rf"{_CUR}?\s*{_NUM}{_UNIT_GUARD}\s+[a-z]",
+        q,
+    )
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:

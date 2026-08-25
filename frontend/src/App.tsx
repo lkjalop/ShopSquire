@@ -346,6 +346,9 @@ export default function App() {
     (import.meta as any).env?.DEV
     || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)),
   );
+  const autoPublicResearchEnabled = !['0', 'false', 'off', 'disabled'].includes(
+    String((import.meta as any).env?.VITE_EXTERNAL_RESEARCH_AUTO_ENABLED ?? '1').trim().toLowerCase(),
+  );
   useEffect(() => {
     setTrustEvidence((current) => ({
       synthetic: catalogueEvidence.synthetic ?? current.synthetic,
@@ -386,12 +389,14 @@ export default function App() {
     setProductShelves,
     supplierContinuation,
     setSupplierContinuation,
+    researchState,
     executeResearch: executeShoppingCaseResearch,
     acceptRequirementProposal: executeRequirementAcceptance,
     submitManualSpecifications: executeManualSpecifications,
     resolveEvidenceSource: executeEvidenceSourceResolution,
     approvePublisherCandidate: executePublisherApproval,
   } = useShoppingCaseResearch();
+  const autoResearchAttemptedRef = useRef<Set<string>>(new Set());
   const dispatchPresentationEvent = useMemo(() => createPresentationEventDispatcher({
     setMessages,
     setProductShelves,
@@ -1324,7 +1329,11 @@ export default function App() {
     stt.toggle();
   };
 
-  const hasProcurementPanel = Boolean(fulfilmentCase);
+  const hasProcurementPanel = Boolean(
+    fulfilmentCase
+    || bulkAlternatives.length > 0
+    || (sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0),
+  );
   const hasRightPanel = rightPanelMode !== 'none' || hasProcurementPanel;
   // latest assistant turn's questions — used to detect a receipt/verification ask (not rendered as a
   // separate bottom bar anymore; NQE questions render inline in the message).
@@ -1528,6 +1537,67 @@ export default function App() {
       };
       setMessages(prev => [...prev, userMsg, warningMsg]);
       setInputValue('');
+      return;
+    }
+
+    // Bridge ordinary chat paste into the same governed source-resolution flow used by
+    // the dedicated "official link" control. A URL is never fetched directly here: the
+    // backend must first map it to an enrolled/case-approved canonical source.
+    const pastedOfficialUrl = q.match(/https:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.;]+$/, '');
+    if (ambiguityExploration?.case_id && pastedOfficialUrl) {
+      setMessages((current) => [...current, { role: 'user', content: q, timestamp: new Date() }]);
+      setInputValue('');
+      setIsThinking(true);
+      try {
+        const resolution = await resolveBuyerEvidenceSource(
+          { source_url: pastedOfficialUrl },
+          autoPublicResearchEnabled,
+        );
+        if (!['resolved', 'matched', 'completed'].includes(String(resolution?.status || '').toLowerCase())) {
+          setMessages((current) => [...current, {
+            role: 'assistant',
+            content: `I could not bind that URL to an approved canonical source: ${resolution?.reason || 'source_not_approved'}. I did not use its claims. Upload the requirements or choose an enrolled publisher source.`,
+            timestamp: new Date(),
+          }]);
+        }
+      } catch (error) {
+        setMessages((current) => [...current, {
+          role: 'assistant',
+          content: `I could not verify that source: ${error instanceof Error ? error.message : String(error)}. I did not use its claims or change product fit.`,
+          timestamp: new Date(),
+        }]);
+      } finally {
+        setIsThinking(false);
+      }
+      return;
+    }
+
+    // Long, specification-shaped chat paste is a buyer claim proposal, not a new catalog
+    // search. Extract it through the reviewable requirement-proposal endpoint so no pasted
+    // claim silently qualifies a product.
+    const specificationSignals = q.match(
+      /\b(?:ram|memory|cpu|processor|cores?|threads?|ghz|gpu|nvidia|radeon|rtx|storage|disk|nvme|ssd|windows|linux|ethernet|network adapter|minimum|recommended)\b/gi,
+    ) || [];
+    const pastedSpecifications = Boolean(
+      ambiguityExploration?.case_id
+      && specificationSignals.length >= 2
+      && (q.length >= 50 || /\d+\s*(?:gb|tb|ghz|cores?|threads?)/i.test(q)),
+    );
+    if (pastedSpecifications) {
+      setMessages((current) => [...current, { role: 'user', content: q, timestamp: new Date() }]);
+      setInputValue('');
+      setIsThinking(true);
+      try {
+        await submitManualSpecifications(q);
+      } catch (error) {
+        setMessages((current) => [...current, {
+          role: 'assistant',
+          content: `I could not turn those specifications into a reviewable proposal: ${error instanceof Error ? error.message : String(error)}. No product was qualified and the cart was not changed.`,
+          timestamp: new Date(),
+        }]);
+      } finally {
+        setIsThinking(false);
+      }
       return;
     }
 
@@ -2552,8 +2622,12 @@ export default function App() {
             revision: Number(data?.interpretation_job?.case_revision || 1),
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
-          if (!continuesActiveCase && data?.product_shelves?.schema_version === 'product-shelves-v1') {
-            setProductShelves(data.product_shelves as ProductShelfProjection);
+          if (!continuesActiveCase) {
+            setProductShelves(
+              data?.product_shelves?.schema_version === 'product-shelves-v1'
+                ? data.product_shelves as ProductShelfProjection
+                : null,
+            );
           }
           switchRightPanelMode('grid');
         }
@@ -2584,6 +2658,9 @@ export default function App() {
           || Boolean(data.fulfillment_case && (data.fulfillment_case as any).case_id)
           || turnHasFulfillmentOptions
           || (Number((data as any).requested_quantity) > 1);
+        if (turnHasSourcingPreview || turnHasFulfillmentOptions) {
+          switchRightPanelMode('cart');
+        }
         setSourcingTraceId((current) => nextSourcingTraceId(
           current,
           nextTraceId,
@@ -2620,7 +2697,9 @@ export default function App() {
         // chat turns still retain their own trace IDs server-side, but replacing
         // the visible trace with the latest turn made approved research appear
         // to vanish after a quantity or deadline follow-up.
-        setTraceId(normalizeTraceId(ambiguityExploration?.trace_id || nextTraceId));
+        setTraceId(normalizeTraceId(
+          data?.ambiguity_exploration?.trace_id || ambiguityExploration?.trace_id || nextTraceId,
+        ));
 
         // Auto-open decision trace when image is security-flagged so the analyst sees the full matrix immediately
         if (
@@ -2681,7 +2760,10 @@ export default function App() {
           if (slateDisposition === 'clear') {
             setDisplayProducts([]);
             setRecommendationShelf(null);
-            if (['grid', 'list', 'visual_search'].includes(rightPanelMode)) {
+            if (
+              !data?.ambiguity_exploration
+              && ['grid', 'list', 'visual_search'].includes(rightPanelMode)
+            ) {
               switchRightPanelMode('none');
             }
           }
@@ -2865,10 +2947,13 @@ export default function App() {
     }]);
   }, [executeManualSpecifications, uid]);
 
-  const researchAmbiguousShoppingCase = useCallback(async (refreshAuthorized = false) => {
+  const researchAmbiguousShoppingCase = useCallback(async (
+    refreshAuthorized = false,
+    authorizationBasis: 'buyer_action' | 'tenant_policy' = 'buyer_action',
+  ) => {
     setIsThinking(true);
     try {
-      const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized });
+      const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized, authorizationBasis });
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         dispatchPresentationEvent({
           type: 'shopping_case.shelves.replaced', source: 'research',
@@ -2904,6 +2989,25 @@ export default function App() {
       setIsThinking(false);
     }
   }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId, dispatchPresentationEvent]);
+
+  useEffect(() => {
+    if (!autoPublicResearchEnabled || researchState === 'running') return;
+    const exploration = ambiguityExploration;
+    if (
+      !exploration?.case_id
+      || !exploration.research_plan_id
+      || exploration.status !== 'provisional'
+    ) return;
+    const attemptKey = `${exploration.case_id}:${exploration.research_plan_id}`;
+    if (autoResearchAttemptedRef.current.has(attemptKey)) return;
+    autoResearchAttemptedRef.current.add(attemptKey);
+    void researchAmbiguousShoppingCase(false, 'tenant_policy');
+  }, [
+    ambiguityExploration,
+    autoPublicResearchEnabled,
+    researchAmbiguousShoppingCase,
+    researchState,
+  ]);
 
   const resolveBuyerEvidenceSource = useCallback(async (
     hint: { source_url?: string; vendor_name?: string },
@@ -3362,7 +3466,7 @@ export default function App() {
                       </button>
                     )}
                     <span>
-                      {rightPanelMode === 'none' && fulfilmentCase
+                      {rightPanelMode === 'none' && hasProcurementPanel
                         ? 'Procurement'
                         : rightPanelMode === 'compare'
                         ? 'Comparison'
@@ -3451,6 +3555,7 @@ export default function App() {
                       onApprovePublisherCandidate={approvePublisherCandidate}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
                       onSubmitSpecifications={submitManualSpecifications}
+                      autoResearchEnabled={autoPublicResearchEnabled}
                     />
                   )}
                   {productShelves && <ProductShelvesPanel

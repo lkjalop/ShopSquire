@@ -31,6 +31,17 @@ def test_named_application_keeps_its_enrolled_publisher_scope():
     assert "blender_official_requirements" in plan.source_candidate_ids
 
 
+def test_emulate3d_uses_its_publisher_and_never_borrows_factory_io_requirements():
+    plan = build_case_research_plan(
+        "I need a laptop for Rockwell Emulate3D PLC digital twin simulation.",
+    )
+
+    assert plan is not None
+    assert plan.publisher_status == "resolved_enrolled"
+    assert plan.source_candidate_ids[0] == "rockwell_emulate3d_official_requirements"
+    assert "factory_io_official_docs" not in plan.source_candidate_ids
+
+
 def test_real_manifest_preserves_governed_scope_hypotheses_for_six_prompt_matrix():
     expected = {
         "I do CGI; I don't want renders taking all night.": {"blender_official_requirements"},
@@ -132,6 +143,17 @@ def test_open_world_plan_has_no_invented_publisher_and_bounded_query_axes():
     assert all(row.query for row in plan.discovery_queries)
     assert all("I need" not in row.query for row in plan.discovery_queries)
     assert any(row.resolution_owner == "research" for row in plan.obligations)
+
+
+def test_open_world_queries_preserve_digit_leading_product_name_tokens():
+    plan = build_case_research_plan(
+        "What do you know of Rockwell Emulate 3D for PLC simulation?",
+        manifest={"sources": []},
+        allow_open_world=True,
+    )
+    assert plan is not None
+    queries = [row.query for row in plan.discovery_queries]
+    assert any("Rockwell Emulate 3D" in query for query in queries)
 
 
 def test_open_world_queries_drop_negated_preferences_and_buyer_filler():

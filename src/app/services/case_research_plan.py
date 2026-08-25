@@ -20,7 +20,8 @@ from src.app.services.official_source_governance import load_official_source_man
 _TOKEN = re.compile(r"[a-z0-9]+")
 _ACRONYM = re.compile(r"\b(?:[A-Z][A-Z0-9+.-]{1,7}|[0-9]+[A-Z][A-Z0-9+.-]{0,6})\b")
 _PROPER_NAME = re.compile(
-    r"\b(?:[A-Z][a-z0-9+_-]{2,})(?:\s+(?:[A-Z][A-Za-z0-9+_-]{2,}|[0-9]{4}\s*R[0-9])){0,3}\b"
+    r"\b(?:[A-Z][a-z0-9+_-]{2,})(?:\s+(?:[A-Z][A-Za-z0-9+_-]{2,}|"
+    r"[0-9]+[A-Z][A-Za-z0-9+_-]*|[0-9]{4}\s*R[0-9])){0,3}\b"
 )
 _NEGATED_CLAUSE = re.compile(
     r"\b(?:i\s+)?(?:do\s+not|don't|does\s+not|doesn't|without|not\s+interested\s+in)\b"
@@ -118,7 +119,7 @@ def _proper_names(value: str) -> tuple[list[str], set[str]]:
         name = raw_name.strip()
         name_tokens = set(_TOKEN.findall(name.lower()))
         if name.casefold() in {
-            "can", "could", "exclude", "only", "this", "we", "which", "will",
+            "can", "could", "exclude", "only", "this", "we", "what", "which", "will",
         } or name_tokens <= tokens:
             continue
         names.append(name)
@@ -130,8 +131,11 @@ def _discovery_subject(value: str) -> str:
     """Bound buyer prose to salient terms without classifying a workload."""
 
     positive_text = _NEGATED_CLAUSE.sub(" ", str(value or ""))
-    acronyms = [item.strip("+.-") for item in _ACRONYM.findall(positive_text)]
     proper_names, proper_tokens = _proper_names(positive_text)
+    acronyms = [
+        item.strip("+.-") for item in _ACRONYM.findall(positive_text)
+        if item.strip("+.-").casefold() not in proper_tokens
+    ]
     content = [
         token for token in _TOKEN.findall(positive_text.lower())
         if token not in _DISCOVERY_FILLER
@@ -363,7 +367,11 @@ def build_case_research_plan(
                     resolution_owner="catalog", status="planned",
                 ),
             ],
-            next_question="Which named software or standard governs this work, and what must run locally?",
+            next_question=(
+                "What project scale or simulation complexity must it handle, and which stages must run locally?"
+                if proper_names
+                else "Which named software or standard governs this work, and what must run locally?"
+            ),
         )
     hypotheses: list[CaseResearchHypothesis] = []
     for index, source in enumerate(sources[:3], 1):

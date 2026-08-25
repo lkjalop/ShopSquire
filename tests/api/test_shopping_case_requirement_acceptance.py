@@ -146,6 +146,27 @@ def test_interpretation_keeps_generic_work_laptop_procurement_on_chat_lane():
     assert response.status_code == 204
 
 
+def test_interpretation_keeps_covered_corporate_and_university_searches_on_chat_lane():
+    client = _client()
+
+    for uid, purpose in (
+        (
+            "buyer-corporate-local",
+            "Recommend a business laptop for corporate office work and travel under $2200.",
+        ),
+        (
+            "buyer-university-local",
+            "I need a portable laptop for university assignments and video calls under $1800.",
+        ),
+    ):
+        response = client.post("/api/v1/shopping-cases/interpretations", json={
+            "uid": uid,
+            "retained_purpose": purpose,
+            "storefront_taxonomy_handle": "el-6-6",
+        })
+        assert response.status_code == 204
+
+
 def test_interpretation_preserves_enrolled_exact_sku_on_normal_chat_lane():
     client = _client()
     with client.app.state.test_engine.begin() as connection:

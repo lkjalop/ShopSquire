@@ -66,12 +66,10 @@ test('ordinary gaming catalog exploration renders products without requiring res
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
 
-  const response = await sendToChat(page, 'I need gaming laptops for a studio.');
+  const response = await sendToChat(page, 'help me with a gaming laptop? is 4000 ok?');
   expect(response.ok()).toBe(true);
-  await expect(page.locator('[data-testid^="product-shelf-"] article').first()).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
+  await expect(page.getByRole('button', { name: /^(Add|Add to Cart)$/i }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('ambiguity-exploration')).toHaveCount(0);
   await expect(page.getByText(/needs current external requirements before I can qualify products/i)).toHaveCount(0);
 });
 

@@ -49,6 +49,20 @@ def test_unrelated_page_on_allowed_domain_is_not_treated_as_authority():
     assert result.candidates == []
 
 
+def test_obsolete_path_on_uniquely_enrolled_domain_maps_to_reviewed_canonical():
+    result = resolve_buyer_evidence_source(
+        source_url="https://docs.factoryio.com/legacy/requirements-2024",
+        sources=_sources(),
+    )
+    assert result.status == "resolved"
+    assert result.selected_source_id == "factory_io"
+    assert result.candidates[0].match_basis == "enrolled_domain"
+    assert result.candidates[0].canonical_url == (
+        "https://docs.factoryio.com/manual/system-requirements/"
+    )
+    assert result.external_calls == result.paid_calls == 0
+
+
 def test_vendor_resolution_preserves_ambiguity_and_review_state():
     ambiguous = resolve_buyer_evidence_source(vendor_name="Autodesk", sources=_sources())
     assert ambiguous.status == "ambiguous"

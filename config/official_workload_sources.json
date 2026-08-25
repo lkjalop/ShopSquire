@@ -115,6 +115,26 @@
       "review_basis": "buyer explicitly approved docs.factoryio.com"
     },
     {
+      "source_id": "rockwell_emulate3d_official_requirements",
+      "publisher": "Rockwell Automation Emulate3D",
+      "allowed_domains": ["store.sim3d.com", "www.sim3d.com"],
+      "canonical_entrypoints": ["https://store.sim3d.com/help/demo3d_2026%3Asystem_requirements", "https://www.sim3d.com/technology/", "https://www.sim3d.com/Connectivity/"],
+      "allowed_claim_types": ["minimum_requirements", "recommended_requirements", "compatibility", "integration_capability", "software_feature"],
+      "forbidden_claim_types": ["capacity_sizing", "behavioral_performance", "benchmark_result", "exact_product_fit", "price", "availability"],
+      "applicability": {"workloads": ["rockwell_emulate3d", "emulate3d", "plc_digital_twin"], "scope": "Rockwell Automation Emulate3D host requirements, supported platforms and documented PLC connectivity", "resolution_owner": "research", "exclusions": ["Factory I/O requirements", "generic PLC simulation", "unpublished project-scale performance"]},
+      "activation_policy": {"provisional_scope_aliases": ["Rockwell Emulate3D", "Emulate3D", "Rockwell Emulate 3D"], "scope_aliases_are_proposal_grade": true, "required_any_terms": ["Emulate3D", "Emulate 3D"]},
+      "artefact_patterns": ["Emulate3D", "System Requirements", "Demo3D"],
+      "parser_type": "html",
+      "freshness_sla_hours": 168,
+      "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:rockwell-emulate3d"},
+      "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
+      "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
+      "review_status": "approved",
+      "reviewed_at": "2026-08-25",
+      "reviewed_by": "project_owner_current_session",
+      "review_basis": "Project owner supplied the Sim3D system-requirements origin; current Sim3D product and Rockwell ownership context were independently corroborated before enrolment"
+    },
+    {
       "source_id": "nist_manufacturing_digital_twins",
       "publisher": "National Institute of Standards and Technology",
       "allowed_domains": ["www.nist.gov"],

@@ -101,6 +101,7 @@ class ResearchShoppingCaseRequest(BaseModel):
     ambiguity_object_ids: list[str] = Field(min_length=1, max_length=8)
     hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
     research_authorized: Literal[True]
+    authorization_basis: Literal["buyer_action", "tenant_policy"] = "buyer_action"
     refresh_authorized: bool = False
     execution_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{8,80}$")
 
@@ -513,9 +514,19 @@ def create_case_interpretation(
             suitability_evidence_requested,
         )
 
+        from src.app.services.query_decomposer import decompose
+
+        local_query_plan = decompose(body.retained_purpose)
+        covered_local_profile = bool(
+            local_query_plan.use_cases
+            and not local_query_plan.needs_market_evidence
+        )
         if (
             explicit_evidence_constraints(body.retained_purpose)
-            or suitability_evidence_requested(body.retained_purpose)
+            or (
+                suitability_evidence_requested(body.retained_purpose)
+                and not covered_local_profile
+            )
         ):
             plan = build_case_research_plan(body.retained_purpose, allow_open_world=True)
     if plan is None:
@@ -1527,8 +1538,17 @@ async def _research_shopping_case_with_db(
     db=None,
     cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Run buyer-authorized live research and rerank inside one durable case."""
+    """Run explicitly buyer- or tenant-policy-authorized research in one case."""
     tenant_id = _tenant(x_tenant_id)
+    if (
+        body.authorization_basis == "tenant_policy"
+        and str(os.getenv("EXTERNAL_RESEARCH_AUTO_AUTHORIZED") or "").strip().lower()
+        not in {"1", "true", "yes", "on"}
+    ):
+        raise HTTPException(status_code=403, detail={
+            "code": "tenant_auto_research_not_authorized",
+            "message": "This tenant has not enabled automatic public-source research.",
+        })
     plan = _case_research_plan_from_trace(db, case_id=case_id, tenant_id=tenant_id)
     if plan is None:
         raise HTTPException(status_code=409, detail={
@@ -1589,7 +1609,7 @@ async def _research_shopping_case_with_db(
         )
 
         try:
-            return await execute_open_world_publisher_discovery_async(
+            result = await execute_open_world_publisher_discovery_async(
                 db,
                 plan=plan,
                 tenant_id=tenant_id,
@@ -1605,6 +1625,12 @@ async def _research_shopping_case_with_db(
                 budget_cents=body.budget_cents,
                 cancellation_requested=request_cancelled,
             )
+            result["authorization"] = {
+                "authorized": True,
+                "basis": body.authorization_basis,
+                "scope": "case_bound_publisher_discovery",
+            }
+            return result
         except OpenWorldResearchUnavailable as exc:
             raise HTTPException(status_code=503, detail={
                 "code": exc.code,
@@ -1621,7 +1647,7 @@ async def _research_shopping_case_with_db(
 
     try:
         consent_recorded_at = _now().isoformat()
-        return await execute_enrolled_official_research(
+        result = await execute_enrolled_official_research(
             db,
             plan=plan,
             approved_sources=list(approved_sources),
@@ -1639,7 +1665,12 @@ async def _research_shopping_case_with_db(
             ).strip(),
             consent_receipt={
                 "authorized": body.research_authorized,
-                "event": "shopping_case_research_request",
+                "event": (
+                    "tenant_policy_auto_research"
+                    if body.authorization_basis == "tenant_policy"
+                    else "shopping_case_research_request"
+                ),
+                "authorization_basis": body.authorization_basis,
                 "recorded_at": consent_recorded_at,
                 "scope": "case_bound_official_research",
                 "research_plan_id": body.research_plan_id,
@@ -1647,6 +1678,13 @@ async def _research_shopping_case_with_db(
             },
             cancellation_requested=request_cancelled,
         )
+        result["authorization"] = {
+            "authorized": True,
+            "basis": body.authorization_basis,
+            "scope": "case_bound_official_research",
+            "recorded_at": consent_recorded_at,
+        }
+        return result
     except EnrolledResearchUnavailable as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
