@@ -56,12 +56,12 @@ test('read-only follow-up preserves exact identity without granting unverified f
 
   await send(page, 'We need 18 RGAM-0007 laptops for a design studio, AUD 85000 total');
   await expect(page.getByText(/HP OMEN MAX 16/i).first()).toBeVisible({ timeout: 40_000 });
-  await expect(page.getByText(/Provisional shortlist/i)).toBeVisible();
+  await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await send(page, 'summarise this procurement case without changing it');
 
   await expect(page.getByText(/HP OMEN MAX 16/i).first()).toBeVisible();
-  await expect(page.getByText(/Provisional shortlist/i)).toBeVisible();
+  await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 });

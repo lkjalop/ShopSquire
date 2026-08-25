@@ -109,6 +109,7 @@ type AnchorSection = {
   top_products?: Product[];
   summary?: string;
   match_basis?: string[];
+  qualification_authority?: 'positive_evidence' | 'none' | string;
 };
 type RightPanelContract = {
   mode?: 'shopping' | 'support';
@@ -346,8 +347,8 @@ export default function App() {
     (import.meta as any).env?.DEV
     || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)),
   );
-  const autoPublicResearchEnabled = !['0', 'false', 'off', 'disabled'].includes(
-    String((import.meta as any).env?.VITE_EXTERNAL_RESEARCH_AUTO_ENABLED ?? '1').trim().toLowerCase(),
+  const autoPublicResearchEnabled = ['1', 'true', 'on', 'enabled'].includes(
+    String((import.meta as any).env?.VITE_EXTERNAL_RESEARCH_AUTO_ENABLED ?? '0').trim().toLowerCase(),
   );
   useEffect(() => {
     setTrustEvidence((current) => ({
@@ -380,6 +381,10 @@ export default function App() {
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
+  // Recommendation panels are an adjudicated projection, not a second catalogue.
+  // Keep their cart controls fail-closed unless the backend explicitly reports
+  // positive product-fit evidence for the current response.
+  const [recommendationActionsAuthorized, setRecommendationActionsAuthorized] = useState(false);
   const {
     ambiguityExploration,
     setAmbiguityExploration,
@@ -2599,6 +2604,19 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        const responseQualificationAuthority = String(
+          data?.qualification_authority
+          || data?.post_catalog_adjudication?.qualification_authority
+          || '',
+        ).trim().toLowerCase();
+        const sectionQualificationAuthorized = Boolean(
+          panelContract?.anchor_sections?.some((section) => (
+            String(section?.qualification_authority || '').trim().toLowerCase() === 'positive_evidence'
+          )),
+        );
+        setRecommendationActionsAuthorized(
+          responseQualificationAuthority === 'positive_evidence' || sectionQualificationAuthorized,
+        );
         if (buyerRequirementClaims.length > 0) {
           // An upload is a pending evidence proposal, not permission to keep presenting
           // an earlier case's shelves as if they reflect the newly extracted claims.
@@ -2854,6 +2872,7 @@ export default function App() {
       setTraceId(null);
       switchRightPanelMode('none');
       setRightPanelContract(null);
+      setRecommendationActionsAuthorized(false);
       const errMsg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'unknown_error';
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -3649,7 +3668,9 @@ export default function App() {
                               <article key={`anchor-${idx}-${p.sku}`} className={styles.tierCard}>
                                 <div className={styles.tierName}>{p.name}</div>
                                 <div className={styles.tierPrice}>{formatPrice(p)}</div>
-                                <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                {recommendationActionsAuthorized && (
+                                  <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                )}
                               </article>
                             ))}
                           </div>
@@ -3706,7 +3727,9 @@ export default function App() {
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
                                   <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
-                                  <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                  {recommendationActionsAuthorized && (
+                                    <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                  )}
                                 </article>
                               ))}
                             </div>
@@ -3749,7 +3772,9 @@ export default function App() {
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
                                   <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
-                                  <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                  {recommendationActionsAuthorized && (
+                                    <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                  )}
                                 </article>
                               ))}
                             </div>
@@ -3777,7 +3802,7 @@ export default function App() {
                       </div>
                       <ProductGrid
                         products={expandedLaneProducts}
-                        onAdd={addToCart}
+                        onAdd={recommendationActionsAuthorized ? addToCart : undefined}
                         onWhy={handleWhyProduct}
                         viewMode="detailed"
                       />
@@ -3887,9 +3912,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={recommendationActionsAuthorized ? addToCart : undefined} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={recommendationActionsAuthorized ? addToCart : undefined} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
@@ -3975,7 +4000,7 @@ export default function App() {
                     </>) : !ambiguityExploration && recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
                       <RecommendationShelf
                         shelf={recommendationShelf}
-                        onAdd={addToCart}
+                        onAdd={recommendationActionsAuthorized ? addToCart : undefined}
                         onWhy={handleWhyProduct}
                       />
                     ) : !ambiguityExploration && !productShelves && filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
@@ -3987,7 +4012,7 @@ export default function App() {
                     ) : ambiguityExploration || productShelves ? null : (
                       <ProductGrid
                         products={filteredDisplayProducts}
-                        onAdd={addToCart}
+                        onAdd={recommendationActionsAuthorized ? addToCart : undefined}
                         onWhy={handleWhyProduct}
                         viewMode={viewMode === 'list' || rightPanelMode === 'list' ? 'detailed' : 'grid'}
                       />

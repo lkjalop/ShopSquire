@@ -76,8 +76,10 @@ test('ambiguous workload explores locally before optional research without cart 
 
   const interpretation = page.getByTestId('ambiguity-exploration');
   await expect(interpretation).toBeVisible({ timeout: 60_000 });
-  await expect(interpretation).toContainText(/status: provisional/i);
-  await expect(interpretation).toContainText(/research approved sources/i);
+  await expect(interpretation.getByTestId('buyer-research-status'))
+    .toContainText(/external research is off/i);
+  await expect(interpretation.getByRole('button', { name: /research approved sources/i }))
+    .toBeVisible();
   await expect(interpretation).toContainText(/upload requirements/i);
   await expect(interpretation).toContainText(/enter specifications/i);
   const accounting = page.getByTestId('ambiguity-accounting');

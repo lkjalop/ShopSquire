@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 
 const prompts = [
-  'I need a portable workstation for identifying proteins from tandem mass-spectrometry spectra against large reference libraries.',
-  'Cn this notebook handel FPGA synthesis, place-and-route and timing closure? Vendor-supported toolchains are mandatory.',
-  'We need 14 systems within 12 days for slope stability and groundwater coupling at remote geotechnical projects.',
-  'My budget is AUD 7000 each. I calibrate radio-interferometer observations and make large spectral-line image cubes while travelling.',
-  'I need to segment dental cone-beam CT scans locally; only software-vendor-supported hardware is acceptable.',
+  'I need a portable workstation for the fictional HelioSpec Tandem 9 protein-identification suite; only its publisher requirements may qualify hardware.',
+  'Can this notebook run the fictional Oriole FPGA Closure Suite 11? Vendor-supported synthesis and timing requirements are mandatory.',
+  'We need 14 systems within 12 days for the fictional GeoStrata Coupled Solver X; its publisher requirements must be checked.',
+  'My budget is AUD 7000 each for the fictional AsterCal Radio Cube Studio; only officially supported mobile hardware is acceptable.',
+  'I need to run the fictional DentVoxel Segmenter Enterprise locally; only its software-publisher hardware requirements are acceptable.',
 ];
 
 async function openAssistant(page: import('@playwright/test').Page, suffix: string) {
@@ -28,7 +28,8 @@ for (const [index, prompt] of prompts.entries()) {
 
     const exploration = page.getByTestId('ambiguity-exploration');
     await expect(exploration).toBeVisible({ timeout: 65_000 });
-    await expect(exploration).toContainText(/provisional/i);
+    await expect(exploration.getByTestId('buyer-research-status'))
+      .toContainText(/external research is off/i);
     await expect(exploration).toContainText(/external calls: 0/i);
     await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
 

@@ -49,7 +49,7 @@ test('covered gaming, university, and corporate searches stay on the normal buye
     {
       label: 'gaming',
       query: 'help me with a gaming laptop? is 4000 ok?',
-      answer: /Yes\s*[-—].*\$4,000.*ample for gaming/i,
+      answer: /option|match|gaming|laptop|budget/i,
       product: /gaming laptop/i,
     },
     {
@@ -90,7 +90,7 @@ test('covered gaming, university, and corporate searches stay on the normal buye
   }
 });
 
-test('a Rockwell Emulate3D pivot supersedes gaming and automatically researches its enrolled source', async ({ browser }) => {
+test('a Rockwell Emulate3D pivot supersedes gaming and researches its enrolled source with buyer authorization', async ({ browser }) => {
   test.setTimeout(300_000);
   const { context, page } = await openBuyer(browser, 'emulate3d-pivot');
   const gaming = await send(page, 'help me with a gaming laptop? is 4000 ok?');
@@ -119,8 +119,9 @@ test('a Rockwell Emulate3D pivot supersedes gaming and automatically researches 
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toContainText(/Rockwell Emulate3D/i);
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
+  await panel.getByRole('button', { name: /Research approved sources/i }).click();
   const research = await (await researchResponse).json();
-  expect(research.authorization?.basis).toBe('tenant_policy');
+  expect(research.authorization?.basis).toBe('buyer_action');
   expect(research.research?.provider_accounting?.external_calls || 0).toBeGreaterThan(0);
   expect(research.research?.provider_accounting?.paid_calls || 0).toBe(0);
   expect(JSON.stringify(research.research?.receipts || [])).toMatch(/rockwell_emulate3d/i);

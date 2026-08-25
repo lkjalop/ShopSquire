@@ -19,7 +19,7 @@ test('typed fit, quantity and deadline semantics produce governed alternatives',
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
   await send(page, 'I need 30 laptops in 2 days to run Factory I/O for PLC simulation.');
-  await expect(page.getByText(/external research not yet authorized/i)).toBeVisible();
+  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
   await expect(page.getByRole('region', { name: 'Provisional product shelves' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Research approved sources' }).click();

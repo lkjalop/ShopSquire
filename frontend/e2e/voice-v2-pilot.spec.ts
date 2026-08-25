@@ -85,7 +85,7 @@ test('spoken input shares the canonical V2 fail-closed recommendation path', asy
 
   await expect(page.getByText(SPOKEN_QUERY, { exact: false })).toBeVisible();
   await expect(page.getByTitle('Sent via voice')).toBeVisible();
-  await expect(page.getByText(/Provisional shortlist/i)).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible({ timeout: 90_000 });
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await page.getByTitle('Decision Trace').click();

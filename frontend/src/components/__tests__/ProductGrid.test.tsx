@@ -58,6 +58,11 @@ describe('ProductGrid buyer-facing "why" (no internal ranker tags leak)', () => 
 });
 
 describe('ProductGrid cart gating', () => {
+  it('does not render a cart action when the parent withholds authority', () => {
+    render(<ProductGrid products={[product({ stock_status: 'in_stock', cart_eligible: true })]} />);
+    expect(screen.queryByRole('button', { name: /add to cart/i })).toBeNull();
+  });
+
   it('disables Add to Cart and shows "Out of stock" when not cart-eligible', () => {
     const onAdd = vi.fn();
     render(<ProductGrid products={[product({ stock_status: 'out_of_stock', cart_eligible: false })]} onAdd={onAdd} />);

@@ -54,7 +54,7 @@ test('novel suitability request stays provisional and exposes a durable research
   expect(unresolvedTraceId).not.toBe('');
   expect(unresolved.qualification_authority ?? 'none').toBe('none');
 
-  await expect(page.getByTestId('ambiguity-exploration')).toContainText(/provisional/i);
+  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
   await expect(page.getByRole('button', { name: /Discover official sources/i })).toBeVisible();
   await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
@@ -161,7 +161,8 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
   expect(accepted.status).toBe('accepted_case_evidence');
   expect(accepted.qualification_authority).toBe('requirements');
   expect(accepted.cart_mutation).toBe('not_authorized');
-  await expect(page.getByTestId('ambiguity-exploration')).toContainText(/researched/i);
+  await expect(page.getByTestId('buyer-research-status'))
+    .toContainText(/official requirements compiled/i);
   if (process.env.PORTFOLIO_RESEARCH_CERTIFICATE_PATH) {
     const before = (discovery?.product_shelves?.shelves || []).flatMap(
       (shelf: any) => (shelf.initial || []).map((item: any) => item?.product?.configuration_id),

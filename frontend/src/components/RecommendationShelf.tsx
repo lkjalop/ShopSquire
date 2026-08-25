@@ -21,7 +21,7 @@ export type RecommendationShelfContract = {
 
 type Props = {
   shelf: RecommendationShelfContract;
-  onAdd: (sku: string) => void;
+  onAdd?: (sku: string) => void;
   onWhy?: (sku: string) => void;
 };
 
@@ -51,7 +51,9 @@ export default function RecommendationShelf({ shelf, onAdd, onWhy }: Props) {
                 <div className={styles.name}>{product.name}</div>
                 <div className={styles.price}>{formatProductPrice(product)}</div>
                 <div className={styles.actions}>
-                  <button type="button" className={styles.add} onClick={() => onAdd(product.sku)}>Add</button>
+                  {onAdd && (
+                    <button type="button" className={styles.add} onClick={() => onAdd(product.sku)}>Add</button>
+                  )}
                   {onWhy && <button type="button" className={styles.why} onClick={() => onWhy(product.sku)}>Why?</button>}
                 </div>
               </article>

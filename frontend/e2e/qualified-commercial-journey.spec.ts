@@ -21,7 +21,7 @@ test('ambiguous research continues into an explicit synthetic supplier decision'
 
   await expect(page.getByText(/Which named software and version/i)).toBeVisible();
   await expect(page.getByRole('region', { name: 'Provisional product shelves' })).toBeVisible();
-  await expect(page.getByText(/external research not yet authorized/i)).toBeVisible();
+  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
   await expect(page.getByRole('button', { name: 'Review option' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Research approved sources' }).click();

@@ -67,6 +67,7 @@ function StockBadge({ p }: { p: Product }) {
 }
 
 function AddToCartButton({ p, onAdd }: { p: Product; onAdd?: (sku: string) => void }) {
+  if (!onAdd) return null;
   const oos = isOutOfStock(p);
   return (
     <button

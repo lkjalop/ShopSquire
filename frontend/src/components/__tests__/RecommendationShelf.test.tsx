@@ -31,4 +31,12 @@ describe('RecommendationShelf', () => {
     expect(onAdd).toHaveBeenCalledWith('GPU');
     expect(onWhy).toHaveBeenCalledWith('BASIC');
   });
+
+  it('keeps explanations visible while withholding cart actions without authority', () => {
+    const onWhy = vi.fn();
+    render(<RecommendationShelf shelf={shelf} onWhy={onWhy} />);
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Why?' })[0]);
+    expect(onWhy).toHaveBeenCalledWith('BASIC');
+  });
 });
