@@ -5,6 +5,25 @@ import AmbiguityExplorationPanel from '../AmbiguityExplorationPanel';
 import ProductShelvesPanel from '../ProductShelvesPanel';
 
 describe('research truth panels', () => {
+  it('keeps buyer research status concise and proof collapsed by default', () => {
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1', retained_purpose: 'Emulate3D 2026',
+        status: 'provisional', interpretations: [{ label: 'PLC simulation workload' }],
+        next_question: null, execution: 'not_started', evidence: 'material_gap',
+        decision: 'provisional_only', cart_authority: 'none',
+        provider_accounting: { external_calls: 0, paid_calls: 0 },
+      }}
+      onResearch={vi.fn()} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+    />);
+
+    expect(screen.getByTestId('buyer-research-status')).toHaveTextContent(
+      /External research is off.*official link, upload, or typed requirements/i,
+    );
+    expect(screen.getByTestId('buyer-research-proof')).not.toHaveAttribute('open');
+    expect(screen.getByText('View research proof')).toBeInTheDocument();
+  });
+
   it('submits manual specifications through the same provisional review boundary', async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     render(<AmbiguityExplorationPanel

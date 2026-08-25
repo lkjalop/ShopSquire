@@ -56,6 +56,7 @@ class ReviewedConfiguration(BaseModel):
     source_url: str
     official_source_url: str | None = None
     official_identity_scope: Literal["exact_configuration", "family_only", "unavailable"] = "unavailable"
+    official_reviewed_at: datetime | None = None
     reviewed_at: datetime = Field(
         default_factory=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
     )
@@ -149,6 +150,54 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
             SeedClaim(attribute_key="ecc_memory", value=None, claim_class="attested", status="unknown"),
         ],
         availability=[SeedAvailability(location_id="australia_delivery", status="available", lead_time_min_days=2, lead_time_max_days=4)],
+    ),
+    ReviewedConfiguration(
+        sku="UMART-85002",
+        title="MSI CreatorPro X18 HX A14VMG RTX 5000 Ada Mobile Workstation",
+        manufacturer="MSI", mpn="CreatorPro X18 HX A14VMG-453AU",
+        retailer_sku="85002", retailer="Umart",
+        source_url=(
+            "https://www.umart.com.au/product/msi-creatorpro-x18-hx-a14vmg-18in-"
+            "uhd-120hz-core-i9-14900hx-rtx-5000-2tb-ssd-64gb-ram-w11p-laptop-"
+            "creatorpro-x18-hx-a14vmg-453au-85002"
+        ),
+        official_source_url=(
+            "https://storage-asset.msi.com/specSheet/au/content-creation/"
+            "CreatorPro%20X18%20HX%20A14VMG-453AU.pdf"
+        ),
+        official_identity_scope="exact_configuration",
+        reviewed_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+        official_reviewed_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+        price_cents=899_900, form_factor="laptop", mobility="mobile_limited",
+        device_class="mobile_workstation", os_edition="Windows 11 Pro",
+        gpu_class="professional_rtx_5000_ada", gpu_vram_gb=16, gpu_tgp_w=175,
+        ram_installed_gb=64, ram_ceiling_gb=192, ram_upgradeable=True,
+        storage_gb=4000, warranty_type="manufacturer", warranty_years=3,
+        claims=[
+            SeedClaim(attribute_key="cpu_model", value="Intel Core i9-14900HX", claim_class="attested"),
+            SeedClaim(attribute_key="cpu_physical_cores", value=24, claim_class="attested"),
+            SeedClaim(attribute_key="cpu_boost_ghz", value=5.8, unit="GHz", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_family", value="NVIDIA RTX 5000 Ada", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_adapter", value="Intel Killer E3100 2.5Gbps", claim_class="attested"),
+            SeedClaim(attribute_key="isv_certified", value=True, claim_class="attested"),
+        ],
+        official_claims=[
+            SeedClaim(attribute_key="operating_system", value="Windows 11 Pro", claim_class="attested"),
+            SeedClaim(attribute_key="cpu_model", value="Intel Core i9-14900HX", claim_class="attested"),
+            SeedClaim(attribute_key="cpu_physical_cores", value=24, claim_class="attested"),
+            SeedClaim(attribute_key="cpu_boost_ghz", value=5.8, unit="GHz", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_family", value="NVIDIA RTX 5000 Ada", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=16, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_tgp_w", value=175, unit="W", claim_class="attested"),
+            SeedClaim(attribute_key="ram_gb", value=64, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ram_ceiling_gb", value=192, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="storage_gb", value=4000, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_adapter", value="Intel Killer E3100 2.5Gbps", claim_class="attested"),
+            SeedClaim(attribute_key="isv_certified", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(
+            location_id="australia_delivery", status="sold_out", quantity=0,
+        )],
     ),
     ReviewedConfiguration(
         sku="JB-899169", title="Lenovo LOQ 15.6-inch RTX 3050 Gaming Laptop",
@@ -324,6 +373,9 @@ PORTFOLIO_DEMO_AVAILABILITY: dict[str, tuple[SeedAvailability, ...]] = {
     "JW-822962": (
         SeedAvailability(location_id="portfolio_network", status="available", quantity=2),
     ),
+    "UMART-85002": (
+        SeedAvailability(location_id="portfolio_network", status="sold_out", quantity=0),
+    ),
     "JB-899169": (
         SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=12),
     ),
@@ -410,7 +462,8 @@ def _ensure_official_observations(
     """Append exact OEM observations; family pages never certify a retailer SKU."""
     if item.official_identity_scope != "exact_configuration" or not item.official_source_url:
         return
-    config.specification_observed_at = OEM_REVIEW_DATE
+    official_reviewed_at = item.official_reviewed_at or OEM_REVIEW_DATE
+    config.specification_observed_at = official_reviewed_at
     rows = [
         SeedClaim(attribute_key="manufacturer_part_number", value=item.mpn, claim_class="attested"),
         *item.official_claims,
@@ -431,7 +484,7 @@ def _ensure_official_observations(
             claim_class=claim.claim_class, evidence_status=claim.status,
             conflict_group=claim.conflict_group, source_id=item.manufacturer,
             source_record_id=record_id, source_excerpt=claim.excerpt,
-            observed_at=OEM_REVIEW_DATE,
+            observed_at=official_reviewed_at,
         ))
 
 
@@ -478,7 +531,7 @@ def _ensure_availability_observations(
 def configuration_hash(item: ReviewedConfiguration) -> str:
     material = item.model_dump(exclude={
         "claims", "availability", "official_claims", "official_source_url",
-        "official_identity_scope", "reviewed_at",
+        "official_identity_scope", "official_reviewed_at", "reviewed_at",
     })
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
@@ -529,7 +582,7 @@ def ingest_reviewed_configurations(
             availability_observed_at=item.reviewed_at, currency="AUD", active=True,
             **item.model_dump(exclude={
                 "claims", "availability", "official_claims", "official_source_url",
-                "official_identity_scope", "reviewed_at",
+                "official_identity_scope", "official_reviewed_at", "reviewed_at",
             }),
         )
         db.add(config)

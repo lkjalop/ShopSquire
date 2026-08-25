@@ -69,6 +69,15 @@ export default function AmbiguityExplorationPanel({
   const [candidateStatus, setCandidateStatus] = useState('');
   const openWorldDiscovery = (exploration.source_candidate_ids?.length || 0) === 0;
   const question = exploration.next_question?.text || exploration.next_question?.question;
+  const buyerStatus = exploration.status === 'researched'
+    ? 'Official requirements compiled; unresolved gaps remain conditional.'
+    : exploration.status === 'context_only'
+      ? 'Research found context, but no authoritative product requirements.'
+      : exploration.status === 'unresolved'
+        ? 'No approved requirement source was established; recommendations remain provisional.'
+        : autoResearchEnabled
+          ? 'Approved external research is running; recommendations remain provisional.'
+          : 'External research is off; provide an official link, upload, or typed requirements.';
   const resolveSource = async (researchAuthorized: boolean) => {
     if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;
     setSourceBusy(true);
@@ -85,28 +94,10 @@ export default function AmbiguityExplorationPanel({
     }
   };
   return (
-    <section data-testid="ambiguity-exploration" style={{ margin: 12, padding: 14, border: '1px solid #93c5fd', borderRadius: 10, background: '#f8fbff' }}>
-      <strong style={{ fontSize: 16 }}>Research needed for a reliable product fit</strong>
-      <div style={{ marginTop: 5, color: '#334155' }}>{exploration.retained_purpose}</div>
-      <div style={{ marginTop: 7, fontSize: 12, color: '#475569' }}>
-        Status: {exploration.status === 'researched'
-          ? 'Researched — scoped product requirements compiled; remaining gaps stay conditional'
-          : exploration.status === 'context_only'
-            ? 'Context researched — no authoritative product requirements were established'
-            : exploration.status === 'unresolved'
-              ? 'Discovery completed — no publisher origin or requirement claim has been accepted'
-              : autoResearchEnabled
-                ? 'External research enabled by tenant policy — approved public-source research starts automatically'
-                : 'External research disabled by tenant policy — use a link, upload, or typed requirements'}
+    <section data-testid="ambiguity-exploration" style={{ margin: 12, padding: 12, border: '1px solid #93c5fd', borderRadius: 10, background: '#f8fbff' }}>
+      <div data-testid="buyer-research-status" style={{ color: '#1e293b' }}>
+        <strong>Research status:</strong> {buyerStatus}
       </div>
-      {exploration.interpretations?.length > 0 && (
-        <details style={{ marginTop: 9, fontSize: 12 }}>
-          <summary>Why research is needed</summary>
-          <ul>{exploration.interpretations.map((item, index) => (
-            <li key={item.hypothesis_id || index}>{item.label || item.hypothesis_id || `Interpretation ${index + 1}`}</li>
-          ))}</ul>
-        </details>
-      )}
       {question && <div data-testid="high-information-question" style={{ marginTop: 10, padding: 9, borderRadius: 7, background: '#fff' }}><strong>To narrow it down:</strong> {question}</div>}
       {exploration.publisher_candidates && exploration.publisher_candidates.length > 0 && (
         <div data-testid="publisher-candidates" style={{ marginTop: 9, padding: 9, border: '1px solid #fdba74', borderRadius: 8 }}>
@@ -248,8 +239,17 @@ export default function AmbiguityExplorationPanel({
           )}
         </div>
       )}
-      <details style={{ marginTop: 9, fontSize: 11 }}>
-        <summary>Research proof</summary>
+      <details data-testid="buyer-research-proof" style={{ marginTop: 9, fontSize: 11 }}>
+        <summary>View research proof</summary>
+        <div style={{ marginTop: 7 }}><strong>Retained purpose:</strong> {exploration.retained_purpose}</div>
+        {exploration.interpretations?.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <strong>Why research is needed</strong>
+            <ul>{exploration.interpretations.map((item, index) => (
+              <li key={item.hypothesis_id || index}>{item.label || item.hypothesis_id || `Interpretation ${index + 1}`}</li>
+            ))}</ul>
+          </div>
+        )}
         {exploration.research_obligations?.length ? (
           <div data-testid="research-resolution-owners" style={{ marginTop: 5 }}>
             {exploration.research_obligations.map((item) => (

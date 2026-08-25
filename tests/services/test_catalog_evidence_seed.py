@@ -16,8 +16,8 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
         second = ingest_reviewed_configurations(db, inventory_profile="realistic")
         assert first == second
         configs = db.execute(select(ProductConfiguration)).scalars().all()
-        assert len(configs) == 12
-        assert sum(row.form_factor == "laptop" for row in configs) == 10
+        assert len(configs) == 13
+        assert sum(row.form_factor == "laptop" for row in configs) == 11
         assert all(row.mpn and row.configuration_hash and row.product_id for row in configs)
         products = db.execute(select(Product)).scalars().all()
         assert {row.sku for row in products} == {row.sku for row in configs}
@@ -41,10 +41,31 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
         )).scalars().all()
         assert {(row.source_id, row.value_json["value"]) for row in exact_oem_mpns} == {
             ("MSI", "Titan 18 HX A2WJ-1038AU"),
+            ("MSI", "CreatorPro X18 HX A14VMG-453AU"),
             ("ASUS", "GX651AX-SR004W"),
             ("HP", "C07NXPT"),
         }
-        assert all(row.observed_at.date().isoformat() == "2026-08-11" for row in exact_oem_mpns)
+        assert {row.observed_at.date().isoformat() for row in exact_oem_mpns} == {
+            "2026-08-11", "2026-08-25",
+        }
+
+        creator = next(row for row in configs if row.sku == "UMART-85002")
+        creator_claims = db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.configuration_id == creator.id,
+            ProductEvidenceObservation.source_id == "MSI",
+        )).scalars().all()
+        creator_values = {
+            row.attribute_key: row.value_json["value"] for row in creator_claims
+        }
+        assert creator_values | {
+            "ram_gb": 64,
+            "gpu_family": "NVIDIA RTX 5000 Ada",
+            "gpu_vram_gb": 16,
+            "cpu_physical_cores": 24,
+            "cpu_boost_ghz": 5.8,
+            "operating_system": "Windows 11 Pro",
+        } == creator_values
+        assert creator.specification_observed_at.date().isoformat() == "2026-08-25"
 
         asus_os = db.execute(select(ProductEvidenceObservation).where(
             ProductEvidenceObservation.configuration_id
@@ -76,6 +97,7 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
             "SCORP-126982": 3,
             "SCORP-125638": 0,
             "JW-822962": 2,
+            "UMART-85002": 0,
             "JB-899169": 12,
             "JB-816759": 7,
             "JB-840466": 0,
