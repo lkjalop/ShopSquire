@@ -127,6 +127,30 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
   });
 
+  it('renders a fail-closed source-intake certificate without exposing the raw URL', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'buyer_evidence_source_resolution_completed',
+      payload: {
+        schema_version: 'buyer-source-intake-certificate-v1',
+        resolution: {
+          status: 'not_enrolled', reason: 'no_canonical_enrolled_source_matched',
+          selected_source_id: null, match_basis: null,
+        },
+        security: { status: 'unresolved', canonical_fetch_eligible: false },
+        execution: { network_execution: false, external_calls: 0, paid_calls: 0 },
+        claim_compilation: { status: 'not_executed', accepted: 0 },
+        decision_effect: { product_fit: 'unchanged', cart_authority: 'none' },
+      },
+    }]} />);
+
+    const certificate = screen.getByTestId('source-intake-certificate');
+    expect(certificate).toHaveTextContent(/Source intake: not enrolled.*safety unresolved/i);
+    expect(certificate).toHaveTextContent(/Network: not executed.*claims accepted: 0/i);
+    expect(certificate).toHaveTextContent(/product fit: unchanged/i);
+    expect(certificate).toHaveTextContent(/Raw URL query parameters and credentials are not persisted/i);
+    expect(certificate).not.toHaveTextContent(/token=/i);
+  });
+
   it('shows an unresolved provider search without fabricating evidence', () => {
     render(<WorkloadResearchTrace executionSteps={[
       {

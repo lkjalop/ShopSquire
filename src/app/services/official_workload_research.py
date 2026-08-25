@@ -243,6 +243,78 @@ def _workstation_application_claims(
     return rows, []
 
 
+def _emulate3d_claims(
+    source_id: str, folded: str, observed_at: str, citation_url: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compile only explicit tiers from the reviewed Emulate3D requirements page."""
+
+    if "emulate3d" not in folded or "recommended hardware" not in folded:
+        return [], []
+    rows: list[dict[str, Any]] = []
+    if "64 gb ram" in folded or "64gb ram" in folded:
+        rows.append(_claim(
+            source_id, "ram_gb", ">=", 64, unit="GB",
+            claim_type="recommended_requirements", requirement_class="recommended",
+            statement="Emulate3D publishes 64 GB RAM in its recommended hardware tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "intel core i9 or amd ryzen 9" in folded:
+        rows.append(_claim(
+            source_id, "cpu_family", "one_of", ["Intel Core i9", "AMD Ryzen 9"],
+            claim_type="recommended_requirements", requirement_class="recommended",
+            statement="Emulate3D recommends an Intel Core i9 or AMD Ryzen 9 processor family.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "8 core processor at 5ghz or greater boost frequency" in folded:
+        rows.extend([
+            _claim(
+                source_id, "cpu_physical_cores", ">=", 8,
+                claim_type="recommended_requirements", requirement_class="recommended",
+                statement="Emulate3D recommends an 8-core processor.",
+                observed_at=observed_at, citation_url=citation_url,
+            ),
+            _claim(
+                source_id, "cpu_boost_ghz", ">=", 5, unit="GHz",
+                claim_type="recommended_requirements", requirement_class="recommended",
+                statement="Emulate3D recommends 5 GHz or greater boost frequency.",
+                observed_at=observed_at, citation_url=citation_url,
+            ),
+        ])
+    if "nvidia rtx 5000 series" in folded:
+        rows.append(_claim(
+            source_id, "gpu_family", "contains", "NVIDIA RTX 5000 series",
+            claim_type="recommended_requirements", requirement_class="recommended",
+            statement="Emulate3D publishes NVIDIA RTX 5000 series in its recommended tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "windows 11 (64-bit)" in folded:
+        rows.append(_claim(
+            source_id, "operating_system", "one_of", ["Windows 11 Pro", "Windows 11"],
+            claim_type="compatibility", requirement_class="recommended",
+            statement="Emulate3D publishes Windows 11 (64-bit) in its recommended tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if (
+        "high performance ethernet network adapter card" in folded
+        and "connecting to a plc using cip class 1" in folded
+    ):
+        rows.append(_claim(
+            source_id, "network_adapter_class", "equals", "high_performance_dedicated",
+            claim_type="compatibility", requirement_class="recommended",
+            condition="PLC connectivity using CIP Class 1",
+            statement="Emulate3D recommends a high-performance Ethernet adapter for PLC connectivity using CIP Class 1.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "16gb ram" in folded or "16 gb ram" in folded:
+        rows.append(_claim(
+            source_id, "ram_gb", ">=", 16, unit="GB",
+            claim_type="minimum_requirements", requirement_class="minimum",
+            statement="Emulate3D publishes 16 GB RAM in its minimum recommended tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    return rows, []
+
+
 _SOURCE_PARSERS = {
     "factory_io_official_docs": _factory_io_claims,
     "microsoft_learn_hyperv": _hyperv_claims,
@@ -253,6 +325,7 @@ _SOURCE_PARSERS = {
     "autodesk_autocad_requirements": _workstation_application_claims,
     "autodesk_revit_requirements": _workstation_application_claims,
     "epic_unreal_engine_requirements": _workstation_application_claims,
+    "rockwell_emulate3d_official_requirements": _emulate3d_claims,
 }
 
 _PARSER_VERSION = "official-source-parser-v2"
@@ -578,6 +651,10 @@ def _compiled_claims_allowed(
         row["source_applicability"] = dict(source.get("applicability") or {})
         row["parser_type"] = source.get("parser_type")
         row["policy_version"] = _policy_version(source)
+        row["policy_review_status"] = str(
+            (source.get("independent_review") or {}).get("status")
+            or source.get("review_status") or "unknown"
+        )
     if not fresh:
         reasons.append("origin_evidence_stale")
         return [], [], reasons
@@ -736,6 +813,7 @@ async def research_official_sources(
     receipts: list[dict[str, Any]] = []
     source_execution: list[dict[str, Any]] = []
     claims: list[dict[str, Any]] = []
+    provisional_claims: list[dict[str, Any]] = []
     context_claims: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     for source in sources[:4]:
@@ -1165,22 +1243,63 @@ async def research_official_sources(
         product_rows, context_rows, claim_errors = _compiled_claims_allowed(
             source, product_rows, context_rows, observed_at=observed_at, now=current,
         )
+        independent_review_status = str(
+            (source.get("independent_review") or {}).get("status") or ""
+        )
+        ownership_status = str(
+            (execution.get("publisher_origin_verification") or {}).get("status")
+            or "not_required"
+        )
+        source_provisional_rows: list[dict[str, Any]] = []
+        if product_rows and (
+            independent_review_status.endswith("pending")
+            or ownership_status == "unresolved"
+        ):
+            source_provisional_rows = product_rows
+            for row in source_provisional_rows:
+                row["authority_status"] = "pending_independent_policy_review"
+                row["acceptance_status"] = "parsed_not_accepted"
+            product_rows = []
+            claim_errors.append(
+                "independent_policy_human_signoff_pending"
+                if independent_review_status.endswith("pending")
+                else "publisher_origin_ownership_unresolved"
+            )
         unresolved.extend({"source_id": source_id, "reason": reason} for reason in claim_errors)
-        execution["parser_coverage"].update({
-            "candidate_claims": len(product_rows) + len(context_rows) + len(claim_errors),
+        parser_coverage_update = {
+            "candidate_claims": (
+                len(product_rows) + len(source_provisional_rows)
+                + len(context_rows) + len(claim_errors)
+            ),
             "accepted_claims": len(product_rows),
             "rejected_claims": len(claim_errors),
             "context_claims": len(context_rows),
-            "parse_status": "completed" if (product_rows or context_rows) else "no_scoped_claims",
-        })
+            "parse_status": (
+                "claims_pending_policy_review" if source_provisional_rows else
+                "completed" if (product_rows or context_rows) else "no_scoped_claims"
+            ),
+        }
+        if source_provisional_rows:
+            parser_coverage_update["provisional_claims"] = len(source_provisional_rows)
+        execution["parser_coverage"].update(parser_coverage_update)
         official_parser_outcomes_total.labels(
-            status="completed" if (product_rows or context_rows) else "zero_yield",
-            failure_code="none" if (product_rows or context_rows) else "no_scoped_claims",
+            status=(
+                "pending_review" if source_provisional_rows else
+                "completed" if (product_rows or context_rows) else "zero_yield"
+            ),
+            failure_code=(
+                "independent_policy_review_pending" if source_provisional_rows else
+                "none" if (product_rows or context_rows) else "no_scoped_claims"
+            ),
         ).inc()
-        claims.extend(product_rows)
-        context_claims.extend(context_rows)
         observed = _parse_time(observed_at)
         content_hash = str(raw_origin_receipt.get("response_body_hash") or hashlib.sha256(origin["content"]).hexdigest())
+        for row in [*product_rows, *source_provisional_rows, *context_rows]:
+            row["parser_version"] = parser_version
+            row["source_content_hash"] = content_hash
+        claims.extend(product_rows)
+        provisional_claims.extend(source_provisional_rows)
+        context_claims.extend(context_rows)
         if observed is not None and not claim_errors and (product_rows or context_rows):
             cache.put(OfficialEvidenceCacheEntry(
                 key=OfficialEvidenceCacheKey(
@@ -1194,11 +1313,12 @@ async def research_official_sources(
                 claims=tuple(dict(row) for row in product_rows),
                 context_claims=tuple(dict(row) for row in context_rows),
             ))
-        if not product_rows and not context_rows:
+        if not product_rows and not source_provisional_rows and not context_rows:
             unresolved.append({"source_id": source_id, "reason": "no_recognized_scoped_claims"})
     deduped = list({row["claim_id"]: row for row in claims}.values())
     evidence_outcome = (
         "product_requirements" if deduped
+        else "claims_pending_policy_review" if provisional_claims
         else "context_only" if context_claims
         else "unresolved"
     )
@@ -1227,15 +1347,54 @@ async def research_official_sources(
         receipts=receipts, source_execution=source_execution,
         evidence_outcome=evidence_outcome, search_configured=bool(search_url_template),
     )
+    source_by_id = {str(row.get("source_id") or ""): row for row in sources}
+    claim_compilation_receipts = []
+    for execution in source_execution:
+        source_id = str(execution.get("source_id") or "")
+        source = source_by_id.get(source_id) or {}
+        source_claims = [row for row in deduped if row.get("source_id") == source_id]
+        source_provisional = [
+            row for row in provisional_claims if row.get("source_id") == source_id
+        ]
+        source_context = [row for row in context_claims if row.get("source_id") == source_id]
+        content_hashes = sorted({
+            str(row.get("source_content_hash"))
+            for row in [*source_claims, *source_provisional, *source_context]
+            if row.get("source_content_hash")
+        })
+        claim_compilation_receipts.append({
+            "source_id": source_id,
+            "parser_version": execution.get("parser_version"),
+            "policy_version": execution.get("policy_version"),
+            "independent_review_status": str(
+                (source.get("independent_review") or {}).get("status")
+                or source.get("review_status") or "unknown"
+            ),
+            "parse_status": (execution.get("parser_coverage") or {}).get("parse_status"),
+            "accepted_claim_count": len(source_claims),
+            "provisional_claim_count": len(source_provisional),
+            "context_claim_count": len(source_context),
+            "claim_ids": [
+                str(row.get("claim_id")) for row in [*source_claims, *source_provisional]
+            ],
+            "source_content_hashes": content_hashes,
+            "qualification_authority": (
+                "human_policy_signoff_pending"
+                if str((source.get("independent_review") or {}).get("status") or "").endswith("pending")
+                else "scoped_official_claims"
+            ),
+        })
     return {
         "schema_version": "official-workload-research-v1",
         "run_id": run_id, "purpose": purpose,
         "research_plan_id": plan_id,
         "hypothesis_ids": list(hypothesis_ids or []),
         "source_ids": [str(source.get("source_id") or "") for source in sources],
-        "claims": deduped, "context_claims": context_claims,
+        "claims": deduped, "provisional_claims": provisional_claims,
+        "context_claims": context_claims,
         "unresolved": unresolved, "receipts": receipts,
         "source_execution": source_execution,
+        "claim_compilation_receipts": claim_compilation_receipts,
         "evidence_ladder": evidence_ladder,
         "evidence_outcome": evidence_outcome,
         "provider_accounting": {

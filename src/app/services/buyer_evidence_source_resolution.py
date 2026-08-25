@@ -6,6 +6,7 @@ the enrolled canonical origin and compile claims.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Literal, Sequence
 from urllib.parse import urlparse
@@ -31,13 +32,22 @@ class BuyerEvidenceSourceResolution(BaseModel):
 
     status: Literal["resolved", "ambiguous", "not_enrolled", "invalid"]
     resolution_owner: Literal["research"] = "research"
+    # Sanitized display URL only: credentials, query, and fragment are never
+    # returned or persisted in Decision Trace.
     submitted_url: str | None = None
+    submitted_url_hash: str | None = None
+    submitted_host: str | None = None
+    submitted_path_hash: str | None = None
     vendor_name: str | None = None
     candidates: list[BuyerEvidenceSourceCandidate]
     selected_source_id: str | None = None
     external_calls: Literal[0] = 0
     paid_calls: Literal[0] = 0
     reason: str
+    security_status: Literal[
+        "canonical_fetch_eligible", "blocked", "unresolved",
+    ] = "unresolved"
+    canonical_fetch_eligible: bool = False
 
 
 def _origin_key(value: str) -> tuple[str, str] | None:
@@ -47,6 +57,29 @@ def _origin_key(value: str) -> tuple[str, str] | None:
     host = parsed.hostname.lower().rstrip(".")
     path = "/" + str(parsed.path or "/").strip("/")
     return host, path.rstrip("/") or "/"
+
+
+def _submitted_url_metadata(value: str | None) -> dict[str, str | None]:
+    raw = str(value or "").strip()
+    if not raw:
+        return {
+            "submitted_url": None, "submitted_url_hash": None,
+            "submitted_host": None, "submitted_path_hash": None,
+        }
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    parsed = urlparse(raw)
+    host = str(parsed.hostname or "").lower().rstrip(".") or None
+    path = "/" + str(parsed.path or "/").strip("/")
+    path = path.rstrip("/") or "/"
+    safe_url = None
+    if parsed.scheme.lower() == "https" and host and not parsed.username and not parsed.password:
+        safe_url = f"https://{host}{path}"
+    return {
+        "submitted_url": safe_url,
+        "submitted_url_hash": digest,
+        "submitted_host": host,
+        "submitted_path_hash": hashlib.sha256(path.encode("utf-8")).hexdigest(),
+    }
 
 
 def _words(value: str) -> set[str]:
@@ -72,10 +105,12 @@ def resolve_buyer_evidence_source(
 ) -> BuyerEvidenceSourceResolution:
     """Map one buyer hint to reviewed registry entries without fetching it."""
 
+    submitted_metadata = _submitted_url_metadata(source_url)
     if bool(str(source_url or "").strip()) == bool(str(vendor_name or "").strip()):
         return BuyerEvidenceSourceResolution(
-            status="invalid", submitted_url=source_url, vendor_name=vendor_name,
+            status="invalid", **submitted_metadata, vendor_name=vendor_name,
             candidates=[], reason="provide_exactly_one_url_or_vendor_name",
+            security_status="blocked",
         )
     registry = list(sources) if sources is not None else list(
         load_official_source_manifest().get("sources") or []
@@ -85,8 +120,9 @@ def resolve_buyer_evidence_source(
         submitted = _origin_key(source_url)
         if submitted is None:
             return BuyerEvidenceSourceResolution(
-                status="invalid", submitted_url=source_url, candidates=[],
+                status="invalid", **submitted_metadata, candidates=[],
                 reason="official_evidence_url_must_be_https_without_credentials",
+                security_status="blocked",
             )
         submitted_host, submitted_path = submitted
         host_sources: dict[str, dict[str, Any]] = {}
@@ -151,10 +187,15 @@ def resolve_buyer_evidence_source(
     else:
         status, reason = "not_enrolled", "no_canonical_enrolled_source_matched"
     return BuyerEvidenceSourceResolution(
-        status=status, submitted_url=source_url, vendor_name=vendor_name,
+        status=status, **submitted_metadata, vendor_name=vendor_name,
         candidates=matches,
         selected_source_id=eligible[0].source_id if status == "resolved" else None,
         reason=reason,
+        security_status=(
+            "canonical_fetch_eligible" if status == "resolved" else
+            "blocked" if status == "invalid" else "unresolved"
+        ),
+        canonical_fetch_eligible=status == "resolved",
     )
 
 

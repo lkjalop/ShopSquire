@@ -27,6 +27,18 @@ const isShoppingCaseObligationEvent = (event: any) => (
     .some((value) => String(value || '').toLowerCase() === 'shopping_case_obligations_retained')
 );
 
+const sourceIntakeCertificateFromEvent = (event: any) => {
+  const eventType = String(
+    event?.payload?._original_event_type || event?.event_type || '',
+  ).toLowerCase();
+  if (!eventType.includes('buyer_evidence_source_')) return null;
+  const payload = event?.payload || {};
+  if (payload?.source_intake_certificate?.schema_version) {
+    return payload.source_intake_certificate;
+  }
+  return payload?.schema_version === 'buyer-source-intake-certificate-v1' ? payload : null;
+};
+
 const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   const rows = value && typeof value === 'object' ? Object.entries(value) : [];
   if (!rows.length) return null;
@@ -62,6 +74,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
+  const sourceIntakeCertificate = [...events].reverse()
+    .map(sourceIntakeCertificateFromEvent)
+    .find(Boolean) || null;
   const queryProposal = officialResearch?.query_proposal || {};
   const publisherOriginVerification = officialResearch?.publisher_origin_verification || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
@@ -98,6 +113,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     || postCatalogTrigger.id
     || semanticEvidence.id || semanticAuthorization.id || evidenceLadder.length
     || Object.keys(officialResearch).length > 0
+    || Boolean(sourceIntakeCertificate)
     || provisionalExploration?.research_plan_id
   );
 
@@ -126,6 +142,26 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
               {' · '}Commerce authority: <strong>{words(canonicalTruth.commerce_authority)}</strong>
             </div>
           </div>
+        )}
+        {sourceIntakeCertificate && (
+          <details data-testid="source-intake-certificate" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+              Source intake: {words(sourceIntakeCertificate?.resolution?.status)}
+              {' · '}safety {words(sourceIntakeCertificate?.security?.status)}
+            </summary>
+            <div style={{ marginTop: 7 }}>
+              Publisher source: <strong>{words(sourceIntakeCertificate?.resolution?.selected_source_id)}</strong>
+              {' · '}match: <strong>{words(sourceIntakeCertificate?.resolution?.match_basis)}</strong>
+            </div>
+            <div>
+              Network: <strong>{sourceIntakeCertificate?.execution?.network_execution ? 'executed' : 'not executed'}</strong>
+              {' · '}claims accepted: <strong>{String(sourceIntakeCertificate?.claim_compilation?.accepted ?? 0)}</strong>
+              {' · '}product fit: <strong>{words(sourceIntakeCertificate?.decision_effect?.product_fit)}</strong>
+            </div>
+            <small style={{ color: '#64748b' }}>
+              Raw URL query parameters and credentials are not persisted. A recognized publisher is not itself an accepted product claim.
+            </small>
+          </details>
         )}
         {provisionalExploration?.research_plan_id && (
           <div data-testid="provisional-research-plan" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>

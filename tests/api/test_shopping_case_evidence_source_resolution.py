@@ -56,6 +56,11 @@ def test_url_resolution_is_case_bound_zero_network_until_authorized():
     assert payload["research_status"] == "not_authorized"
     assert payload["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
     assert payload["cart_mutation"] == "not_authorized"
+    certificate = payload["source_intake_certificate"]
+    assert certificate["security"]["canonical_fetch_eligible"] is True
+    assert certificate["security"]["arbitrary_submitted_path_fetch_allowed"] is False
+    assert certificate["execution"]["network_execution"] is False
+    assert certificate["claim_compilation"]["status"] == "not_executed"
 
 
 def test_authorized_url_fetches_reviewed_canonical_and_reranks_same_case(monkeypatch):
@@ -102,6 +107,15 @@ def test_authorized_url_fetches_reviewed_canonical_and_reranks_same_case(monkeyp
     assert payload["product_shelves"]["schema_version"] == "product-shelves-v1"
     assert calls[0][1]["search_url_template"] == ""
     assert [row["source_id"] for row in calls[0][1]["sources"]] == ["factory_io_official_docs"]
+    certificate = payload["source_intake_certificate"]
+    assert certificate["claim_compilation"] == {
+        "status": "completed",
+        "accepted": 1,
+        "rejected": 0,
+        "unresolved": 0,
+        "evidence_outcome": "product_requirements",
+    }
+    assert certificate["decision_effect"]["cart_authority"] == "none"
 
 
 def test_vendor_ambiguity_and_unrelated_same_domain_page_never_dispatch(monkeypatch):
@@ -126,3 +140,38 @@ def test_vendor_ambiguity_and_unrelated_same_domain_page_never_dispatch(monkeypa
     ).json()
     assert unrelated["resolution"]["status"] == "not_enrolled"
     assert unrelated["provider_accounting"]["external_calls"] == 0
+
+
+def test_rejected_url_is_sanitized_and_still_emits_fail_closed_trace(monkeypatch):
+    client = _client()
+    case_id = _case(client)
+    events = []
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases.log_trace_event",
+        lambda **kwargs: events.append(kwargs),
+    )
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+        json={
+            "uid": "buyer-link",
+            "source_url": "https://evil.example/requirements?token=secret-value",
+            "research_authorized": True,
+        },
+    )
+    assert response.status_code == 200
+    raw = response.text
+    payload = response.json()
+    assert payload["resolution"]["status"] == "not_enrolled"
+    assert payload["provider_accounting"]["external_calls"] == 0
+    assert "secret-value" not in raw
+    assert "token=" not in raw
+    source_events = [
+        row for row in events
+        if row.get("event_type") == "buyer_evidence_source_resolution_completed"
+    ]
+    assert len(source_events) == 1
+    certificate = source_events[0]["payload"]
+    assert certificate["security"]["status"] == "unresolved"
+    assert certificate["execution"]["network_execution"] is False
+    assert certificate["decision_effect"]["product_fit"] == "unchanged"
+    assert "secret-value" not in str(certificate)

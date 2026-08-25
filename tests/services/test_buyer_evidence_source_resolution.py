@@ -63,6 +63,26 @@ def test_obsolete_path_on_uniquely_enrolled_domain_maps_to_reviewed_canonical():
     assert result.external_calls == result.paid_calls == 0
 
 
+def test_query_tokens_are_hashed_and_never_returned_in_resolution():
+    result = resolve_buyer_evidence_source(
+        source_url=(
+            "https://docs.factoryio.com/manual/system-requirements/"
+            "?access_token=do-not-persist#private"
+        ),
+        sources=_sources(),
+    )
+    raw = result.model_dump_json()
+    assert result.status == "resolved"
+    assert result.submitted_url == (
+        "https://docs.factoryio.com/manual/system-requirements"
+    )
+    assert result.submitted_url_hash
+    assert result.submitted_path_hash
+    assert "do-not-persist" not in raw
+    assert "access_token" not in raw
+    assert "private" not in raw
+
+
 def test_vendor_resolution_preserves_ambiguity_and_review_state():
     ambiguous = resolve_buyer_evidence_source(vendor_name="Autodesk", sources=_sources())
     assert ambiguous.status == "ambiguous"

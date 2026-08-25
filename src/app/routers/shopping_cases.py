@@ -1341,14 +1341,74 @@ async def _resolve_case_evidence_source_with_db(
     resolution = resolve_buyer_evidence_source(
         source_url=body.source_url, vendor_name=body.vendor_name, sources=sources,
     )
+    resolution_payload = resolution.model_dump(mode="json")
+    source_intake_certificate = {
+        "schema_version": "buyer-source-intake-certificate-v1",
+        "case_id": case_id,
+        "case_revision": int(case.revision or 1),
+        "submitted_source": {
+            "url_hash": resolution.submitted_url_hash,
+            "host": resolution.submitted_host,
+            "path_hash": resolution.submitted_path_hash,
+            "vendor_name_hash": (
+                hashlib.sha256(str(body.vendor_name).encode("utf-8")).hexdigest()
+                if body.vendor_name else None
+            ),
+            "raw_query_persisted": False,
+            "raw_credentials_persisted": False,
+        },
+        "resolution": {
+            "status": resolution.status,
+            "reason": resolution.reason,
+            "selected_source_id": resolution.selected_source_id,
+            "match_basis": (
+                resolution.candidates[0].match_basis
+                if len(resolution.candidates) == 1 else None
+            ),
+        },
+        "security": {
+            "status": resolution.security_status,
+            "canonical_fetch_eligible": resolution.canonical_fetch_eligible,
+            "arbitrary_submitted_path_fetch_allowed": False,
+        },
+        "execution": {
+            "network_execution": False,
+            "external_calls": 0,
+            "paid_calls": 0,
+        },
+        "claim_compilation": {
+            "status": "not_executed", "accepted": 0,
+            "rejected": 0, "unresolved": 0,
+        },
+        "decision_effect": {
+            "product_fit": "unchanged",
+            "cart_authority": "none",
+            "supplier_authority": "none",
+        },
+    }
     base = {
         "schema_version": "buyer-evidence-source-resolution-v1",
         "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
-        "resolution": resolution.model_dump(mode="json"),
+        "resolution": resolution_payload,
+        "source_intake_certificate": source_intake_certificate,
         "research_status": "not_authorized",
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
         "cart_mutation": "not_authorized", "supplier_send": "not_authorized",
     }
+    try:
+        log_trace_event(
+            trace_id=base["trace_id"],
+            event_type="buyer_evidence_source_resolution_completed",
+            source_type="deterministic_reducer",
+            source_id="Buyer_Evidence_Source_Resolution",
+            target_type="shopping_case", target_id=case_id,
+            tenant_id=tenant_id,
+            payload=source_intake_certificate,
+        )
+    except Exception:
+        # The source decision remains fail-closed even if optional trace transport
+        # is unavailable; the API still returns the complete certificate.
+        pass
     if resolution.status != "resolved" or not body.research_authorized:
         return base
     if (
@@ -1383,12 +1443,77 @@ async def _resolve_case_evidence_source_with_db(
         ).configuration_ids,
     ).model_dump(mode="json")
     evidence_outcome = str(research.get("evidence_outcome") or "unresolved")
+    research_receipts = list(research.get("receipts") or [])
+    origin_receipts = [
+        row for row in research_receipts
+        if str(row.get("provider_capability") or "") == "OFFICIAL_ORIGIN_FETCH"
+    ]
+    accepted_claims = list(research.get("claims") or [])
+    provisional_claims = list(research.get("provisional_claims") or [])
+    rejected_claims = list(research.get("rejected_claims") or [])
+    unresolved_claims = list(research.get("unresolved") or [])
+    network_execution = any(bool(row.get("network_execution")) for row in origin_receipts)
+    completed_origin = any(
+        str(row.get("execution_status") or "") == "completed"
+        for row in origin_receipts
+    )
+    source_intake_certificate = {
+        **source_intake_certificate,
+        "security": {
+            **source_intake_certificate["security"],
+            "status": (
+                "observed_untrusted_content_pending_compilation"
+                if completed_origin else "fetch_failed_closed"
+            ),
+            "response_body_hashes": sorted({
+                str(row.get("response_body_hash"))
+                for row in origin_receipts if row.get("response_body_hash")
+            }),
+            "integrity_state": (
+                "content_hash_recorded_no_baseline_comparison"
+                if completed_origin else "no_content_accepted"
+            ),
+        },
+        "execution": {
+            "network_execution": network_execution,
+            "external_calls": int((research.get("provider_accounting") or {}).get("external_calls") or 0),
+            "paid_calls": int((research.get("provider_accounting") or {}).get("paid_calls") or 0),
+            "origin_fetch_status": "completed" if completed_origin else "failed",
+        },
+        "claim_compilation": {
+            "status": (
+                "completed" if accepted_claims else
+                "claims_pending_policy_review" if provisional_claims else
+                "completed_zero_accepted" if completed_origin else "not_executed"
+            ),
+            "accepted": len(accepted_claims),
+            "rejected": len(rejected_claims),
+            "unresolved": len(unresolved_claims),
+            "evidence_outcome": evidence_outcome,
+        },
+        "decision_effect": {
+            "product_fit": (
+                "reranked_from_compiled_requirements"
+                if evidence_outcome == "product_requirements"
+                else "blocked_pending_independent_policy_review"
+                if evidence_outcome == "claims_pending_policy_review"
+                else "provisional_unchanged"
+            ),
+            "cart_authority": "none",
+            "supplier_authority": "none",
+        },
+    }
+    if provisional_claims:
+        source_intake_certificate["claim_compilation"]["provisional"] = len(
+            provisional_claims
+        )
     result = {
         **base, "research_status": "completed",
         "provider_accounting": research.get("provider_accounting") or {
             "external_calls": 0, "paid_calls": 0,
         },
         "research": research, "evidence_outcome": evidence_outcome,
+        "source_intake_certificate": source_intake_certificate,
         "product_shelves": shelves,
     }
     try:
@@ -1404,6 +1529,7 @@ async def _resolve_case_evidence_source_with_db(
                 "receipts": research.get("receipts") or [],
                 "evidence_ladder": research.get("evidence_ladder") or [],
                 "provider_accounting": result["provider_accounting"],
+                "source_intake_certificate": source_intake_certificate,
                 "cart_authority": "none", "supplier_authority": "none",
             },
         )

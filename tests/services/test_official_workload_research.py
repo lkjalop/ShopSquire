@@ -126,6 +126,108 @@ def test_application_parsers_do_not_share_claims_across_publishers() -> None:
     assert all(row["source_id"] == "autodesk_autocad_requirements" for row in autocad)
 
 
+def test_emulate3d_parser_preserves_recommended_and_minimum_tiers() -> None:
+    claims, context = compile_source_claims(
+        "rockwell_emulate3d_official_requirements",
+        b"""
+        <h1>Emulate3D System Requirements</h1>
+        <h2>Recommended Hardware</h2>
+        Intel Core i9 or AMD Ryzen 9
+        8 core processor at 5GHz or greater boost frequency
+        64 GB RAM
+        Nvidia RTX 5000 series
+        Windows 11 (64-bit)
+        High performance ethernet network adapter card when connecting to a PLC using CIP Class 1.
+        <h3>Minimum Hardware</h3>
+        Intel Core i5; 16GB RAM; Windows 10 (64-bit)
+        """,
+        observed_at="2026-08-25T00:00:00Z",
+        citation_url=(
+            "https://store.sim3d.com/helpconsole.php?j=demo3d_2026"
+            "&p=system_requirements&action=view&format=raw"
+        ),
+    )
+    assert context == []
+    by_attribute_and_class = {
+        (row["attribute"], row["requirement_class"]): row for row in claims
+    }
+    assert by_attribute_and_class[("ram_gb", "recommended")]["value"] == 64
+    assert by_attribute_and_class[("ram_gb", "minimum")]["value"] == 16
+    assert by_attribute_and_class[("cpu_physical_cores", "recommended")]["value"] == 8
+    assert by_attribute_and_class[("cpu_boost_ghz", "recommended")]["value"] == 5
+    assert by_attribute_and_class[("gpu_family", "recommended")]["value"] == (
+        "NVIDIA RTX 5000 series"
+    )
+    assert by_attribute_and_class[("network_adapter_class", "recommended")][
+        "condition"
+    ] == "PLC connectivity using CIP Class 1"
+
+
+def test_emulate3d_parser_rejects_unidentified_requirement_prose() -> None:
+    claims, context = compile_source_claims(
+        "rockwell_emulate3d_official_requirements",
+        b"Recommended Hardware: 64 GB RAM and Nvidia RTX 5000 series",
+        observed_at="2026-08-25T00:00:00Z",
+        citation_url="https://store.sim3d.com/helpconsole.php",
+    )
+    assert claims == []
+    assert context == []
+
+
+def test_emulate3d_policy_pending_keeps_parsed_claims_out_of_qualification(monkeypatch) -> None:
+    from src.app.services.official_source_governance import load_official_source_manifest
+
+    content = (
+        b"Emulate3D System Requirements. Recommended Hardware: Intel Core i9 or AMD Ryzen 9; "
+        b"8 core processor at 5GHz or greater boost frequency; 64 GB RAM; "
+        b"Nvidia RTX 5000 series; Windows 11 (64-bit). Minimum Hardware: 16GB RAM."
+    )
+
+    class Origin:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fetch(self, url, **_kwargs):
+            return {
+                "status": "completed", "content": content, "content_type": "text/plain",
+                "receipt": {
+                    "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+                    "provider_id": "governed_http_origin", "fixture": False,
+                    "network_execution": True, "external_call_dispatched": True,
+                    "execution_status": "completed", "cache_status": "miss",
+                    "provider_endpoint_host": "store.sim3d.com", "query_hash": "a" * 16,
+                    "http_status": 200, "response_body_hash": "b" * 64,
+                    "started_at": "2026-08-25T00:00:00+00:00",
+                    "completed_at": "2026-08-25T00:00:01+00:00",
+                    "observed_at": "2026-08-25T00:00:01+00:00",
+                },
+            }
+
+    source = next(
+        row for row in load_official_source_manifest()["sources"]
+        if row["source_id"] == "rockwell_emulate3d_official_requirements"
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources_sync(
+        "Rockwell Emulate3D", search_url_template="", sources=[source],
+        evidence_cache=OfficialEvidenceCache(), now=datetime(2026, 8, 25, 1, tzinfo=timezone.utc),
+    )
+
+    assert result["claims"] == []
+    assert len(result["provisional_claims"]) >= 6
+    assert result["evidence_outcome"] == "claims_pending_policy_review"
+    assert {row["authority_status"] for row in result["provisional_claims"]} == {
+        "pending_independent_policy_review"
+    }
+    receipt = result["claim_compilation_receipts"][0]
+    assert receipt["accepted_claim_count"] == 0
+    assert receipt["provisional_claim_count"] >= 6
+    assert receipt["qualification_authority"] == "human_policy_signoff_pending"
+    assert receipt["source_content_hashes"] == ["b" * 64]
+
+
 def test_unregistered_source_parser_cannot_create_claims() -> None:
     claims, context = compile_source_claims(
         "search_snippet", b"32 GB RAM and 16 GB VRAM is perfect",
