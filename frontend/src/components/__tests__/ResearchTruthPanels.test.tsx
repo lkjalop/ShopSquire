@@ -18,7 +18,7 @@ describe('research truth panels', () => {
     />);
 
     expect(screen.getByTestId('buyer-research-status')).toHaveTextContent(
-      /External research is off.*official link, upload, or typed requirements/i,
+      /External research has not produced evidence.*official link, upload, or typed requirements/i,
     );
     expect(screen.getByTestId('buyer-research-proof')).not.toHaveAttribute('open');
     expect(screen.getByText('View research proof')).toBeInTheDocument();

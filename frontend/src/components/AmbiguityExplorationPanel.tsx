@@ -77,7 +77,7 @@ export default function AmbiguityExplorationPanel({
         ? 'No approved requirement source was established; recommendations remain provisional.'
         : autoResearchEnabled
           ? 'Approved external research is running; recommendations remain provisional.'
-          : 'External research is off; provide an official link, upload, or typed requirements.';
+          : 'External research has not produced evidence; provide an official link, upload, or typed requirements.';
   const resolveSource = async (researchAuthorized: boolean) => {
     if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;
     setSourceBusy(true);
