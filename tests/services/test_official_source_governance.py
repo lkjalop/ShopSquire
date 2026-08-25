@@ -8,7 +8,7 @@ from src.app.services.official_source_governance import (
 def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     status = source_governance_readiness()
     assert status["schema_version"] == "official-workload-sources-v2"
-    assert status["valid_source_count"] == 18
+    assert status["valid_source_count"] == 19
     assert status["errors"] == []
     assert "docs.gns3.com" in status["domain_allowlist"]
     assert "learn.microsoft.com" in status["domain_allowlist"]
@@ -18,8 +18,9 @@ def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     assert "www.blender.org" in status["domain_allowlist"]
     assert "help.autodesk.com" in status["domain_allowlist"]
     assert "dev.epicgames.com" in status["domain_allowlist"]
-    assert len(status["canonical_entrypoints"]) >= 17
-    assert status["approved_source_count"] == 10
+    assert "store.sim3d.com" in status["domain_allowlist"]
+    assert len(status["canonical_entrypoints"]) >= 18
+    assert status["approved_source_count"] == 11
     assert status["pending_independent_human_review_count"] == 8
     assert status["operationally_enrolled"] is False
 
@@ -75,6 +76,16 @@ def test_isaac_does_not_apply_to_default_ot_cyber_range():
     assert {source["source_id"] for source in isaac_sources} == {
         "nvidia_omniverse_isaac_docs"
     }
+
+
+def test_emulate3d_source_may_be_researched_but_claim_authority_stays_pending():
+    sources = governed_sources_for_workload("emulate3d")
+    assert {source["source_id"] for source in sources} == {
+        "rockwell_emulate3d_official_requirements"
+    }
+    source = sources[0]
+    assert source["independent_review"]["status"].endswith("pending")
+    assert source["tenant_allowlist"]["default"] == "deny"
 
 
 def test_five_year_fleet_sources_are_explicit_candidates_not_blanket_authority():
