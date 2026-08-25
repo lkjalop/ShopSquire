@@ -30,7 +30,9 @@ test('buyer checks an official URL locally then explicitly authorizes canonical 
 
   await panel.getByRole('button', { name: 'Research matched canonical source' }).click();
   await expect(page.getByText(/fetched the reviewed canonical publisher page/i)).toBeVisible({ timeout: 60_000 });
-  await expect(panel).toContainText(/Status: Researched|Status: Context researched|Status: Research completed/i);
+  await expect(panel.getByTestId('buyer-research-status')).toContainText(
+    /Official requirements compiled|Research found context|No approved requirement source/i,
+  );
   await expect(page.getByText(/no cart or supplier action was authorized/i)).toBeVisible();
 
   await page.getByRole('button', { name: 'Decision Trace' }).click();

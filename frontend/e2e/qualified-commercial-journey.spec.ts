@@ -27,7 +27,7 @@ test('ambiguous research continues into an explicit synthetic supplier decision'
   await page.getByRole('button', { name: 'Research approved sources' }).click();
   await expect(page.getByText(/Approved-source research completed in the same shopping case/i))
     .toBeVisible({ timeout: 90_000 });
-  const researchProof = page.locator('details').filter({ hasText: 'Research proof' }).last();
+  const researchProof = page.getByTestId('buyer-research-proof');
   await researchProof.locator('summary').click();
   await expect(researchProof.getByTestId('ambiguity-accounting')).toContainText(/Paid calls: 0/i);
 

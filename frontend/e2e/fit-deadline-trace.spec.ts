@@ -25,7 +25,7 @@ test('typed fit, quantity and deadline semantics produce governed alternatives',
   await page.getByRole('button', { name: 'Research approved sources' }).click();
   await expect(page.getByText(/compiled 3 scoped product claims/i).first())
     .toBeVisible({ timeout: 90_000 });
-  const proof = page.locator('details').filter({ hasText: 'Research proof' }).last();
+  const proof = page.getByTestId('buyer-research-proof');
   await proof.locator('summary').click();
   await expect(proof.getByTestId('ambiguity-accounting')).toContainText(/Paid calls: 0/i);
 
