@@ -14,7 +14,7 @@ test('shopping-case fast lane returns provisional shelves before external resear
 
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toBeVisible();
-  await expect(panel.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
+  await expect(panel.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
   await expect(panel).toContainText(/external calls: 0/i);
   await expect(page.getByTestId('product-shelves')).toBeVisible();
 

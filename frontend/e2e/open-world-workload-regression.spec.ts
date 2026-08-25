@@ -54,7 +54,7 @@ test('novel suitability request stays provisional and exposes a durable research
   expect(unresolvedTraceId).not.toBe('');
   expect(unresolved.qualification_authority ?? 'none').toBe('none');
 
-  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
+  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
   await expect(page.getByRole('button', { name: /Discover official sources/i })).toBeVisible();
   await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);

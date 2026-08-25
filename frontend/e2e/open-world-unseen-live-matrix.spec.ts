@@ -29,7 +29,7 @@ for (const [index, prompt] of prompts.entries()) {
     const exploration = page.getByTestId('ambiguity-exploration');
     await expect(exploration).toBeVisible({ timeout: 65_000 });
     await expect(exploration.getByTestId('buyer-research-status'))
-      .toContainText(/external research is off/i);
+      .toContainText(/external research has not produced evidence/i);
     await expect(exploration).toContainText(/external calls: 0/i);
     await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
 

@@ -28,7 +28,7 @@ test('unfamiliar capability request plans research before buyer-specific clarifi
   expect(Date.now() - started).toBeLessThan(1_500);
   await expect(page.getByText(/created a provisional shopping case.*local catalog exploration/i).last())
     .toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research is off/i);
+  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
   await expect(page.getByRole('button', { name: /Research approved sources/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
