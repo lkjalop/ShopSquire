@@ -37,4 +37,11 @@ export type ChatMessage = {
   buyerRequirementClaims?: BuyerRequirementClaim[];
   buyerRequirementProposal?: { case_id: string; proposal_id: string; proposal_version: number };
   buyerClaimReconciliation?: BuyerClaimReconciliation[];
+  responseProvenance?: {
+    response_kind?: string;
+    interpretation_model?: string | null;
+    narration_model?: string | null;
+    label: string;
+  };
+  sourceFetchPrompt?: { sourceUrl: string };
 };

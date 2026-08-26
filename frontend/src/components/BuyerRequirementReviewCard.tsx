@@ -83,15 +83,15 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
         color: '#78350f',
       }}
     >
-      <strong>Review extracted requirements</strong>
+      <strong>Review {claims.length} extracted requirements</strong>
       <div style={{ marginTop: 4, fontSize: 12 }}>
         {caseOriginEvidence
           ? 'These cited claims came from the exact publisher origin you approved for this case. Review, correct, or reject them before they affect product fit. No cart action was authorized.'
           : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
       </div>
-      <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+      <ul style={{ margin: '8px 0 0', padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
         {claims.slice(0, 12).map((claim) => (
-          <li key={claim.claim_id} style={{ marginTop: 3, listStyle: 'none' }}>
+          <li key={claim.claim_id} style={{ listStyle: 'none', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 7px', background: '#fff' }}>
             <input
               type="checkbox"
               checked={selected.has(claim.claim_id)}

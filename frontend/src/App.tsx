@@ -1564,6 +1564,13 @@ export default function App() {
             content: `I could not bind that URL to an approved canonical source: ${resolution?.reason || 'source_not_approved'}. I did not use its claims. Upload the requirements or choose an enrolled publisher source.`,
             timestamp: new Date(),
           }]);
+        } else if (!autoPublicResearchEnabled) {
+          setMessages((current) => [...current, {
+            role: 'assistant',
+            content: 'Official source recognized. I mapped the submitted address to its reviewed canonical origin; I did not fetch the arbitrary pasted path, persist credentials/query parameters, or use any claims. Fetch the reviewed canonical source to extract requirements.',
+            timestamp: new Date(),
+            sourceFetchPrompt: { sourceUrl: pastedOfficialUrl },
+          }]);
         }
       } catch (error) {
         setMessages((current) => [...current, {
@@ -2575,6 +2582,9 @@ export default function App() {
         if (nextMultiIntent) switchRightPanelMode('cart');
         setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
+        const responseProvenance = data.response_provenance && typeof data.response_provenance === 'object'
+          ? data.response_provenance as ChatMessage['responseProvenance']
+          : undefined;
         // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
         // richer LLM prose. We tag the assistant message and poll it in to replace the text in place.
         const narrationJobId = (typeof data.llm_summary_job_id === 'string' && data.llm_summary_job_id)
@@ -2771,6 +2781,7 @@ export default function App() {
             ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
             ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
+            ...(responseProvenance ? { responseProvenance } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -2809,6 +2820,7 @@ export default function App() {
             ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
             ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
+            ...(responseProvenance ? { responseProvenance } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         }
@@ -3060,7 +3072,13 @@ export default function App() {
         timestamp: new Date(),
       }]);
     }
-    return payload?.resolution || { status: 'unresolved', reason: 'resolution_not_recorded' };
+    return payload?.resolution
+      ? {
+          ...payload.resolution,
+          research_status: payload?.research_status,
+          source_intake_certificate: payload?.source_intake_certificate,
+        }
+      : { status: 'unresolved', reason: 'resolution_not_recorded' };
   }, [executeEvidenceSourceResolution, uid, traceId]);
 
   const approvePublisherCandidate = useCallback(async (
@@ -3331,6 +3349,18 @@ export default function App() {
                     const query = message.webConsentPrompt!.query;
                     setMessages(previous => previous.map(item => item === message ? { ...item, webConsentPrompt: undefined } : item));
                     void handleSend({ queryOverride: query, externalResearchConsent: consent });
+                  }}
+                  onSourceFetch={(message) => {
+                    const sourceUrl = message.sourceFetchPrompt!.sourceUrl;
+                    setMessages(previous => previous.map(item => item === message ? { ...item, sourceFetchPrompt: undefined } : item));
+                    setIsThinking(true);
+                    void resolveBuyerEvidenceSource({ source_url: sourceUrl }, true)
+                      .catch((error) => setMessages(current => [...current, {
+                        role: 'assistant',
+                        content: `The reviewed canonical source could not be fetched: ${error instanceof Error ? error.message : String(error)}. No claims were used and product fit remains provisional.`,
+                        timestamp: new Date(),
+                      }]))
+                      .finally(() => setIsThinking(false));
                   }}
                   onOpenEvidence={(evidence) => {
                     setTraceEvidence(evidence);

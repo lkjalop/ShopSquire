@@ -1,6 +1,8 @@
 param(
     [string]$LogRoot = "",
-    [switch]$NoMarketSignal
+    [switch]$NoMarketSignal,
+    [switch]$LiveDemo,
+    [string]$LiveModel = "qwen3:14b"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +54,49 @@ $env:MULTI_INTENT_PLANNER_ENABLED = "1"
 $env:SEMANTIC_RESEARCH_FIXTURES_ENABLED = "1"
 $env:SEMANTIC_RESEARCH_FIXTURE_ID = "siemens_digital_twin_qualified_contract"
 $env:SEMANTIC_SIMULATION_AUTHORITY_ENABLED = "1"
+if ($LiveDemo) {
+    # Live demo mode is intentionally distinct from the reproducible certificate
+    # mode above. It uses local Ollama plus local SearXNG and records those live
+    # dependencies rather than presenting fixture evidence as live research.
+    $env:USE_MOCK_LLM = "0"
+    $env:USE_OLLAMA_INTENT = "1"
+    $env:MODEL_WARMUP_ON_STARTUP = "1"
+    $env:ROUTER_MODEL_ENABLED = "1"
+    $env:ROUTER_MODEL = $LiveModel
+    $env:OLLAMA_DEFAULT_MODEL = $LiveModel
+    $env:OLLAMA_MEDIUM_MODEL = $LiveModel
+    $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
+    $env:OPEN_WORLD_QUERY_MODEL = $LiveModel
+    $env:EXTERNAL_RESEARCH_ENABLED = "1"
+    $env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = "0"
+    $env:EXTERNAL_RESEARCH_SEARCH_URL = "http://127.0.0.1:8888/search?q={query}&format=json"
+    $env:EXTERNAL_RESEARCH_ALLOW_PRIVATE = "1"
+    $env:EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = "1"
+    $env:EXTERNAL_RESEARCH_PROVIDER_ID = "local_searxng"
+    $env:EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS = "free"
+    $env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST = "default,portfolio-demo"
+    $env:EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = "leoma-project-owner"
+    $env:EXTERNAL_RESEARCH_SOURCE_LICENCE = "portfolio-demo-policy-v1"
+    $env:OFFICIAL_REQUIREMENTS_PUBLISHER_POLICY_ID = "leoma-publisher-policy-v1"
+    $env:OFFICIAL_REQUIREMENTS_FRESHNESS_SLA_HOURS = "720"
+    $env:SEMANTIC_RESEARCH_FIXTURES_ENABLED = "0"
+    $env:SEMANTIC_SIMULATION_AUTHORITY_ENABLED = "0"
+
+    try {
+        $warmupBody = @{
+            model = $LiveModel
+            prompt = "Reply with READY only."
+            stream = $false
+            keep_alive = "30m"
+            options = @{ num_predict = 8; temperature = 0 }
+        } | ConvertTo-Json -Depth 4
+        Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
+            -ContentType "application/json" -Body $warmupBody -TimeoutSec 180 | Out-Null
+        Write-Output "OLLAMA_PREWARMED=$LiveModel"
+    } catch {
+        throw "Live demo requested, but Ollama prewarm failed for '$LiveModel': $($_.Exception.Message)"
+    }
+}
 $env:SALES_RESPONSE_OVERSTOCK_UNITS = "10"
 $env:SALES_RESPONSE_NUDGE_ENABLED = "1"
 $env:MERCHANT_API_KEY = "local-merchant-key"

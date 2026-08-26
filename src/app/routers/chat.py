@@ -3871,6 +3871,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "confirmed_slots": response_slots_for_output,
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
+        "response_provenance": (
+            data.get("response_provenance")
+            if isinstance(data.get("response_provenance"), dict) else None
+        ),
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,

@@ -229,6 +229,13 @@ def test_finalizer_separates_affordability_target_from_value(monkeypatch):
     assert sections[1]["top_products"][0]["sku"] == "VALUE"
     assert out["price_intent"]["mode"] == "affordability_check"
     assert out["right_panel"]["price_intent"]["hard_ceiling"] == 4000
+    assert out["assistant_message"].startswith(
+        "Yes - AUD 4,000 is enough for the qualified gaming options shown."
+    )
+    assert "Near target laptop is closest" in out["assistant_message"]
+    assert out["response_provenance"]["label"] == (
+        "Answer grounded by deterministic policy; live intent model not used"
+    )
 
 
 def test_finalizer_deduplicates_repeated_exact_sku(monkeypatch):

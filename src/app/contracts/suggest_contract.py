@@ -58,6 +58,7 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "intent_confidence", "intent_router_model", "learn_more_url", "llm_summary_job_id",
     "memory_health", "message", "model_output_fingerprint", "model_watermark",
     "narration_mode", "narration_model", "next_questions", "notice", "off_catalog",
+    "response_provenance",
     "persona_tone", "policy_notes", "price_buckets", "price_filter", "price_range",
     "recommendation_tiers", "refusal_note", "requested_quantity", "right_panel", "risk_score",
     "slate_disposition",

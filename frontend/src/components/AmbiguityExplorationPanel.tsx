@@ -222,6 +222,11 @@ export default function AmbiguityExplorationPanel({
           {sourceResolution && (
             <div role="status" style={{ marginTop: 8, fontSize: 12 }}>
               <strong>{String(sourceResolution.status || 'unknown').replaceAll('_', ' ')}</strong>
+              {sourceResolution.security_status ? (
+                <div data-testid="source-safety-status" style={{ marginTop: 4, color: sourceResolution.security_status === 'blocked' ? '#b91c1c' : '#475569' }}>
+                  Link safety: <strong>{String(sourceResolution.security_status).replaceAll('_', ' ')}</strong>. The submitted path is never fetched directly; only the reviewed canonical origin can be fetched after authorization.
+                </div>
+              ) : null}
               {sourceResolution.reason ? ` — ${String(sourceResolution.reason).replaceAll('_', ' ')}` : ''}
               {Array.isArray(sourceResolution.candidates) && sourceResolution.candidates.length > 0 && (
                 <ul style={{ margin: '5px 0', paddingLeft: 20 }}>

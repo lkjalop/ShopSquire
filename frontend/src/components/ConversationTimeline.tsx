@@ -24,6 +24,7 @@ type Props = {
   onDismissCart: (message: ChatMessage) => void;
   onAcceptRequirements: (message: ChatMessage, claimIds: string[], choice: any, corrections: any) => void;
   onAffordabilityChoice: (message: ChatMessage, choice: any) => void;
+  onSourceFetch?: (message: ChatMessage) => void;
 };
 
 export default function ConversationTimeline(props: Props) {
@@ -34,6 +35,7 @@ export default function ConversationTimeline(props: Props) {
       {msg.role === 'assistant'
         ? String(msg.content || '').split(/\n\n+/).filter(Boolean).map((paragraph, paragraphIndex) => <div key={paragraphIndex} className={/^\s*(⚠️|\[security\])/i.test(paragraph) ? styles.msgSecurity : styles.msgPara}><InlineMessageText text={paragraph.trim()} /></div>)
         : msg.content}
+      {msg.role === 'assistant' && msg.responseProvenance?.label ? <div data-testid="response-provenance" style={{ marginTop: 5, fontSize: 11, fontStyle: 'italic', color: '#64748b' }}>{msg.responseProvenance.label}</div> : null}
       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
       {props.showDebugBadges && msg.complexity && <span className={styles.complexityBadge} title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`} style={{ display: 'block', fontSize: '0.62em', opacity: 0.35, marginTop: 4, letterSpacing: '0.02em' }}>{msg.complexity.tier} · {msg.complexity.model?.split(':')[0]}</span>}
       {msg.agentStepsReadable?.length ? <details style={{ marginTop: 8, fontSize: '0.78em', opacity: 0.72 }}><summary style={{ cursor: 'pointer', userSelect: 'none' }}>How I answered this</summary><ul style={{ margin: '4px 0 0 16px', padding: 0 }}>{msg.agentStepsReadable.map((step, stepIndex) => <li key={stepIndex} style={{ marginBottom: 2 }}>{step}</li>)}</ul></details> : null}
@@ -46,6 +48,7 @@ export default function ConversationTimeline(props: Props) {
       </div>}
     </div>
     {msg.disambiguation && msg.disambiguationOptions?.length ? <DisambiguationButtons options={msg.disambiguationOptions} onSelect={props.onDisambiguation} /> : null}
+    {msg.sourceFetchPrompt && props.onSourceFetch && <div style={{ display: 'flex', gap: 8, marginTop: 8 }}><button type="button" className={styles.filterBtn} style={{ border: '1.5px solid #f59e0b' }} onClick={() => props.onSourceFetch?.(msg)}>Fetch reviewed canonical source</button></div>}
     {msg.webConsentPrompt && <div style={{ display: 'flex', gap: 8, marginTop: 8 }}><button type="button" className={styles.filterBtn} style={{ border: '1.5px solid #f59e0b' }} onClick={() => props.onWebConsent(msg, true)}>🌐 Check approved sources</button><button type="button" className={styles.filterBtn} onClick={() => props.onWebConsent(msg, false)}>Use store data only</button></div>}
     {msg.evidence?.citations?.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}><span style={{ fontSize: 11, color: '#6b7280' }}>Sources:</span>{citationChips(msg.evidence).map(chip => <button key={chip.key} type="button" className={styles.filterBtn} style={chip.trusted ? undefined : { border: '1.5px solid #f59e0b' }} title={chip.trusted ? 'Trusted store record — open the Evidence tab' : 'External evidence (verified, never authority) — open the Evidence tab'} onClick={() => props.onOpenEvidence(msg.evidence)}>{chip.icon} {chip.label}</button>)}</div> : null}
     {msg.undoClear?.items.length ? <div style={{ marginTop: 8 }}><button type="button" className={styles.filterBtn} onClick={() => props.onUndoClear(msg)} title="Put the cleared items back">↩️ Undo — restore {msg.undoClear.items.length} item(s)</button></div> : null}

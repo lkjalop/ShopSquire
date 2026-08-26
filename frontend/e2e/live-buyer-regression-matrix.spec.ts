@@ -96,6 +96,9 @@ test('covered gaming, university, and corporate searches stay on the normal buye
       const priceSections = answer.right_panel?.anchor_sections || [];
       expect(priceSections[0]?.title).toMatch(/Target-price fit/i);
       expect(priceSections.some((section: any) => /value options/i.test(section.title || ''))).toBe(true);
+      expect(String(answer.assistant_message || '')).toMatch(/^Yes - AUD 4,000 is enough/i);
+      expect(answer.response_provenance?.label).toMatch(/deterministic policy/i);
+      await expect(page.getByTestId('response-provenance')).toContainText(/deterministic policy/i);
     }
     expect(answer.ambiguity_exploration).toBeFalsy();
     await expect(page.getByTestId('ambiguity-exploration')).toHaveCount(0);
@@ -165,6 +168,18 @@ test('chat-pasted official URL and specifications enter their governed review pa
     'rockwell_emulate3d_official_requirements',
   );
   expect(sourcePayload.resolution?.candidates?.[0]?.match_basis).toBe('enrolled_domain');
+  await expect(page.getByText(/Official source recognized/i)).toBeVisible();
+  const canonicalFetchResponse = page.waitForResponse(
+    response => /\/evidence-source-resolutions$/.test(response.url()),
+    { timeout: 90_000 },
+  );
+  await page.getByRole('button', { name: 'Fetch reviewed canonical source' }).click();
+  const canonicalFetchPayload = await (await canonicalFetchResponse).json();
+  expect(canonicalFetchPayload.research_status).toBe('completed');
+  expect(canonicalFetchPayload.source_intake_certificate?.security?.status).toMatch(
+    /observed_untrusted_content_pending_compilation|fetch_failed_closed/,
+  );
+  await expect(page.getByText(/fetched the reviewed canonical publisher page/i)).toBeVisible();
 
   const specificationResponse = page.waitForResponse(
     response => /\/requirement-proposals\/from-text$/.test(response.url()),

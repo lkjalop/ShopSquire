@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import asdict
 from typing import Any, Dict, Optional
@@ -12,6 +13,54 @@ from src.app.deps import security_sanitize
 from src.app.services.decision_log import log_decision, log_trace_event
 
 logger = logging.getLogger("shopsquire.recommendation_finalizer")
+
+
+def _price_dollars(item: dict[str, Any]) -> float | None:
+    value = item.get("price")
+    if isinstance(value, (int, float)):
+        return float(value)
+    cents = item.get("price_cents")
+    return float(cents) / 100.0 if isinstance(cents, (int, float)) else None
+
+
+def _affordability_answer(
+    query: str, price_intent: dict[str, Any] | None,
+    summary: list[dict[str, Any]], payload: dict[str, Any],
+) -> str | None:
+    """Answer an explicit budget question from the adjudicated product slate."""
+    if not price_intent or price_intent.get("mode") != "affordability_check" or not summary:
+        return None
+    if not re.search(r"\b(?:enough|ok|okay|acceptable|afford)\b", query or "", re.I):
+        return None
+    target = price_intent.get("target") or price_intent.get("preferred_max")
+    if not isinstance(target, (int, float)):
+        return None
+    priced = [(row, _price_dollars(row)) for row in summary]
+    priced = [(row, price) for row, price in priced if price is not None and price > 0]
+    if not priced:
+        return None
+    constraints = payload.get("constraints_used") if isinstance(payload.get("constraints_used"), dict) else {}
+    use_cases = constraints.get("use_cases") if isinstance(constraints.get("use_cases"), list) else []
+    use_case = str(constraints.get("use_case") or (use_cases[0] if use_cases else "")).replace("_", " ").strip()
+    if not use_case:
+        match = re.search(r"\b(gaming|university|corporate|office|simulation|content creation|ai)\b", query or "", re.I)
+        use_case = match.group(1).lower() if match else "your stated use case"
+    currency = str(next((row.get("currency") for row, _ in priced if row.get("currency")), "AUD")).upper()
+    cheapest = min(price for _, price in priced)
+    closest_row, closest = min(priced, key=lambda pair: abs(pair[1] - float(target)))
+    qualified = _positive_workload_fit_evidence(payload)
+    scope = "qualified" if qualified else "provisional catalog"
+    if cheapest > float(target):
+        return (
+            f"No - {currency} {float(target):,.0f} is below the current {scope} floor for {use_case}; "
+            f"the shortlist starts at {currency} {cheapest:,.0f}."
+        )
+    closest_name = str(closest_row.get("name") or "the closest option").strip()
+    return (
+        f"Yes - {currency} {float(target):,.0f} is enough for the {scope} {use_case} options shown. "
+        f"They start at {currency} {cheapest:,.0f}; {closest_name} is closest to your named budget "
+        f"at {currency} {closest:,.0f}, so spending the full amount is not necessary."
+    )
 
 
 def _products(payload: Dict[str, Any]) -> list[dict[str, Any]]:
@@ -263,6 +312,21 @@ def finalize_core_response(
         if isinstance(out.get("model_selection"), dict)
         else {}
     )
+    affordability_answer = _affordability_answer(query, price_intent, summary, out)
+    if affordability_answer:
+        out["assistant_message"] = affordability_answer
+        out["message"] = affordability_answer
+    selected_model = str(model_selection.get("selected") or "").strip()
+    out["response_provenance"] = {
+        "response_kind": "deterministic_grounded",
+        "interpretation_model": selected_model or None,
+        "narration_model": None,
+        "label": (
+            f"Intent interpreted by {selected_model}; answer grounded by deterministic policy"
+            if selected_model else
+            "Answer grounded by deterministic policy; live intent model not used"
+        ),
+    }
     security = dict(out.get("security") or {}) if isinstance(out.get("security"), dict) else {}
     security.setdefault("policy_route", "allow")
     security.setdefault("checked_boundary", "recommendation_facade")

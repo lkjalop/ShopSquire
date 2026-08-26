@@ -3200,6 +3200,25 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
               {activeTab === 'security' && (
                 <div className={styles.summaryPane}>
+                  {(() => {
+                    const sourceEvent = [...(events || [])].reverse().find((event: any) => {
+                      const eventType = String(event?.payload?._original_event_type || event?.event_type || '').toLowerCase();
+                      return eventType.includes('buyer_evidence_source_');
+                    });
+                    const payload = sourceEvent?.payload || {};
+                    const certificate = payload?.source_intake_certificate?.schema_version
+                      ? payload.source_intake_certificate
+                      : payload?.schema_version === 'buyer-source-intake-certificate-v1' ? payload : null;
+                    if (!certificate) return null;
+                    const securityStatus = String(certificate?.security?.status || 'unresolved').replaceAll('_', ' ');
+                    const resolutionStatus = String(certificate?.resolution?.status || 'unresolved').replaceAll('_', ' ');
+                    return (
+                      <div data-testid="source-link-security" style={{ margin: '0 0 10px', padding: '10px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', fontSize: 13, color: '#78350f' }}>
+                        <strong>Submitted-link safety: {securityStatus}.</strong>{' '}
+                        Resolution: {resolutionStatus}. The arbitrary submitted path was not fetched; credentials and query parameters were not persisted. Network execution: {certificate?.execution?.network_execution ? 'yes' : 'no'}.
+                      </div>
+                    );
+                  })()}
                   {!security && (
                     <div className={styles.empty}>No security analysis available for this trace.</div>
                   )}
