@@ -3941,6 +3941,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "capability": (
             data.get("capability") if isinstance(data.get("capability"), dict) else None
         ),
+        "price_intent": (
+            data.get("price_intent") if isinstance(data.get("price_intent"), dict) else None
+        ),
         "slate_disposition": str(data.get("slate_disposition") or "replace"),
         "secondary_lanes": (
             data.get("secondary_lanes") if isinstance(data.get("secondary_lanes"), list) else []

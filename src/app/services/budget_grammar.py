@@ -44,6 +44,46 @@ class BudgetParse:
         return self.budget_min is not None or self.budget_max is not None
 
 
+@dataclass(frozen=True)
+class PriceIntent:
+    """Buyer-facing meaning of a parsed price, separate from authorization."""
+
+    mode: str  # hard_ceiling | target_band | affordability_check | range | floor
+    target: Optional[int]
+    preferred_min: Optional[int]
+    preferred_max: Optional[int]
+    hard_ceiling: Optional[int]
+
+
+def interpret_price_intent(text: str) -> Optional[PriceIntent]:
+    """Project canonical budget grammar into deterministic display semantics.
+
+    The parsed budget remains the authority boundary. This projection only tells
+    the buyer-facing shelf whether a number is a limit, target, or question.
+    """
+    parsed = parse_budget(text)
+    if parsed is None:
+        return None
+    q = str(text or "").lower()
+    affordability = bool(
+        re.search(r"\b(?:is|would|will|could)\s*(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)?\s*[\d,]+(?:\.\d+)?\s+(?:be\s+)?(?:enough|ok|okay|acceptable)\b", q)
+        or re.search(r"\benough\b[^\d$€£]{0,18}(?:at|with|on)\s*(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)?\s*[\d,]+", q)
+    )
+    if affordability and parsed.budget_max is not None:
+        target = parsed.budget_max
+        return PriceIntent("affordability_check", target, int(target * 0.75), target, target)
+    if parsed.mode == "around":
+        low, high = parsed.budget_min, parsed.budget_max
+        target = int((low + high) / 2) if low is not None and high is not None else high or low
+        return PriceIntent("target_band", target, low, high, high)
+    if parsed.mode in {"ceiling", "revision_down", "per_unit"}:
+        return PriceIntent("hard_ceiling", parsed.budget_max, None, parsed.budget_max, parsed.budget_max)
+    if parsed.mode == "range" and parsed.budget_min is not None and parsed.budget_max is not None:
+        target = int((parsed.budget_min + parsed.budget_max) / 2)
+        return PriceIntent("range", target, parsed.budget_min, parsed.budget_max, parsed.budget_max)
+    return PriceIntent("floor", parsed.budget_min, parsed.budget_min, None, None)
+
+
 def parse_budget_delta(text: str) -> Optional[int]:
     """Return a signed, buyer-stated relative budget change in whole currency units.
 

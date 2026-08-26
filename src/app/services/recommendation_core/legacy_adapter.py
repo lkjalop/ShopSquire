@@ -148,6 +148,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         # Absent (None/[]) on the legacy path, so old consumers are unaffected.
         "shelf": core.extras.get("shelf"),
         "capability": core.extras.get("capability"),
+        "price_intent": core.extras.get("price_intent"),
         "secondary_lanes": core.extras.get("secondary_lanes", []),
         "explanation": core.extras.get("explanation"),
         "advisories": core.extras.get("advisories", []),

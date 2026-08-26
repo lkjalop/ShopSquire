@@ -31,6 +31,13 @@ function bandTone(id: string): string {
   return styles.primary;
 }
 
+function bandExplanation(id: string): string | null {
+  if (id === 'target_fit') return 'Closest qualified options to the price you named';
+  if (id === 'value_fit') return 'Lower cost, while still meeting the accepted requirements';
+  if (id === 'maximum_capability') return 'More of the budget buys verified capability headroom';
+  return null;
+}
+
 export default function RecommendationShelf({ shelf, onAdd, onWhy }: Props) {
   const bands = (shelf.bands || []).filter((band) => Array.isArray(band.cards) && band.cards.length > 0);
   if (bands.length === 0) return null;
@@ -43,6 +50,7 @@ export default function RecommendationShelf({ shelf, onAdd, onWhy }: Props) {
             <h3>{band.label}</h3>
             {band.id === 'closest_fit' && <span>Requirements not fully met</span>}
             {band.id === 'stretch' && <span>Outside your stated budget</span>}
+            {bandExplanation(band.id) && <span>{bandExplanation(band.id)}</span>}
           </header>
           <div className={styles.cards}>
             {band.cards.map((product) => (

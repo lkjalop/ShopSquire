@@ -89,6 +89,14 @@ test('covered gaming, university, and corporate searches stay on the normal buye
       );
     }
     expect((answer.products || []).slice(0, 3).map((item: any) => item.name || item.title).join(' ')).toMatch(scenario.product);
+    if (scenario.label === 'gaming') {
+      expect(answer.price_intent).toMatchObject({
+        mode: 'affordability_check', target: 4000, preferred_min: 3000, hard_ceiling: 4000,
+      });
+      const priceSections = answer.right_panel?.anchor_sections || [];
+      expect(priceSections[0]?.title).toMatch(/Target-price fit/i);
+      expect(priceSections.some((section: any) => /value options/i.test(section.title || ''))).toBe(true);
+    }
     expect(answer.ambiguity_exploration).toBeFalsy();
     await expect(page.getByTestId('ambiguity-exploration')).toHaveCount(0);
     await context.close();

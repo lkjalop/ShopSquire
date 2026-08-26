@@ -1793,13 +1793,41 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
     used: set = set()
     bands: list = []
 
+    # Price semantics shape presentation, never authorization. The canonical
+    # envelope has already enforced the accepted budget before this point.
+    from dataclasses import asdict
+    from src.app.services.budget_grammar import interpret_price_intent
+
+    price_intent = interpret_price_intent(envelope.query or "")
+    if price_intent:
+        resp.extras["price_intent"] = asdict(price_intent)
+
     # band 1 — best fit for intent+budget (meets-in-budget, else the honest closest)
     meets_in = [c for c in in_budget if meets(c)]
-    band1 = (meets_in or in_budget)[:3]
+    target_mode = bool(
+        price_intent
+        and price_intent.mode in {"target_band", "affordability_check", "range"}
+        and price_intent.preferred_min is not None
+        and price_intent.preferred_max is not None
+    )
+    target_candidates = []
+    if target_mode:
+        target_candidates = [
+            c for c in meets_in
+            if c.price_cents is not None
+            and price_intent.preferred_min * 100 <= c.price_cents <= price_intent.preferred_max * 100
+        ]
+        target_cents = (price_intent.target or price_intent.preferred_max) * 100
+        target_candidates.sort(key=lambda c: (abs((c.price_cents or 0) - target_cents), -margin(c)))
+    band1 = (target_candidates or meets_in or in_budget)[:3]
     used.update(c.sku for c in band1)
     if band1:
         if meets_in:
-            bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
+            if target_candidates:
+                bands.append(_band("target_fit", "Closest to your stated price",
+                                   f"price_target:{price_intent.target}", band1))
+            else:
+                bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
         else:
             bands.append(_band("closest_fit", "Closest within budget - requirements not met",
                                "closest_noncompliant", band1))
@@ -1812,6 +1840,13 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
         label = (f"Meets your needs — stretch from ${floor / 100:,.0f}"
                  if floor else "Meets your needs (stretch)")
         band2_id, basis = "stretch", "meets_stretch"
+    elif target_mode and target_candidates:
+        value = [
+            c for c in rest_meets
+            if c.price_cents is not None and c.price_cents < price_intent.preferred_min * 100
+        ]
+        band2 = value[:3]
+        band2_id, label, basis = "value_fit", "Qualified lower-cost options", "qualified_below_target"
     else:
         headroom = [c for c in rest_meets if margin(c) > 0]            # HEADROOM, not just pricier
         headroom.sort(key=lambda c: (-margin(c), c.price_cents or 0))
@@ -1820,6 +1855,15 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
     used.update(c.sku for c in band2)
     if band2:
         bands.append(_band(band2_id, label, basis, band2))
+
+    if target_mode and target_candidates and verdict != "below_budget":
+        remaining = [c for c in universe if c.sku not in used and meets(c) and margin(c) > 0]
+        remaining.sort(key=lambda c: (-margin(c), -(c.price_cents or 0)))
+        maximum = remaining[:3]
+        used.update(c.sku for c in maximum)
+        if maximum:
+            bands.append(_band("maximum_capability", "Maximum verified capability",
+                               "capability_headroom_near_budget", maximum))
 
     # band 3 — brand/variant/spec preference (only when a signal was expressed)
     pref = getattr(decision, "preferred_brand", None) or getattr(decision, "brand_filter", None)

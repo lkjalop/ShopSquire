@@ -128,6 +128,33 @@ def test_adaptive_single_band_when_thin():
     assert [b["id"] for b in resp.extras["shelf"]["bands"]] == ["best_fit"]
 
 
+def test_affordability_question_separates_target_value_and_capability():
+    env = _env(query="help me with a gaming laptop - is $4000 okay?", budget_max=4000)
+    resp = CoreResponse(envelope=env, lane="SEARCH")
+    resp.products = [
+        card("VALUE", 169900),
+        card("TARGET", 389900),
+        card("TARGET3", 379900),
+        card("TARGET2", 349900),
+        card("HEADROOM", 319900, exceeds=["ram_gb", "gpu_vram_gb"]),
+    ]
+    resp.extras["capability"] = {"verdict": "within_budget", "floor_cents": 119900}
+    resp.message = "$4,000 is ample."
+    core._build_shelf(None, env, _decision(), resp, 10)
+    shelf = resp.extras["shelf"]
+    assert shelf["bands"][0]["id"] == "target_fit"
+    assert shelf["bands"][0]["skus"] == ["TARGET", "TARGET3", "TARGET2"]
+    assert _by_id(shelf, "value_fit")["skus"] == ["VALUE"]
+    assert _by_id(shelf, "maximum_capability")["skus"] == ["HEADROOM"]
+    assert resp.extras["price_intent"] == {
+        "mode": "affordability_check",
+        "target": 4000,
+        "preferred_min": 3000,
+        "preferred_max": 4000,
+        "hard_ceiling": 4000,
+    }
+
+
 # ── guards: no shelf off the product lanes / degraded / no requirements ──────────
 
 def test_adapter_passes_shelf_capability_advisories_to_payload():
@@ -139,11 +166,13 @@ def test_adapter_passes_shelf_capability_advisories_to_payload():
     resp.extras["capability"] = {"verdict": "within_budget", "floor_cents": 119900}
     resp.extras["advisories"] = [{"persona": "minor"}]
     resp.extras["assumption"] = {"use_case": "gaming", "variant": None}
+    resp.extras["price_intent"] = {"mode": "target_band", "target": 2000}
     payload = to_legacy(resp)
     assert payload["shelf"]["bands"][0]["id"] == "best_fit"
     assert payload["capability"]["floor_cents"] == 119900
     assert payload["advisories"][0]["persona"] == "minor"
     assert payload["assumption"]["use_case"] == "gaming"
+    assert payload["price_intent"]["target"] == 2000
 
 
 def test_relaxation_options_discovers_the_conflict():

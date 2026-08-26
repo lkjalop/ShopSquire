@@ -86,7 +86,7 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # V2 recommendation_core presentation surfaces (Phase 1a-1d, added 2026-07-13 with the shelf):
     # shelf = the 3-band right-side panel; capability = the floor/budget banner; advisories =
     # non-blocking notes (e.g. minor content-advisory); assumption = the stated variant assumption.
-    "shelf", "capability", "secondary_lanes", "explanation", "advisories", "assumption",
+    "shelf", "capability", "price_intent", "secondary_lanes", "explanation", "advisories", "assumption",
     # complement_offers: declared complements (drawing → graphics tablet) as bundle-upsell (stocked)
     # or source-it supplier-RFQ offers (not stocked) — the unstocked-complement trust play (1d.4).
     "complement_offers",

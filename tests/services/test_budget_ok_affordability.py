@@ -1,4 +1,4 @@
-from src.app.services.budget_grammar import parse_budget
+from src.app.services.budget_grammar import interpret_price_intent, parse_budget
 
 
 def test_short_ok_affordability_question_is_a_budget_ceiling():
@@ -19,3 +19,14 @@ def test_singular_product_price_is_a_target_band_not_a_ceiling():
     assert parsed is not None
     assert parsed.mode == "around"
     assert (parsed.budget_min, parsed.budget_max) == (3200, 4800)
+
+
+def test_display_intent_distinguishes_limit_target_and_affordability():
+    limit = interpret_price_intent("Keep it under $4,000")
+    target = interpret_price_intent("I need a laptop around $4,000")
+    question = interpret_price_intent("Would $4,000 be enough?")
+
+    assert limit is not None and limit.mode == "hard_ceiling"
+    assert target is not None and target.mode == "target_band" and target.target == 4000
+    assert question is not None and question.mode == "affordability_check"
+    assert (question.preferred_min, question.preferred_max, question.hard_ceiling) == (3000, 4000, 4000)

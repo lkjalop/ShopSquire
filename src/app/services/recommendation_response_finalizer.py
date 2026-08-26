@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from src.app.deps import security_sanitize
@@ -124,6 +125,65 @@ def finalize_core_response(
     right_panel.setdefault("anchor_sections", [])
     shelf = out.get("shelf") if isinstance(out.get("shelf"), dict) else {}
     shelf_bands = shelf.get("bands") if isinstance(shelf.get("bands"), list) else []
+    price_intent = out.get("price_intent") if isinstance(out.get("price_intent"), dict) else None
+    if price_intent is None:
+        from src.app.services.budget_grammar import interpret_price_intent
+
+        interpreted = interpret_price_intent(query)
+        price_intent = asdict(interpreted) if interpreted is not None else None
+        if price_intent is not None:
+            out["price_intent"] = price_intent
+
+    if (
+        not right_panel["anchor_sections"] and summary and not shelf_bands
+        and price_intent
+        and price_intent.get("mode") in {"target_band", "affordability_check", "range"}
+        and isinstance(price_intent.get("preferred_min"), (int, float))
+        and isinstance(price_intent.get("preferred_max"), (int, float))
+    ):
+        low_cents = int(price_intent["preferred_min"] * 100)
+        high_cents = int(price_intent["preferred_max"] * 100)
+
+        def item_price_cents(item: dict[str, Any]) -> int | None:
+            if isinstance(item.get("price_cents"), (int, float)):
+                return int(item["price_cents"])
+            if isinstance(item.get("price"), (int, float)):
+                return int(float(item["price"]) * 100)
+            return None
+
+        target_rows = [
+            item for item in summary
+            if (item_price_cents(item) is not None
+                and low_cents <= item_price_cents(item) <= high_cents)
+        ]
+        value_rows = [
+            item for item in summary
+            if item_price_cents(item) is not None and item_price_cents(item) < low_cents
+        ]
+        fit_authorized = _positive_workload_fit_evidence(out)
+        authority = "positive_evidence" if fit_authorized else "none"
+
+        def price_section(title: str, rows: list[dict[str, Any]], explanation: str) -> dict[str, Any]:
+            return {
+                "title": title,
+                "qualification_authority": authority,
+                "match_basis": ["catalog eligibility", "budget", "price intent"],
+                "summary": explanation,
+                "top_products": rows[:3],
+            }
+
+        if target_rows:
+            right_panel["anchor_sections"].append(price_section(
+                "Target-price fit" if fit_authorized else "Provisional target-price options",
+                target_rows,
+                "Closest options to the price you named; spending the full amount is not assumed necessary.",
+            ))
+        if value_rows:
+            right_panel["anchor_sections"].append(price_section(
+                "Qualified value options" if fit_authorized else "Provisional lower-cost options",
+                value_rows,
+                "Lower-cost choices are separated so they are not confused with the target-price comparison.",
+            ))
     if not right_panel["anchor_sections"] and summary and not shelf_bands:
         fit_authorized = _positive_workload_fit_evidence(out)
         right_panel["anchor_sections"] = [{
@@ -155,6 +215,7 @@ def finalize_core_response(
             ],
         }]
     right_panel["canonical_identity"] = canonical_identity
+    right_panel["price_intent"] = price_intent
     right_panel["semantic_resolution"] = out.get("semantic_resolution")
     right_panel["semantic_evidence"] = out.get("semantic_evidence")
     right_panel["catalog_alignment"] = out.get("catalog_alignment")

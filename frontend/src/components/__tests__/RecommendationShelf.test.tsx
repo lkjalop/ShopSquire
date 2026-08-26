@@ -39,4 +39,21 @@ describe('RecommendationShelf', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Why?' })[0]);
     expect(onWhy).toHaveBeenCalledWith('BASIC');
   });
+
+  it('explains target, value, and maximum-capability price roles', () => {
+    render(<RecommendationShelf shelf={{ bands: [
+      { id: 'target_fit', label: 'Closest to your stated price', cards: [
+        { sku: 'T', name: 'Target workstation', price: 3899, currency: 'AUD' },
+      ] },
+      { id: 'value_fit', label: 'Qualified lower-cost options', cards: [
+        { sku: 'V', name: 'Value workstation', price: 2499, currency: 'AUD' },
+      ] },
+      { id: 'maximum_capability', label: 'Maximum verified capability', cards: [
+        { sku: 'M', name: 'Maximum workstation', price: 3999, currency: 'AUD' },
+      ] },
+    ] }} />);
+    expect(screen.getByTestId('shelf-band-target_fit')).toHaveTextContent('Closest qualified options');
+    expect(screen.getByTestId('shelf-band-value_fit')).toHaveTextContent('Lower cost');
+    expect(screen.getByTestId('shelf-band-maximum_capability')).toHaveTextContent('verified capability headroom');
+  });
 });

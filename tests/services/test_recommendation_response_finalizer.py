@@ -206,6 +206,31 @@ def test_finalizer_never_authorizes_products_without_positive_fit_evidence(monke
     assert "capability" not in section["match_basis"]
 
 
+def test_finalizer_separates_affordability_target_from_value(monkeypatch):
+    monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)
+    out = finalizer.finalize_core_response(
+        {
+            "results": [
+                {"sku": "VALUE", "name": "Value laptop", "price": 1919},
+                {"sku": "NEAR", "name": "Near target laptop", "price": 3899},
+            ],
+            "constraints_used": {"requirements": {"ram_gb": [[">=", 16]]}},
+            "catalog_alignment": {"qualified": ["VALUE", "NEAR"]},
+        },
+        "trace-price-intent",
+        query="help me with a gaming laptop - is $4000 okay?",
+    )
+    sections = out["right_panel"]["anchor_sections"]
+    assert [section["title"] for section in sections] == [
+        "Target-price fit", "Qualified value options",
+    ]
+    assert sections[0]["top_products"][0]["sku"] == "NEAR"
+    assert sections[1]["top_products"][0]["sku"] == "VALUE"
+    assert out["price_intent"]["mode"] == "affordability_check"
+    assert out["right_panel"]["price_intent"]["hard_ceiling"] == 4000
+
+
 def test_finalizer_deduplicates_repeated_exact_sku(monkeypatch):
     monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
     monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)
