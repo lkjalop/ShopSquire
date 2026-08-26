@@ -557,26 +557,13 @@ def _complete_canonical_case_patches(
     # may emit them only when this buyer utterance independently grounds them.
     # Otherwise an amendment such as "move 3 from Adelaide to Brisbane" would
     # silently rewrite retained quantity/budget alongside the one requested edit.
-    from src.app.services.bulk_intent import quantity_value_mentioned
-    quantity_is_current = bool(
-        requested_quantity is not None
-        and quantity_value_mentioned(query, requested_quantity)
+    from src.app.services.recommendation_core.case_patch_grounding import (
+        budget_is_current,
+        quantity_is_current,
     )
-    if quantity_is_current and "requested_quantity" not in paths:
+    if quantity_is_current(query, requested_quantity) and "requested_quantity" not in paths:
         add("set", "requested_quantity", requested_quantity, "canonical_quantity_grammar")
-
-    from src.app.services.budget_grammar import parse_budget
-    parsed_budget = parse_budget(query)
-    budget_is_current = bool(
-        total_budget_cents is not None
-        and parsed_budget is not None
-        and total_budget_cents in {
-            int(amount) * 100
-            for amount in (parsed_budget.budget_min, parsed_budget.budget_max)
-            if amount is not None
-        }
-    )
-    if budget_is_current:
+    if budget_is_current(query, total_budget_cents):
         if "budget.amount_minor" not in paths:
             add("set", "budget.amount_minor", total_budget_cents, "canonical_budget_grammar")
         if "budget.currency" not in paths:
