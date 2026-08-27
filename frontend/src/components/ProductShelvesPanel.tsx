@@ -102,13 +102,31 @@ export default function ProductShelvesPanel({ projection, onPropose, onNarration
   onPropose?: (product: ShelfProduct, quantity: number) => void;
   onNarrationPreview?: (projection: NonNullable<ProductShelfProjection['narration_projection']>) => Promise<{
     text: string; renderer: string; status: string; fallback_reason?: string | null;
+    model_id?: string | null;
   }>;
 }) {
   const [showNarration, setShowNarration] = React.useState(true);
   const [preview, setPreview] = React.useState<{
     text: string; renderer: string; status: string; fallback_reason?: string | null;
+    model_id?: string | null;
   } | null>(null);
   const [previewBusy, setPreviewBusy] = React.useState(false);
+  const narration = projection?.narration_projection;
+  React.useEffect(() => {
+    if (!narration || !onNarrationPreview) {
+      setPreview(null);
+      setPreviewBusy(false);
+      return;
+    }
+    let current = true;
+    setPreview(null);
+    setPreviewBusy(true);
+    void onNarrationPreview(narration)
+      .then((result) => { if (current) setPreview(result); })
+      .catch(() => undefined)
+      .finally(() => { if (current) setPreviewBusy(false); });
+    return () => { current = false; };
+  }, [narration, onNarrationPreview]);
   if (!projection?.shelves?.length) return null;
   return (
     <section data-testid="product-shelves" aria-label="Provisional product shelves" style={{ padding: 12 }}>
@@ -140,7 +158,7 @@ export default function ProductShelvesPanel({ projection, onPropose, onNarration
                   .then(setPreview)
                   .finally(() => setPreviewBusy(false));
               }}>
-              {previewBusy ? 'Checking AI preview…' : 'AI explanation preview'}
+              {previewBusy ? 'Generating explanation…' : preview ? 'Refresh AI explanation' : 'AI explanation preview'}
             </button>
           ) : null}
           {showNarration ? (
@@ -149,7 +167,7 @@ export default function ProductShelvesPanel({ projection, onPropose, onNarration
               {preview ? (
                 <div data-testid="narration-preview-status" style={{ marginTop: 4, fontSize: 11 }}>
                   {preview.renderer === 'local_model_preview'
-                    ? 'Local AI preview · critic accepted · no commerce authority'
+                    ? `Explained by ${preview.model_id || 'local model'} · critic accepted · no commerce authority`
                     : `Deterministic fallback · ${preview.fallback_reason || preview.status}`}
                 </div>
               ) : null}

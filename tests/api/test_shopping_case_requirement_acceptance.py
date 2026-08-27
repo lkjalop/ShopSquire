@@ -104,6 +104,10 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
         "shelf_projection_ms", "response_projection_ms",
     ))
     assert payload["product_shelves"]["schema_version"] == "product-shelves-v1"
+    narration = payload["product_shelves"]["narration_projection"]
+    assert narration["purpose"] == payload["ambiguity_exploration"]["retained_purpose"]
+    assert narration["shelf_summary"]
+    assert all(row["sku"] and row["sentence"] for row in narration["top_product_sentences"])
     assert payload["cart_mutation"] == "not_authorized"
     assert payload["supplier_send"] == "not_authorized"
 
@@ -603,6 +607,56 @@ def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeyp
     assert payload["product_shelves"]["buyer_claim_reconciliation"] == payload[
         "buyer_claim_reconciliation"
     ]
+
+
+def test_cancelled_live_research_projects_attempted_unresolved_truth(monkeypatch):
+    client = _client()
+    _enrol_local_research(monkeypatch)
+    interpreted = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-cancelled-live",
+        "retained_purpose": "Digital-twin simulation of factory equipment",
+    }).json()
+
+    def cancelled_research(*args, **kwargs):
+        return {
+            "status": "cancelled", "claims": [], "context_claims": [],
+            "unresolved": [{
+                "source_id": "nist_manufacturing_digital_twins",
+                "reason": "buyer_request_cancelled",
+            }],
+            "receipts": [], "source_execution": [{
+                "source_id": "nist_manufacturing_digital_twins",
+                "publisher": "NIST", "deadline_status": "cancelled_during_canonical_fetch",
+            }],
+            "provider_accounting": {"external_calls": 1, "paid_calls": 0},
+            "evidence_outcome": "unresolved", "execution_mode": "live_network",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        cancelled_research,
+    )
+    plan = interpreted["ambiguity_exploration"]
+    response = client.post(
+        f"/api/v1/shopping-cases/{interpreted['case_id']}/research",
+        json={
+            "uid": "buyer-cancelled-live",
+            "research_plan_id": plan["research_plan_id"],
+            "ambiguity_object_ids": [row["ambiguity_id"] for row in plan["ambiguity_objects"]],
+            "hypothesis_ids": [row["hypothesis_id"] for row in plan["interpretations"]],
+            "research_authorized": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "research_cancelled"
+    assert payload["ambiguity_exploration"]["status"] == "unresolved"
+    assert payload["ambiguity_exploration"]["execution"] == "official_research_cancelled"
+    assert payload["ambiguity_exploration"]["canonical_truth"]["research_execution"] == (
+        "OFFICIAL_FETCH_PARTIAL"
+    )
+    assert payload["product_shelves"]["narration_projection"]["shelf_summary"]
 
 
 def test_acceptance_is_case_scoped_versioned_idempotent_and_never_mutates_cart():

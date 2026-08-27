@@ -73,6 +73,27 @@ def project_research_explainability(
         unresolved_count=len(unresolved),
     )
 
+    narration = project_product_shelf_narration(
+        purpose=purpose,
+        shelves=shelves,
+        accepted_requirements=claims,
+        delta=delta,
+    )
+    return receipt, narration
+
+
+def project_product_shelf_narration(
+    *, purpose: str, shelves: dict[str, Any],
+    accepted_requirements: list[dict[str, Any]] | None = None,
+    delta: list[dict[str, Any]] | None = None,
+) -> TypedNarrationProjection:
+    """Explain a shelf from its reduced product evidence, even before research.
+
+    This projection never invents requirements or changes rank.  It gives the
+    buyer an immediate product-specific reason while live/model narration is
+    still optional and authority-free.
+    """
+
     shelf_rows = list(shelves.get("shelves") or [])
     leading = list(shelf_rows[0].get("initial") or []) if shelf_rows else []
     qualified = sum(str(row.get("fit_status")) == "qualified" for row in leading)
@@ -81,7 +102,10 @@ def project_research_explainability(
         f"{qualified} have verified exact-configuration fit and the remainder stay conditional."
     )
     sentences = [_product_sentence(row) for row in leading[:3]]
-    moved = [row for row in delta if int(row.get("movement") or 0) != 0]
+    moved = [
+        row for row in list(delta or [])
+        if int(row.get("movement") or 0) != 0
+    ]
     if moved:
         first = moved[0]
         reranking_summary = (
@@ -94,20 +118,19 @@ def project_research_explainability(
             "Research did not change the leading order; it updated evidence status and "
             "kept unresolved gaps visible."
         )
-    accepted_requirements = [{
+    accepted = [{
         key: claim.get(key) for key in (
             "claim_id", "attribute", "attribute_key", "operator", "value", "unit",
             "requirement_class", "condition", "source_id", "freshness_status",
         ) if claim.get(key) is not None
-    } for claim in claims]
-    narration = TypedNarrationProjection(
+    } for claim in list(accepted_requirements or [])]
+    return TypedNarrationProjection(
         purpose=purpose,
-        accepted_requirements=accepted_requirements,
+        accepted_requirements=accepted,
         shelf_summary=shelf_summary,
         top_product_sentences=sentences,
         reranking_summary=reranking_summary,
     )
-    return receipt, narration
 
 
 def _product_sentence(row: dict[str, Any]) -> ProductNarrationSentence:
@@ -126,6 +149,24 @@ def _product_sentence(row: dict[str, Any]) -> ProductNarrationSentence:
         sentence += f"; {availability.rstrip('.')}" if availability else " with no verified minimum miss"
         sentence += "."
         basis = "verified"
+    elif not any((row.get("meets"), unknowns, compromises, misses)):
+        form_factor = str(
+            (row.get("product") or {}).get("form_factor") or "product"
+        ).replace("_", " ")
+        budget_outcome = str(
+            (row.get("commercial_decision") or {}).get("budget_outcome") or ""
+        )
+        budget_phrase = (
+            " within the stated budget" if budget_outcome == "within"
+            else " outside the stated budget" if budget_outcome == "over"
+            else ""
+        )
+        sentence = (
+            f"{title} is shown as a {form_factor} catalog candidate{budget_phrase}; "
+            "it is not yet a verified recommendation because no accepted capability "
+            "requirements distinguish it."
+        )
+        basis = "conditional"
     else:
         gap = (unknowns or compromises or ["exact capability evidence remains incomplete"])[0]
         sentence = f"{title} remains conditional because {gap}."

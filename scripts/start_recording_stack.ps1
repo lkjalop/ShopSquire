@@ -67,6 +67,9 @@ if ($LiveDemo) {
     $env:OLLAMA_MEDIUM_MODEL = $LiveModel
     $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
     $env:OPEN_WORLD_QUERY_MODEL = $LiveModel
+    $env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED = "1"
+    $env:PORTFOLIO_NARRATION_MODEL = $LiveModel
+    $env:PORTFOLIO_NARRATION_TIMEOUT_SEC = "8"
     $env:EXTERNAL_RESEARCH_ENABLED = "1"
     $env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = "0"
     $env:EXTERNAL_RESEARCH_SEARCH_URL = "http://127.0.0.1:8888/search?q={query}&format=json"
@@ -92,7 +95,21 @@ if ($LiveDemo) {
         } | ConvertTo-Json -Depth 4
         Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
             -ContentType "application/json" -Body $warmupBody -TimeoutSec 180 | Out-Null
+        $ollamaTags = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 10
+        $liveManifest = $ollamaTags.models | Where-Object {
+            $_.name -eq $LiveModel -or $_.model -eq $LiveModel
+        } | Select-Object -First 1
+        $liveDigest = [string]$liveManifest.digest
+        if ($liveDigest -notmatch '^[a-fA-F0-9]{64}$') {
+            throw "Ollama did not report a verifiable manifest digest for '$LiveModel'."
+        }
+        $env:ROUTER_MODEL_DIGEST = $liveDigest
+        $env:OLLAMA_DEFAULT_MODEL_DIGEST = $liveDigest
+        $env:OLLAMA_MEDIUM_MODEL_DIGEST = $liveDigest
+        $env:OPEN_WORLD_QUERY_MODEL_DIGEST = $liveDigest
+        $env:PORTFOLIO_NARRATION_MODEL_DIGEST = $liveDigest
         Write-Output "OLLAMA_PREWARMED=$LiveModel"
+        Write-Output "OLLAMA_MANIFEST_VERIFIED=$($liveDigest.Substring(0, 12))"
     } catch {
         throw "Live demo requested, but Ollama prewarm failed for '$LiveModel': $($_.Exception.Message)"
     }

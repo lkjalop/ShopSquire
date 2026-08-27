@@ -222,7 +222,7 @@ describe('research truth panels', () => {
   it('shows only critic-accepted preview output and labels its lack of authority', async () => {
     const preview = vi.fn().mockResolvedValue({
       text: 'Critic-accepted local preview.', renderer: 'local_model_preview',
-      status: 'accepted_preview', fallback_reason: null,
+      status: 'accepted_preview', fallback_reason: null, model_id: 'qwen3:14b',
     });
     render(<ProductShelvesPanel projection={{
       schema_version: 'product-shelves-v1', evidence_status: 'researched',
@@ -241,10 +241,10 @@ describe('research truth panels', () => {
       }],
     }} onNarrationPreview={preview} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'AI explanation preview' }));
     await waitFor(() => expect(screen.getByTestId('deterministic-shelf-narration'))
       .toHaveTextContent('Critic-accepted local preview.'));
+    expect(preview).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('narration-preview-status'))
-      .toHaveTextContent(/critic accepted.*no commerce authority/i);
+      .toHaveTextContent(/Explained by qwen3:14b.*critic accepted.*no commerce authority/i);
   });
 });

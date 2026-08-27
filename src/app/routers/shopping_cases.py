@@ -587,6 +587,20 @@ def create_case_interpretation(
         tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
         candidate_configuration_ids=candidate_set.configuration_ids,
     )
+    product_shelves = projection.model_dump(mode="json")
+    from src.app.services.research_explainability_projection import (
+        project_product_shelf_narration,
+    )
+
+    product_shelves.update({
+        "evidence_status": "provisional",
+        "official_claim_count": 0,
+        "context_claim_count": 0,
+        "narration_projection": project_product_shelf_narration(
+            purpose=plan.retained_purpose,
+            shelves=product_shelves,
+        ).model_dump(mode="json"),
+    })
     shelf_projection_ms = (perf_counter() - stage_started) * 1000.0
     from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
 
@@ -650,7 +664,7 @@ def create_case_interpretation(
         "case_id": case_id,
         "trace_id": trace_id,
         "ambiguity_exploration": exploration,
-        "product_shelves": projection.model_dump(mode="json"),
+        "product_shelves": product_shelves,
         "catalog_candidate_set": candidate_set.model_dump(mode="json"),
         "interpretation_job": interpretation_job,
         "requested_quantity": requested_quantity,

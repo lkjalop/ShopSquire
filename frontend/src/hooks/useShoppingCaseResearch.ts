@@ -246,7 +246,10 @@ export function useShoppingCaseResearch() {
   const executeResearch = useCallback(async ({
     uid,
     refreshAuthorized = false,
-    deadlineMs = 20_000,
+    // Live official-origin research is bounded to 30 seconds server-side.
+    // Give the response time to return and seal its receipts before the buyer
+    // transport requests cooperative cancellation.
+    deadlineMs = 40_000,
     authorizationBasis = 'buyer_action',
   }: ResearchRequest) => {
     const exploration = ambiguityExploration;

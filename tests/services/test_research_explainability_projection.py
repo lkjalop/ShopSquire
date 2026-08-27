@@ -45,3 +45,22 @@ def test_projection_names_verified_failure_and_rank_movement():
     assert narration.top_product_sentences[0].evidence_basis == "failed"
     assert "not qualified" in narration.top_product_sentences[0].sentence
     assert "verified OS incompatibility" in narration.reranking_summary
+
+
+def test_projection_explains_why_a_requirement_free_candidate_is_only_shown():
+    shelves = {"shelves": [{"initial": [{
+        "identity_key": "p2", "title": "Gaming Laptop C", "fit_status": "conditional",
+        "product": {"sku": "C", "form_factor": "laptop"},
+        "commercial_decision": {"budget_outcome": "within"},
+        "meets": [], "unknowns": [], "compromises": [], "misses": [],
+    }]}]}
+
+    _receipt, narration = project_research_explainability(
+        purpose="Unresolved simulation workload",
+        research={"claims": [], "context_claims": [], "unresolved": []},
+        shelves=shelves, delta=[],
+    )
+
+    sentence = narration.top_product_sentences[0].sentence
+    assert "shown as a laptop catalog candidate within the stated budget" in sentence
+    assert "not yet a verified recommendation" in sentence

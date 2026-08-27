@@ -213,8 +213,11 @@ async def execute_enrolled_official_research(
         else "unresolved"
     ))
     was_cancelled = research.get("status") == "cancelled"
+    # Cancellation is execution state, not evidence state.  Keep the canonical
+    # evidence vocabulary valid while preserving the cancellation in
+    # ``execution`` and the outer response status.
     status = (
-        "research_cancelled" if was_cancelled
+        "unresolved" if was_cancelled
         else "researched" if outcome == "product_requirements"
         else outcome
     )
