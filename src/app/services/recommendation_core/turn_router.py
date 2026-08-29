@@ -2147,18 +2147,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if entity not in workload_entities:
             workload_entities.append(entity)
     workload_entities = recover_literal_game_identity(envelope.query, workload_entities, query_entity_tokens)
-    pending_relation = str(data.get("clarification_relation") or "").strip().lower()
-    # A literal-clamped software/game identity that directly answers a server-held material
-    # question is new evidence about the pending case, not a redundant echo of a generic
-    # enrolled use case.  Retain it so downstream governed research can resolve the named
-    # workload.  Ordinary turns still pass through the covered-echo clamp below.
-    if not (pending and pending_relation == "answer"):
-        workload_entities = discard_covered_model_workload_echo(
-            query=envelope.query,
-            use_cases=use_cases,
-            workload_entities=workload_entities,
-            node_path=str(data.get("handle") or session.get("prior_node") or "") or None,
-        )
+    if not (pending and str(data.get("clarification_relation") or "").strip().lower() == "answer"):
+        workload_entities = discard_covered_model_workload_echo(query=envelope.query, use_cases=use_cases, workload_entities=workload_entities, node_path=str(data.get("handle") or session.get("prior_node") or "") or None)
     use_case_variants: Dict[str, str] = {}
     scalar_variant = str(data.get("use_case_variant") or "").strip()
     raw_variants = data.get("use_case_variants")
