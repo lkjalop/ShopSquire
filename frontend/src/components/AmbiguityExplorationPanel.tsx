@@ -40,6 +40,9 @@ export type AmbiguityExploration = {
     confidence?: number; status?: string; requirements_status?: string;
   }[];
   canonical_truth?: Record<string, unknown> | null;
+  source_intake_certificate?: {
+    resolution?: { status?: string };
+  } | null;
 };
 
 type Props = {

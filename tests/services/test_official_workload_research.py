@@ -174,6 +174,39 @@ def test_emulate3d_parser_rejects_unidentified_requirement_prose() -> None:
     assert context == []
 
 
+def test_larian_bg3_parser_preserves_official_pc_tiers() -> None:
+    claims, context = compile_source_claims(
+        "larian_baldurs_gate_3_requirements",
+        b"""
+        <h1>Baldur's Gate 3 System Requirements</h1>
+        <h2>Minimum</h2>Windows 10 64-bit; 8 GB RAM; 150 GB available space, SSD required.
+        <h2>Recommended</h2>Windows 10 64-bit; 16 GB RAM; 150 GB available space, SSD required.
+        """,
+        observed_at="2026-08-29T00:00:00Z",
+        citation_url="https://baldursgate3.game/support/system-requirements_47",
+    )
+    assert context == []
+    assert {
+        (row["attribute"], row["requirement_class"], row["value"])
+        for row in claims if row["attribute"] in {"ram_gb", "storage_gb"}
+    } >= {
+        ("ram_gb", "minimum", 8),
+        ("ram_gb", "recommended", 16),
+        ("storage_gb", "minimum", 150),
+    }
+
+
+def test_larian_bg3_parser_rejects_wrong_game_or_non_requirement_page() -> None:
+    claims, context = compile_source_claims(
+        "larian_baldurs_gate_3_requirements",
+        b"Baldur's Gate Enhanced Edition walkthrough: 8 GB RAM",
+        observed_at="2026-08-29T00:00:00Z",
+        citation_url="https://baldursgate3.game/news",
+    )
+    assert claims == []
+    assert context == []
+
+
 def test_emulate3d_policy_pending_keeps_parsed_claims_out_of_qualification(monkeypatch) -> None:
     from src.app.services.official_source_governance import load_official_source_manifest
 

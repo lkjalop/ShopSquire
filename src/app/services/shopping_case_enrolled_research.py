@@ -219,7 +219,11 @@ async def execute_enrolled_official_research(
     status = (
         "unresolved" if was_cancelled
         else "researched" if outcome == "product_requirements"
-        else outcome
+        else "context_only" if outcome == "context_only"
+        # Parser/reviewer workflow states such as
+        # ``claims_pending_policy_review`` are execution detail, not values in
+        # the buyer-facing canonical evidence vocabulary.
+        else "unresolved"
     )
     contract = project_research_execution_contract(
         plan, requirements_compiled=outcome == "product_requirements",

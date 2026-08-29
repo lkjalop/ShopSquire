@@ -1383,6 +1383,14 @@ async def _resolve_case_evidence_source_with_db(
         },
         "security": {
             "status": resolution.security_status,
+            "url_syntax": (
+                "accepted_https_no_credentials"
+                if resolution.submitted_url else "rejected"
+            ),
+            "publisher_authority": (
+                "enrolled" if resolution.status == "resolved" else "not_enrolled"
+            ),
+            "content_trust": "not_observed",
             "canonical_fetch_eligible": resolution.canonical_fetch_eligible,
             "arbitrary_submitted_path_fetch_allowed": False,
         },
@@ -1479,6 +1487,10 @@ async def _resolve_case_evidence_source_with_db(
             "status": (
                 "observed_untrusted_content_pending_compilation"
                 if completed_origin else "fetch_failed_closed"
+            ),
+            "content_trust": (
+                "untrusted_until_claim_compilation"
+                if completed_origin else "not_accepted"
             ),
             "response_body_hashes": sorted({
                 str(row.get("response_body_hash"))

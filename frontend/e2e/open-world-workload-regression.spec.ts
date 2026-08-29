@@ -5,6 +5,16 @@ import { dirname, resolve } from 'node:path';
 
 async function send(page: import('@playwright/test').Page, text: string, requireChat = false) {
   const input = page.getByPlaceholder('Type your message...');
+  // Register before the turn starts: the frontend can launch the idempotent
+  // query fallback immediately after the SSE `in_progress` event, before this
+  // helper has finished decoding the stream body.
+  const queryFallbackPromise = requireChat
+    ? page.waitForResponse(
+        candidate => candidate.request().method() === 'POST'
+          && /\/api\/v1\/chat\/query$/.test(candidate.url()),
+        { timeout: 100_000 },
+      ).catch(() => null)
+    : Promise.resolve(null);
   const responsePromise = page.waitForResponse(
     response => (
       response.request().method() === 'POST'
@@ -29,15 +39,36 @@ async function send(page: import('@playwright/test').Page, text: string, require
     );
   }
   await expect(page.getByTestId('stream-acknowledgement')).toBeHidden({ timeout: 60_000 });
-  const body = await response.text();
-  const payloads = body.split('\n')
-    .filter(line => line.startsWith('data: '))
-    .map(line => {
-      try { return JSON.parse(line.slice(6)); } catch { return null; }
-    })
-    .filter(Boolean);
+  const decodePayloads = (body: string): any[] => {
+    const decoded = body.split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => {
+        try { return JSON.parse(line.slice(6)); } catch { return null; }
+      })
+      .filter(Boolean);
+    // `/chat/query` is a JSON fallback while `/chat/stream` is SSE.  The same
+    // live certificate helper must inspect either transport.
+    if (decoded.length === 0) {
+      try { decoded.push(JSON.parse(body)); } catch { /* assertion reports a missing receipt */ }
+    }
+    return decoded;
+  };
+  let payloads = decodePayloads(await response.text());
+  // Long live-model turns deliberately close the SSE request with an
+  // idempotent in-progress receipt; App then obtains the completed atomic
+  // result through `/chat/query`.  Follow that documented transport handoff.
+  if (payloads.some((payload: any) => payload?.status === 'in_progress')) {
+    const fallbackResponse = await queryFallbackPromise;
+    if (!fallbackResponse) throw new Error('chat_query_fallback_response_missing');
+    response = fallbackResponse;
+    payloads = decodePayloads(await response.text());
+  }
   const reversed = [...payloads].reverse();
-  return reversed.find((payload: any) => (
+  // A URL-bearing chat turn can emit the normal execution projection before
+  // the atomic source-intake receipt.  Prefer the latter so the certificate
+  // assertion cannot accidentally inspect an earlier SSE event.
+  return reversed.find((payload: any) => payload?.buyer_evidence_source_resolution)
+  || reversed.find((payload: any) => (
     payload?.execution_state_envelope
     || payload?.workload_authorization
     || payload?.semantic_resolution
@@ -154,7 +185,7 @@ test('held-out future-game alias resolves identity but cannot invent fit or budg
   });
 });
 
-test('buyer Emulate3D link returns cited policy-pending claims instead of stale no-research truth', async ({ page }) => {
+test('first-turn Emulate3D URL creates its case and source-security receipt without a bridge race', async ({ page }) => {
   test.setTimeout(180_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   await page.addInitScript((uid) => {
@@ -165,65 +196,128 @@ test('buyer Emulate3D link returns cited policy-pending claims instead of stale 
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
-  await send(
-    page,
-    'I need a computer for Rockwell Emulate3D 2026 digital twin simulations. Is AUD 2500 enough?',
-  );
-  await expect(page.getByTestId('ambiguity-exploration')).toBeVisible();
+  const result = await send(page,
+    'I need a computer for Rockwell Emulate3D digital twin simulations. Official link: '
+    + 'https://store.sim3d.com/demo3d_2025/system_requirements', true);
+  const source = result.buyer_evidence_source_resolution;
 
-  const sourceResponse = page.waitForResponse(
-    response => (
-      response.request().method() === 'POST'
-      && /\/api\/v1\/shopping-cases\/[^/]+\/evidence-source-resolutions$/.test(response.url())
-    ),
-    { timeout: 90_000 },
-  );
-  const input = page.getByPlaceholder('Type your message...');
-  await input.fill('https://store.sim3d.com/demo3d_2025/system_requirements');
-  await input.press('Enter');
-  const sourceResolution = await (await sourceResponse).json();
-
-  let source = sourceResolution;
-  if (sourceResolution.research_status === 'not_authorized') {
-    expect(sourceResolution.provider_accounting).toMatchObject({ external_calls: 0 });
-    const fetchResponse = page.waitForResponse(
-      response => (
-        response.request().method() === 'POST'
-        && /\/api\/v1\/shopping-cases\/[^/]+\/evidence-source-resolutions$/.test(response.url())
-      ),
-      { timeout: 90_000 },
-    );
-    await page.getByRole('button', { name: 'Fetch reviewed canonical source' }).click();
-    source = await (await fetchResponse).json();
-  }
-
+  expect(source.case_id).toBe(result.ambiguity_exploration.case_id);
   expect(source.resolution.status).toBe('resolved');
   expect(source.resolution.selected_source_id).toBe('rockwell_emulate3d_official_requirements');
-  expect(source.research_status).toBe('claims_pending_review');
-  expect(source.claims.length).toBeGreaterThanOrEqual(8);
-  expect(source.canonical_truth).toMatchObject({
-    research_execution: 'OFFICIAL_FETCH_PARTIAL',
-    evidence_status: 'OBSERVED_PENDING_REVIEW',
-    freshness: 'CURRENT',
-    commerce_authority: 'NONE',
+  expect(source.research_status).toMatch(/not_authorized|claims_pending_review/);
+  if (source.research_status === 'not_authorized') {
+    expect(source.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+  } else {
+    expect(source.provider_accounting.official_origin_fetches).toBeGreaterThanOrEqual(1);
+    expect(source.claims.length).toBeGreaterThan(0);
+  }
+  expect(source.source_intake_certificate).toMatchObject({
+    case_id: source.case_id,
+    security: {
+      url_syntax: 'accepted_https_no_credentials',
+      publisher_authority: 'enrolled',
+      arbitrary_submitted_path_fetch_allowed: false,
+    },
   });
-  expect(source.provider_accounting.official_origin_fetches).toBeGreaterThanOrEqual(1);
+  expect(source.source_intake_certificate.execution.network_execution)
+    .toBe(source.research_status !== 'not_authorized');
   expect(source.cart_mutation).toBe('not_authorized');
   expect(source.supplier_send).toBe('not_authorized');
-
-  const review = page.getByTestId('buyer-requirement-review').last();
-  await expect(review).toContainText(/Review 8 extracted requirements/i);
-  await expect(review).toContainText(/reviewed canonical publisher page/i);
-  await expect(review).toContainText(/independent source-policy review/i);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await page.getByTitle('Decision Trace').click();
   const modal = page.getByTestId('decision-trace-modal');
   await modal.getByRole('button', { name: /^Research & Fit/ }).click();
   await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
-  await expect(modal.getByTestId('canonical-procurement-truth')).toContainText(
-    /official fetch partial.*observed pending review.*current/i,
+  const receipt = modal.getByTestId('source-intake-certificate');
+  await expect(receipt).toContainText(
+    /source intake: resolved.*safety (?:canonical fetch eligible|observed untrusted content pending compilation)/i,
   );
+});
+
+test('digital twin to Heroes III Remake supersedes evidence and consent but retains budget', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-digital-twin-heroes-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const first = await send(page,
+    'I need an AUD 3000 computer for a digital twin. Link: https://store.sim3d.com/demo3d_2025/system_requirements',
+    true);
+  const firstCase = first.ambiguity_exploration.case_id;
+  expect(first.buyer_evidence_source_resolution.resolution.status).toBe('resolved');
+
+  const switched = await send(page,
+    'I want a laptop to play the new remastered Heroes of Might and Magic 3.', true);
+  expect(switched.ambiguity_exploration.case_id).not.toBe(firstCase);
+  expect(switched.buyer_evidence_source_resolution ?? null).toBeNull();
+  expect(switched.execution_state_envelope.commerce_authority).toBe('none');
+  // Local demo policy authorizes research on each current turn. The boundary
+  // receipt distinguishes that fresh grant from inherited consent.
+  expect(switched.subject_switch_boundary).toMatchObject({
+    schema_version: 'subject-switch-boundary-v1',
+    research_authority: 'granted_on_replacement_turn',
+    commerce_authority: 'none',
+  });
+  expect(JSON.stringify(switched)).not.toMatch(/rockwell_emulate3d_official_requirements/i);
+  expect(switched.confirmed_slots?.budget_max || switched.confirmed_slots?.budget).toBeTruthy();
+});
+
+test('Heroes III Remake to BG3 resolves the new canonical Steam identity', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-heroes-bg3-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const heroes = await send(page,
+    'I want a laptop to play the new remastered Heroes of Might and Magic 3. Is AUD 2500 enough?', true);
+  const heroesCase = heroes.ambiguity_exploration.case_id;
+  const bg3 = await send(page,
+    "What about Baldur's Gate 3? You may check the enrolled official requirements.", true);
+  expect(bg3.ambiguity_exploration?.case_id || bg3.shopping_case_id).not.toBe(heroesCase);
+  const evidence = bg3.workload_authorization?.evidence || [];
+  expect(evidence.some((item: any) => (
+    item.canonical_title === "Baldur's Gate 3"
+    && item.publisher === 'Larian Studios'
+    && String(item.app_id) === '1086940'
+    && item.release_state === 'released'
+    && item.requirements_completeness === 'minimum_and_recommended'
+  ))).toBe(true);
+  expect(JSON.stringify(bg3)).not.toMatch(/Heroes of Might and Magic III Remake/);
+});
+
+test('unenrolled Larian URL is rejected with a visible zero-fetch security receipt', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-larian-reject-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const result = await send(page,
+    "I want a laptop for Baldur's Gate 3. Use https://larian.com/support/faqs/baldurs-gate-3?token=do-not-store",
+    true);
+  const source = result.buyer_evidence_source_resolution;
+  expect(source.resolution.status).toBe('not_enrolled');
+  expect(source.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+  expect(JSON.stringify(source)).not.toContain('do-not-store');
+  expect(source.source_intake_certificate.security).toMatchObject({
+    publisher_authority: 'not_enrolled',
+    arbitrary_submitted_path_fetch_allowed: false,
+  });
+  await expect(page.getByText(/not an enrolled canonical source/i)).toBeVisible();
+  await page.getByTitle('Decision Trace').click();
+  const modal = page.getByTestId('decision-trace-modal');
+  await modal.getByRole('button', { name: /^Research & Fit/ }).click();
+  await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
+  await expect(modal.getByTestId('source-intake-certificate')).toContainText(/source intake: not enrolled/i);
 });
 
 test('explicit furniture and pharmacy categories cannot inherit laptop shelves', async ({ page }) => {

@@ -16,6 +16,23 @@ from pydantic import BaseModel, ConfigDict
 from src.app.services.official_source_governance import load_official_source_manifest
 
 
+_SUBMITTED_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+def extract_submitted_source_url(value: str | None) -> str | None:
+    """Extract one bounded buyer URL before semantic routing or persistence."""
+    match = _SUBMITTED_URL_RE.search(str(value or ""))
+    if not match:
+        return None
+    return match.group(0).rstrip("),.;]")[:2000]
+
+
+def remove_submitted_source_urls(value: str | None) -> str:
+    """Remove raw URLs from model/catalog input while preserving the buyer's purpose."""
+    sanitized = _SUBMITTED_URL_RE.sub(" [submitted official source] ", str(value or ""))
+    return re.sub(r"\s+", " ", sanitized).strip()
+
+
 class BuyerEvidenceSourceCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -201,5 +218,6 @@ def resolve_buyer_evidence_source(
 
 __all__ = [
     "BuyerEvidenceSourceCandidate", "BuyerEvidenceSourceResolution",
+    "extract_submitted_source_url", "remove_submitted_source_urls",
     "resolve_buyer_evidence_source",
 ]

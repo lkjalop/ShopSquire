@@ -315,6 +315,53 @@ def _emulate3d_claims(
     return rows, []
 
 
+def _baldurs_gate_3_claims(
+    source_id: str, folded: str, observed_at: str, citation_url: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compile the stable, explicitly published BG3 PC requirement tiers.
+
+    This is intentionally source-specific: prose from arbitrary Larian pages or
+    search snippets cannot enter the compiler merely because it mentions BG3.
+    """
+
+    identity_present = (
+        ("baldur's gate 3" in folded or "baldurs gate 3" in folded)
+        and "system requirements" in folded
+    )
+    if not identity_present:
+        return [], []
+    rows: list[dict[str, Any]] = []
+    if "8 gb ram" in folded or "8gb ram" in folded:
+        rows.append(_claim(
+            source_id, "ram_gb", ">=", 8, unit="GB",
+            claim_type="minimum_requirements", requirement_class="minimum",
+            statement="Larian publishes 8 GB RAM in the Baldur's Gate 3 minimum PC tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "16 gb ram" in folded or "16gb ram" in folded:
+        rows.append(_claim(
+            source_id, "ram_gb", ">=", 16, unit="GB",
+            claim_type="recommended_requirements", requirement_class="recommended",
+            statement="Larian publishes 16 GB RAM in the Baldur's Gate 3 recommended PC tier.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "150 gb" in folded and ("ssd" in folded or "storage" in folded):
+        rows.append(_claim(
+            source_id, "storage_gb", ">=", 150, unit="GB",
+            claim_type="minimum_requirements", requirement_class="minimum",
+            statement="Larian publishes 150 GB of PC storage for Baldur's Gate 3.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    if "windows 10 64-bit" in folded or "windows 10 64 bit" in folded:
+        rows.append(_claim(
+            source_id, "operating_system", "one_of", ["Windows 10 64-bit", "Windows 11 64-bit"],
+            claim_type="compatibility", requirement_class="minimum",
+            statement="Larian publishes a 64-bit Windows PC requirement for Baldur's Gate 3.",
+            observed_at=observed_at, citation_url=citation_url,
+        ))
+    return rows, []
+
+
 _SOURCE_PARSERS = {
     "factory_io_official_docs": _factory_io_claims,
     "microsoft_learn_hyperv": _hyperv_claims,
@@ -326,6 +373,7 @@ _SOURCE_PARSERS = {
     "autodesk_revit_requirements": _workstation_application_claims,
     "epic_unreal_engine_requirements": _workstation_application_claims,
     "rockwell_emulate3d_official_requirements": _emulate3d_claims,
+    "larian_baldurs_gate_3_requirements": _baldurs_gate_3_claims,
 }
 
 _PARSER_VERSION = "official-source-parser-v2"

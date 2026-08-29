@@ -1483,6 +1483,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                image_intent?, voice_transcript?, voice_confidence?, recent_messages? }
     """
     q, voice_used, voice_confidence = _effective_chat_query(payload)
+    from src.app.services.buyer_evidence_source_resolution import (
+        extract_submitted_source_url,
+        remove_submitted_source_urls,
+    )
+
+    # Prefer the URL actually present in the buyer utterance.  The browser hint
+    # is accepted only when the text transport omitted it; it never overrides
+    # what the buyer submitted.
+    submitted_source_url = (
+        extract_submitted_source_url(q)
+        or str((payload or {}).get("buyer_source_url") or "").strip()[:2000]
+    )
+    # URL bytes are evidence input, not semantic workload prose. Isolate them
+    # before model routing, case-purpose persistence, retrieval, or trace copy.
+    if submitted_source_url:
+        q = remove_submitted_source_urls(q)
     submitted_query = q
     voice_transcript = q if voice_used else None
 
@@ -1513,6 +1529,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
+
+    # Resolve literal game identities from bounded local provider data before
+    # any model or catalogue deadline. This is evidence preflight only: it does
+    # not rank products or grant commerce authority. It guarantees that a known
+    # title's canonical identity survives model variation and timeout recovery.
+    preflight_workload_evidence: list[Dict[str, Any]] = []
+    try:
+        from src.app.services.recommendation_core.literal_workload_identity import (
+            literal_game_identity_candidate,
+        )
+        from src.app.services.connectors.workload_evidence import default_registry
+
+        for workload_kind, workload_name in literal_game_identity_candidate(q):
+            resolved = default_registry().resolve(
+                workload_kind, workload_name, allow_live=False,
+            )
+            if resolved is not None:
+                preflight_workload_evidence.append(resolved.to_dict())
+    except Exception:
+        logger.debug("literal workload identity preflight skipped", exc_info=True)
 
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
@@ -2023,10 +2059,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # permission on the buyer's behalf.
     from src.app.services.clarification_state import external_research_consent_granted
 
-    if (
+    turn_explicit_research_consent = bool(
         bool((payload or {}).get("external_research_consent"))
         or external_research_consent_granted(submitted_query)
-    ):
+    )
+    if turn_explicit_research_consent:
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     active_shopping_case_id = str(
@@ -2100,6 +2137,141 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ).get_pending_clarification(uid)
     except Exception:
         pending_clarification = {}
+    # Detect the high-confidence lexical switch before clarification expansion
+    # and recommendation dispatch.  This keeps the old case snapshot, consent,
+    # evidence and question text out of the new subject's model input.  The old
+    # case is durably superseded later once the full routing result is present.
+    from src.app.services.recommendation_core.literal_workload_identity import (
+        deterministic_named_workload_switch,
+    )
+    deterministic_pre_route_subject_switch = bool(
+        active_shopping_case_id
+        and deterministic_named_workload_switch(submitted_query)
+    )
+    if deterministic_pre_route_subject_switch:
+        from src.app.services.subject_switch_boundary import clear_subject_scoped_state
+        clear_subject_scoped_state(
+            params,
+            retain_same_turn_consent=turn_explicit_research_consent,
+        )
+        pending_clarification = {}
+
+    # URL intake has a strict fast-fail boundary.  An invalid, ambiguous, or
+    # unenrolled origin is fully decidable from the reviewed local registry; it
+    # must not wait behind model interpretation or catalog ranking.  Materialize
+    # the case and its receipt in the same database operation, then return the
+    # zero-fetch decision immediately.  Resolved enrolled sources continue to
+    # the normal governed research pipeline below.
+    if submitted_source_url:
+        from src.app.services.buyer_evidence_source_resolution import (
+            resolve_buyer_evidence_source,
+        )
+
+        _early_source_resolution = resolve_buyer_evidence_source(
+            source_url=submitted_source_url,
+        )
+        if _early_source_resolution.status != "resolved":
+            from datetime import datetime, timezone
+            from src.app.models.orm import ShoppingCase
+            from src.app.routers.shopping_cases import (
+                ResolveBuyerEvidenceSourceRequest,
+                _resolve_case_evidence_source_with_db,
+            )
+            from src.app.services.subject_switch_boundary import clear_subject_scoped_state
+
+            _replaced_case_id = active_shopping_case_id or None
+            if not active_shopping_case_id or deterministic_pre_route_subject_switch:
+                _source_trace_id = uuid.uuid4().hex
+                _source_case_id = f"sc-{_source_trace_id}"
+                now = datetime.now(timezone.utc)
+                if deterministic_pre_route_subject_switch and active_shopping_case_id:
+                    db.execute(sql_text(
+                        "UPDATE shopping_cases SET status='superseded',updated_at=:updated_at "
+                        "WHERE tenant_id=:tenant_id AND case_id=:case_id"
+                    ), {
+                        "updated_at": now,
+                        "tenant_id": tenant_id,
+                        "case_id": active_shopping_case_id,
+                    })
+                db.add(ShoppingCase(
+                    case_id=_source_case_id,
+                    tenant_id=tenant_id,
+                    uid=str(uid or "guest")[:200],
+                    status="active",
+                    retained_purpose=str(submitted_query or q or "")[:500],
+                    created_at=now,
+                    updated_at=now,
+                ))
+                db.commit()
+            else:
+                _source_case_id = active_shopping_case_id
+                _source_trace_id = active_shopping_case_id.removeprefix("sc-")
+
+            _source_result = await _resolve_case_evidence_source_with_db(
+                _source_case_id,
+                ResolveBuyerEvidenceSourceRequest(
+                    uid=uid,
+                    source_url=submitted_source_url,
+                    research_authorized=False,
+                ),
+                x_tenant_id=tenant_id,
+                db=db,
+            )
+            _shared_budget = _extract_budget_bounds(submitted_query)
+            for _budget_key in ("budget_min", "budget_max"):
+                if _shared_budget.get(_budget_key) is not None:
+                    params[_budget_key] = _shared_budget[_budget_key]
+            _switch_receipt = (
+                clear_subject_scoped_state(
+                    params,
+                    retain_same_turn_consent=turn_explicit_research_consent,
+                )
+                if deterministic_pre_route_subject_switch else None
+            )
+            if _switch_receipt is not None:
+                _switch_receipt.update({
+                    "previous_case_id": _replaced_case_id,
+                    "replacement_case_id": _source_case_id,
+                })
+            _source_reason = str(
+                (_source_result.get("resolution") or {}).get("reason")
+                or "source_not_approved"
+            )
+            return {
+                "products": [],
+                "view_mode": "cards",
+                "confidence": None,
+                "decision_trace_id": _source_trace_id,
+                "trace_id": _source_trace_id,
+                "shopping_case_id": _source_case_id,
+                "assistant_message": (
+                    "I inspected the submitted link before using it, but it is not an "
+                    f"enrolled canonical source ({_source_reason}). I made zero network "
+                    "calls, did not retain its query parameters, and did not use its claims. "
+                    "The source-safety receipt is available in Decision Trace."
+                ),
+                "next_questions": [],
+                "blocked": True,
+                "degraded": False,
+                "buyer_evidence_source_resolution": _source_result,
+                "subject_switch_boundary": _switch_receipt,
+                "workload_authorization": {
+                    "status": "blocked",
+                    "reason": "submitted_source_not_enrolled",
+                    "evidence": preflight_workload_evidence,
+                    "state_prevented": [
+                        "catalog_qualification", "buyer_commitment", "supplier_rfq",
+                    ],
+                },
+                "execution_state_envelope": {
+                    "schema_version": "unified-execution-state-v1",
+                    "execution_status": "completed",
+                    "research_authority": "not_granted",
+                    "evidence_status": "source_rejected",
+                    "decision_status": "blocked",
+                    "commerce_authority": "none",
+                },
+            }
     # Research consent belongs to the active semantic case, not merely the click
     # that granted it.  Reuse it only inside the same tenant/session-scoped,
     # unexpired pending contract; a new or superseding objective must ask again.
@@ -2616,18 +2788,109 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             "qualification_authority": "none", "commercial_authority": "none",
                         },
                     )
+                    _fallback_source_intake = None
+                    if submitted_source_url:
+                        try:
+                            from src.app.routers.shopping_cases import (
+                                ResolveBuyerEvidenceSourceRequest,
+                                _resolve_case_evidence_source_with_db,
+                            )
+                            _fallback_source_intake = await _resolve_case_evidence_source_with_db(
+                                _case_id,
+                                ResolveBuyerEvidenceSourceRequest(
+                                    uid=_case_uid,
+                                    source_url=submitted_source_url,
+                                    research_authorized=bool(
+                                        external_research_consent_granted(str(q or ""))
+                                        or (payload or {}).get("external_research_consent")
+                                    ),
+                                ),
+                                x_tenant_id=_case_tenant,
+                                db=_fallback_db,
+                            )
+                        except Exception as _source_exc:
+                            logger.warning(
+                                "timeout source intake failed closed: %s",
+                                repr(_source_exc)[:160],
+                            )
+                            _fallback_source_intake = {
+                                "schema_version": "buyer-evidence-source-resolution-v1",
+                                "case_id": _case_id,
+                                "resolution": {
+                                    "status": "invalid",
+                                    "reason": "source_intake_failed_closed",
+                                },
+                                "provider_accounting": {
+                                    "external_calls": 0, "paid_calls": 0,
+                                },
+                                "source_intake_certificate": {
+                                    "schema_version": "source-intake-certificate-v1",
+                                    "case_id": _case_id,
+                                    "resolution_status": "invalid",
+                                    "security": {
+                                        "url_syntax": "isolated_before_routing",
+                                        "publisher_authority": "unresolved",
+                                        "arbitrary_submitted_path_fetch_allowed": False,
+                                    },
+                                    "execution": {"network_execution": False},
+                                },
+                            }
+                    _preflight_authorization = (
+                        {
+                            "status": "evidence_resolved_catalog_pending",
+                            "reason": "catalog_ranking_timeout",
+                            "evidence": preflight_workload_evidence,
+                            "state_prevented": [
+                                "catalog_qualification", "buyer_commitment", "supplier_rfq",
+                            ],
+                        }
+                        if preflight_workload_evidence else None
+                    )
+                    _fallback_assistant_message = (
+                        "The catalog-ranking step reached its deadline. I preserved a provisional "
+                        "shortlist and research plan; no external source was called. You can "
+                        "authorize discovery, upload requirements, or continue provisionally."
+                    )
+                    _fallback_source_status = str(
+                        ((_fallback_source_intake or {}).get("resolution") or {}).get("status")
+                        or ""
+                    ).lower()
+                    if _fallback_source_status == "not_enrolled":
+                        _fallback_assistant_message = (
+                            "I isolated and security-checked the submitted link, but its publisher "
+                            "is not an enrolled canonical source for this case. I made zero network "
+                            "calls, did not retain its query parameters, and did not use its claims. "
+                            "You can upload requirements or choose an enrolled source."
+                        )
+                    elif _fallback_source_status == "invalid":
+                        _fallback_assistant_message = (
+                            "I isolated the submitted link, but URL intake failed closed. I made "
+                            "zero network calls and did not use its claims. You can upload the "
+                            "requirements or provide another approved source."
+                        )
                     return {
                         "products": [], "view_mode": "cards", "confidence": None,
                         "decision_trace_id": _degraded_trace, "trace_id": _degraded_trace,
-                        "assistant_message": (
-                            "The catalog-ranking step reached its deadline. I preserved a provisional "
-                            "shortlist and research plan; no external source was called. You can "
-                            "authorize discovery, upload requirements, or continue provisionally."
-                        ),
+                        "assistant_message": _fallback_assistant_message,
                         "next_questions": [], "blocked": False, "degraded": True,
                         "degraded_reason": _failure_reason, "needs_human_review": False,
                         "security_route": "allow", "ambiguity_exploration": _ambiguity,
                         "product_shelves": _projection.model_dump(mode="json"),
+                        "workload_authorization": _preflight_authorization,
+                        "execution_state_envelope": {
+                            "schema_version": "unified-execution-state-v1",
+                            "execution_status": "degraded",
+                            "research_authority": (
+                                "granted" if external_research_consent_granted(str(q or ""))
+                                else "required"
+                            ),
+                            "evidence_status": (
+                                "identity_resolved" if preflight_workload_evidence else "material_gaps"
+                            ),
+                            "decision_status": "provisional",
+                            "commerce_authority": "none",
+                        },
+                        "buyer_evidence_source_resolution": _fallback_source_intake,
                     }
             except Exception:
                 logger.warning("timeout ambiguity projection failed", exc_info=True)
@@ -3393,10 +3656,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             literal_buyer_turn,
         )
     )
+    deterministic_workload_replacement = deterministic_named_workload_switch(
+        literal_buyer_turn,
+    )
+    subject_switch_receipt: Dict[str, Any] | None = None
     active_case_subject_replaced = bool(
         active_shopping_case_id
         and (
             named_workload_replacement
+            or deterministic_workload_replacement
             or (
                 not case_commercial_obligations
                 and (
@@ -3418,6 +3686,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         prior_case_purpose = active_shopping_case_purpose
         active_shopping_case_id = None
         active_shopping_case_purpose = None
+        # Consent and observations are scoped to the superseded subject.  Only
+        # an authorization made explicitly on this same replacement turn may
+        # cross the boundary; budget and other freshly parsed shared buyer
+        # constraints remain in response_confirmed_slots.
+        from src.app.services.subject_switch_boundary import clear_subject_scoped_state
+        subject_switch_receipt = clear_subject_scoped_state(
+            params,
+            retain_same_turn_consent=turn_explicit_research_consent,
+        )
         pending_clarification_consumed = bool(pending_clarification)
         pending_clarification_suspended = False
         routed_clarification_relation = "supersede"
@@ -3448,6 +3725,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 payload={
                     "prior_purpose": prior_case_purpose,
                     "replacement_turn": literal_buyer_turn[:500],
+                    "state_boundary": subject_switch_receipt,
                     "commercial_authority": "none",
                 },
             )
@@ -3583,6 +3861,48 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # exploration. This path calls no external provider and grants no cart authority.
     ambiguity_exploration: Dict[str, Any] | None = None
     ambiguous_product_shelves: Dict[str, Any] | None = None
+    if preflight_workload_evidence:
+        # Canonical local identity data is deterministic and must not disappear
+        # when the live router varies its output. Merge metadata into the
+        # recommendation-owned authorization envelope without changing that
+        # envelope's product or commerce decision.
+        projected_authorization = dict(
+            data.get("workload_authorization")
+            if isinstance(data.get("workload_authorization"), dict) else {}
+        )
+        projected_items = [
+            dict(item) for item in list(projected_authorization.get("evidence") or [])
+            if isinstance(item, dict)
+        ]
+        for canonical_item in preflight_workload_evidence:
+            canonical_key = str(
+                canonical_item.get("app_id")
+                or canonical_item.get("canonical_title")
+                or canonical_item.get("resolved_name")
+                or ""
+            ).strip().lower()
+            match_index = next((
+                index for index, item in enumerate(projected_items)
+                if canonical_key and canonical_key in {
+                    str(item.get("app_id") or "").strip().lower(),
+                    str(item.get("canonical_title") or "").strip().lower(),
+                    str(item.get("resolved_name") or "").strip().lower(),
+                }
+            ), None)
+            if match_index is None:
+                projected_items.append(dict(canonical_item))
+            else:
+                projected_items[match_index] = {
+                    **projected_items[match_index],
+                    **{
+                        key: value for key, value in canonical_item.items()
+                        if value not in (None, "", [], {})
+                    },
+                }
+        projected_authorization["evidence"] = projected_items
+        projected_authorization.setdefault("status", "evidence_resolved_catalog_pending")
+        projected_authorization.setdefault("reason", "canonical_identity_preflight")
+        data["workload_authorization"] = projected_authorization
     _workload_authorization = (
         data.get("workload_authorization")
         if isinstance(data.get("workload_authorization"), dict) else {}
@@ -3644,6 +3964,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "confidence": item.get("confidence") or identity.get("confidence"),
                     "status": item.get("status"),
                     "requirements_status": "incomplete",
+                    "canonical_title": item.get("canonical_title") or item.get("resolved_name"),
+                    "publisher": item.get("publisher"),
+                    "app_id": item.get("app_id") or item.get("source_record_id"),
+                    "release_state": item.get("release_state"),
+                    "release_date": item.get("release_date"),
+                    "requirements_completeness": item.get("requirements_completeness"),
                 })
 
             _semantic_hypotheses = list(semantic_resolution.get("workload_hypotheses") or [])[:3]
@@ -3886,6 +4212,164 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 repr(exc)[:160],
             )
 
+    # URL intake owns a durable case even when the workload itself resolved and
+    # catalogue ranking returned no products. Without this final case boundary,
+    # a first-turn rejected URL could be silently omitted from the response.
+    if submitted_source_url and not active_shopping_case_id:
+        try:
+            from datetime import datetime, timezone
+            import uuid as _uuid
+            from src.app.models.orm import ShoppingCase
+
+            source_case_id = "sc-" + str(
+                decision_trace_id or _uuid.uuid4().hex
+            ).removeprefix("sc-")[:196]
+            existing_case = db.execute(sql_text(
+                "SELECT 1 FROM shopping_cases "
+                "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
+            ), {"tenant_id": tenant_id, "case_id": source_case_id}).first()
+            if existing_case is None:
+                now = datetime.now(timezone.utc)
+                db.add(ShoppingCase(
+                    case_id=source_case_id,
+                    tenant_id=tenant_id,
+                    uid=str(uid or "guest")[:200],
+                    status="active",
+                    retained_purpose=str(submitted_query or q or "")[:500],
+                    created_at=now,
+                    updated_at=now,
+                ))
+                db.commit()
+            active_shopping_case_id = source_case_id
+            active_shopping_case_purpose = str(submitted_query or q or "")[:500]
+        except Exception:
+            db.rollback()
+            logger.warning("URL-owned shopping-case creation failed", exc_info=True)
+
+    # A pasted URL is resolved inside the same chat operation that owns the new
+    # or superseding case. This guarantees every accepted or rejected URL emits
+    # a case-bound intake/security receipt; the browser never has to race a
+    # second request against case creation.
+    source_intake_result: Dict[str, Any] | None = None
+    if submitted_source_url and active_shopping_case_id:
+        try:
+            from src.app.routers.shopping_cases import (
+                ResolveBuyerEvidenceSourceRequest,
+                _resolve_case_evidence_source_with_db,
+            )
+
+            source_intake_result = await _resolve_case_evidence_source_with_db(
+                active_shopping_case_id,
+                ResolveBuyerEvidenceSourceRequest(
+                    uid=uid,
+                    source_url=submitted_source_url,
+                    research_authorized=bool(params.get("external_research_consent")),
+                ),
+                x_tenant_id=tenant_id,
+                db=db,
+            )
+            source_status = str(
+                (source_intake_result.get("resolution") or {}).get("status") or ""
+            ).lower()
+            research_status = str(source_intake_result.get("research_status") or "").lower()
+            if source_status != "resolved":
+                reason = str(
+                    (source_intake_result.get("resolution") or {}).get("reason")
+                    or "source_not_approved"
+                )
+                assistant_message = (
+                    "I inspected the submitted link before using it, but it is not an "
+                    f"enrolled canonical source ({reason}). I did not fetch its arbitrary "
+                    "path or use its claims. The source-safety receipt is available in Decision Trace."
+                )
+                products = []
+                ambiguous_product_shelves = None
+            elif research_status == "not_authorized":
+                assistant_message = (
+                    "I safely matched the submitted link to a reviewed canonical publisher "
+                    "source. I did not fetch it or use its claims because external research "
+                    "is not authorized for this turn."
+                )
+                products = []
+                ambiguous_product_shelves = None
+            else:
+                source_claims = list(source_intake_result.get("claims") or [])
+                buyer_requirement_claims = source_claims
+                buyer_requirement_review_required = bool(source_claims)
+                buyer_requirement_proposal = source_intake_result.get(
+                    "buyer_requirement_proposal"
+                )
+                if isinstance(source_intake_result.get("product_shelves"), dict):
+                    ambiguous_product_shelves = source_intake_result["product_shelves"]
+                evidence_outcome = str(
+                    source_intake_result.get("evidence_outcome") or "unresolved"
+                )
+                if ambiguity_exploration is not None:
+                    ambiguity_exploration["status"] = (
+                        "researched" if evidence_outcome == "product_requirements"
+                        else "context_only" if evidence_outcome == "context_only"
+                        else "unresolved"
+                    )
+                    ambiguity_exploration["canonical_truth"] = source_intake_result.get(
+                        "canonical_truth"
+                    )
+                    ambiguity_exploration["source_intake_certificate"] = (
+                        source_intake_result.get("source_intake_certificate")
+                    )
+                assistant_message = (
+                    f"I safely fetched the reviewed canonical publisher source and extracted "
+                    f"{len(source_claims)} cited requirement claims. "
+                    + (
+                        "Review them below; they remain provisional until policy approval."
+                        if source_claims else
+                        "It did not establish product requirements, so product fit remains blocked."
+                    )
+                    + " No cart or supplier action was authorized."
+                )
+                products = []
+        except Exception as exc:
+            logger.warning("atomic buyer source intake failed closed", exc_info=True)
+            source_intake_result = {
+                "schema_version": "buyer-evidence-source-resolution-v1",
+                "case_id": active_shopping_case_id,
+                "resolution": {
+                    "status": "invalid",
+                    "reason": "governed_source_intake_failed_closed",
+                },
+                "research_status": "failed_closed",
+                "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+                "source_intake_certificate": {
+                    "schema_version": "buyer-source-intake-certificate-v1",
+                    "case_id": active_shopping_case_id,
+                    "resolution": {
+                        "status": "invalid",
+                        "reason": "governed_source_intake_failed_closed",
+                    },
+                    "security": {
+                        "status": "blocked",
+                        "url_syntax": "unresolved",
+                        "publisher_authority": "unresolved",
+                        "content_trust": "not_observed",
+                        "canonical_fetch_eligible": False,
+                        "arbitrary_submitted_path_fetch_allowed": False,
+                    },
+                    "execution": {"network_execution": False, "external_calls": 0, "paid_calls": 0},
+                    "claim_compilation": {"status": "not_executed", "accepted": 0, "rejected": 0, "unresolved": 1},
+                    "decision_effect": {"product_fit": "blocked", "cart_authority": "none", "supplier_authority": "none"},
+                },
+            }
+            if ambiguity_exploration is not None:
+                ambiguity_exploration["source_intake_certificate"] = (
+                    source_intake_result["source_intake_certificate"]
+                )
+            assistant_message = (
+                "I isolated the submitted link, but its governed source-intake operation "
+                "failed closed. I did not fetch the submitted path, use its claims, or "
+                "qualify a product."
+            )
+            products = []
+            ambiguous_product_shelves = None
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -4070,6 +4554,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ),
         "execution_state_envelope": data.get("execution_state_envelope"),
         "control_faults": data.get("control_faults") if isinstance(data.get("control_faults"), list) else [],
+        "subject_switch_boundary": subject_switch_receipt,
+        "buyer_evidence_source_resolution": source_intake_result,
     }
     # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
     # disabled is part of the API contract; emitting null makes clients and audits infer an

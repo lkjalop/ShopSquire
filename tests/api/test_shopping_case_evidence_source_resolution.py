@@ -172,9 +172,44 @@ def test_rejected_url_is_sanitized_and_still_emits_fail_closed_trace(monkeypatch
     assert len(source_events) == 1
     certificate = source_events[0]["payload"]
     assert certificate["security"]["status"] == "unresolved"
+    assert certificate["security"]["url_syntax"] == "accepted_https_no_credentials"
+    assert certificate["security"]["publisher_authority"] == "not_enrolled"
+    assert certificate["security"]["content_trust"] == "not_observed"
     assert certificate["execution"]["network_execution"] is False
     assert certificate["decision_effect"]["product_fit"] == "unchanged"
     assert "secret-value" not in str(certificate)
+
+
+def test_larian_bg3_canonical_source_is_enrolled_but_other_larian_host_is_rejected():
+    client = _client()
+    case_id = _case(client)
+    canonical = client.post(
+        f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+        json={
+            "uid": "buyer-link",
+            "source_url": "https://baldursgate3.game/support/system-requirements_47",
+            "research_authorized": False,
+        },
+    ).json()
+    assert canonical["resolution"]["status"] == "resolved"
+    assert canonical["resolution"]["selected_source_id"] == (
+        "larian_baldurs_gate_3_requirements"
+    )
+    assert canonical["source_intake_certificate"]["security"]["publisher_authority"] == "enrolled"
+
+    rejected = client.post(
+        f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+        json={
+            "uid": "buyer-link",
+            "source_url": "https://larian.com/support/faqs/bg3?credential=discard-me",
+            "research_authorized": True,
+        },
+    )
+    assert rejected.status_code == 200
+    assert "discard-me" not in rejected.text
+    rejected_payload = rejected.json()
+    assert rejected_payload["resolution"]["status"] == "not_enrolled"
+    assert rejected_payload["source_intake_certificate"]["execution"]["network_execution"] is False
 
 
 def test_emulate3d_policy_pending_claims_are_returned_for_review_with_execution_truth(monkeypatch):

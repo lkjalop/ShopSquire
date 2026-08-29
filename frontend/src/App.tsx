@@ -1546,44 +1546,10 @@ export default function App() {
       return;
     }
 
-    // Bridge ordinary chat paste into the same governed source-resolution flow used by
-    // the dedicated "official link" control. A URL is never fetched directly here: the
-    // backend must first map it to an enrolled/case-approved canonical source.
-    const pastedOfficialUrl = q.match(/https:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.;]+$/, '');
-    if (ambiguityExploration?.case_id && pastedOfficialUrl) {
-      setMessages((current) => [...current, { role: 'user', content: q, timestamp: new Date() }]);
-      setInputValue('');
-      setIsThinking(true);
-      try {
-        const resolution = await resolveBuyerEvidenceSource(
-          { source_url: pastedOfficialUrl },
-          autoPublicResearchEnabled,
-        );
-        if (!['resolved', 'matched', 'completed'].includes(String(resolution?.status || '').toLowerCase())) {
-          setMessages((current) => [...current, {
-            role: 'assistant',
-            content: `I could not bind that URL to an approved canonical source: ${resolution?.reason || 'source_not_approved'}. I did not use its claims. Upload the requirements or choose an enrolled publisher source.`,
-            timestamp: new Date(),
-          }]);
-        } else if (!autoPublicResearchEnabled) {
-          setMessages((current) => [...current, {
-            role: 'assistant',
-            content: 'Official source recognized. I mapped the submitted address to its reviewed canonical origin; I did not fetch the arbitrary pasted path, persist credentials/query parameters, or use any claims. Fetch the reviewed canonical source to extract requirements.',
-            timestamp: new Date(),
-            sourceFetchPrompt: { sourceUrl: pastedOfficialUrl },
-          }]);
-        }
-      } catch (error) {
-        setMessages((current) => [...current, {
-          role: 'assistant',
-          content: `I could not verify that source: ${error instanceof Error ? error.message : String(error)}. I did not use its claims or change product fit.`,
-          timestamp: new Date(),
-        }]);
-      } finally {
-        setIsThinking(false);
-      }
-      return;
-    }
+    // The backend owns URL isolation, case creation/supersession and the intake
+    // receipt in one operation. The browser supplies the bounded hint but never
+    // fetches the pasted path directly.
+    const pastedOfficialUrl = q.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.;\]]+$/, '');
 
     // Long, specification-shaped chat paste is a buyer claim proposal, not a new catalog
     // search. Extract it through the reviewable requirement-proposal endpoint so no pasted
@@ -1854,6 +1820,9 @@ export default function App() {
         && !hasImages
         && !complaintIntent
         && !hasNamedGameWorkload(q)
+        // URL-bearing turns must reach governed source intake. The fast
+        // interpretation shortcut cannot issue the mandatory security receipt.
+        && !pastedOfficialUrl
       ) {
         const interpretationAction = await postShoppingCaseAction(
           shoppingCaseActionPath.interpretation(), {
@@ -2161,6 +2130,7 @@ export default function App() {
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
         };
+        if (pastedOfficialUrl) chatPayload.buyer_source_url = pastedOfficialUrl;
         if (activeShoppingCase?.case_id || ambiguityExploration?.case_id) {
           chatPayload.shopping_case_id = activeShoppingCase?.case_id || ambiguityExploration?.case_id;
         }
@@ -2607,6 +2577,9 @@ export default function App() {
           && data.buyer_requirement_proposal.proposal_id
           ? data.buyer_requirement_proposal as ChatMessage['buyerRequirementProposal']
           : undefined;
+        const sourceIntake = data?.buyer_evidence_source_resolution
+          && typeof data.buyer_evidence_source_resolution === 'object'
+          ? data.buyer_evidence_source_resolution : null;
         const backendConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
           ? data.confirmed_slots
           : null;
@@ -2645,7 +2618,14 @@ export default function App() {
           // It must not downgrade a researched same-case projection or replace the
           // durable case trace after later quantity/budget follow-ups.
           if (!continuesActiveCase) {
-            setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
+            setAmbiguityExploration({
+              ...data.ambiguity_exploration,
+              ...(sourceIntake?.source_intake_certificate ? {
+                source_intake_certificate: sourceIntake.source_intake_certificate,
+                canonical_truth: sourceIntake.canonical_truth
+                  || data.ambiguity_exploration.canonical_truth,
+              } : {}),
+            } as AmbiguityExploration);
           }
           setActiveShoppingCase({
             case_id: incomingCaseId,
@@ -3028,10 +3008,17 @@ export default function App() {
   useEffect(() => {
     if (!autoPublicResearchEnabled || researchState === 'running') return;
     const exploration = ambiguityExploration;
+    const sourceResolutionStatus = String(
+      exploration?.source_intake_certificate?.resolution?.status || '',
+    ).trim().toLowerCase();
     if (
       !exploration?.case_id
       || !exploration.research_plan_id
       || exploration.status !== 'provisional'
+      // A rejected, invalid, or ambiguous buyer URL is itself the outcome for
+      // this turn.  Do not silently launch a different discovery workflow
+      // after issuing that security receipt.
+      || (sourceResolutionStatus && sourceResolutionStatus !== 'resolved')
     ) return;
     const attemptKey = `${exploration.case_id}:${exploration.research_plan_id}`;
     if (autoResearchAttemptedRef.current.has(attemptKey)) return;

@@ -26,6 +26,7 @@ _REQ_KEYS = {"ram_gb", "gpu", "storage_gb", "os"}
 _TOP_KEYS = {
     "title", "appid", "minimum", "recommended", "tags",
     "review_summary", "source", "source_url", "retrieved_at", "cached",
+    "publisher", "release_state", "release_date", "requirements_completeness",
 }
 
 
@@ -171,6 +172,16 @@ def test_official_identity_candidate_can_bridge_remastered_to_remake_without_cla
     assert ranked[0]["appid"] == 3809850
     assert ranked[0]["confidence"] >= 0.9
     assert ranked[0]["authority"] == "identity_candidate_only"
+
+
+def test_baldurs_gate_fixture_exposes_canonical_identity_completeness():
+    result = get_game_requirements("what about Baldurs Gate 3")
+    assert result is not None
+    assert result["title"] == "Baldur's Gate 3"
+    assert result["appid"] == 1086940
+    assert result["publisher"] == "Larian Studios"
+    assert result["release_state"] == "released"
+    assert result["requirements_completeness"] == "minimum_and_recommended"
 
 
 # ── GPU translation ──────────────────────────────────────────────────────────

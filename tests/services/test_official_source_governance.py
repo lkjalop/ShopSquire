@@ -8,7 +8,7 @@ from src.app.services.official_source_governance import (
 def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     status = source_governance_readiness()
     assert status["schema_version"] == "official-workload-sources-v2"
-    assert status["valid_source_count"] == 19
+    assert status["valid_source_count"] == 20
     assert status["errors"] == []
     assert "docs.gns3.com" in status["domain_allowlist"]
     assert "learn.microsoft.com" in status["domain_allowlist"]
@@ -19,8 +19,9 @@ def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     assert "help.autodesk.com" in status["domain_allowlist"]
     assert "dev.epicgames.com" in status["domain_allowlist"]
     assert "store.sim3d.com" in status["domain_allowlist"]
+    assert "baldursgate3.game" in status["domain_allowlist"]
     assert len(status["canonical_entrypoints"]) >= 18
-    assert status["approved_source_count"] == 11
+    assert status["approved_source_count"] == 12
     assert status["pending_independent_human_review_count"] == 8
     assert status["operationally_enrolled"] is False
 

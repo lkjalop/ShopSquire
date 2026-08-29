@@ -484,6 +484,16 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
             return (
               <div key={`${item?.kind || 'workload'}-${item?.requested_name || index}`} style={{ marginTop: 9, paddingTop: 8, borderTop: '1px solid #e2e8f0' }}>
                 <div><strong>{item?.requested_name || 'Unnamed workload'}</strong> - {words(item?.status)}</div>
+                {(item?.canonical_title || item?.resolved_name) && (
+                  <div data-testid="canonical-workload-identity">
+                    Canonical identity: <strong>{item?.canonical_title || item?.resolved_name}</strong>
+                    {item?.publisher ? ` · publisher: ${item.publisher}` : ''}
+                    {item?.app_id || item?.source_record_id ? ` · app ID: ${item?.app_id || item?.source_record_id}` : ''}
+                    {item?.release_state ? ` · release: ${words(item.release_state)}` : ''}
+                    {item?.release_date ? ` (${item.release_date})` : ''}
+                    {item?.requirements_completeness ? ` · requirements: ${words(item.requirements_completeness)}` : ''}
+                  </div>
+                )}
                 <div>Provider coverage: <strong>{words(item?.provider_coverage)}</strong></div>
                 <div>Live provider access for this workload: <strong>{item?.live_allowed ? 'yes' : 'no'}</strong></div>
                 {attempts.length ? (

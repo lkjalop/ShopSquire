@@ -45,12 +45,25 @@ export function requiresExternalResearchConsent(query: string): boolean {
  * intake first duplicates model work and can erase the title into a generic workload.
  */
 export function hasNamedGameWorkload(query: string): boolean {
-  const match = String(query || '').match(/\bplay\s+(.{3,120}?)(?:[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i);
+  const text = String(query || '');
+  const patterns = [
+    /\bplay\s+(?:the\s+)?(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
+    /\bwhat\s+about\s+(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
+    /\b(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)\s+(.{3,120}?)(?=[?.!,;]|$)/i,
+    /\bi\s+want\s+(?:a\s+laptop\s+)?(?:that\s+can|to)\s+(?:run|play)\s+(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
+    /\b(?:laptop|computer|pc)\s+for\s+(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
+  ];
+  const matchedIndex = patterns.findIndex((pattern) => pattern.test(text));
+  const match = matchedIndex >= 0 ? text.match(patterns[matchedIndex]) : null;
   if (!match) return false;
   const title = String(match[1] || '')
     .replace(/^\s*(?:a|the|some)\s+/i, '')
     .trim();
-  if (!title || /^(?:games?|gaming|online|locally)$/i.test(title)) return false;
+  if (!title || /^(?:games?|gaming|online|locally|work|school|university|office|digital\s+twin(?:\s+simulations?)?)$/i.test(title)) return false;
+  if (matchedIndex === patterns.length - 1) {
+    const titleWords = title.match(/\b[A-Z][A-Za-z']+\b/g) || [];
+    if (!/\d/.test(title) && titleWords.length < 2) return false;
+  }
   return title.split(/\s+/).length >= 2;
 }
 

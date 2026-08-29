@@ -1,4 +1,20 @@
-from src.app.services.buyer_evidence_source_resolution import resolve_buyer_evidence_source
+from src.app.services.buyer_evidence_source_resolution import (
+    extract_submitted_source_url,
+    remove_submitted_source_urls,
+    resolve_buyer_evidence_source,
+)
+
+
+def test_chat_source_url_is_extracted_and_removed_before_semantic_routing():
+    query = (
+        "I need a computer for digital twin work; link is "
+        "https://store.sim3d.com/demo3d_2025/system_requirements?token=secret#fragment"
+    )
+    assert extract_submitted_source_url(query).startswith("https://store.sim3d.com/")
+    sanitized = remove_submitted_source_urls(query)
+    assert "store.sim3d.com" not in sanitized
+    assert "token=secret" not in sanitized
+    assert "[submitted official source]" in sanitized
 
 
 def _sources():

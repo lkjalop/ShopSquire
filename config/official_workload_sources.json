@@ -136,6 +136,26 @@
       "independent_review": {"status": "automated_policy_checks_passed_human_signoff_pending", "reviewer": "shopsquire-source-policy-review-v1", "reviewed_at": "2026-08-25", "checks": ["publisher-domain-bound", "canonical-raw-origin", "no-discovery-snippet-authority", "typed-source-parser", "content-hash-receipt", "claim-type-boundary", "commerce-authority-none"]}
     },
     {
+      "source_id": "larian_baldurs_gate_3_requirements",
+      "publisher": "Larian Studios",
+      "allowed_domains": ["baldursgate3.game"],
+      "canonical_entrypoints": ["https://baldursgate3.game/support/system-requirements_47"],
+      "allowed_claim_types": ["minimum_requirements", "recommended_requirements", "compatibility"],
+      "forbidden_claim_types": ["behavioral_performance", "benchmark_result", "exact_product_fit", "price", "availability"],
+      "applicability": {"workloads": ["baldurs_gate_3", "bg3"], "scope": "Baldur's Gate 3 PC minimum and recommended requirements", "resolution_owner": "research", "exclusions": ["Baldur's Gate Enhanced Edition", "Baldur's Gate II", "console requirements", "ultra-performance predictions"]},
+      "activation_policy": {"provisional_scope_aliases": ["Baldur's Gate 3", "Baldurs Gate 3", "BG3"], "scope_aliases_are_proposal_grade": true, "required_any_terms": ["Baldur's Gate 3", "Baldurs Gate 3", "BG3"]},
+      "artefact_patterns": ["Baldur's Gate 3", "System Requirements", "Larian Studios"],
+      "parser_type": "html",
+      "freshness_sla_hours": 168,
+      "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "semantic_ownership_verification_required": true, "policy_ref": "operator:larian-bg3-v1"},
+      "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
+      "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
+      "review_status": "approved",
+      "reviewed_at": "2026-08-29",
+      "reviewed_by": "project_owner_current_session",
+      "review_basis": "Project owner explicitly requested enrolment of the official Larian BG3 source with deterministic source-specific parsing and fail-closed product authority."
+    },
+    {
       "source_id": "nist_manufacturing_digital_twins",
       "publisher": "National Institute of Standards and Technology",
       "allowed_domains": ["www.nist.gov"],

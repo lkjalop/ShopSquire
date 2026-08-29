@@ -17,11 +17,19 @@ describe('hasNamedGameWorkload', () => {
       'i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?',
     )).toBe(true);
     expect(hasNamedGameWorkload('I want to play Alan Wake 2 on a laptop')).toBe(true);
+    expect(hasNamedGameWorkload("what about Baldur's Gate 3? is 2500 good?")).toBe(true);
+    expect(hasNamedGameWorkload('can this laptop run Heroes of Might and Magic III Remake?')).toBe(true);
+    expect(hasNamedGameWorkload('I want a laptop that can play Cyberpunk 2077')).toBe(true);
+    expect(hasNamedGameWorkload('I need a laptop for Baldurs Gate 3')).toBe(true);
+    expect(hasNamedGameWorkload('I need a laptop for university study')).toBe(false);
+    expect(hasNamedGameWorkload('I need a laptop for game development')).toBe(false);
   });
 
   it('keeps generic gaming language on ordinary intake', () => {
     expect(hasNamedGameWorkload('I need a laptop to play games')).toBe(false);
     expect(hasNamedGameWorkload('I need a gaming laptop')).toBe(false);
+    expect(hasNamedGameWorkload('I need a laptop for university')).toBe(false);
+    expect(hasNamedGameWorkload('I need a computer for digital twin simulations')).toBe(false);
   });
 });
 

@@ -35,6 +35,12 @@ class WorkloadEvidence:
     confidence: float = 0.0
     provenance_chain: tuple[str, ...] = ()
     identity_resolution: Dict[str, Any] = field(default_factory=dict)
+    canonical_title: Optional[str] = None
+    publisher: Optional[str] = None
+    app_id: Optional[str] = None
+    release_state: Optional[str] = None
+    release_date: Optional[str] = None
+    requirements_completeness: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -88,6 +94,12 @@ class SteamWorkloadProvider:
             confidence=1.0 if source_url and retrieved_at else 0.7,
             provenance_chain=provenance,
             identity_resolution=dict(raw.get("identity_resolution") or {}),
+            canonical_title=str(raw.get("title") or name),
+            publisher=str(raw.get("publisher") or "") or None,
+            app_id=str(raw.get("appid") or "") or None,
+            release_state=str(raw.get("release_state") or "") or None,
+            release_date=str(raw.get("release_date") or "") or None,
+            requirements_completeness=str(raw.get("requirements_completeness") or "") or None,
         )
 
 

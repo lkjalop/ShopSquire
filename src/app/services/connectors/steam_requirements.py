@@ -180,12 +180,30 @@ def _bounded_requirements(value: Any) -> Dict[str, Any]:
     }
 
 
+def _requirements_completeness(minimum: Dict[str, Any], recommended: Dict[str, Any]) -> str:
+    has_minimum = any(value is not None for value in minimum.values())
+    has_recommended = any(value is not None for value in recommended.values())
+    if has_minimum and has_recommended:
+        return "minimum_and_recommended"
+    if has_minimum:
+        return "minimum_only"
+    if has_recommended:
+        return "recommended_only"
+    return "not_published"
+
+
 def _fixture_result(game: Dict[str, Any]) -> Dict[str, Any]:
+    minimum = _bounded_requirements(game.get("minimum"))
+    recommended = _bounded_requirements(game.get("recommended"))
     return {
         "title": game.get("title"),
         "appid": game.get("appid"),
-        "minimum": _bounded_requirements(game.get("minimum")),
-        "recommended": _bounded_requirements(game.get("recommended")),
+        "publisher": _bounded_text(game.get("publisher"), 160),
+        "release_state": str(game.get("release_state") or "released"),
+        "release_date": _bounded_text(game.get("release_date"), 80),
+        "requirements_completeness": _requirements_completeness(minimum, recommended),
+        "minimum": minimum,
+        "recommended": recommended,
         "tags": [_bounded_text(tag, 80) for tag in list(game.get("tags") or [])[:20]
                  if _bounded_text(tag, 80)],
         "review_summary": _bounded_text(game.get("review_summary"), 240),
@@ -437,13 +455,21 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
                 for g in (data.get("genres") or [])
                 if isinstance(g, dict) and g.get("description")
             ]
+            minimum = _bounded_requirements(
+                _parse_requirements_html(pc.get("minimum") or ""))
+            recommended = _bounded_requirements(
+                _parse_requirements_html(pc.get("recommended") or ""))
+            release = data.get("release_date") if isinstance(data.get("release_date"), dict) else {}
+            publishers = data.get("publishers") if isinstance(data.get("publishers"), list) else []
             return {
                 "title": _bounded_text(data.get("name") or title, 160),
                 "appid": int(appid),
-                "minimum": _bounded_requirements(
-                    _parse_requirements_html(pc.get("minimum") or "")),
-                "recommended": _bounded_requirements(
-                    _parse_requirements_html(pc.get("recommended") or "")),
+                "publisher": _bounded_text(publishers[0] if publishers else None, 160),
+                "release_state": "unreleased" if bool(release.get("coming_soon")) else "released",
+                "release_date": _bounded_text(release.get("date"), 80),
+                "requirements_completeness": _requirements_completeness(minimum, recommended),
+                "minimum": minimum,
+                "recommended": recommended,
                 "tags": [_bounded_text(tag, 80) for tag in tags[:20] if _bounded_text(tag, 80)],
                 "review_summary": None,
                 "source": "steam",
