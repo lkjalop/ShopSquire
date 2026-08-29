@@ -180,6 +180,68 @@ def test_rejected_url_is_sanitized_and_still_emits_fail_closed_trace(monkeypatch
     assert "secret-value" not in str(certificate)
 
 
+def test_demo_link_matrix_classifies_authority_relevance_and_tracking_without_fetch(monkeypatch):
+    client = _client()
+    case_id = _case(client)
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not dispatch")),
+    )
+    cases = [
+        (
+            "https://www.cupix.com/home-1?utm_source=google&gclid=secret",
+            "official_publisher", "likely_relevant_context_only", 2,
+        ),
+        (
+            "https://www.anylogic.com/features/digital-twin/",
+            "official_publisher", "likely_relevant_context_only", 0,
+        ),
+        (
+            "https://thectoclub.com/tools/best-digital-twin-software/",
+            "secondary_commentary", "likely_relevant_secondary", 0,
+        ),
+        (
+            "https://darkheresy.wiki.fextralife.com/Dark_Heresy_Wiki",
+            "community_wiki", "irrelevant_to_retained_purpose", 0,
+        ),
+        (
+            "https://www.systemrequirementslab.com/cyri/requirements/microsoft-flight-simulator-2024/24131",
+            "secondary_requirements_aggregator", "irrelevant_to_retained_purpose", 0,
+        ),
+    ]
+    for url, source_class, relevance, removed in cases:
+        response = client.post(
+            f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+            json={"uid": "buyer-link", "source_url": url, "research_authorized": True},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assessment = payload["source_intake_certificate"]["security"]["link_assessment"]
+        assert assessment["source_class"] == source_class
+        assert assessment["relevance"] == relevance
+        assert assessment["tracking_parameters_removed"] == removed
+        assert assessment["content_executed_as_instructions"] is False
+        assert assessment["requirement_authority"] == "none"
+        assert assessment["commerce_authority"] == "none"
+        assert payload["provider_accounting"]["external_calls"] == 0
+        assert "secret" not in response.text
+
+
+def test_private_or_credentialed_url_triggers_ssrf_control_without_incident_claim():
+    from src.app.services.buyer_link_assessment import assess_buyer_link
+
+    receipt = assess_buyer_link(
+        source_url="https://127.0.0.1/admin?token=discard",
+        retained_purpose="digital twin simulation",
+    )
+    assert receipt["security_status"] == "blocked"
+    assert receipt["control_hypotheses"][0]["control"].startswith("API7:2023")
+    assert receipt["control_hypotheses"][0]["status"] == (
+        "design_control_triggered_not_incident_attribution"
+    )
+    assert receipt["threat_intel"]["incident_tags"] == []
+
+
 def test_larian_bg3_canonical_source_is_enrolled_but_other_larian_host_is_rejected():
     client = _client()
     case_id = _case(client)

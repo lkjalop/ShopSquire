@@ -322,6 +322,52 @@ test('unenrolled Larian URL is rejected with a visible zero-fetch security recei
   await expect(modal.getByTestId('source-intake-certificate')).toContainText(/source intake: not enrolled/i);
 });
 
+test('demo URL policy strips ad tracking and rejects a purpose-mismatched community page', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-demo-link-policy-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const tracked = await send(page,
+    'I need a computer for a construction digital twin. Source: '
+    + 'https://www.cupix.com/home-1?utm_source=google&utm_medium=cpc&gclid=demo-secret', true);
+  const trackedAssessment = tracked.buyer_evidence_source_resolution?.resolution?.link_assessment;
+  expect(trackedAssessment).toMatchObject({
+    source_class: 'official_publisher',
+    relevance: 'likely_relevant_context_only',
+    requirement_authority: 'none',
+    commerce_authority: 'none',
+  });
+  expect(trackedAssessment.tracking_parameters_removed).toBe(3);
+  expect(JSON.stringify(tracked)).not.toContain('demo-secret');
+
+  const mismatch = await send(page,
+    'For the same construction digital twin, use this source: '
+    + 'https://darkheresy.wiki.fextralife.com/Dark_Heresy_Wiki', true);
+  const mismatchAssessment = mismatch.buyer_evidence_source_resolution?.resolution?.link_assessment;
+  expect(mismatchAssessment).toMatchObject({
+    source_class: 'community_wiki',
+    relevance: 'irrelevant_to_retained_purpose',
+    recommended_use: 'reject_for_this_case_and_request_a_relevant_source',
+    requirement_authority: 'none',
+    commerce_authority: 'none',
+  });
+  expect(mismatch.buyer_evidence_source_resolution.provider_accounting)
+    .toEqual({ external_calls: 0, paid_calls: 0 });
+
+  await page.getByTitle('Decision Trace').click();
+  const modal = page.getByTestId('decision-trace-modal');
+  await modal.getByRole('button', { name: /^Research & Fit/ }).click();
+  await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
+  const receipt = modal.getByTestId('source-intake-certificate');
+  await expect(receipt).toContainText(/community wiki/i);
+  await expect(receipt).toContainText(/irrelevant to retained purpose/i);
+  await expect(receipt).toContainText(/content executed as instructions:\s*no/i);
+});
+
 test('explicit furniture and pharmacy categories cannot inherit laptop shelves', async ({ page }) => {
   test.setTimeout(120_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;

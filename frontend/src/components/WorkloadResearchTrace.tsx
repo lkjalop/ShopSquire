@@ -160,6 +160,24 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
               {' · '}claims accepted: <strong>{String(sourceIntakeCertificate?.claim_compilation?.accepted ?? 0)}</strong>
               {' · '}product fit: <strong>{words(sourceIntakeCertificate?.decision_effect?.product_fit)}</strong>
             </div>
+            {sourceIntakeCertificate?.security?.link_assessment && (
+              <div data-testid="source-link-assessment" style={{ marginTop: 6 }}>
+                Source class: <strong>{words(sourceIntakeCertificate.security.link_assessment.source_class)}</strong>
+                {' · '}Relevance: <strong>{words(sourceIntakeCertificate.security.link_assessment.relevance)}</strong>
+                {' · '}Allowed use: <strong>{words(sourceIntakeCertificate.security.link_assessment.recommended_use)}</strong>
+                <br />
+                Tracking parameters removed: <strong>{String(sourceIntakeCertificate.security.link_assessment.tracking_parameters_removed ?? 0)}</strong>
+                {' · '}Content executed as instructions: <strong>no</strong>
+                {Array.isArray(sourceIntakeCertificate.security.link_assessment.control_hypotheses)
+                  && sourceIntakeCertificate.security.link_assessment.control_hypotheses.length > 0 && (
+                    <div style={{ marginTop: 4, color: '#9a3412' }}>
+                      Security control triggered:{' '}
+                      {sourceIntakeCertificate.security.link_assessment.control_hypotheses
+                        .map((item: any) => `${item.control} (${words(item.status)})`).join(', ')}
+                    </div>
+                  )}
+              </div>
+            )}
             <small style={{ color: '#64748b' }}>
               Raw URL query parameters and credentials are not persisted. A recognized publisher is not itself an accepted product claim.
             </small>

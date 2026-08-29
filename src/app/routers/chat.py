@@ -2063,7 +2063,19 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         bool((payload or {}).get("external_research_consent"))
         or external_research_consent_granted(submitted_query)
     )
-    if turn_explicit_research_consent:
+    from src.app.services.research_policy import (
+        active_research_policy, tenant_policy_auto_research_authorized,
+    )
+    turn_research_policy = active_research_policy()
+    turn_policy_research_authorized = tenant_policy_auto_research_authorized()
+    turn_research_authorized = bool(
+        turn_explicit_research_consent or turn_policy_research_authorized
+    )
+    turn_research_authorization_basis = (
+        "buyer_action" if turn_explicit_research_consent else
+        "tenant_policy" if turn_policy_research_authorized else "none"
+    )
+    if turn_research_authorized:
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     active_shopping_case_id = str(
@@ -2152,7 +2164,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         from src.app.services.subject_switch_boundary import clear_subject_scoped_state
         clear_subject_scoped_state(
             params,
-            retain_same_turn_consent=turn_explicit_research_consent,
+            retain_same_turn_consent=turn_research_authorized,
         )
         pending_clarification = {}
 
@@ -2169,6 +2181,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
         _early_source_resolution = resolve_buyer_evidence_source(
             source_url=submitted_source_url,
+            retained_purpose=submitted_query,
         )
         if _early_source_resolution.status != "resolved":
             from datetime import datetime, timezone
@@ -2213,6 +2226,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     uid=uid,
                     source_url=submitted_source_url,
                     research_authorized=False,
+                    authorization_basis="none",
                 ),
                 x_tenant_id=tenant_id,
                 db=db,
@@ -2224,7 +2238,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             _switch_receipt = (
                 clear_subject_scoped_state(
                     params,
-                    retain_same_turn_consent=turn_explicit_research_consent,
+                    retain_same_turn_consent=turn_research_authorized,
                 )
                 if deterministic_pre_route_subject_switch else None
             )
@@ -2237,6 +2251,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 (_source_result.get("resolution") or {}).get("reason")
                 or "source_not_approved"
             )
+            _link_assessment = (
+                (_source_result.get("source_intake_certificate") or {})
+                .get("security", {}).get("link_assessment") or {}
+            )
+            _link_relevance = str(
+                _link_assessment.get("relevance") or "relevance_unresolved"
+            ).replace("_", " ")
+            _link_use = str(
+                _link_assessment.get("recommended_use")
+                or "provide an enrolled official requirements source"
+            ).replace("_", " ")
             return {
                 "products": [],
                 "view_mode": "cards",
@@ -2245,10 +2270,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 "trace_id": _source_trace_id,
                 "shopping_case_id": _source_case_id,
                 "assistant_message": (
-                    "I inspected the submitted link before using it, but it is not an "
-                    f"enrolled canonical source ({_source_reason}). I made zero network "
-                    "calls, did not retain its query parameters, and did not use its claims. "
-                    "The source-safety receipt is available in Decision Trace."
+                    "I inspected the submitted link before using it. It is classified as "
+                    f"{_link_relevance}, but it is not an enrolled canonical source "
+                    f"({_source_reason}). I made zero network calls and did not retain its "
+                    f"query parameters or use its claims. Next: {_link_use}. The full "
+                    "source-safety receipt is available in Decision Trace."
                 ),
                 "next_questions": [],
                 "blocked": True,
@@ -2800,10 +2826,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 ResolveBuyerEvidenceSourceRequest(
                                     uid=_case_uid,
                                     source_url=submitted_source_url,
-                                    research_authorized=bool(
-                                        external_research_consent_granted(str(q or ""))
-                                        or (payload or {}).get("external_research_consent")
-                                    ),
+                                    research_authorized=turn_research_authorized,
+                                    authorization_basis=turn_research_authorization_basis,
                                 ),
                                 x_tenant_id=_case_tenant,
                                 db=_fallback_db,
@@ -3693,7 +3717,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         from src.app.services.subject_switch_boundary import clear_subject_scoped_state
         subject_switch_receipt = clear_subject_scoped_state(
             params,
-            retain_same_turn_consent=turn_explicit_research_consent,
+            retain_same_turn_consent=turn_research_authorized,
         )
         pending_clarification_consumed = bool(pending_clarification)
         pending_clarification_suspended = False
@@ -4264,6 +4288,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     uid=uid,
                     source_url=submitted_source_url,
                     research_authorized=bool(params.get("external_research_consent")),
+                    authorization_basis=turn_research_authorization_basis,
                 ),
                 x_tenant_id=tenant_id,
                 db=db,
@@ -4556,6 +4581,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "control_faults": data.get("control_faults") if isinstance(data.get("control_faults"), list) else [],
         "subject_switch_boundary": subject_switch_receipt,
         "buyer_evidence_source_resolution": source_intake_result,
+        "research_policy": turn_research_policy,
     }
     # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
     # disabled is part of the API contract; emitting null makes clients and audits infer an

@@ -1,0 +1,30 @@
+{
+  "schema_version": "research-policy-registry-v1",
+  "default_profile": "buyer-consent-v1",
+  "profiles": {
+    "buyer-consent-v1": {
+      "external_research_enabled": true,
+      "auto_authorize_read_only": false,
+      "pasted_url_policy": "reviewed_canonical_origin_only",
+      "max_provider_fanout": 3,
+      "commerce_authority": "none",
+      "description": "Buyer explicitly authorizes each external research operation."
+    },
+    "demo-safe-auto-v1": {
+      "external_research_enabled": true,
+      "auto_authorize_read_only": true,
+      "pasted_url_policy": "reviewed_canonical_origin_only",
+      "max_provider_fanout": 3,
+      "commerce_authority": "none",
+      "description": "Admin-approved demo policy: automatically runs bounded read-only research, while URL, source, claim, product-fit and commerce gates remain enforced."
+    },
+    "network-disabled-v1": {
+      "external_research_enabled": false,
+      "auto_authorize_read_only": false,
+      "pasted_url_policy": "receipt_only_zero_fetch",
+      "max_provider_fanout": 0,
+      "commerce_authority": "none",
+      "description": "Records source-intake receipts but performs no network research."
+    }
+  }
+}

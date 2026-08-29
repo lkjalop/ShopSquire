@@ -74,6 +74,8 @@ $env:OWNER_API_KEY = $OwnerKey
 $env:VITE_API_BASE = "http://localhost:$ApiPort"
 $env:EXTERNAL_RESEARCH_ENABLED = "1"
 $env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = "1"
+$env:RESEARCH_POLICY_PROFILE = "demo-safe-auto-v1"
+$env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST = "default"
 $env:STEAM_REQUIREMENTS_LIVE_ENABLED = "1"
 $env:ROUTER_MODEL_ENABLED = "1"
 $env:ROUTER_MODEL = "qwen3:14b"
@@ -96,7 +98,7 @@ $env:EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = "1"
 $env:EXTERNAL_RESEARCH_PROVIDER_ID = "local_searxng"
 $env:EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS = "free"
 $env:VITE_EXTERNAL_RESEARCH_AUTO_ENABLED = "1"
-foreach ($n in "COMMERCE_CATALOG_ENABLED","FULFILLMENT_DEMO_ENABLED","FULFILLMENT_CASES_ENABLED","FULFILLMENT_BULK_THRESHOLD","OWNER_API_KEY","VITE_API_BASE","ROUTER_MODEL_ENABLED","ROUTER_MODEL","REDIS_URL","EXTERNAL_RESEARCH_ENABLED","EXTERNAL_RESEARCH_AUTO_AUTHORIZED","EXTERNAL_RESEARCH_SEARCH_URL","STEAM_REQUIREMENTS_LIVE_ENABLED","VITE_EXTERNAL_RESEARCH_AUTO_ENABLED") {
+foreach ($n in "COMMERCE_CATALOG_ENABLED","FULFILLMENT_DEMO_ENABLED","FULFILLMENT_CASES_ENABLED","FULFILLMENT_BULK_THRESHOLD","OWNER_API_KEY","VITE_API_BASE","ROUTER_MODEL_ENABLED","ROUTER_MODEL","REDIS_URL","EXTERNAL_RESEARCH_ENABLED","EXTERNAL_RESEARCH_AUTO_AUTHORIZED","RESEARCH_POLICY_PROFILE","EXTERNAL_RESEARCH_TENANT_ALLOWLIST","EXTERNAL_RESEARCH_SEARCH_URL","STEAM_REQUIREMENTS_LIVE_ENABLED","VITE_EXTERNAL_RESEARCH_AUTO_ENABLED") {
   Write-Host ("  {0}={1}" -f $n, (Get-Item "env:$n").Value)
 }
 
@@ -144,8 +146,8 @@ if ($Launch) {
   $apiCmd   = "cd '$Root'; python -m uvicorn src.app.main:app --port $ApiPort"
   $buyerCmd = "cd '$Root/frontend'; npm run dev -- --port $BuyerPort"
   $adminCmd = "cd '$Root/src/frontend/admin-react'; npm run dev -- --port $AdminPort"
-  Start-Process powershell -ArgumentList "-NoExit", "-Command", $apiCmd
-  Start-Process powershell -ArgumentList "-NoExit", "-Command", $buyerCmd
-  Start-Process powershell -ArgumentList "-NoExit", "-Command", $adminCmd
+  Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $apiCmd
+  Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $buyerCmd
+  Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $adminCmd
   Write-Host "  Launched API + buyer + admin. Give them ~10s, then re-run without -Launch for health checks." -ForegroundColor Green
 }

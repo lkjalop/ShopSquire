@@ -143,6 +143,7 @@ class ResolveBuyerEvidenceSourceRequest(BaseModel):
     source_url: str | None = Field(default=None, min_length=8, max_length=2000)
     vendor_name: str | None = Field(default=None, min_length=2, max_length=200)
     research_authorized: bool = False
+    authorization_basis: Literal["buyer_action", "tenant_policy", "none"] = "none"
     refresh_authorized: bool = False
 
 
@@ -1355,8 +1356,11 @@ async def _resolve_case_evidence_source_with_db(
     sources = list(load_official_source_manifest().get("sources") or [])
     resolution = resolve_buyer_evidence_source(
         source_url=body.source_url, vendor_name=body.vendor_name, sources=sources,
+        retained_purpose=case.retained_purpose,
     )
     resolution_payload = resolution.model_dump(mode="json")
+    if resolution.status == "resolved" and isinstance(resolution_payload.get("link_assessment"), dict):
+        resolution_payload["link_assessment"]["source_class"] = "enrolled_official_publisher"
     source_intake_certificate = {
         "schema_version": "buyer-source-intake-certificate-v1",
         "case_id": case_id,
@@ -1393,11 +1397,15 @@ async def _resolve_case_evidence_source_with_db(
             "content_trust": "not_observed",
             "canonical_fetch_eligible": resolution.canonical_fetch_eligible,
             "arbitrary_submitted_path_fetch_allowed": False,
+            "link_assessment": resolution_payload.get("link_assessment"),
         },
         "execution": {
             "network_execution": False,
             "external_calls": 0,
             "paid_calls": 0,
+            "authorization_basis": (
+                body.authorization_basis if body.research_authorized else "none"
+            ),
         },
         "claim_compilation": {
             "status": "not_executed", "accepted": 0,
@@ -1727,11 +1735,9 @@ async def _research_shopping_case_with_db(
 ) -> dict[str, Any]:
     """Run explicitly buyer- or tenant-policy-authorized research in one case."""
     tenant_id = _tenant(x_tenant_id)
-    if (
-        body.authorization_basis == "tenant_policy"
-        and str(os.getenv("EXTERNAL_RESEARCH_AUTO_AUTHORIZED") or "").strip().lower()
-        not in {"1", "true", "yes", "on"}
-    ):
+    from src.app.services.research_policy import tenant_policy_auto_research_authorized
+
+    if body.authorization_basis == "tenant_policy" and not tenant_policy_auto_research_authorized():
         raise HTTPException(status_code=403, detail={
             "code": "tenant_auto_research_not_authorized",
             "message": "This tenant has not enabled automatic public-source research.",

@@ -65,6 +65,7 @@ class BuyerEvidenceSourceResolution(BaseModel):
         "canonical_fetch_eligible", "blocked", "unresolved",
     ] = "unresolved"
     canonical_fetch_eligible: bool = False
+    link_assessment: dict[str, Any] | None = None
 
 
 def _origin_key(value: str) -> tuple[str, str] | None:
@@ -119,15 +120,22 @@ def _candidate(source: dict[str, Any], basis: str, canonical_url: str) -> BuyerE
 def resolve_buyer_evidence_source(
     *, source_url: str | None = None, vendor_name: str | None = None,
     sources: Sequence[dict[str, Any]] | None = None,
+    retained_purpose: str | None = None,
 ) -> BuyerEvidenceSourceResolution:
     """Map one buyer hint to reviewed registry entries without fetching it."""
 
     submitted_metadata = _submitted_url_metadata(source_url)
+    from src.app.services.buyer_link_assessment import assess_buyer_link
+
+    link_assessment = (
+        assess_buyer_link(source_url=source_url, retained_purpose=retained_purpose)
+        if source_url else None
+    )
     if bool(str(source_url or "").strip()) == bool(str(vendor_name or "").strip()):
         return BuyerEvidenceSourceResolution(
             status="invalid", **submitted_metadata, vendor_name=vendor_name,
             candidates=[], reason="provide_exactly_one_url_or_vendor_name",
-            security_status="blocked",
+            security_status="blocked", link_assessment=link_assessment,
         )
     registry = list(sources) if sources is not None else list(
         load_official_source_manifest().get("sources") or []
@@ -139,7 +147,7 @@ def resolve_buyer_evidence_source(
             return BuyerEvidenceSourceResolution(
                 status="invalid", **submitted_metadata, candidates=[],
                 reason="official_evidence_url_must_be_https_without_credentials",
-                security_status="blocked",
+                security_status="blocked", link_assessment=link_assessment,
             )
         submitted_host, submitted_path = submitted
         host_sources: dict[str, dict[str, Any]] = {}
@@ -213,6 +221,7 @@ def resolve_buyer_evidence_source(
             "blocked" if status == "invalid" else "unresolved"
         ),
         canonical_fetch_eligible=status == "resolved",
+        link_assessment=link_assessment,
     )
 
 
