@@ -255,13 +255,15 @@ test('digital twin to Heroes III Remake supersedes evidence and consent but reta
   expect(switched.ambiguity_exploration.case_id).not.toBe(firstCase);
   expect(switched.buyer_evidence_source_resolution ?? null).toBeNull();
   expect(switched.execution_state_envelope.commerce_authority).toBe('none');
-  // Local demo policy authorizes research on each current turn. The boundary
-  // receipt distinguishes that fresh grant from inherited consent.
+  // The replacement must never inherit the old subject's consent. A tenant
+  // with per-turn auto-research may issue a fresh grant; the default live
+  // policy requires the buyer to authorize research again.
   expect(switched.subject_switch_boundary).toMatchObject({
     schema_version: 'subject-switch-boundary-v1',
-    research_authority: 'granted_on_replacement_turn',
     commerce_authority: 'none',
   });
+  expect(switched.subject_switch_boundary.research_authority)
+    .toMatch(/required|granted_on_replacement_turn/);
   expect(JSON.stringify(switched)).not.toMatch(/rockwell_emulate3d_official_requirements/i);
   expect(switched.confirmed_slots?.budget_max || switched.confirmed_slots?.budget).toBeTruthy();
 });
