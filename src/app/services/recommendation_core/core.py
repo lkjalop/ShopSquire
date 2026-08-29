@@ -854,14 +854,6 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         and not declared_title_requirements
     ]
     if decision.workload_entities and unresolved_workloads:
-        import hashlib
-        from src.app.services.research_control_loop import (
-            ControlReceipt,
-            ExecutionStateEnvelope,
-            localize_control_faults,
-            propose_sanitized_failure_lesson,
-        )
-
         names = [
             str(item.get("requested_name") or "").strip()
             for item in unresolved_workloads
@@ -892,142 +884,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             ],
             "next_permitted_action": "resolve_workload_requirements",
         }
-        identity_candidates = []
-        for item in unresolved_workloads:
-            identity = (
-                item.get("identity_resolution")
-                if isinstance(item.get("identity_resolution"), dict) else {}
-            )
-            resolved_name = str(
-                item.get("resolved_name") or identity.get("resolved_name") or ""
-            ).strip()
-            if not resolved_name:
-                continue
-            identity_candidates.append({
-                "requested_name": str(item.get("requested_name") or "").strip(),
-                "resolved_name": resolved_name,
-                "source": str(identity.get("source") or "").strip(),
-                "source_url": str(identity.get("source_url") or item.get("source_url") or "").strip(),
-                "confidence": identity.get("confidence"),
-                "status": str(item.get("status") or "identity_resolved"),
-                "requirements_status": "material_requirements_missing",
-            })
-        # The buyer surface consumes the same adjudicated state as Decision Trace.  A
-        # named-workload hold must therefore project an identity/research card even when
-        # no durable open-world shopping case was needed.  Without this projection the
-        # browser showed only chat copy and silently hid the successful identity lookup.
-        resp.extras["ambiguity_exploration"] = {
-            "schema_version": "ambiguity-exploration-v1",
-            "case_id": str(envelope.session.get("case_id") or envelope.trace_id),
-            "trace_id": envelope.trace_id,
-            "retained_purpose": str(envelope.buyer_query or envelope.query),
-            "status": "context_only" if identity_candidates else "unresolved",
-            "interpretations": [{
-                "hypothesis_id": f"named-workload-{index + 1}",
-                "label": (
-                    f"Likely official identity: {candidate['resolved_name']}; "
-                    "material requirements are still unresolved."
-                ),
-                "confidence": candidate.get("confidence"),
-            } for index, candidate in enumerate(identity_candidates)],
-            "next_question": {"text": question_text},
-            "execution": "provider lookup completed" if envelope.external_research_consent else "not executed",
-            "evidence": "identity only" if identity_candidates else "none",
-            "decision": "clarification required",
-            "cart_authority": "none",
-            "provider_accounting": {
-                "external_calls": sum(
-                    1 for item in unresolved_workloads
-                    for attempt in list(item.get("provider_attempts") or [])
-                    if isinstance(attempt, dict) and bool(attempt.get("allow_live"))
-                ),
-                "paid_calls": 0,
-            },
-            "identity_candidates": identity_candidates,
-        }
-        provider_status = "not_attempted"
-        if envelope.external_research_consent:
-            provider_status = (
-                "completed"
-                if any(
-                    str(item.get("status") or "").startswith("identity_resolved")
-                    for item in unresolved_workloads
-                )
-                else "failed"
-                if any(
-                    any(
-                        str(attempt.get("status") or "") == "provider_error"
-                        for attempt in list(item.get("provider_attempts") or [])
-                        if isinstance(attempt, dict)
-                    )
-                    for item in unresolved_workloads
-                )
-                else "disabled"
-            )
-        control_envelope = ExecutionStateEnvelope(
-            case_id=str(envelope.session.get("case_id") or envelope.trace_id),
-            case_revision=max(1, int(envelope.session.get("case_revision") or 1)),
-            buyer_text_hash=hashlib.sha256(
-                str(envelope.buyer_query or envelope.query).encode("utf-8")
-            ).hexdigest(),
-            model_identity=str(active_router_model() or "unknown"),
-            model_status=(
-                "degraded" if bool(resp.degraded) else "completed"
-            ),
-            material_concept_status=(
-                "resolved"
-                if any(
-                    str(item.get("status") or "").startswith("identity_resolved")
-                    for item in unresolved_workloads
-                )
-                else "unresolved"
-            ),
-            research_authority=(
-                "granted" if envelope.external_research_consent else "required"
-            ),
-            provider_status=provider_status,
-            evidence_status=(
-                "identity_only"
-                if any(
-                    str(item.get("status") or "").startswith("identity_resolved")
-                    for item in unresolved_workloads
-                )
-                else "none"
-            ),
-            requirement_status="blocked",
-            catalog_authority="blocked",
-            presentation_status="clarification_only",
-            commerce_authority="none",
-            receipts=(
-                ControlReceipt(
-                    sequence=1, component="model", status="completed",
-                    authority="proposes", reason="Named workload proposed from buyer-authored text.",
-                ),
-                ControlReceipt(
-                    sequence=2, component="working_state", status="unresolved",
-                    authority="records", reason="Material workload identity or requirements remain unresolved.",
-                ),
-                ControlReceipt(
-                    sequence=3, component="invocation", status=provider_status,
-                    authority="retrieves", reason="Enrolled provider readiness and authorization evaluated.",
-                ),
-                ControlReceipt(
-                    sequence=4, component="checker", status="blocked",
-                    authority="authorizes", reason="No accepted material requirements authorize catalog fit.",
-                ),
-                ControlReceipt(
-                    sequence=5, component="presentation", status="clarification_only",
-                    authority="presents", reason="Buyer receives one evidence-resolution action, not a fit claim.",
-                ),
-            ),
+        from src.app.services.recommendation_core.unresolved_workload_control import (
+            project_named_workload_hold,
         )
-        control_faults = localize_control_faults(control_envelope)
-        resp.extras["execution_state_envelope"] = control_envelope.model_dump(mode="json")
-        resp.extras["control_faults"] = [item.model_dump(mode="json") for item in control_faults]
-        if control_faults:
-            resp.extras["experiential_failure_lesson"] = propose_sanitized_failure_lesson(
-                control_envelope, control_faults,
-            ).model_dump(mode="json")
+        project_named_workload_hold(
+            resp=resp,
+            envelope=envelope,
+            unresolved_workloads=unresolved_workloads,
+            question_text=question_text,
+            model_identity=str(active_router_model() or "unknown"),
+        )
         question = {
             "id": "workload_requirements",
             "goal": "resolve_named_workload",
@@ -1356,85 +1222,20 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 "selected_sku": prior_case_anchor.get("selected_sku"),
                 "catalog_authority": "blocked",
             }
-            # Project the same typed control envelope used by named-workload
-            # grounding. Coverage abstention and model-only semantic proposals must
-            # therefore expose the exact component that stopped the turn instead of
-            # collapsing everything into a generic clarification.
-            import hashlib
-            from src.app.services.research_control_loop import (
-                ControlReceipt,
-                ExecutionStateEnvelope,
-                localize_control_faults,
-                propose_sanitized_failure_lesson,
+            from src.app.services.recommendation_core.unresolved_workload_control import (
+                project_semantic_hold,
             )
-
-            concept_status = str(concept_data.get("status") or "").lower()
-            if not envelope.external_research_consent:
-                provider_status = "not_attempted"
-            elif not evidence_stage.research_trigger.should_execute_external_research:
-                provider_status = "disabled"
-            elif "timeout" in concept_status or "deadline" in concept_status:
-                provider_status = "timeout"
-            elif normalized:
-                provider_status = "completed"
-            else:
-                provider_status = "failed"
-            evidence_status = (
-                "contradicted" if "contradict" in concept_status
-                else "stale" if "stale" in concept_status
-                else "accepted" if normalized
-                else "none"
-            )
-            control_envelope = ExecutionStateEnvelope(
-                case_id=str(semantic_case_id or envelope.trace_id),
-                case_revision=max(1, int(envelope.session.get("case_revision") or 1)),
-                buyer_text_hash=hashlib.sha256(
-                    str(envelope.buyer_query or envelope.query).encode("utf-8")
-                ).hexdigest(),
+            project_semantic_hold(
+                resp=resp,
+                envelope=envelope,
+                semantic_case_id=semantic_case_id,
+                concept_status=str(concept_data.get("status") or ""),
+                research_should_execute=(
+                    evidence_stage.research_trigger.should_execute_external_research
+                ),
+                normalized_evidence=normalized,
                 model_identity=str(active_router_model() or "unknown"),
-                model_status="degraded" if bool(resp.degraded) else "completed",
-                material_concept_status="unresolved",
-                research_authority=(
-                    "granted" if envelope.external_research_consent else "required"
-                ),
-                provider_status=provider_status,
-                evidence_status=evidence_status,
-                requirement_status="blocked",
-                catalog_authority="blocked",
-                presentation_status="clarification_only",
-                commerce_authority="none",
-                receipts=(
-                    ControlReceipt(
-                        sequence=1, component="model", status="completed",
-                        authority="proposes", reason="Model proposed a material semantic interpretation.",
-                    ),
-                    ControlReceipt(
-                        sequence=2, component="working_state", status="unresolved",
-                        authority="records", reason="Canonical case retains the unresolved material concept.",
-                    ),
-                    ControlReceipt(
-                        sequence=3, component="invocation", status=provider_status,
-                        authority="retrieves", reason="Research authorization and provider outcome were recorded.",
-                    ),
-                    ControlReceipt(
-                        sequence=4, component="checker", status="blocked",
-                        authority="authorizes", reason="No accepted requirement set authorizes product fit.",
-                    ),
-                    ControlReceipt(
-                        sequence=5, component="presentation", status="clarification_only",
-                        authority="presents", reason="Budget conclusions and product shelves are suppressed.",
-                    ),
-                ),
             )
-            control_faults = localize_control_faults(control_envelope)
-            resp.extras["execution_state_envelope"] = control_envelope.model_dump(mode="json")
-            resp.extras["control_faults"] = [
-                item.model_dump(mode="json") for item in control_faults
-            ]
-            if control_faults:
-                resp.extras["experiential_failure_lesson"] = propose_sanitized_failure_lesson(
-                    control_envelope, control_faults,
-                ).model_dump(mode="json")
             from src.app.services.recommendation_core.clarification_policy import (
                 select_semantic_clarification,
             )

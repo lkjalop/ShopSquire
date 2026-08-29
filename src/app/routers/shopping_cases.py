@@ -38,6 +38,7 @@ from src.app.services.requirement_claim_reconciliation import reconcile_requirem
 from src.app.services.research_cancellation_registry import DEFAULT_RESEARCH_CANCELLATIONS
 from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
 from src.app.services.bounded_sync_session import run_isolated_sync_session
+from src.app.services.source_requirement_review import create_source_review_proposal
 
 logger = logging.getLogger("shopsquire.shopping_cases")
 
@@ -1521,32 +1522,14 @@ async def _resolve_case_evidence_source_with_db(
         source_intake_certificate["claim_compilation"]["provisional"] = len(
             provisional_claims
         )
-    review_claims: list[dict[str, Any]] = []
-    proposal: RequirementProposal | None = None
-    if provisional_claims:
-        source_reference = f"official-source:{resolution.selected_source_id}"
-        for raw_claim in provisional_claims:
-            claim = dict(raw_claim)
-            claim.update({
-                "subject": "buyer_workload_requirement",
-                "constraint_tier": "preferred",
-                "source_reference": source_reference,
-                "source_excerpt": str(
-                    claim.get("quoted_evidence_span") or claim.get("statement") or ""
-                )[:500],
-                "evidence_class": "official_policy_pending_source",
-                "extraction_confidence": 1.0,
-                "acceptance_status": "pending_buyer_review",
-            })
-            review_claims.append(claim)
-        proposal = RequirementProposal(
-            proposal_id=f"rp-{uuid.uuid4().hex[:20]}", case_id=case_id,
-            tenant_id=tenant_id, uid=body.uid, version=1, status="pending_review",
-            source_reference=source_reference, claims_json=review_claims,
-            created_at=_now(), updated_at=_now(),
-        )
-        db.add(proposal)
-        db.flush()
+    review_claims, proposal = create_source_review_proposal(
+        db,
+        provisional_claims=provisional_claims,
+        source_id=resolution.selected_source_id,
+        case_id=case_id,
+        tenant_id=tenant_id,
+        uid=body.uid,
+    )
 
     from src.app.services.procurement_truth_adjudicator import (
         adjudicate_procurement_truth,
