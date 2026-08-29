@@ -44,4 +44,17 @@ describe('BuyerRequirementReviewCard', () => {
       })],
     ));
   });
+
+  it('surfaces canonical source claims pending independent policy review', () => {
+    render(<BuyerRequirementReviewCard claims={[{
+      claim_id: 'claim-emulate-ram', attribute: 'ram_gb', operator: '>=', value: 64,
+      unit: 'GB', requirement_class: 'recommended', constraint_tier: 'preferred',
+      authority_status: 'pending_independent_policy_review',
+    }]} onAccept={vi.fn()} />);
+
+    expect(screen.getByText(/reviewed canonical publisher page/i)).toBeVisible();
+    expect(screen.getByText(/independent source-policy review is signed off/i)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Use provisionally' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Research and corroborate' })).toBeNull();
+  });
 });

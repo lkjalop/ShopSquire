@@ -3,12 +3,15 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-async function send(page: import('@playwright/test').Page, text: string) {
+async function send(page: import('@playwright/test').Page, text: string, requireChat = false) {
   const input = page.getByPlaceholder('Type your message...');
   const responsePromise = page.waitForResponse(
     response => (
-      /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
-      || /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url())
+      response.request().method() === 'POST'
+      && (
+        /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
+        || (!requireChat && /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()))
+      )
     ),
     { timeout: 65_000 },
   );
@@ -18,7 +21,10 @@ async function send(page: import('@playwright/test').Page, text: string) {
   if (/\/shopping-cases\/interpretations$/.test(response.url())) {
     if (response.status() !== 204) return response.json();
     response = await page.waitForResponse(
-      candidate => /\/api\/v1\/chat\/(stream|query)$/.test(candidate.url()),
+      candidate => (
+        candidate.request().method() === 'POST'
+        && /\/api\/v1\/chat\/(stream|query)$/.test(candidate.url())
+      ),
       { timeout: 65_000 },
     );
   }
@@ -30,7 +36,12 @@ async function send(page: import('@playwright/test').Page, text: string) {
       try { return JSON.parse(line.slice(6)); } catch { return null; }
     })
     .filter(Boolean);
-  return [...payloads].reverse().find(
+  const reversed = [...payloads].reverse();
+  return reversed.find((payload: any) => (
+    payload?.execution_state_envelope
+    || payload?.workload_authorization
+    || payload?.semantic_resolution
+  )) || reversed.find(
     (payload: any) => payload?.decision_trace_id || payload?.trace_id,
   ) || {};
 }
@@ -72,6 +83,118 @@ test('novel suitability request stays provisional and exposes a durable research
   await expect(research).toContainText(/Status:\s*(blocked|planned|not executed)/i);
   await expect(research).toContainText(/catalog recommendation|exploration/i);
   await page.screenshot({ path: '../.tmp-open-world-browser/coverage-gate.png', fullPage: true });
+});
+
+test('held-out future-game alias resolves identity but cannot invent fit or budget sufficiency', async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  const prompt = 'i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?';
+  await page.addInitScript((uid) => {
+    localStorage.clear();
+    sessionStorage.clear();
+    sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-heldout-game-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const result = await send(page, prompt, true);
+  const products = result.products || result.results || [];
+  expect(products).toEqual([]);
+  expect(String(result.assistant_message || result.message || '')).not.toMatch(/\b(ample|enough|insufficient)\b/i);
+  expect(result.workload_authorization?.status || result.semantic_resolution?.catalog_authority)
+    .toBe('blocked');
+  expect(result.execution_state_envelope?.catalog_authority).toBe('blocked');
+  expect(result.execution_state_envelope?.commerce_authority).toBe('none');
+  expect(result.execution_state_envelope?.research_authority).toBe('granted');
+  expect(result.execution_state_envelope?.evidence_status).toBe('identity_only');
+  expect(result.workload_authorization?.evidence?.[0]?.resolved_name)
+    .toBe('Heroes of Might and Magic III Remake');
+  expect(result.workload_authorization?.evidence?.[0]?.identity_resolution?.authority)
+    .toBe('identity_candidate_only');
+  await expect(page.getByText(/\bAUD\s*3,?000\b.*\b(ample|enough|insufficient)\b/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+  await expect(page.getByText(/No product is qualified until the material gap is resolved/i))
+    .toBeVisible();
+  await expect(page.getByText(/Heroes of Might and Magic III Remake/i)).toBeVisible();
+
+  const certificate: any = {
+    schema_version: 'heldout-future-game-browser-certificate-v1',
+    execution: 'live_playwright_browser',
+    fixture: false,
+    prompt,
+    trace_id: result.decision_trace_id || result.trace_id,
+    workload_authority: result.workload_authorization || null,
+    execution_state: result.execution_state_envelope || null,
+    control_faults: result.control_faults || [],
+    invariants: {
+      products_presented: products.length,
+      budget_sufficiency_claimed: false,
+      commerce_authority: 'none',
+    },
+  };
+  certificate.seal = createHash('sha256').update(JSON.stringify(certificate)).digest('hex');
+  await testInfo.attach('heldout-future-game-browser-certificate.json', {
+    body: Buffer.from(`${JSON.stringify(certificate, null, 2)}\n`),
+    contentType: 'application/json',
+  });
+});
+
+test('buyer Emulate3D link returns cited policy-pending claims instead of stale no-research truth', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear();
+    sessionStorage.clear();
+    sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-emulate-link-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  await send(
+    page,
+    'I need a computer for Rockwell Emulate3D 2026 digital twin simulations. Is AUD 2500 enough?',
+  );
+  await expect(page.getByTestId('ambiguity-exploration')).toBeVisible();
+
+  const sourceResponse = page.waitForResponse(
+    response => (
+      response.request().method() === 'POST'
+      && /\/api\/v1\/shopping-cases\/[^/]+\/evidence-source-resolutions$/.test(response.url())
+    ),
+    { timeout: 90_000 },
+  );
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('https://store.sim3d.com/demo3d_2025/system_requirements');
+  await input.press('Enter');
+  const source = await (await sourceResponse).json();
+
+  expect(source.resolution.status).toBe('resolved');
+  expect(source.resolution.selected_source_id).toBe('rockwell_emulate3d_official_requirements');
+  expect(source.research_status).toBe('claims_pending_review');
+  expect(source.claims.length).toBeGreaterThanOrEqual(8);
+  expect(source.canonical_truth).toMatchObject({
+    research_execution: 'OFFICIAL_FETCH_PARTIAL',
+    evidence_status: 'OBSERVED_PENDING_REVIEW',
+    freshness: 'CURRENT',
+    commerce_authority: 'NONE',
+  });
+  expect(source.provider_accounting.official_origin_fetches).toBeGreaterThanOrEqual(1);
+  expect(source.cart_mutation).toBe('not_authorized');
+  expect(source.supplier_send).toBe('not_authorized');
+
+  const review = page.getByTestId('buyer-requirement-review').last();
+  await expect(review).toContainText(/Review 8 extracted requirements/i);
+  await expect(review).toContainText(/reviewed canonical publisher page/i);
+  await expect(review).toContainText(/independent source-policy review/i);
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+
+  await page.getByTitle('Decision Trace').click();
+  const modal = page.getByTestId('decision-trace-modal');
+  await modal.getByRole('button', { name: /^Research & Fit/ }).click();
+  await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
+  await expect(modal.getByTestId('canonical-procurement-truth')).toContainText(
+    /official fetch partial.*observed pending review.*current/i,
+  );
 });
 
 test('explicit furniture and pharmacy categories cannot inherit laptop shelves', async ({ page }) => {

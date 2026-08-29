@@ -114,7 +114,10 @@ def test_unresolved_fit_blocks_procurement_before_catalog_retrieval(
     assert response.clarify[0]["reason"] == "external_research_consent_required"
     assert response.clarify[0]["id"] == "external_research_consent"
     assert "approved official sources" in response.clarify[0]["text"]
-    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert (
+        (response.extras.get("workload_authorization") or {}).get("status")
+        or (response.extras.get("semantic_resolution") or {}).get("catalog_authority")
+    ) == "blocked"
     assert response.extras["research_trigger"]["should_execute_external_research"] is False
     assert response.extras["research_trigger"]["route"] in {
         "request_authorization", "request_buyer_evidence",
@@ -290,7 +293,10 @@ def test_material_capability_relation_blocks_when_model_omits_semantic_proposal(
     )
 
     assert response.products == []
-    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert (
+        (response.extras.get("semantic_resolution") or {}).get("catalog_authority")
+        or (response.extras.get("workload_authorization") or {}).get("status")
+    ) == "blocked"
     assert response.extras["case_anchor"]["kind"] == "semantic_qualification"
     assert response.extras["semantic_resolution"]["desired_outcome"].startswith("Please recommend")
     questions = [item["question"] for item in response.extras["semantic_resolution"]["questions"]]
@@ -508,6 +514,12 @@ def test_unresolved_named_software_cannot_fall_through_to_generic_profile(db):
     assert response.clarify[0]["reason"] == "named_workload_evidence_unresolved"
     assert response.extras["workload_authorization"]["status"] == "blocked"
     assert "catalog_qualification" in response.extras["workload_authorization"]["state_prevented"]
+    control = response.extras["execution_state_envelope"]
+    assert control["material_concept_status"] == "unresolved"
+    assert control["catalog_authority"] == "blocked"
+    assert control["presentation_status"] == "clarification_only"
+    assert response.extras["control_faults"][0]["code"] == "authorized_provider_disabled"
+    assert response.extras["experiential_failure_lesson"]["authority"] == "none"
     assert not any(item.stage.startswith("plan:") for item in response.stage_results)
     assert "generic profile" in response.message
 
@@ -3294,6 +3306,111 @@ def test_explicit_gaming_laptop_phrase_uses_enrolled_profile_for_local_explorati
         "needs current external requirements" not in item["text"].lower()
         for item in response.clarify
     )
+
+
+def test_heldout_future_game_fit_question_cannot_use_generic_gaming_budget_floor(db):
+    response = recommend_turn(
+        db,
+        _env(
+            "I need a laptop to play the new remastered Heroes of Might and Magic 3. "
+            "Is AUD 3000 enough?",
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.products == []
+    assert "ample" not in response.message.lower()
+    assert "official" in response.message.lower() or "requirements" in response.message.lower()
+    assert (
+        (response.extras.get("semantic_resolution") or {}).get("catalog_authority")
+        or (response.extras.get("workload_authorization") or {}).get("status")
+    ) == "blocked"
+    assert response.extras["execution_state_envelope"]["catalog_authority"] == "blocked"
+    assert response.extras["execution_state_envelope"]["commerce_authority"] == "none"
+    assert response.extras["execution_state_envelope"]["presentation_status"] == "clarification_only"
+    exploration = response.extras["ambiguity_exploration"]
+    assert exploration["schema_version"] == "ambiguity-exploration-v1"
+    assert exploration["status"] in {"context_only", "unresolved"}
+    assert exploration["cart_authority"] == "none"
+
+
+def test_router_restores_literal_remastered_qualifier_dropped_by_model(db):
+    raw = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-11-2",
+        "confidence": 0.96,
+        "use_cases": ["gaming"],
+        # This is the normalization observed from qwen3:14b in the held-out journey.
+        "workload_entities": [
+            {"kind": "game", "name": "heroes of might and magic 3"},
+        ],
+    })
+
+    decision = route_turn(
+        db,
+        _env(
+            "i need a laptop to play the new remastered heroes of might and magic 3? "
+            "is 3000 enough?"
+        ),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.workload_entities == (
+        ("game", "heroes of might and magic 3 remastered"),
+    )
+
+
+def test_router_preserves_literal_game_identity_when_model_is_unavailable(db):
+    decision = route_turn(
+        db,
+        _env(
+            "i need a laptop to play the new remastered heroes of might and magic 3? "
+            "is 3000 enough?"
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert decision.workload_entities == (
+        ("game", "new remastered heroes of might and magic 3"),
+    )
+
+
+def test_heldout_future_game_replay_certificate_is_deterministic(db):
+    import hashlib
+
+    prompt = (
+        "i need a laptop to play the new remastered heroes of might and magic 3? "
+        "is 3000 enough?"
+    )
+
+    def certified_slice(response):
+        state = response.extras["execution_state_envelope"]
+        payload = {
+            "schema_version": "heldout-future-game-replay-certificate-v1",
+            "prompt": prompt,
+            "products": [item.sku for item in response.products],
+            "budget_sufficiency_claimed": any(
+                word in response.message.lower() for word in ("ample", "enough", "insufficient")
+            ),
+            "material_concept_status": state["material_concept_status"],
+            "catalog_authority": state["catalog_authority"],
+            "presentation_status": state["presentation_status"],
+            "commerce_authority": state["commerce_authority"],
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return payload, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    first = recommend_turn(db, _env(prompt), llm_fn=lambda _prompt, _timeout: "")
+    second = recommend_turn(db, _env(prompt), llm_fn=lambda _prompt, _timeout: "")
+    first_payload, first_seal = certified_slice(first)
+    second_payload, second_seal = certified_slice(second)
+
+    assert first_payload == second_payload
+    assert first_seal == second_seal
+    assert first_payload["products"] == []
+    assert first_payload["budget_sufficiency_claimed"] is False
+    assert first_payload["catalog_authority"] == "blocked"
+    assert first_payload["commerce_authority"] == "none"
 
 
 def test_product_noun_unresolved_purpose_cannot_emit_catalog_products(db):

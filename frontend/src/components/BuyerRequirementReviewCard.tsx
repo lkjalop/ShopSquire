@@ -28,6 +28,9 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
   const caseOriginEvidence = claims.some(
     (claim) => claim.authority_status === 'case_origin_critic_accepted',
   );
+  const policyPendingSourceEvidence = claims.some(
+    (claim) => claim.authority_status === 'pending_independent_policy_review',
+  );
   const [selected, setSelected] = React.useState(() => new Set(claims.map((claim) => claim.claim_id)));
   const [draftValues, setDraftValues] = React.useState<Record<string, string>>(() => Object.fromEntries(
     claims.map((claim) => [
@@ -87,7 +90,9 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
       <div style={{ marginTop: 4, fontSize: 12 }}>
         {caseOriginEvidence
           ? 'These cited claims came from the exact publisher origin you approved for this case. Review, correct, or reject them before they affect product fit. No cart action was authorized.'
-          : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
+          : policyPendingSourceEvidence
+            ? 'These cited claims were extracted from the reviewed canonical publisher page. They may be used only as provisional buyer constraints until the independent source-policy review is signed off; no product or cart action was authorized.'
+            : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
       </div>
       <ul style={{ margin: '8px 0 0', padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
         {claims.slice(0, 12).map((claim) => (
@@ -120,14 +125,16 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
       <div style={{ marginTop: 8, fontSize: 12 }}>
         {caseOriginEvidence
           ? 'Unedited cited claims retain case-only evidence authority. Edited claims become provisional buyer evidence.'
-          : 'Select the claims to use. Buyer acceptance keeps them provisional until corroborated.'}
+          : policyPendingSourceEvidence
+            ? 'Accepting these records your provisional constraints; it does not turn pending source evidence into authoritative requirements.'
+            : 'Select the claims to use. Buyer acceptance keeps them provisional until corroborated.'}
       </div>
       {onAccept && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
             {caseOriginEvidence ? 'Accept case evidence' : 'Use provisionally'}
           </button>
-          {!caseOriginEvidence && (
+          {!caseOriginEvidence && !policyPendingSourceEvidence && (
             <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>
               Research and corroborate
             </button>

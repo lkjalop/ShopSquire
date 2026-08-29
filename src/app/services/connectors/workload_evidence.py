@@ -34,6 +34,7 @@ class WorkloadEvidence:
     cached: bool = False
     confidence: float = 0.0
     provenance_chain: tuple[str, ...] = ()
+    identity_resolution: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -86,6 +87,7 @@ class SteamWorkloadProvider:
             cached=bool(raw.get("cached")),
             confidence=1.0 if source_url and retrieved_at else 0.7,
             provenance_chain=provenance,
+            identity_resolution=dict(raw.get("identity_resolution") or {}),
         )
 
 

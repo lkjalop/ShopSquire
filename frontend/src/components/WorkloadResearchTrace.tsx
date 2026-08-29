@@ -80,7 +80,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const queryProposal = officialResearch?.query_proposal || {};
   const publisherOriginVerification = officialResearch?.publisher_origin_verification || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
-  const canonicalTruth = provisionalExploration?.canonical_truth;
+  const canonicalTruth = officialResearch?.canonical_truth
+    || sourceIntakeCertificate?.canonical_truth
+    || provisionalExploration?.canonical_truth;
   const retainedObligations = events
     .filter(isShoppingCaseObligationEvent)
     .flatMap((event) => Array.isArray(event?.payload?.obligations) ? event.payload.obligations : []);
@@ -510,7 +512,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
             );
           }) : (
             <div style={{ marginTop: 5, color: '#b45309' }}>
-              {researchPlan.id && !planOutput?.external_research_authorized
+              {Object.keys(officialResearch).length > 0
+                ? `No accepted provider claim was recorded; ${Number(officialResearch?.provider_accounting?.external_calls || 0)} external call(s) executed and pending or rejected evidence remains visible above.`
+                : researchPlan.id && !planOutput?.external_research_authorized
                 ? 'Not attempted - buyer consent is required before external research.'
                 : 'No provider result was recorded.'}
             </div>

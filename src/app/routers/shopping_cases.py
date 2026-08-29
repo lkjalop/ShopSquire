@@ -1521,15 +1521,65 @@ async def _resolve_case_evidence_source_with_db(
         source_intake_certificate["claim_compilation"]["provisional"] = len(
             provisional_claims
         )
+    review_claims: list[dict[str, Any]] = []
+    proposal: RequirementProposal | None = None
+    if provisional_claims:
+        source_reference = f"official-source:{resolution.selected_source_id}"
+        for raw_claim in provisional_claims:
+            claim = dict(raw_claim)
+            claim.update({
+                "subject": "buyer_workload_requirement",
+                "constraint_tier": "preferred",
+                "source_reference": source_reference,
+                "source_excerpt": str(
+                    claim.get("quoted_evidence_span") or claim.get("statement") or ""
+                )[:500],
+                "evidence_class": "official_policy_pending_source",
+                "extraction_confidence": 1.0,
+                "acceptance_status": "pending_buyer_review",
+            })
+            review_claims.append(claim)
+        proposal = RequirementProposal(
+            proposal_id=f"rp-{uuid.uuid4().hex[:20]}", case_id=case_id,
+            tenant_id=tenant_id, uid=body.uid, version=1, status="pending_review",
+            source_reference=source_reference, claims_json=review_claims,
+            created_at=_now(), updated_at=_now(),
+        )
+        db.add(proposal)
+        db.flush()
+
+    from src.app.services.procurement_truth_adjudicator import (
+        adjudicate_procurement_truth,
+    )
+
+    canonical_truth = adjudicate_procurement_truth(
+        state_data={
+            "case_id": case_id, "revision": int(case.revision or 1),
+            "research": research, "fulfilment": {}, "authority": {},
+        },
+        provider_accounting=research.get("provider_accounting") or {},
+    ).model_dump(mode="json")
+    source_intake_certificate["canonical_truth"] = canonical_truth
     result = {
-        **base, "research_status": "completed",
+        **base,
+        "research_status": (
+            "claims_pending_review" if review_claims else "completed"
+        ),
         "provider_accounting": research.get("provider_accounting") or {
             "external_calls": 0, "paid_calls": 0,
         },
         "research": research, "evidence_outcome": evidence_outcome,
         "source_intake_certificate": source_intake_certificate,
         "product_shelves": shelves,
+        "claims": review_claims,
+        "buyer_requirement_proposal": ({
+            "case_id": case_id, "proposal_id": proposal.proposal_id,
+            "proposal_version": proposal.version,
+        } if proposal else None),
+        "canonical_truth": canonical_truth,
     }
+    if proposal is not None:
+        db.commit()
     try:
         log_trace_event(
             trace_id=result["trace_id"], event_type="buyer_evidence_source_researched",
@@ -1544,6 +1594,8 @@ async def _resolve_case_evidence_source_with_db(
                 "evidence_ladder": research.get("evidence_ladder") or [],
                 "provider_accounting": result["provider_accounting"],
                 "source_intake_certificate": source_intake_certificate,
+                "provisional_claims": provisional_claims,
+                "canonical_truth": canonical_truth,
                 "cart_authority": "none", "supplier_authority": "none",
             },
         )

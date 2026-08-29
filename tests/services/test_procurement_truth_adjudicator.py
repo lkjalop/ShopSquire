@@ -75,3 +75,57 @@ def test_exploration_projection_uses_same_vocabulary() -> None:
     assert truth.evidence_status == "CANDIDATE_ONLY"
     assert truth.decision_status == "PROVISIONAL"
     assert truth.commerce_authority == "NONE"
+
+
+def test_official_fetch_with_fresh_policy_pending_claims_is_not_reported_as_not_attempted() -> None:
+    truth = adjudicate_procurement_truth(
+        state_data={
+            "case_id": "sc-policy-pending",
+            "revision": 2,
+            "research": {
+                "execution_mode": "live_network",
+                "claims": [],
+                "provisional_claims": [{
+                    "claim_id": "claim-1",
+                    "authority_status": "pending_independent_policy_review",
+                    "freshness_status": "fresh",
+                }],
+            },
+            "fulfilment": {},
+            "authority": {},
+        },
+        provider_accounting={"external_calls": 1, "paid_calls": 0},
+        evaluated_at=NOW,
+    )
+
+    assert truth.research_execution == "OFFICIAL_FETCH_PARTIAL"
+    assert truth.evidence_status == "OBSERVED_PENDING_REVIEW"
+    assert truth.freshness == "CURRENT"
+    assert truth.commerce_authority == "NONE"
+
+
+def test_official_context_fetch_is_visible_without_becoming_requirement_evidence() -> None:
+    truth = adjudicate_procurement_truth(
+        state_data={
+            "case_id": "sc-context-only",
+            "revision": 1,
+            "research": {
+                "execution_mode": "live_network",
+                "claims": [],
+                "context_claims": [{
+                    "claim_id": "context-nist",
+                    "status": "corroborated",
+                    "freshness_status": "fresh",
+                }],
+            },
+            "fulfilment": {},
+            "authority": {},
+        },
+        provider_accounting={"external_calls": 1, "paid_calls": 0},
+        evaluated_at=NOW,
+    )
+
+    assert truth.research_execution == "OFFICIAL_FETCH_PARTIAL"
+    assert truth.evidence_status == "CONTEXT_ONLY"
+    assert truth.freshness == "CURRENT"
+    assert truth.decision_status == "PROVISIONAL"

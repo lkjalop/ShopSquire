@@ -42,7 +42,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +286,113 @@ def _title_matches(requested: str, resolved: str) -> bool:
     return requested_norm in resolved_norm
 
 
+def _identity_query_variants(title: str) -> List[str]:
+    """Bounded official-store queries for colloquial sequel/remaster wording.
+
+    These variants discover identity candidates only.  They do not establish
+    hardware requirements or product-fit authority.
+    """
+
+    raw = _norm_title(title)
+    if not raw:
+        return []
+    canonical = re.sub(r"\bremaster(?:ed)?\b", "remake", raw)
+    canonical = re.sub(r"\b3\b", "iii", canonical)
+    without_temporal = re.sub(r"\b(?:the|new|upcoming)\b", " ", canonical)
+    without_temporal = " ".join(without_temporal.split())
+    if "remake" in without_temporal.split():
+        without_temporal = " ".join(
+            [token for token in without_temporal.split() if token != "remake"] + ["remake"]
+        )
+    variants: List[str] = []
+    # Ask the normalized official-title form first. On a cold cache this avoids
+    # spending the turn deadline on a colloquial query that the storefront is
+    # unlikely to match, while preserving the raw form as a bounded fallback.
+    for value in (without_temporal, canonical, raw):
+        cleaned = " ".join(str(value or "").split())
+        if cleaned and cleaned not in variants:
+            variants.append(cleaned)
+    return variants[:4]
+
+
+def _identity_tokens(value: Any) -> set[str]:
+    normalized = _norm_title(str(value or ""))
+    normalized = re.sub(r"\bremaster(?:ed)?\b", "remake", normalized)
+    normalized = re.sub(r"\b3\b", "iii", normalized)
+    return {
+        token for token in normalized.split()
+        if token not in {"the", "new", "upcoming", "of", "and"}
+    }
+
+
+def rank_game_identity_candidates(
+    requested: str, items: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Rank official-store identities without granting requirement authority."""
+
+    requested_tokens = _identity_tokens(requested)
+    if not requested_tokens:
+        return []
+    ranked: List[Dict[str, Any]] = []
+    for item in list(items)[:10]:
+        if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+            continue
+        candidate_tokens = _identity_tokens(item.get("name"))
+        if not candidate_tokens:
+            continue
+        overlap = len(requested_tokens & candidate_tokens)
+        coverage = overlap / max(1, len(requested_tokens))
+        precision = overlap / max(1, len(candidate_tokens))
+        confidence = round((coverage * 0.7) + (precision * 0.3), 4)
+        if confidence < 0.65:
+            continue
+        appid = int(item["id"])
+        ranked.append({
+            "appid": appid,
+            "title": _bounded_text(item.get("name"), 160),
+            "confidence": confidence,
+            "authority": "identity_candidate_only",
+            "source": "steam_storesearch",
+            "source_url": f"https://store.steampowered.com/app/{appid}/",
+        })
+    ranked.sort(key=lambda row: (-float(row["confidence"]), len(str(row["title"]))))
+    return ranked
+
+
+def _live_identity_candidate(title: str) -> Optional[Dict[str, Any]]:
+    """Return one dominant official identity candidate, never an inferred requirement."""
+
+    try:
+        import httpx
+
+        gathered: Dict[int, Dict[str, Any]] = {}
+        with httpx.Client(
+            timeout=_TIMEOUT_S,
+            headers={"User-Agent": _USER_AGENT},
+            follow_redirects=False,
+        ) as client:
+            for query in _identity_query_variants(title):
+                found = _get_json(client, _SEARCH_URL, {"term": query, "cc": "us", "l": "en"})
+                for row in rank_game_identity_candidates(title, (found or {}).get("items") or []):
+                    appid = int(row["appid"])
+                    prior = gathered.get(appid)
+                    if prior is None or float(row["confidence"]) > float(prior["confidence"]):
+                        gathered[appid] = row
+                if gathered and max(float(row["confidence"]) for row in gathered.values()) >= 0.9:
+                    break
+        ranked = sorted(
+            gathered.values(), key=lambda row: (-float(row["confidence"]), len(str(row["title"]))),
+        )
+        if not ranked or float(ranked[0]["confidence"]) < 0.9:
+            return None
+        if len(ranked) > 1 and float(ranked[0]["confidence"]) - float(ranked[1]["confidence"]) < 0.15:
+            return None
+        return dict(ranked[0])
+    except Exception as exc:
+        logger.debug("steam identity discovery failed for %r: %s", title, exc)
+        return None
+
+
 def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
     """Official storefront JSON: storesearch resolves the appid, appdetails carries
     pc_requirements. Any failure at any step → None (fixture/None contract upstream)."""
@@ -372,6 +479,19 @@ def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[d
         if cached and now - cached[0] <= _LIVE_CACHE_TTL_S:
             return dict(cached[1]) if cached[1] is not None else None
         result = _live_lookup(title)
+        if result is None:
+            identity = _live_identity_candidate(title)
+            if identity is not None:
+                result = _live_lookup(str(identity["title"]))
+                if result is not None:
+                    result["identity_resolution"] = {
+                        "requested_name": str(title)[:160],
+                        "resolved_name": result.get("title"),
+                        "confidence": identity.get("confidence"),
+                        "authority": "identity_candidate_only",
+                        "source": identity.get("source"),
+                        "source_url": identity.get("source_url"),
+                    }
         if len(_LIVE_CACHE) >= _LIVE_CACHE_MAX:
             oldest = min(_LIVE_CACHE, key=lambda item: _LIVE_CACHE[item][0])
             _LIVE_CACHE.pop(oldest, None)

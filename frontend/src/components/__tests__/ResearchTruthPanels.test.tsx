@@ -24,6 +24,51 @@ describe('research truth panels', () => {
     expect(screen.getByText('View research proof')).toBeInTheDocument();
   });
 
+  it('shows one official identity candidate without implying requirement authority', () => {
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1', retained_purpose: 'future game laptop',
+        status: 'provisional', interpretations: [], next_question: null,
+        execution: 'identity_resolved', evidence: 'identity_only', decision: 'blocked',
+        cart_authority: 'none', provider_accounting: { external_calls: 1, paid_calls: 0 },
+        identity_candidates: [{
+          requested_name: 'new remastered heroes 3',
+          resolved_name: 'Heroes of Might and Magic III Remake', source: 'steam',
+          source_url: 'https://store.steampowered.com/app/3809850/', confidence: 1,
+          status: 'identity_resolved_requirements_incomplete', requirements_status: 'incomplete',
+        }],
+      }}
+      onResearch={vi.fn()} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+    />);
+
+    expect(screen.getByTestId('official-identity-candidate')).toHaveTextContent(
+      /Heroes of Might and Magic III Remake/i,
+    );
+    expect(screen.getByTestId('official-identity-candidate')).toHaveTextContent(
+      /identity candidate only.*requirements are not yet published or accepted/i,
+    );
+    expect(screen.queryByText(/qualified product/i)).toBeNull();
+  });
+
+  it('does not offer a futile research retry while canonical claims await policy review', () => {
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1', retained_purpose: 'Emulate3D 2026',
+        status: 'unresolved', interpretations: [], next_question: null,
+        execution: 'buyer_authorized_canonical_fetch_completed',
+        evidence: 'claims_pending_policy_review', decision: 'provisional_only',
+        cart_authority: 'none', provider_accounting: { external_calls: 1, paid_calls: 0 },
+        research_plan_id: 'crp-0123456789abcdef0123',
+      }}
+      onResearch={vi.fn()} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+    />);
+
+    expect(screen.queryByRole('button', { name: /Retry approved research/i })).toBeNull();
+    expect(screen.getByTestId('buyer-research-status')).toHaveTextContent(
+      /claims await independent policy review.*product fit remains provisional/i,
+    );
+  });
+
   it('submits manual specifications through the same provisional review boundary', async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
     render(<AmbiguityExplorationPanel

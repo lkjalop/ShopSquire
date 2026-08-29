@@ -128,6 +128,29 @@ def resolve_named_workloads(
                 "lineage_root": result.get("source"),
             })
         compilation = compile_authoritative_requirements(claims)
+        if not compilation.requirements:
+            evidence.append({
+                "kind": kind,
+                "requested_name": name,
+                "resolved_name": result.get("resolved_name") or result.get("title"),
+                "status": "identity_resolved_requirements_incomplete",
+                "live_allowed": allow_live,
+                "source": result.get("source"),
+                "source_url": result.get("source_url"),
+                "retrieved_at": result.get("retrieved_at"),
+                "cached": bool(result.get("cached")),
+                "confidence": result.get("confidence"),
+                "identity_resolution": dict(result.get("identity_resolution") or {}),
+                "minimum": dict(result.get("minimum") or {}),
+                "recommended": dict(result.get("recommended") or {}),
+                "provider_attempts": provider_attempts,
+                "provider_coverage": "identity_only",
+                "enrolled_providers": list(enrolled_providers),
+                "compiled_requirements": [],
+                "claim_rejections": list(compilation.rejections),
+                "reason": "official_identity_has_no_material_hardware_requirements",
+            })
+            continue
         for compiled in compilation.requirements:
             attr = compiled.attribute_key
             predicate = (compiled.operator, float(compiled.value))

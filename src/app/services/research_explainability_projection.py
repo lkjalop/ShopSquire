@@ -48,7 +48,11 @@ def project_research_explainability(
         for row in research.get("source_execution") or []
     ))
     if len(publishers) == 1:
-        subject = f"{publishers[0]}'s official requirements"
+        subject = (
+            f"{publishers[0]}'s official context"
+            if context and not claims
+            else f"{publishers[0]}'s official requirements"
+        )
     else:
         subject = f"{len(publishers)} official publisher sources"
     if claims:

@@ -282,6 +282,7 @@ def resolve(use_cases: Optional[List[str]],
     # through governed providers below. Do not also run the legacy NQE title vocabulary:
     # combining both paths lets two independent detectors silently disagree on the floor.
     # Keep salvage only for offline/direct callers that have no model entity yet.
+    declared_title = {"requirements": {}, "trace": {}}
     if query and not workload_entities:
         title = _salvage_title_requirements(query)
         title["trace"]["resolution_mode"] = "legacy_fallback"
@@ -307,8 +308,23 @@ def resolve(use_cases: Optional[List[str]],
                     merged,
                     from_op_map(grounded["requirements"], "workload:publisher"),
                 )
+            elif query:
+                # A finite, curated title entry remains an enrolled local evidence
+                # source when a live provider can establish identity but publishes no
+                # material requirements.  This is a fallback only: current publisher
+                # requirements win whenever present, so the two sources never silently
+                # compete.  Unknown and future titles have no declared entry and remain
+                # blocked at the identity-only boundary.
+                declared_title = _salvage_title_requirements(query)
+                if declared_title["requirements"]:
+                    merged = merge_maps(merged, declared_title["requirements"])
+                    title["trace"].update(declared_title["trace"])
+                    title["trace"]["declared_catalog_requirements"] = True
             title["trace"]["external_workload_evidence"] = {
                 "live_allowed": grounded["live_allowed"],
+                "consent_recorded": bool(
+                    grounded.get("consent_recorded", external_research_consent)
+                ),
                 "items": grounded["evidence"],
             }
         except Exception as exc:

@@ -105,3 +105,11 @@ def test_uncovered_workload_cannot_invent_a_local_profile():
         catalog_authority="blocked",
         covered_profiles=(),
     ) is False
+
+
+def test_material_unknown_prevents_generic_profile_from_answering_fit_question():
+    assert allows_covered_profile_exploration(
+        catalog_authority="blocked",
+        covered_profiles=("gaming",),
+        material_unknowns=("authoritative requirements for a named game",),
+    ) is False

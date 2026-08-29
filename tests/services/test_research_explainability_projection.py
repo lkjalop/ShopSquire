@@ -64,3 +64,23 @@ def test_projection_explains_why_a_requirement_free_candidate_is_only_shown():
     sentence = narration.top_product_sentences[0].sentence
     assert "shown as a laptop catalog candidate within the stated budget" in sentence
     assert "not yet a verified recommendation" in sentence
+
+
+def test_context_only_source_is_not_described_as_product_requirements():
+    receipt, _ = project_research_explainability(
+        purpose="digital twin simulation",
+        research={
+            "claims": [],
+            "context_claims": [{"claim_id": "context-1"}],
+            "unresolved": [{"reason": "named_software_required"}],
+            "source_execution": [{
+                "publisher": "National Institute of Standards and Technology",
+                "source_scope": "context_only",
+            }],
+        },
+        shelves={"shelves": []},
+        delta=[],
+    )
+
+    assert "official context" in receipt.summary
+    assert "official requirements" not in receipt.summary

@@ -69,7 +69,42 @@ def test_named_game_evidence_merges_minimums_not_recommended(monkeypatch):
     assert result["requirements"]["gpu_vram_gb"][0][1] >= 4
     evidence = result["title_requirements"]["external_workload_evidence"]
     assert evidence["live_allowed"] is True
+    assert evidence["consent_recorded"] is True
     assert evidence["items"][0]["source"] == "steam"
+
+
+def test_identity_without_material_requirements_stays_unresolved(monkeypatch):
+    monkeypatch.setattr(W, "live_steam_allowed", lambda consent: bool(consent))
+    monkeypatch.setattr(
+        "src.app.services.connectors.steam_requirements.get_game_requirements",
+        lambda title, allow_live=False: {
+            "title": "Heroes of Might and Magic III Remake",
+            "appid": 3809850,
+            "minimum": {"ram_gb": None, "storage_gb": None, "gpu": None, "os": "Windows 11"},
+            "recommended": {"ram_gb": None, "storage_gb": None, "gpu": None, "os": "Windows 11"},
+            "source": "steam",
+            "source_url": "https://store.steampowered.com/app/3809850/",
+            "retrieved_at": "2026-08-28T00:00:00+00:00",
+            "cached": False,
+            "identity_resolution": {
+                "requested_name": title,
+                "resolved_name": "Heroes of Might and Magic III Remake",
+                "authority": "identity_candidate_only",
+                "confidence": 1.0,
+            },
+        },
+    )
+
+    result = W.resolve_named_workloads(
+        [("game", "the new remastered heroes of might and magic 3")],
+        consent=True,
+    )
+
+    assert result["requirements"] == {}
+    assert result["evidence"][0]["status"] == "identity_resolved_requirements_incomplete"
+    assert result["evidence"][0]["resolved_name"] == "Heroes of Might and Magic III Remake"
+    assert result["evidence"][0]["identity_resolution"]["authority"] == "identity_candidate_only"
+    assert result["evidence"][0]["compiled_requirements"] == []
 
 
 def test_router_accepts_only_literal_workload_entities(db):

@@ -3583,6 +3583,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # exploration. This path calls no external provider and grants no cart authority.
     ambiguity_exploration: Dict[str, Any] | None = None
     ambiguous_product_shelves: Dict[str, Any] | None = None
+    _workload_authorization = (
+        data.get("workload_authorization")
+        if isinstance(data.get("workload_authorization"), dict) else {}
+    )
+    _workload_material_blocked = (
+        str(_workload_authorization.get("status") or "").strip().lower() == "blocked"
+    )
     _case_research_plan = None
     try:
         from src.app.services.case_research_plan import build_case_research_plan
@@ -3594,6 +3601,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
         semantic_catalog_blocked
+        or _workload_material_blocked
         or (
             turn_intent == "SEARCH"
             and not products
@@ -3617,6 +3625,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if provisional_exploration_needed and not buyer_requirement_claims:
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
+
+            _identity_candidates = []
+            for item in list(_workload_authorization.get("evidence") or [])[:3]:
+                if not isinstance(item, dict) or not str(
+                    item.get("status") or ""
+                ).startswith("identity_resolved"):
+                    continue
+                identity = (
+                    item.get("identity_resolution")
+                    if isinstance(item.get("identity_resolution"), dict) else {}
+                )
+                _identity_candidates.append({
+                    "requested_name": item.get("requested_name"),
+                    "resolved_name": item.get("resolved_name") or identity.get("resolved_name"),
+                    "source": item.get("source") or identity.get("source"),
+                    "source_url": item.get("source_url") or identity.get("source_url"),
+                    "confidence": item.get("confidence") or identity.get("confidence"),
+                    "status": item.get("status"),
+                    "requirements_status": "incomplete",
+                })
 
             _semantic_hypotheses = list(semantic_resolution.get("workload_hypotheses") or [])[:3]
             if not _semantic_hypotheses and _case_research_plan is not None:
@@ -3673,7 +3701,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 ),
                 "trace_id": decision_trace_id,
                 "retained_purpose": _retained_case_purpose,
-                "status": "provisional",
+                "status": "context_only" if _identity_candidates else "provisional",
                 "interpretations": _semantic_hypotheses,
                 "next_question": (
                     # A generic catalog budget question must not displace the
@@ -3682,6 +3710,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     ({"id": "research_scope", "text": _case_research_plan.next_question}
                      if _case_research_plan is not None
                      and _case_research_plan.publisher_status == "unresolved"
+                     and not _identity_candidates
                      else _questions[0]) if _questions
                     else ({"id": "research_scope", "text": _case_research_plan.next_question}
                           if _case_research_plan is not None else None)
@@ -3689,11 +3718,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 "research_choices": (["research_approved_sources"] if _case_research_plan else []) + [
                     "upload_requirements", "enter_specifications", "continue_provisionally",
                 ],
-                "execution": "local_exploration_completed",
-                "evidence": "material_gaps",
-                "decision": "exploration_allowed",
+                "execution": (
+                    "provider_lookup_completed" if _identity_candidates
+                    else "local_exploration_completed"
+                ),
+                "evidence": "identity_only" if _identity_candidates else "material_gaps",
+                "decision": "clarification_required" if _workload_material_blocked else "exploration_allowed",
                 "cart_authority": "none",
-                "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+                "provider_accounting": {
+                    "external_calls": sum(
+                        1 for item in list(_workload_authorization.get("evidence") or [])
+                        if isinstance(item, dict)
+                        for attempt in list(item.get("provider_attempts") or [])
+                        if isinstance(attempt, dict) and bool(attempt.get("allow_live"))
+                    ),
+                    "paid_calls": 0,
+                },
                 "research_plan_id": (
                     _case_research_plan.plan_id if _case_research_plan is not None else None
                 ),
@@ -3709,6 +3749,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     list(_case_research_plan.source_candidate_ids)
                     if _case_research_plan is not None else []
                 ),
+                "identity_candidates": _identity_candidates,
             }
             if active_case_subject_replaced and _case_research_plan is not None:
                 products = []
@@ -4023,6 +4064,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "buyer_requirement_proposal": buyer_requirement_proposal,
         "ambiguity_exploration": ambiguity_exploration,
         "product_shelves": ambiguous_product_shelves,
+        "workload_authorization": (
+            data.get("workload_authorization")
+            if isinstance(data.get("workload_authorization"), dict) else None
+        ),
+        "execution_state_envelope": data.get("execution_state_envelope"),
+        "control_faults": data.get("control_faults") if isinstance(data.get("control_faults"), list) else [],
     }
     # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
     # disabled is part of the API contract; emitting null makes clients and audits infer an

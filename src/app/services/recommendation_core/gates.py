@@ -37,10 +37,19 @@ class ClarificationObligationState:
 
 def allows_covered_profile_exploration(
     *, catalog_authority: str, covered_profiles: tuple[str, ...] | list[str],
+    material_unknowns: tuple[str, ...] | list[str] = (),
 ) -> bool:
     """Allow browsing, never qualification, when a local profile is already grounded."""
 
-    return str(catalog_authority or "").lower() != "permitted" and bool(covered_profiles)
+    # A covered generic profile (for example ``gaming``) cannot answer an exact
+    # workload-fit question while a material concept remains unresolved.  That
+    # would let a familiar category outrun the evidence authority for the named
+    # game/software and recreate a generic shortlist under a blocked decision.
+    return (
+        str(catalog_authority or "").lower() != "permitted"
+        and bool(covered_profiles)
+        and not any(str(item or "").strip() for item in material_unknowns)
+    )
 
 
 def evaluate_text_gates(query: str) -> Dict[str, Any]:

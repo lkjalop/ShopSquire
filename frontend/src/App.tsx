@@ -52,6 +52,7 @@ import {
   detectCVIssueType,
   detectPanelMode,
   hasDamageSignal,
+  hasNamedGameWorkload,
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
@@ -1613,11 +1614,11 @@ export default function App() {
       return;
     }
 
-    // N3 Mode-B: an explicit web-search imperative is a CONSENT REQUEST, not a command — the fetch
-    // only happens if the buyer clicks the chip (which re-sends WITH external_research_consent).
-    // This is simultaneously the UX and the trigger-forcing mitigation: prompt-crafted imperatives
-    // cannot make the platform touch the network.
+    // N3 Mode-B: an explicit web-search imperative is a CONSENT REQUEST unless the tenant/admin
+    // has enabled the bounded auto-research profile. The runtime flag is the operator grant; buyer
+    // text alone can never enable it. This keeps the browser and backend on the same authority state.
     if (opts?.externalResearchConsent === undefined   // chip answers (true OR false) bypass — no loop
+        && !autoPublicResearchEnabled
         && requiresExternalResearchConsent(q)) {
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
         { role: 'assistant',
@@ -1852,6 +1853,7 @@ export default function App() {
         !activeShoppingCase?.case_id
         && !hasImages
         && !complaintIntent
+        && !hasNamedGameWorkload(q)
       ) {
         const interpretationAction = await postShoppingCaseAction(
           shoppingCaseActionPath.interpretation(), {
@@ -2172,7 +2174,9 @@ export default function App() {
         if (copyProfileId) chatPayload.copy_profile_id = copyProfileId;
         if (copyBrandName) chatPayload.brand_name = copyBrandName;
         chatPayload.copy_surface = 'storefront';
-        if (opts?.externalResearchConsent) chatPayload.external_research_consent = true;
+        if (opts?.externalResearchConsent || autoPublicResearchEnabled) {
+          chatPayload.external_research_consent = true;
+        }
         if (opts?.nqeSelection) {
           chatPayload.nqe_selection = opts.nqeSelection;
         }
@@ -3045,7 +3049,7 @@ export default function App() {
     researchAuthorized: boolean,
   ) => {
     const payload = await executeEvidenceSourceResolution(uid, hint, researchAuthorized);
-    if (researchAuthorized && payload?.research_status === 'completed') {
+    if (researchAuthorized && ['completed', 'claims_pending_review'].includes(payload?.research_status)) {
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         setProductShelves({
           ...payload.product_shelves,
@@ -3062,14 +3066,20 @@ export default function App() {
         execution: 'buyer_authorized_canonical_fetch_completed',
         evidence: payload?.evidence_outcome || 'unresolved',
         provider_accounting: payload?.provider_accounting || current.provider_accounting,
+        canonical_truth: payload?.canonical_truth || current.canonical_truth,
       } : current);
       setTraceId(normalizeTraceId(payload?.trace_id || traceId));
       setMessages((current) => [...current, {
         role: 'assistant',
-        content: payload?.evidence_outcome === 'product_requirements'
+        content: payload?.research_status === 'claims_pending_review'
+          ? `I fetched the reviewed canonical publisher page and extracted ${payload?.claims?.length || 0} cited requirement claims. Review them below. They remain provisional until independent policy approval, and no product, cart, or supplier action was authorized.`
+          : payload?.evidence_outcome === 'product_requirements'
           ? 'I fetched the reviewed canonical publisher page you selected, compiled scoped requirements, and reranked this same case. Unknowns remain visible; no cart or supplier action was authorized.'
           : 'I fetched the reviewed canonical publisher page, but it did not establish product requirements for this case. The shortlist remains provisional and no cart or supplier action was authorized.',
         timestamp: new Date(),
+        buyerRequirementClaims: Array.isArray(payload?.claims)
+          ? payload.claims as BuyerRequirementClaim[] : undefined,
+        buyerRequirementProposal: payload?.buyer_requirement_proposal || undefined,
       }]);
     }
     return payload?.resolution
@@ -3077,6 +3087,7 @@ export default function App() {
           ...payload.resolution,
           research_status: payload?.research_status,
           source_intake_certificate: payload?.source_intake_certificate,
+          provisional_claim_count: Array.isArray(payload?.claims) ? payload.claims.length : 0,
         }
       : { status: 'unresolved', reason: 'resolution_not_recorded' };
   }, [executeEvidenceSourceResolution, uid, traceId]);
@@ -3120,6 +3131,12 @@ export default function App() {
     setMessages,
     refreshCart,
   });
+
+  const materialProductFitBlocked = Boolean(
+    ambiguityExploration?.research_plan_id
+    && ['context_only', 'unresolved'].includes(String(productShelves?.evidence_status || ''))
+    && ['context_only', 'unresolved'].includes(String(ambiguityExploration?.status || ''))
+  );
 
 
   /** Disambiguation button click → re-send with the chosen intent */
@@ -3607,7 +3624,7 @@ export default function App() {
                       autoResearchEnabled={autoPublicResearchEnabled}
                     />
                   )}
-                  {productShelves && <ProductShelvesPanel
+                  {productShelves && !materialProductFitBlocked && <ProductShelvesPanel
                     projection={productShelves}
                     onPropose={ambiguityExploration?.status === 'researched' ? proposeResearchedProduct : undefined}
                     onNarrationPreview={requestPortfolioNarrationPreview}

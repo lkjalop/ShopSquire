@@ -127,6 +127,37 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
   });
 
+  it('uses the latest executed-research truth instead of the provisional plan truth', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[
+      {
+        event_type: 'ambiguity_exploration_projected',
+        payload: {
+          retained_purpose: 'digital twin simulation', research_plan_id: 'crp-context',
+          canonical_truth: {
+            research_execution: 'NOT_ATTEMPTED', evidence_status: 'NONE',
+            freshness: 'UNKNOWN', decision_status: 'PROVISIONAL', commerce_authority: 'NONE',
+          },
+        },
+      },
+      {
+        event_type: 'official_research_rerank_completed',
+        payload: {
+          canonical_truth: {
+            research_execution: 'OFFICIAL_FETCH_PARTIAL', evidence_status: 'CONTEXT_ONLY',
+            freshness: 'CURRENT', decision_status: 'PROVISIONAL', commerce_authority: 'NONE',
+          },
+          provider_accounting: { external_calls: 1, paid_calls: 0 },
+          context_claims: [{ claim_id: 'context-nist' }],
+        },
+      },
+    ]} />);
+
+    expect(screen.getByTestId('canonical-procurement-truth')).toHaveTextContent(
+      /research: official fetch partial.*evidence: context only.*freshness: current/i,
+    );
+    expect(screen.getByTestId('canonical-procurement-truth')).not.toHaveTextContent(/not attempted/i);
+  });
+
   it('renders a fail-closed source-intake certificate without exposing the raw URL', () => {
     render(<WorkloadResearchTrace executionSteps={[]} events={[{
       event_type: 'buyer_evidence_source_resolution_completed',

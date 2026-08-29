@@ -306,6 +306,7 @@ async def execute_enrolled_official_research(
         "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
+        "canonical_truth": exploration["canonical_truth"],
     }
     case.retained_purpose = plan.retained_purpose
     case.updated_at = datetime.now(timezone.utc)
@@ -349,6 +350,7 @@ async def execute_enrolled_official_research(
             "official_claims": research["claims"],
             "context_claims": research["context_claims"],
             "evidence_outcome": outcome,
+            "canonical_truth": exploration["canonical_truth"],
             "cart_authority": "none",
             "supplier_authority": "none",
         },

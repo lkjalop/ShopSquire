@@ -3,12 +3,27 @@ import {
   detectCVIssueType,
   detectPanelMode,
   hasDamageSignal,
+  hasNamedGameWorkload,
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
   requiresExternalResearchConsent,
   shouldRouteToComplaint,
 } from '../queryIntent';
+
+describe('hasNamedGameWorkload', () => {
+  it('routes a buyer-authored game title to the identity-aware chat path', () => {
+    expect(hasNamedGameWorkload(
+      'i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?',
+    )).toBe(true);
+    expect(hasNamedGameWorkload('I want to play Alan Wake 2 on a laptop')).toBe(true);
+  });
+
+  it('keeps generic gaming language on ordinary intake', () => {
+    expect(hasNamedGameWorkload('I need a laptop to play games')).toBe(false);
+    expect(hasNamedGameWorkload('I need a gaming laptop')).toBe(false);
+  });
+});
 
 describe('shouldRouteToComplaint (chat-firing misroute guard)', () => {
   const base = {

@@ -175,3 +175,66 @@ def test_rejected_url_is_sanitized_and_still_emits_fail_closed_trace(monkeypatch
     assert certificate["execution"]["network_execution"] is False
     assert certificate["decision_effect"]["product_fit"] == "unchanged"
     assert "secret-value" not in str(certificate)
+
+
+def test_emulate3d_policy_pending_claims_are_returned_for_review_with_execution_truth(monkeypatch):
+    client = _client()
+    case_id = _case(client)
+
+    def fake_research(*_args, **_kwargs):
+        return {
+            "claims": [],
+            "provisional_claims": [{
+                "claim_id": "official-emulate3d-ram",
+                "attribute": "ram_gb", "operator": ">=", "value": 64,
+                "unit": "GB", "requirement_class": "recommended",
+                "claim_type": "recommended_requirements",
+                "authority_status": "pending_independent_policy_review",
+                "freshness_status": "fresh",
+                "source_id": "rockwell_emulate3d_official_requirements",
+                "citation_url": "https://store.sim3d.com/helpconsole.php?j=demo3d_2026&p=system_requirements&action=view&format=raw",
+                "statement": "Emulate3D publishes 64 GB RAM in its recommended tier.",
+            }],
+            "context_claims": [],
+            "rejected_claims": [],
+            "unresolved": [{"reason": "independent_policy_human_signoff_pending"}],
+            "receipts": [{
+                "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+                "execution_status": "completed", "network_execution": True,
+                "response_body_hash": "a" * 64,
+            }],
+            "source_execution": [{
+                "canonical_fetch_status": "completed",
+                "publisher": "Rockwell Automation Emulate3D",
+            }],
+            "execution_mode": "live_network",
+            "evidence_ladder": [],
+            "evidence_outcome": "claims_pending_policy_review",
+            "provider_accounting": {
+                "external_calls": 1, "official_origin_fetches": 1,
+                "cache_hits": 0, "paid_calls": 0,
+            },
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        fake_research,
+    )
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+        json={
+            "uid": "buyer-link",
+            "source_url": "https://store.sim3d.com/demo3d_2025/system_requirements",
+            "research_authorized": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["research_status"] == "claims_pending_review"
+    assert payload["claims"][0]["attribute"] == "ram_gb"
+    assert payload["buyer_requirement_proposal"]["proposal_version"] == 1
+    assert payload["canonical_truth"]["research_execution"] == "OFFICIAL_FETCH_PARTIAL"
+    assert payload["canonical_truth"]["evidence_status"] == "OBSERVED_PENDING_REVIEW"
+    assert payload["canonical_truth"]["freshness"] == "CURRENT"
+    assert payload["source_intake_certificate"]["claim_compilation"]["provisional"] == 1

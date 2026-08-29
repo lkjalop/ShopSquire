@@ -4,7 +4,7 @@ import BuyerRequirementReviewCard from './BuyerRequirementReviewCard';
 import DisambiguationButtons from './DisambiguationButtons';
 import InlineMessageText from './InlineMessageText';
 import PendingCartChangeCard from './PendingCartChangeCard';
-import { isActionableBuyerQuestion } from '../lib/buyerQuestion';
+import { isActionableBuyerQuestion, isResearchAuthorityQuestion } from '../lib/buyerQuestion';
 import { citationChips } from '../lib/evidenceDisplay';
 import type { ChatMessage } from '../conversationTypes';
 
@@ -39,9 +39,9 @@ export default function ConversationTimeline(props: Props) {
       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
       {props.showDebugBadges && msg.complexity && <span className={styles.complexityBadge} title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`} style={{ display: 'block', fontSize: '0.62em', opacity: 0.35, marginTop: 4, letterSpacing: '0.02em' }}>{msg.complexity.tier} · {msg.complexity.model?.split(':')[0]}</span>}
       {msg.agentStepsReadable?.length ? <details style={{ marginTop: 8, fontSize: '0.78em', opacity: 0.72 }}><summary style={{ cursor: 'pointer', userSelect: 'none' }}>How I answered this</summary><ul style={{ margin: '4px 0 0 16px', padding: 0 }}>{msg.agentStepsReadable.map((step, stepIndex) => <li key={stepIndex} style={{ marginBottom: 2 }}>{step}</li>)}</ul></details> : null}
-      {index === props.messages.length - 1 && msg.nextQuestions?.some(isActionableBuyerQuestion) && <div data-testid="nqe-card" style={{ marginTop: 10, border: '1px solid #e5e7eb', background: '#f9fafb', borderRadius: 10, padding: '10px 12px' }}>
+      {index === props.messages.length - 1 && msg.nextQuestions?.some(question => isActionableBuyerQuestion(question) && !isResearchAuthorityQuestion(question)) && <div data-testid="nqe-card" style={{ marginTop: 10, border: '1px solid #e5e7eb', background: '#f9fafb', borderRadius: 10, padding: '10px 12px' }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Help me narrow this down</div>
-        {msg.nextQuestions.filter(isActionableBuyerQuestion).slice(0, 2).map((question, questionIndex) => <div key={question.id} style={{ marginTop: questionIndex ? 8 : 0 }}>
+        {msg.nextQuestions.filter(question => isActionableBuyerQuestion(question) && !isResearchAuthorityQuestion(question)).slice(0, 2).map((question, questionIndex) => <div key={question.id} style={{ marginTop: questionIndex ? 8 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}><button type="button" onClick={() => props.onQuickAction(question.text)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f2937', textAlign: 'left' }}>{question.text}</button>{question.why_hint && <button type="button" className={styles.hintBtn} title={question.why_hint} style={{ fontSize: 11 }}>why?</button>}</div>
           {question.options?.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>{question.options.slice(0, 3).map(option => <button key={`${question.id}:${option.id}`} type="button" className={styles.filterBtn} onClick={() => props.onNqeOption(question, option)}>{option.label}</button>)}</div> : null}
         </div>)}

@@ -14,9 +14,11 @@ import pytest
 
 from src.app.services.connectors.steam_requirements import (
     _bounded_requirements,
+    _identity_query_variants,
     _parse_requirements_html,
     _title_matches,
     get_game_requirements,
+    rank_game_identity_candidates,
 )
 from src.app.services.gpu_translation import desktop_req_to_laptop_tier, laptop_gpu_tier
 
@@ -150,6 +152,25 @@ def test_live_evidence_bounds_and_title_match_are_fail_closed():
     assert bounded["storage_gb"] is None
     assert "\n" not in bounded["gpu"]
     assert "\x00" not in bounded["os"]
+
+
+def test_colloquial_remaster_title_gets_bounded_official_identity_query_variants():
+    variants = _identity_query_variants(
+        "the new remastered heroes of might and magic 3",
+    )
+    assert variants[0] == "heroes of might and magic iii remake"
+    assert "heroes of might and magic iii remake" in variants
+    assert len(variants) <= 4
+
+
+def test_official_identity_candidate_can_bridge_remastered_to_remake_without_claim_authority():
+    ranked = rank_game_identity_candidates(
+        "the new remastered heroes of might and magic 3",
+        [{"id": 3809850, "name": "Heroes of Might and Magic III Remake"}],
+    )
+    assert ranked[0]["appid"] == 3809850
+    assert ranked[0]["confidence"] >= 0.9
+    assert ranked[0]["authority"] == "identity_candidate_only"
 
 
 # ── GPU translation ──────────────────────────────────────────────────────────

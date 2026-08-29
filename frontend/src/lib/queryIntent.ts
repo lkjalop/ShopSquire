@@ -39,6 +39,21 @@ export function requiresExternalResearchConsent(query: string): boolean {
   return researchVerb.test(q) && externalTarget.test(q);
 }
 
+/**
+ * A title-bearing game request belongs on the governed chat/router path, where the
+ * literal title can be identity-resolved. Sending it through the generic open-world
+ * intake first duplicates model work and can erase the title into a generic workload.
+ */
+export function hasNamedGameWorkload(query: string): boolean {
+  const match = String(query || '').match(/\bplay\s+(.{3,120}?)(?:[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i);
+  if (!match) return false;
+  const title = String(match[1] || '')
+    .replace(/^\s*(?:a|the|some)\s+/i, '')
+    .trim();
+  if (!title || /^(?:games?|gaming|online|locally)$/i.test(title)) return false;
+  return title.split(/\s+/).length >= 2;
+}
+
 export function detectCVIssueType(query: string): string {
   const q = query.toLowerCase();
   if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';

@@ -12,7 +12,8 @@ ResearchExecution = Literal[
     "NOT_ATTEMPTED", "DISCOVERY_ONLY", "OFFICIAL_FETCH_PARTIAL", "COMPLETE",
 ]
 EvidenceStatus = Literal[
-    "NONE", "CANDIDATE_ONLY", "ACCEPTED_PARTIAL", "ACCEPTED_COMPLETE",
+    "NONE", "CANDIDATE_ONLY", "CONTEXT_ONLY", "OBSERVED_PENDING_REVIEW",
+    "ACCEPTED_PARTIAL", "ACCEPTED_COMPLETE",
 ]
 FreshnessStatus = Literal["CURRENT", "STALE", "UNKNOWN"]
 DecisionStatus = Literal["PROVISIONAL", "CONDITIONAL", "QUALIFIED", "FAILED"]
@@ -72,11 +73,23 @@ def _research_and_evidence(
         in {"accepted", "verified", "supported"}
     ]
     candidates = research.get("publisher_candidates") or research.get("candidates") or []
+    provisional = [
+        row for row in research.get("provisional_claims") or []
+        if isinstance(row, dict)
+    ]
     complete = bool(research.get("complete") or research.get("accepted_complete"))
+    context = [
+        row for row in research.get("context_claims") or []
+        if isinstance(row, dict)
+    ]
     if complete or (accepted and len(accepted) == len(claims)):
         return "COMPLETE", "ACCEPTED_COMPLETE"
     if accepted:
         return "OFFICIAL_FETCH_PARTIAL", "ACCEPTED_PARTIAL"
+    if provisional:
+        return "OFFICIAL_FETCH_PARTIAL", "OBSERVED_PENDING_REVIEW"
+    if context:
+        return "OFFICIAL_FETCH_PARTIAL", "CONTEXT_ONLY"
     if candidates or "discovery" in execution:
         return "DISCOVERY_ONLY", "CANDIDATE_ONLY"
     if "live" in execution or "official" in execution or "fetch" in execution:
@@ -99,6 +112,24 @@ def adjudicate_procurement_truth(
     accounting = dict(provider_accounting or research.get("provider_accounting") or {})
     watermarks = list(evidence_watermarks or [])
     research_execution, evidence_status = _research_and_evidence(research)
+    if not watermarks:
+        claim_freshness = {
+            str(row.get("freshness_status") or "").strip().lower()
+            for row in [
+                *(research.get("claims") or []),
+                *(research.get("provisional_claims") or []),
+                *(research.get("context_claims") or []),
+            ]
+            if isinstance(row, dict)
+        }
+        if claim_freshness:
+            watermarks = [{
+                "state": (
+                    "stale" if claim_freshness & {"stale", "expired", "invalid"}
+                    else "current" if claim_freshness <= {"fresh", "current"}
+                    else "unknown"
+                ),
+            }]
     freshness = _freshness(watermarks)
     commercial = dict(fulfilment.get("commercial_decision") or {})
     commercial_status = str(commercial.get("status") or "not_evaluated").upper()
@@ -127,7 +158,9 @@ def adjudicate_procurement_truth(
     reasons: list[str] = []
     if research_execution == "NOT_ATTEMPTED":
         reasons.append("External research was not attempted.")
-    if evidence_status in {"NONE", "CANDIDATE_ONLY"}:
+    if evidence_status in {
+        "NONE", "CANDIDATE_ONLY", "CONTEXT_ONLY", "OBSERVED_PENDING_REVIEW",
+    }:
         reasons.append("Accepted requirement evidence is incomplete.")
     if freshness != "CURRENT":
         reasons.append("Current operational freshness is not established.")
@@ -170,6 +203,15 @@ def adjudicate_exploration_truth(payload: dict[str, Any]) -> CanonicalProcuremen
     }
     if "candidate" in evidence:
         research["candidates"] = [{}]
+    elif "context" in evidence:
+        research["context_claims"] = [{
+            "status": "corroborated", "freshness_status": "fresh",
+        }]
+    elif "pending" in evidence and "claim" in evidence:
+        research["provisional_claims"] = [{
+            "authority_status": "pending_independent_policy_review",
+            "freshness_status": "fresh" if "fresh" in evidence else "unknown",
+        }]
     elif "compiled" in evidence:
         research["claims"] = [{"status": "accepted"}]
         research["complete"] = True

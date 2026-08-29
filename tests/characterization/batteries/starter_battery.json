@@ -306,5 +306,16 @@
     "expects_products": true
    }
   ]
+ },
+ {
+  "id": "heldout_future_game_alias_authority",
+  "lane": "research_clarification",
+  "notes": "Held-out regression certificate: a colloquial alias for an unreleased game may resolve official identity, but missing material hardware requirements must suppress budget sufficiency and product shelves.",
+  "turns": [
+   {
+    "query": "i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?",
+    "expects_products": false
+   }
+  ]
  }
 ]

@@ -100,6 +100,12 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "sourcing_intent",
     # routing_source: model versus bounded fallback provenance used by promotion telemetry.
     "routing_source",
+    # Reviewed P1 control-loop additions (2026-08-28). These are case-bound audit
+    # projections only: they diagnose where a turn stopped and never grant research,
+    # product-fit, or commerce authority.
+    "workload_authorization", "execution_state_envelope", "control_faults",
+    "ambiguity_exploration",
+    "experiential_failure_lesson",
     # V2 ownership + immutable presentation identity. These make mixed-mode migration visible and
     # let every consumer prove it rendered the same trace-bound ordered product slate.
     "execution_mode", "execution_lane", "delegation_reason", "canonical_identity",

@@ -35,6 +35,11 @@ export type AmbiguityExploration = {
     url: string; domain: string; title: string; discovery_only: boolean; authority: string;
     status?: string; approval_scope?: string | null;
   }[];
+  identity_candidates?: {
+    requested_name?: string; resolved_name?: string; source?: string; source_url?: string;
+    confidence?: number; status?: string; requirements_status?: string;
+  }[];
+  canonical_truth?: Record<string, unknown> | null;
 };
 
 type Props = {
@@ -69,8 +74,10 @@ export default function AmbiguityExplorationPanel({
   const [candidateStatus, setCandidateStatus] = useState('');
   const openWorldDiscovery = (exploration.source_candidate_ids?.length || 0) === 0;
   const question = exploration.next_question?.text || exploration.next_question?.question;
-  const buyerStatus = exploration.status === 'researched'
-    ? 'Official requirements compiled; unresolved gaps remain conditional.'
+  const buyerStatus = String(exploration.evidence || '').includes('pending_policy_review')
+    ? 'Canonical requirements were fetched and extracted; claims await independent policy review, so product fit remains provisional.'
+    : exploration.status === 'researched'
+      ? 'Official requirements compiled; unresolved gaps remain conditional.'
     : exploration.status === 'context_only'
       ? 'Research found context, but no authoritative product requirements.'
       : exploration.status === 'unresolved'
@@ -98,6 +105,19 @@ export default function AmbiguityExplorationPanel({
       <div data-testid="buyer-research-status" style={{ color: '#1e293b' }}>
         <strong>Research status:</strong> {buyerStatus}
       </div>
+      {exploration.identity_candidates?.length ? (
+        <div data-testid="official-identity-candidate" style={{ marginTop: 9, padding: 9, border: '1px solid #93c5fd', borderRadius: 8, background: '#fff' }}>
+          <strong>Likely official match:</strong>{' '}
+          {exploration.identity_candidates[0].source_url ? (
+            <a href={exploration.identity_candidates[0].source_url} target="_blank" rel="noreferrer">
+              {exploration.identity_candidates[0].resolved_name}
+            </a>
+          ) : exploration.identity_candidates[0].resolved_name}
+          <div style={{ marginTop: 3, fontSize: 12, color: '#475569' }}>
+            Official identity candidate only; material hardware requirements are not yet published or accepted.
+          </div>
+        </div>
+      ) : null}
       {question && <div data-testid="high-information-question" style={{ marginTop: 10, padding: 9, borderRadius: 7, background: '#fff' }}><strong>To narrow it down:</strong> {question}</div>}
       {exploration.publisher_candidates && exploration.publisher_candidates.length > 0 && (
         <div data-testid="publisher-candidates" style={{ marginTop: 9, padding: 9, border: '1px solid #fdba74', borderRadius: 8 }}>
@@ -144,7 +164,9 @@ export default function AmbiguityExplorationPanel({
             {openWorldDiscovery ? 'Discover official sources' : 'Research approved sources'}
           </button>
         )}
-        {exploration.status === 'unresolved' && Boolean(exploration.research_plan_id) && (
+        {exploration.status === 'unresolved'
+          && !String(exploration.evidence || '').includes('pending_policy_review')
+          && Boolean(exploration.research_plan_id) && (
           <button type="button" onClick={() => onResearch(true)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
             {openWorldDiscovery ? 'Refresh source discovery' : 'Retry approved research'}
           </button>
@@ -235,10 +257,15 @@ export default function AmbiguityExplorationPanel({
                   ))}
                 </ul>
               )}
-              {sourceResolution.status === 'resolved' && (
+              {sourceResolution.status === 'resolved' && sourceResolution.research_status !== 'claims_pending_review' && (
                 <button type="button" disabled={sourceBusy} onClick={() => { void resolveSource(true); }} style={{ marginTop: 5, background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
                   Research matched canonical source
                 </button>
+              )}
+              {sourceResolution.research_status === 'claims_pending_review' && (
+                <div data-testid="source-claims-pending-review" style={{ marginTop: 5, color: '#92400e' }}>
+                  The canonical source was fetched and {sourceResolution.provisional_claim_count || 0} cited claims were extracted. Review them in the conversation; they remain provisional until independent policy approval.
+                </div>
               )}
             </div>
           )}

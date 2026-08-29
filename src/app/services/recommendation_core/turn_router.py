@@ -912,6 +912,23 @@ def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
         return False
 
 
+def _literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
+    """Copy a narrowly delimited buyer-authored game title for fail-closed lookup only."""
+    match = _re.search(
+        r"\bplay\s+(?:the\s+)?(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)",
+        str(query or ""),
+        _re.IGNORECASE,
+    )
+    if not match:
+        return ()
+    candidate = _re.sub(r"\s+", " ", match.group(1)).strip(" ,;:-")[:80]
+    significant = [
+        token for token in _re.findall(r"[a-z0-9]+", candidate.lower())
+        if token not in {"a", "an", "the", "new"}
+    ]
+    return (("game", candidate),) if len(significant) >= 2 else ()
+
+
 def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str) -> TurnDecision:
     """Recover only platform-verifiable facts when model routing is unavailable.
 
@@ -950,6 +967,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         defs_union(DEFAULT_VERTICALS),
     )
     from src.app.services import use_case_registry as use_cases_registry
+    literal_workloads = _literal_game_identity_candidate(envelope.query)
 
     # This remains deterministic fallback authority: only an exact, multiword phrase
     # declared by the data-owned registry is recoverable while the model is unavailable.
@@ -1049,6 +1067,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             budget_scope=budget_scope,
             semantic_proposal=semantic,
             requirements=explicit_requirements,
+            workload_entities=literal_workloads,
             clarification_relation=("answer" if pending_budget_answer else "none"),
         )
 
@@ -1097,6 +1116,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         semantic_proposal=semantic,
         use_cases=compatible_use_cases,
         requirements=explicit_requirements,
+        workload_entities=literal_workloads,
         clarification_relation=("answer" if pending_budget_answer else "none"),
     )
 
@@ -2145,6 +2165,32 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         entity = (kind, name)
         if entity not in workload_entities:
             workload_entities.append(entity)
+    # Availability fallback, not a second semantic classifier: if the bounded model is
+    # unavailable or times out, preserve an explicitly buyer-authored game title following
+    # "play".  The captured text is still only an identity candidate and therefore cannot
+    # establish requirements, product fit, budget sufficiency, or commerce authority.
+    if not workload_entities:
+        workload_entities.extend(_literal_game_identity_candidate(envelope.query))
+    # Small local models sometimes preserve the title's base tokens while dropping a
+    # buyer-authored edition qualifier (for example, "remastered" or "remake").  That
+    # qualifier is material to identity resolution: losing it can turn a forthcoming
+    # remake into an older release and let unrelated requirements drive product fit.
+    # Restore only literal qualifiers present in this turn; this is evidence recovery,
+    # not model inference, and therefore cannot introduce a title the buyer did not name.
+    edition_qualifiers = tuple(
+        token for token in ("remastered", "remaster", "remake")
+        if token in query_entity_tokens
+    )
+    if edition_qualifiers:
+        restored_entities: List[Tuple[str, str]] = []
+        for kind, name in workload_entities:
+            normalized_name_tokens = set(
+                _re.sub(r"[^a-z0-9]+", " ", name.lower()).strip().split()
+            )
+            missing = [token for token in edition_qualifiers
+                       if token not in normalized_name_tokens]
+            restored_entities.append((kind, f"{name} {' '.join(missing)}".strip()))
+        workload_entities = restored_entities
     use_case_variants: Dict[str, str] = {}
     scalar_variant = str(data.get("use_case_variant") or "").strip()
     raw_variants = data.get("use_case_variants")
