@@ -2580,6 +2580,16 @@ export default function App() {
         const sourceIntake = data?.buyer_evidence_source_resolution
           && typeof data.buyer_evidence_source_resolution === 'object'
           ? data.buyer_evidence_source_resolution : null;
+        const sourceFetchUrl = sourceIntake?.research_status === 'not_authorized'
+          ? String(
+              sourceIntake?.resolution?.submitted_url
+              || sourceIntake?.resolution?.candidates?.[0]?.canonical_url
+              || '',
+            ).trim()
+          : '';
+        const sourceFetchPrompt = sourceFetchUrl
+          ? { sourceUrl: sourceFetchUrl }
+          : undefined;
         const backendConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
           ? data.confirmed_slots
           : null;
@@ -2736,6 +2746,7 @@ export default function App() {
             ...(data.evidence ? { evidence: data.evidence } : {}),
             ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
             ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
+            ...(sourceFetchPrompt ? { sourceFetchPrompt } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
@@ -2766,6 +2777,7 @@ export default function App() {
             ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
             ...(responseProvenance ? { responseProvenance } : {}),
+            ...(sourceFetchPrompt ? { sourceFetchPrompt } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -2805,6 +2817,7 @@ export default function App() {
             ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
             ...(responseProvenance ? { responseProvenance } : {}),
+            ...(sourceFetchPrompt ? { sourceFetchPrompt } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         }

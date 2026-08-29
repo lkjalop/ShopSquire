@@ -32,6 +32,12 @@ def literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
     if not match:
         return ()
     candidate = re.sub(r"\s+", " ", match.group(1)).strip(" ,;:-")[:80]
+    candidate = re.sub(
+        r"\s+(?:under|below|up to|around|about|budget(?:\s+is)?)\s+(?:aud\s*)?\$?[\d,]+\s*$",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    ).strip(" ,;:-")
     if candidate.lower() in _GENERIC_GAME_TARGETS:
         return ()
     significant = [

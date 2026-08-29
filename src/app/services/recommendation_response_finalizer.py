@@ -143,11 +143,11 @@ def finalize_core_response(
     out["trace_id"] = trace_id
     out["decision_trace_id"] = trace_id
     out.setdefault("decision_id", trace_id)
-    products = _products(out)[:8]
+    products = _products(out)
     for key in ("products", "results"):
         if isinstance(out.get(key), list):
             out[key] = _products({key: out[key]})
-    summary = [
+    all_product_summaries = [
         {
             "sku": str(item.get("sku") or ""),
             "name": str(item.get("name") or item.get("title") or ""),
@@ -161,6 +161,7 @@ def finalize_core_response(
         }
         for item in products
     ]
+    summary = all_product_summaries[:8]
     canonical_identity = {
         "trace_id": trace_id,
         "ordered_skus": [item["sku"] for item in summary if item.get("sku")],
@@ -201,12 +202,12 @@ def finalize_core_response(
             return None
 
         target_rows = [
-            item for item in summary
+            item for item in all_product_summaries
             if (item_price_cents(item) is not None
                 and low_cents <= item_price_cents(item) <= high_cents)
         ]
         value_rows = [
-            item for item in summary
+            item for item in all_product_summaries
             if item_price_cents(item) is not None and item_price_cents(item) < low_cents
         ]
         fit_authorized = _positive_workload_fit_evidence(out)

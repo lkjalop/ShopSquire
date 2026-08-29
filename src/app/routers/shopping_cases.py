@@ -31,8 +31,8 @@ from src.app.services.infrastructure_alternative_projection import project_infra
 from src.app.services.evidence_acquisition_ladder import choose_evidence_stage
 from src.app.services.fulfillment_choice_reducer import reduce_fulfillment_choices
 from src.app.services.decision_log import log_trace_event
-from src.app.services.commerce_feature_readiness import (
-    external_research_runtime_observation,
+from src.app.services.research_policy import (
+    external_research_runtime_status as _external_research_runtime_status,
 )
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
 from src.app.services.research_cancellation_registry import DEFAULT_RESEARCH_CANCELLATIONS
@@ -299,33 +299,6 @@ def portfolio_narration_preview(
         "case_id": case_id, "cart_authority": "none", "supplier_authority": "none",
     })
     return result
-
-
-def _external_research_runtime_status() -> dict[str, Any]:
-    """Read the latest probe observation without performing network I/O.
-
-    Deployments may project their health-probe observations into these values.
-    The explicit local proof enrollment is handled separately by readiness and
-    never appears here as a successful observation.
-    """
-
-    status = str(os.getenv("EXTERNAL_RESEARCH_RUNTIME_STATUS") or "").strip().lower()
-    reachable: bool | None = None
-    if status in {"healthy", "reachable", "effective", "degraded"}:
-        reachable = True
-    elif status in {"unreachable", "failed"}:
-        reachable = False
-    observed = external_research_runtime_observation()
-    configured = {
-        "status": status or None,
-        "reachable": reachable,
-        "degraded": (status == "degraded") if status else None,
-        "last_success_at": os.getenv("EXTERNAL_RESEARCH_LAST_SUCCESS_AT"),
-        "last_failure_at": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_AT"),
-        "last_failure_code": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_CODE"),
-    }
-    observed.update({key: value for key, value in configured.items() if value is not None})
-    return observed
 
 
 def _trace_id(proposal_id: str, version: int) -> str:

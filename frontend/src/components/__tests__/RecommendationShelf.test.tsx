@@ -42,10 +42,10 @@ describe('RecommendationShelf', () => {
 
   it('explains target, value, and maximum-capability price roles', () => {
     render(<RecommendationShelf shelf={{ bands: [
-      { id: 'target_fit', label: 'Closest to your stated price', cards: [
+      { id: 'target_fit', label: 'Target-price fit', cards: [
         { sku: 'T', name: 'Target workstation', price: 3899, currency: 'AUD' },
       ] },
-      { id: 'value_fit', label: 'Qualified lower-cost options', cards: [
+      { id: 'value_fit', label: 'Qualified value options', cards: [
         { sku: 'V', name: 'Value workstation', price: 2499, currency: 'AUD' },
       ] },
       { id: 'maximum_capability', label: 'Maximum verified capability', cards: [

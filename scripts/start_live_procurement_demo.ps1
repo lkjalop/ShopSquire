@@ -81,6 +81,16 @@ $env:ROUTER_MODEL_ENABLED = "1"
 $env:ROUTER_MODEL = "qwen3:14b"
 $env:OLLAMA_DEFAULT_MODEL = "qwen3:14b"
 $env:USE_OLLAMA_INTENT = "1"
+$env:SHOPSQUIRE_RUNTIME_PROFILE = "demo_v2"
+$env:VLM_WARMUP_ON_START = "0"
+$env:CHAT_UPSTREAM_TIMEOUT_SEC = "45"
+$env:RECOMMEND_CORE_MODE = "primary"
+$env:RECOMMEND_CART_SERVE = "1"
+$env:RECOMMEND_PROCUREMENT_ADVICE_MODE = "on"
+$env:RECOMMEND_POLICY_ANSWER_MODE = "on"
+$env:RECOMMEND_SUPPORT_HANDOFF_MODE = "on"
+$env:RECOMMEND_INVENTORY_READ_MODE = "on"
+$env:RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED = "1"
 $routerManifest = (Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 10).models |
   Where-Object { $_.name -eq $env:ROUTER_MODEL -or $_.model -eq $env:ROUTER_MODEL } |
   Select-Object -First 1
@@ -98,7 +108,7 @@ $env:EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = "1"
 $env:EXTERNAL_RESEARCH_PROVIDER_ID = "local_searxng"
 $env:EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS = "free"
 $env:VITE_EXTERNAL_RESEARCH_AUTO_ENABLED = "1"
-foreach ($n in "COMMERCE_CATALOG_ENABLED","FULFILLMENT_DEMO_ENABLED","FULFILLMENT_CASES_ENABLED","FULFILLMENT_BULK_THRESHOLD","OWNER_API_KEY","VITE_API_BASE","ROUTER_MODEL_ENABLED","ROUTER_MODEL","REDIS_URL","EXTERNAL_RESEARCH_ENABLED","EXTERNAL_RESEARCH_AUTO_AUTHORIZED","RESEARCH_POLICY_PROFILE","EXTERNAL_RESEARCH_TENANT_ALLOWLIST","EXTERNAL_RESEARCH_SEARCH_URL","STEAM_REQUIREMENTS_LIVE_ENABLED","VITE_EXTERNAL_RESEARCH_AUTO_ENABLED") {
+foreach ($n in "COMMERCE_CATALOG_ENABLED","FULFILLMENT_DEMO_ENABLED","FULFILLMENT_CASES_ENABLED","FULFILLMENT_BULK_THRESHOLD","OWNER_API_KEY","VITE_API_BASE","ROUTER_MODEL_ENABLED","ROUTER_MODEL","SHOPSQUIRE_RUNTIME_PROFILE","VLM_WARMUP_ON_START","CHAT_UPSTREAM_TIMEOUT_SEC","RECOMMEND_CORE_MODE","RECOMMEND_CART_SERVE","RECOMMEND_PROCUREMENT_ADVICE_MODE","RECOMMEND_POLICY_ANSWER_MODE","RECOMMEND_SUPPORT_HANDOFF_MODE","RECOMMEND_INVENTORY_READ_MODE","RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED","REDIS_URL","EXTERNAL_RESEARCH_ENABLED","EXTERNAL_RESEARCH_AUTO_AUTHORIZED","RESEARCH_POLICY_PROFILE","EXTERNAL_RESEARCH_TENANT_ALLOWLIST","EXTERNAL_RESEARCH_SEARCH_URL","STEAM_REQUIREMENTS_LIVE_ENABLED","VITE_EXTERNAL_RESEARCH_AUTO_ENABLED") {
   Write-Host ("  {0}={1}" -f $n, (Get-Item "env:$n").Value)
 }
 
@@ -149,5 +159,27 @@ if ($Launch) {
   Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $apiCmd
   Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $buyerCmd
   Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoExit", "-Command", $adminCmd
-  Write-Host "  Launched API + buyer + admin. Give them ~10s, then re-run without -Launch for health checks." -ForegroundColor Green
+  $apiReady = $false
+  for ($attempt = 0; $attempt -lt 120; $attempt++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $health = Invoke-WebRequest -Uri "$apiBase/health" -TimeoutSec 2 -UseBasicParsing
+      if ($health.StatusCode -eq 200) { $apiReady = $true; break }
+    } catch { }
+  }
+  if ($apiReady) {
+    $warmBody = @{
+      model = $env:ROUTER_MODEL
+      prompt = "Return only READY"
+      stream = $false
+      think = $false
+      keep_alive = "30m"
+      options = @{ num_predict = 4; temperature = 0 }
+    } | ConvertTo-Json -Depth 4
+    Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/generate" -Method Post -ContentType "application/json" -Body $warmBody -TimeoutSec 180 | Out-Null
+    Write-Host "  API ready; text router prewarmed after startup." -ForegroundColor Green
+  } else {
+    Write-Host "  API did not become ready within 60 seconds; run the script again for health checks." -ForegroundColor Yellow
+  }
+  Write-Host "  Launched API + buyer + admin." -ForegroundColor Green
 }

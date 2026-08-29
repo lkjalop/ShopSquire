@@ -189,3 +189,19 @@ def unresolved_purpose_proposal(
         "confidence": 0.25,
         "proposal_origin": "coverage_abstention",
     }
+
+
+def discard_covered_model_workload_echo(
+    *, query: str, use_cases: Sequence[str], workload_entities: list[tuple[str, str]],
+    node_path: str | None,
+) -> list[tuple[str, str]]:
+    """Drop a model-only workload title when enrolled semantics already cover the turn."""
+    if not workload_entities:
+        return workload_entities
+    from src.app.services.recommendation_core.literal_workload_identity import literal_game_identity_candidate
+    if literal_game_identity_candidate(query):
+        return workload_entities
+    unresolved = unresolved_purpose_proposal(
+        query=query, use_cases=use_cases, workload_entities=(), node_path=node_path,
+    )
+    return workload_entities if unresolved else []

@@ -155,6 +155,18 @@ def test_affordability_question_separates_target_value_and_capability():
     }
 
 
+def test_affordability_question_uses_nearest_qualified_when_target_band_is_empty():
+    env = _env(query="I need a gaming laptop. Is AUD 4,000 okay?", budget_max=4000)
+    resp = CoreResponse(envelope=env, lane="SEARCH")
+    resp.products = [card("VALUE", 119900), card("NEAR2", 191900), card("NEAR", 289900)]
+    resp.extras["capability"] = {"verdict": "within_budget", "floor_cents": 119900}
+    resp.message = "$4,000 is ample."
+    core._build_shelf(None, env, _decision(), resp, 10)
+    shelf = resp.extras["shelf"]
+    assert _by_id(shelf, "target_fit")["skus"] == ["NEAR", "NEAR2"]
+    assert _by_id(shelf, "value_fit")["skus"] == ["VALUE"]
+
+
 # ── guards: no shelf off the product lanes / degraded / no requirements ──────────
 
 def test_adapter_passes_shelf_capability_advisories_to_payload():

@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.app.services.commerce_feature_readiness import (
+    external_research_runtime_observation,
+)
+
 
 _DEFAULT_PATH = Path("config/research_policies.json")
 
@@ -51,4 +55,30 @@ def tenant_policy_auto_research_authorized() -> bool:
     }
 
 
-__all__ = ["active_research_policy", "tenant_policy_auto_research_authorized"]
+def external_research_runtime_status() -> dict[str, Any]:
+    """Project the latest probe observation without performing network I/O."""
+
+    status = str(os.getenv("EXTERNAL_RESEARCH_RUNTIME_STATUS") or "").strip().lower()
+    reachable: bool | None = None
+    if status in {"healthy", "reachable", "effective", "degraded"}:
+        reachable = True
+    elif status in {"unreachable", "failed"}:
+        reachable = False
+    observed = external_research_runtime_observation()
+    configured = {
+        "status": status or None,
+        "reachable": reachable,
+        "degraded": (status == "degraded") if status else None,
+        "last_success_at": os.getenv("EXTERNAL_RESEARCH_LAST_SUCCESS_AT"),
+        "last_failure_at": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_AT"),
+        "last_failure_code": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_CODE"),
+    }
+    observed.update({key: value for key, value in configured.items() if value is not None})
+    return observed
+
+
+__all__ = [
+    "active_research_policy",
+    "external_research_runtime_status",
+    "tenant_policy_auto_research_authorized",
+]

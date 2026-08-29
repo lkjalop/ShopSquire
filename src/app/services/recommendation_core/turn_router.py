@@ -40,6 +40,7 @@ from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
 from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIASES
 from src.app.services.recommendation_core.router_prompt import _instruction_prefix
 from src.app.services.recommendation_core.literal_workload_identity import literal_game_identity_candidate, recover_literal_game_identity
+from src.app.services.recommendation_core.semantic_coverage import discard_covered_model_workload_echo
 from src.app.services.http_defaults import DEFAULT_OUTBOUND_TIMEOUT
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
                                                 primary_sold_node, search_nodes, sells_within,
@@ -50,7 +51,6 @@ _ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
 _ROUTER_CALL_STATE = threading.local()
 _ROUTER_HTTP_CLIENT: Any = None
 _ROUTER_HTTP_CLIENT_LOCK = threading.Lock()
-
 
 def router_runtime_contract() -> Dict[str, Any]:
     """Return the bounded router budget independently of research/narration.
@@ -72,7 +72,6 @@ def router_runtime_contract() -> Dict[str, Any]:
         "max_concurrency": _ROUTER_MAX_CONCURRENCY,
         "late_results_accepted": False,
     }
-
 
 def last_router_call_metrics() -> Dict[str, Any]:
     return dict(getattr(_ROUTER_CALL_STATE, "metrics", {}) or {})
@@ -2148,6 +2147,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if entity not in workload_entities:
             workload_entities.append(entity)
     workload_entities = recover_literal_game_identity(envelope.query, workload_entities, query_entity_tokens)
+    workload_entities = discard_covered_model_workload_echo(
+        query=envelope.query, use_cases=use_cases, workload_entities=workload_entities, node_path=str(data.get("handle") or session.get("prior_node") or "") or None)
     use_case_variants: Dict[str, str] = {}
     scalar_variant = str(data.get("use_case_variant") or "").strip()
     raw_variants = data.get("use_case_variants")

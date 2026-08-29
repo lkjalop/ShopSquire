@@ -238,6 +238,30 @@ def test_finalizer_separates_affordability_target_from_value(monkeypatch):
     )
 
 
+def test_finalizer_keeps_target_price_candidate_beyond_trace_summary_limit(monkeypatch):
+    monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)
+    results = [
+        {"sku": f"VALUE-{index}", "name": f"Value {index}", "price": 1500 + index}
+        for index in range(8)
+    ]
+    results.append({"sku": "TARGET", "name": "Target option", "price": 3899})
+
+    out = finalizer.finalize_core_response(
+        {
+            "results": results,
+            "constraints_used": {"requirements": {"ram_gb": [[">=", 16]]}},
+            "catalog_alignment": {"qualified": [item["sku"] for item in results]},
+        },
+        "trace-target-beyond-summary",
+        query="gaming laptop - is $4000 okay?",
+    )
+
+    assert out["right_panel"]["anchor_sections"][0]["title"] == "Target-price fit"
+    assert out["right_panel"]["anchor_sections"][0]["top_products"][0]["sku"] == "TARGET"
+    assert len(out["canonical_identity"]["ordered_skus"]) == 8
+
+
 def test_finalizer_deduplicates_repeated_exact_sku(monkeypatch):
     monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
     monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)

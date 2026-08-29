@@ -3360,6 +3360,30 @@ def test_router_restores_literal_remastered_qualifier_dropped_by_model(db):
     )
 
 
+def test_router_drops_model_echo_of_covered_university_purpose(db):
+    raw = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.94,
+        "use_cases": ["university_general"],
+        "workload_entities": [{
+            "kind": "software",
+            "name": "university assignments and video calls",
+        }],
+    })
+
+    decision = route_turn(
+        db,
+        _env(
+            "I need a portable laptop for university assignments and video calls "
+            "under $1800."
+        ),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.workload_entities == ()
+
+
 def test_router_preserves_literal_game_identity_when_model_is_unavailable(db):
     decision = route_turn(
         db,

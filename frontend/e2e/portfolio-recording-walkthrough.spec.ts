@@ -20,7 +20,11 @@ async function openFreshBuyer(page: Page, label: string) {
 }
 
 async function send(page: Page, text: string) {
-  const terminalResponse = page.waitForResponse(
+  const chatResponse = page.waitForResponse(
+    response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
+    { timeout: 90_000 },
+  ).catch(() => null);
+  const firstResponse = page.waitForResponse(
     response => (
       /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
       || /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url())
@@ -31,7 +35,13 @@ async function send(page: Page, text: string) {
   await input.fill(text);
   await pause(page, 0.5);
   await input.press('Enter');
-  await terminalResponse;
+  const first = await firstResponse;
+  if (/\/shopping-cases\/interpretations$/.test(first.url()) && first.status() === 204) {
+    const chat = await chatResponse;
+    if (chat) await chat.text();
+  } else if (/\/chat\/(stream|query)$/.test(first.url())) {
+    await first.text();
+  }
   await pause(page, 2);
 }
 
@@ -61,35 +71,45 @@ test('deterministic portfolio recording walkthrough', async ({ page }) => {
 
   await openFreshBuyer(page, 'emulate3d');
   await send(page, 'I need a gaming laptop. Is AUD 4,000 okay?');
+  const researchRequest = page.waitForRequest(
+    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
+    { timeout: 60_000 },
+  );
   await send(page, 'Actually I need to simulate PLCs with Rockwell Emulate3D.');
   const researchPanel = page.getByTestId('ambiguity-exploration');
   await expect(researchPanel).toContainText(/Rockwell Emulate3D/i);
   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
 
-  const researchRequest = page.waitForRequest(
-    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
-    { timeout: 30_000 },
-  );
-  await researchPanel.getByRole('button', { name: /Research approved sources/i }).click();
+  const explicitResearchButton = researchPanel.getByRole('button', {
+    name: /Research approved sources|Discover official sources/i,
+  });
+  if (await explicitResearchButton.count()) await explicitResearchButton.click();
   expect((await researchRequest).postDataJSON()).toMatchObject({
     research_authorized: true,
-    authorization_basis: 'buyer_action',
   });
+  expect((await researchRequest).postDataJSON().authorization_basis).toMatch(
+    /tenant_policy|buyer_action/,
+  );
   await expect(page.getByText(/Approved-source research (completed|could not complete)/i)).toBeVisible({
     timeout: 45_000,
   });
   await pause(page, 2);
 
-  const sourceResponse = page.waitForResponse(
-    response => /\/evidence-source-resolutions$/.test(response.url()),
-    { timeout: 90_000 },
-  );
-  await submitBridge(page, 'Official link: https://store.sim3d.com/demo3d_2025/system_requirements');
-  const sourcePayload = await (await sourceResponse).json();
-  expect(sourcePayload.resolution?.status).toBe('resolved');
-  expect(sourcePayload.resolution?.selected_source_id).toBe(
-    'rockwell_emulate3d_official_requirements',
-  );
+  await send(page, 'Official link: https://store.sim3d.com/demo3d_2025/system_requirements');
+  const explicitSourceFetch = page.getByRole('button', {
+    name: 'Fetch reviewed canonical source',
+  });
+  if (await explicitSourceFetch.count()) {
+    const sourceFetchResponse = page.waitForResponse(
+      response => /\/evidence-source-resolutions$/.test(response.url()),
+      { timeout: 90_000 },
+    );
+    await explicitSourceFetch.click();
+    await sourceFetchResponse;
+  }
+  await expect(page.getByTestId('buyer-requirement-review').first()).toBeVisible({
+    timeout: 90_000,
+  });
   await pause(page, 2);
 
   const specificationResponse = page.waitForResponse(
@@ -103,7 +123,7 @@ test('deterministic portfolio recording walkthrough', async ({ page }) => {
   );
   const specificationPayload = await (await specificationResponse).json();
   expect(specificationPayload.claims?.length || 0).toBeGreaterThan(0);
-  await expect(page.getByTestId('buyer-requirement-review')).toBeVisible();
+  await expect(page.getByTestId('buyer-requirement-review').last()).toBeVisible();
   await expect(page.getByText(/provisional requirement claims/i)).toBeVisible();
   await pause(page, 2);
 

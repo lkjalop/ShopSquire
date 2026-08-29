@@ -1863,12 +1863,20 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
         ]
         target_cents = (price_intent.target or price_intent.preferred_max) * 100
         target_candidates.sort(key=lambda c: (abs((c.price_cents or 0) - target_cents), -margin(c)))
+        # When the catalog has no item inside the preferred band, still answer
+        # the buyer's price comparison with the nearest qualified options. The
+        # banner explains that the named amount is unnecessary; cheaper choices
+        # remain a separate value band rather than silently replacing the target.
+        if not target_candidates:
+            priced_meets = [c for c in meets_in if c.price_cents is not None]
+            priced_meets.sort(key=lambda c: (abs((c.price_cents or 0) - target_cents), -margin(c)))
+            target_candidates = priced_meets[:2]
     band1 = (target_candidates or meets_in or in_budget)[:3]
     used.update(c.sku for c in band1)
     if band1:
         if meets_in:
             if target_candidates:
-                bands.append(_band("target_fit", "Closest to your stated price",
+                bands.append(_band("target_fit", "Target-price fit",
                                    f"price_target:{price_intent.target}", band1))
             else:
                 bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
@@ -1890,7 +1898,7 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
             if c.price_cents is not None and c.price_cents < price_intent.preferred_min * 100
         ]
         band2 = value[:3]
-        band2_id, label, basis = "value_fit", "Qualified lower-cost options", "qualified_below_target"
+        band2_id, label, basis = "value_fit", "Qualified value options", "qualified_below_target"
     else:
         headroom = [c for c in rest_meets if margin(c) > 0]            # HEADROOM, not just pricier
         headroom.sort(key=lambda c: (-margin(c), c.price_cents or 0))
