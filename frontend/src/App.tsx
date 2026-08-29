@@ -3134,6 +3134,8 @@ export default function App() {
 
   const materialProductFitBlocked = Boolean(
     ambiguityExploration?.research_plan_id
+    && Number(productShelves?.buyer_accepted_claim_count || 0) === 0
+    && Number(productShelves?.official_claim_count || 0) === 0
     && ['context_only', 'unresolved'].includes(String(productShelves?.evidence_status || ''))
     && ['context_only', 'unresolved'].includes(String(ambiguityExploration?.status || ''))
   );

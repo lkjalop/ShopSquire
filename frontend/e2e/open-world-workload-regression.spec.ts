@@ -65,8 +65,13 @@ test('novel suitability request stays provisional and exposes a durable research
   expect(unresolvedTraceId).not.toBe('');
   expect(unresolved.qualification_authority ?? 'none').toBe('none');
 
-  await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
-  await expect(page.getByRole('button', { name: /Discover official sources/i })).toBeVisible();
+  await expect(page.getByTestId('buyer-research-status')).toContainText(
+    /external research has not produced evidence|no approved requirement source was established/i,
+  );
+  const discoverButton = page.getByRole('button', { name: /Discover official sources/i });
+  if (unresolved.execution_state_envelope?.research_authority !== 'granted') {
+    await expect(discoverButton).toBeVisible();
+  }
   await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
   await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
@@ -105,17 +110,27 @@ test('held-out future-game alias resolves identity but cannot invent fit or budg
     .toBe('blocked');
   expect(result.execution_state_envelope?.catalog_authority).toBe('blocked');
   expect(result.execution_state_envelope?.commerce_authority).toBe('none');
-  expect(result.execution_state_envelope?.research_authority).toBe('granted');
-  expect(result.execution_state_envelope?.evidence_status).toBe('identity_only');
-  expect(result.workload_authorization?.evidence?.[0]?.resolved_name)
-    .toBe('Heroes of Might and Magic III Remake');
-  expect(result.workload_authorization?.evidence?.[0]?.identity_resolution?.authority)
-    .toBe('identity_candidate_only');
+  // The exact utterance does not itself grant network authority. A deployment
+  // may grant it through an enrolled tenant auto-research policy; identity can
+  // still be resolved from the deterministic alias registry in either mode.
+  expect(result.execution_state_envelope?.research_authority).toMatch(/required|granted/);
+  if (result.execution_state_envelope?.research_authority === 'granted') {
+    expect(result.execution_state_envelope?.evidence_status).toBe('identity_only');
+    expect(result.workload_authorization?.evidence?.[0]?.resolved_name)
+      .toBe('Heroes of Might and Magic III Remake');
+    expect(result.workload_authorization?.evidence?.[0]?.identity_resolution?.authority)
+      .toBe('identity_candidate_only');
+  } else {
+    expect(result.execution_state_envelope?.evidence_status).toBe('none');
+    expect(result.workload_authorization?.evidence?.[0]?.resolved_name).toBeFalsy();
+  }
   await expect(page.getByText(/\bAUD\s*3,?000\b.*\b(ample|enough|insufficient)\b/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
   await expect(page.getByText(/No product is qualified until the material gap is resolved/i))
     .toBeVisible();
-  await expect(page.getByText(/Heroes of Might and Magic III Remake/i)).toBeVisible();
+  if (result.execution_state_envelope?.research_authority === 'granted') {
+    await expect(page.getByText(/Heroes of Might and Magic III Remake/i)).toBeVisible();
+  }
 
   const certificate: any = {
     schema_version: 'heldout-future-game-browser-certificate-v1',
@@ -166,7 +181,21 @@ test('buyer Emulate3D link returns cited policy-pending claims instead of stale 
   const input = page.getByPlaceholder('Type your message...');
   await input.fill('https://store.sim3d.com/demo3d_2025/system_requirements');
   await input.press('Enter');
-  const source = await (await sourceResponse).json();
+  const sourceResolution = await (await sourceResponse).json();
+
+  let source = sourceResolution;
+  if (sourceResolution.research_status === 'not_authorized') {
+    expect(sourceResolution.provider_accounting).toMatchObject({ external_calls: 0 });
+    const fetchResponse = page.waitForResponse(
+      response => (
+        response.request().method() === 'POST'
+        && /\/api\/v1\/shopping-cases\/[^/]+\/evidence-source-resolutions$/.test(response.url())
+      ),
+      { timeout: 90_000 },
+    );
+    await page.getByRole('button', { name: 'Fetch reviewed canonical source' }).click();
+    source = await (await fetchResponse).json();
+  }
 
   expect(source.resolution.status).toBe('resolved');
   expect(source.resolution.selected_source_id).toBe('rockwell_emulate3d_official_requirements');

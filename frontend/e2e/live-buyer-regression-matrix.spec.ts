@@ -112,6 +112,10 @@ test('a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled resea
   const gaming = await send(page, 'help me with a gaming laptop? is 4000 ok?');
   expect(gaming.ambiguity_exploration).toBeFalsy();
 
+  const researchRequest = page.waitForRequest(
+    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
+    { timeout: 60_000 },
+  );
   const emulate = await send(
     page,
     'actually i need something to simulate PLCs? what do you know of Rockwell Emulate3D?',
@@ -131,17 +135,14 @@ test('a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled resea
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toContainText(/Rockwell Emulate3D/i);
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
-  const researchRequest = page.waitForRequest(
-    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
-    { timeout: 30_000 },
-  );
-  await panel.getByRole('button', { name: /Research approved sources/i }).click();
+  const explicitResearchButton = panel.getByRole('button', { name: /Research approved sources/i });
+  if (await explicitResearchButton.count()) await explicitResearchButton.click();
   const dispatched = await researchRequest;
   expect(dispatched.postDataJSON()).toMatchObject({
     research_authorized: true,
-    authorization_basis: 'buyer_action',
     research_plan_id: emulate.ambiguity_exploration.research_plan_id,
   });
+  expect(dispatched.postDataJSON().authorization_basis).toMatch(/buyer_action|tenant_policy/);
   await expect(page.getByText(
     /Approved-source research (?:completed|could not complete)/i,
   )).toBeVisible({ timeout: 40_000 });
@@ -168,14 +169,23 @@ test('chat-pasted official URL and specifications enter their governed review pa
     'rockwell_emulate3d_official_requirements',
   );
   expect(sourcePayload.resolution?.candidates?.[0]?.match_basis).toBe('enrolled_domain');
-  await expect(page.getByText(/Official source recognized/i)).toBeVisible();
-  const canonicalFetchResponse = page.waitForResponse(
-    response => /\/evidence-source-resolutions$/.test(response.url()),
-    { timeout: 90_000 },
-  );
-  await page.getByRole('button', { name: 'Fetch reviewed canonical source' }).click();
-  const canonicalFetchPayload = await (await canonicalFetchResponse).json();
-  expect(canonicalFetchPayload.research_status).toBe('completed');
+  let canonicalFetchPayload = sourcePayload;
+  if (sourcePayload.research_status === 'not_authorized') {
+    await expect(page.getByText(/Official source recognized/i)).toBeVisible();
+    const canonicalFetchResponse = page.waitForResponse(
+      response => /\/evidence-source-resolutions$/.test(response.url()),
+      { timeout: 90_000 },
+    );
+    await page.getByRole('button', { name: 'Fetch reviewed canonical source' }).click();
+    canonicalFetchPayload = await (await canonicalFetchResponse).json();
+  }
+  expect(canonicalFetchPayload.research_status).toBe('claims_pending_review');
+  expect(canonicalFetchPayload.claims?.length || 0).toBeGreaterThanOrEqual(8);
+  expect(canonicalFetchPayload.canonical_truth).toMatchObject({
+    research_execution: 'OFFICIAL_FETCH_PARTIAL',
+    evidence_status: 'OBSERVED_PENDING_REVIEW',
+    commerce_authority: 'NONE',
+  });
   expect(canonicalFetchPayload.source_intake_certificate?.security?.status).toMatch(
     /observed_untrusted_content_pending_compilation|fetch_failed_closed/,
   );
@@ -192,7 +202,7 @@ test('chat-pasted official URL and specifications enter their governed review pa
   await input.press('Enter');
   const specificationPayload = await (await specificationResponse).json();
   expect(specificationPayload.claims?.length || 0).toBeGreaterThan(0);
-  await expect(page.getByTestId('buyer-requirement-review')).toBeVisible();
+  await expect(page.getByTestId('buyer-requirement-review').last()).toBeVisible();
   await expect(page.getByText(/I extracted .* provisional requirement claims/i)).toBeVisible();
   await context.close();
 });
