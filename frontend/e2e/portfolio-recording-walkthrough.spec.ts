@@ -138,7 +138,13 @@ test('deterministic portfolio recording walkthrough', async ({ page }) => {
     await traceButton.click();
     const trace = page.getByTestId('decision-trace-modal');
     await expect(trace).toBeVisible();
-    await expect(trace).toContainText(/Not executed/i);
+    await trace.getByRole('button', { name: 'Research & Fit', exact: true }).click();
+    const canonicalTruth = trace.getByTestId('canonical-procurement-truth').first();
+    await expect(canonicalTruth).toBeVisible();
+    await expect(canonicalTruth).toContainText(/Research:/i);
+    await expect(canonicalTruth).not.toContainText(/Research:\s*Not attempted/i);
+    await expect(canonicalTruth).toContainText(/Decision:\s*Provisional/i);
+    await expect(canonicalTruth).toContainText(/Commerce authority:\s*None/i);
     await expect(trace).toContainText(/Authority unrecorded|Proposal only/i);
     await pause(page, 3);
   }

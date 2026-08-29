@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 import hashlib
-import imghdr
+import io
 from typing import Any, Dict, Optional
+
+
+def _detect_image_kind(image_bytes: bytes) -> Optional[str]:
+    """Identify supported image bytes without the removed stdlib ``imghdr`` module."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            detected = str(image.format or "").strip().lower()
+        return {"jpg": "jpeg", "tif": "tiff"}.get(detected, detected) or None
+    except Exception:
+        return None
 
 
 def _strip_exif(image_bytes: bytes) -> bytes:
@@ -34,7 +46,7 @@ def _perceptual_hash(image_bytes: bytes) -> Optional[str]:
 def sanitize_image(image_bytes: bytes, max_bytes: int = 10 * 1024 * 1024) -> Dict[str, Any]:
     """Preflight checks and sanitization for uploaded images.
 
-    - Validate MIME via imghdr
+    - Validate MIME via Pillow's byte-level format identification
     - Size limit
     - Strip EXIF (best-effort)
     - Compute SHA256 and optional perceptual hash
@@ -45,18 +57,7 @@ def sanitize_image(image_bytes: bytes, max_bytes: int = 10 * 1024 * 1024) -> Dic
     if len(image_bytes) > max_bytes:
         return {"status": "invalid", "reason": "too_large", "size": len(image_bytes)}
 
-    kind = imghdr.what(None, h=image_bytes)
-    if kind is None:
-        try:
-            from PIL import Image
-            import io
-
-            with Image.open(io.BytesIO(image_bytes)) as img:
-                fmt = str(img.format or "").strip().lower()
-            if fmt == "avif":
-                kind = "avif"
-        except Exception:
-            kind = None
+    kind = _detect_image_kind(image_bytes)
     if kind not in {"jpeg", "png", "bmp", "gif", "tiff"}:
         # Accept unknown but flag for review
         mime = f"unknown:{kind}" if kind else "unknown"

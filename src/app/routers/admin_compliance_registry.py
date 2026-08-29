@@ -6,18 +6,10 @@ import uuid
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 from src.app.security.auth import require_role, ROLE_OWNER, ROLE_DEVELOPER
-from src.app.models.compliance_registry import ensure_compliance_registry_table, insert_artifact, list_artifacts
+from src.app.models.compliance_registry import insert_artifact, list_artifacts
 
 
 router = APIRouter(prefix="/api/v1/admin/compliance", tags=["admin", "compliance"])
-
-
-@router.on_event("startup")
-def _ensure_table_on_startup():
-    try:
-        ensure_compliance_registry_table()
-    except Exception:
-        pass
 
 
 @router.post("/artifacts")

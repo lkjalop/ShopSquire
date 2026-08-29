@@ -300,6 +300,14 @@ def create_app() -> FastAPI:
             app, name="audit_chain_table_compatibility", criticality="optional",
             operation=_ensure_audit_chain_table,
         )
+
+        def _ensure_compliance_registry() -> None:
+            from src.app.models.compliance_registry import ensure_compliance_registry_table
+            ensure_compliance_registry_table()
+        run_startup_step(
+            app, name="compliance_registry_compatibility", criticality="optional",
+            operation=_ensure_compliance_registry,
+        )
         # Eagerly validate AUDIT_CHAIN_SECRET at startup so a misconfigured production
         # deployment fails immediately rather than silently forging audit records.
         try:

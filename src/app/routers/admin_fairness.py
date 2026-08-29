@@ -6,18 +6,10 @@ from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException
 from src.app.security.auth import require_role, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.fairness import demographic_parity
-from src.app.models.compliance_registry import ensure_compliance_registry_table, insert_artifact
+from src.app.models.compliance_registry import insert_artifact
 
 
 router = APIRouter(prefix="/api/v1/admin/fairness", tags=["admin", "fairness"])
-
-
-@router.on_event("startup")
-def _ensure_compliance_table():
-    try:
-        ensure_compliance_registry_table()
-    except Exception:
-        pass
 
 
 @router.post("/audit")
