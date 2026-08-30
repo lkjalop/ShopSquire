@@ -48,19 +48,26 @@ test('live OT research stays in one case and exposes real provider receipts', as
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
-  await send(page, 'I need to simulate a PLC-controlled factory and cyberattacks against the OT network.');
-  const panel = page.getByTestId('ambiguity-exploration');
-  await expect(panel).toBeVisible();
-  await expect(panel).toContainText(/external calls: 0/i);
-  await expect(panel).toContainText(/paid calls: 0/i);
-  await expect(panel).not.toContainText(/isaac|physics/i);
-
-  const researchResponse = page.waitForResponse((response) => (
+  // The named demo policy may authorize bounded, read-only research
+  // automatically. Start observing before the turn so the certificate can
+  // validate that response instead of racing a consent button that disappears
+  // once auto-research completes.
+  const researchResponsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST'
       && /\/api\/v1\/shopping-cases\/[^/]+\/research(?:\?|$)/.test(response.url())
   ), { timeout: 180_000 });
-  await panel.getByRole('button', { name: /Research approved sources/i }).click();
-  const response = await researchResponse;
+  await send(page, 'I need to simulate a PLC-controlled factory and cyberattacks against the OT network.');
+  const panel = page.getByTestId('ambiguity-exploration');
+  await expect(panel).toBeVisible();
+  await expect(panel).not.toContainText(/isaac|physics/i);
+
+  const manualResearchButton = panel.getByRole('button', { name: /Research approved sources/i });
+  if (await manualResearchButton.isVisible().catch(() => false)) {
+    await expect(panel).toContainText(/external calls: 0/i);
+    await expect(panel).toContainText(/paid calls: 0/i);
+    await manualResearchButton.click();
+  }
+  const response = await researchResponsePromise;
   expect(response.ok(), `research request failed: ${response.status()}`).toBeTruthy();
   const result = await response.json();
   expect(result.status).toBe('research_completed');
@@ -90,7 +97,7 @@ test('live OT research stays in one case and exposes real provider receipts', as
 
   await expect(page.getByTestId('product-shelves')).toBeVisible();
   await expect(page.getByTestId('research-reranking-delta')).toBeVisible();
-  await expect(panel).toContainText(/status: researched/i);
+  await expect(panel).toContainText(/research status:\s*(?:researched|official requirements compiled)/i);
   await expect(panel).toContainText(/paid calls: 0/i);
 
   // Research changes evidence and ranking only. Commercial continuation has its

@@ -15,10 +15,20 @@ def test_live_and_recording_profiles_align_all_research_controls():
     for relative in (
         "scripts/start_live_procurement_demo.ps1",
         "scripts/start_recording_stack.ps1",
+        "scripts/start_portfolio_demo_backend.ps1",
     ):
         script = (ROOT / relative).read_text(encoding="utf-8")
         for flag in RUNTIME_FLAGS:
-            assert f'$env:{flag} = "1"' in script, f"{relative} does not enable {flag}"
+            env_assignment = f'$env:{flag} = "1"'
+            map_assignment = f"{flag} = '1'"
+            assert env_assignment in script or map_assignment in script, (
+                f"{relative} does not enable {flag}"
+            )
+
+    portfolio = (ROOT / "scripts/start_portfolio_demo_backend.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "RESEARCH_POLICY_PROFILE = 'demo-safe-auto-v1'" in portfolio
 
     live = (ROOT / "scripts/start_live_procurement_demo.ps1").read_text(encoding="utf-8")
     assert '$env:ROUTER_MODEL_DIGEST = $routerDigest' in live

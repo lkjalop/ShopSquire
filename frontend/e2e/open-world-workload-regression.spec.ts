@@ -406,18 +406,23 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
+  // Observe before the turn because the demo-safe profile may grant bounded,
+  // read-only discovery automatically. Manual profiles still expose the
+  // explicit discovery button and are certified by the same response contract.
+  const discoveryResponse = page.waitForResponse(
+    response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
+    { timeout: 30_000 },
+  );
   await send(
     page,
     'I process large drone surveys in Agisoft Metashape. Only hardware officially supported by Agisoft is acceptable. Is this gaming laptop suitable?',
   );
   await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
-  await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
-
-  const discoveryResponse = page.waitForResponse(
-    response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
-    { timeout: 30_000 },
-  );
-  await page.getByRole('button', { name: /Discover official sources/i }).click();
+  const discoverButton = page.getByRole('button', { name: /Discover official sources/i });
+  if (await discoverButton.isVisible().catch(() => false)) {
+    await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
+    await discoverButton.click();
+  }
   const discovery = await (await discoveryResponse).json();
   expect(discovery.status).toBe('publisher_resolution_required');
   expect(discovery.research.provider_accounting.discovery_calls).toBeGreaterThanOrEqual(1);

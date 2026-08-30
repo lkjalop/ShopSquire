@@ -6,6 +6,9 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $environment = @{
     EXTERNAL_RESEARCH_ENABLED = '1'
     EXTERNAL_RESEARCH_AUTO_AUTHORIZED = '1'
+    RESEARCH_POLICY_PROFILE = 'demo-safe-auto-v1'
+    VITE_EXTERNAL_RESEARCH_AUTO_ENABLED = '1'
+    STEAM_REQUIREMENTS_LIVE_ENABLED = '1'
     EXTERNAL_RESEARCH_SEARCH_URL = 'http://127.0.0.1:8888/search?q={query}&format=json'
     EXTERNAL_RESEARCH_ALLOW_PRIVATE = '1'
     EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = '1'
