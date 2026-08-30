@@ -1790,7 +1790,24 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             source_url=submitted_source_url,
             retained_purpose=submitted_query,
         )
-        if _early_source_resolution.status != "resolved":
+        _early_link_assessment = _early_source_resolution.link_assessment or {}
+        _early_link_relevance = str(
+            _early_link_assessment.get("relevance") or ""
+        ).lower()
+        _early_link_security = str(
+            _early_link_assessment.get("security_status") or ""
+        ).lower()
+        # Safe context links must continue through semantic routing so the
+        # current turn can create/replace its workload and launch governed
+        # publisher discovery.  The old fast return made "use for identity,
+        # then find official requirements" a dead end and left the prior case
+        # projection visible.  Only terminal safety/relevance outcomes stop
+        # before normal routing.
+        if (
+            _early_source_resolution.status == "invalid"
+            or _early_link_security == "blocked"
+            or _early_link_relevance == "irrelevant_to_retained_purpose"
+        ):
             from datetime import datetime, timezone
             from src.app.models.orm import ShoppingCase
             from src.app.routers.shopping_cases import (
@@ -4117,6 +4134,104 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
             products = []
             ambiguous_product_shelves = None
+
+    # Provider-grounded workload evidence must shape the buyer-facing answer,
+    # not merely the hidden fit predicates.  Keep this source-neutral: any
+    # enrolled provider can supply the same identity/release/requirements
+    # contract, including titles that have never appeared in local fixtures.
+    _resolved_workload_evidence = next((
+        item for item in list(_workload_authorization.get("evidence") or [])
+        if isinstance(item, dict)
+        and str(item.get("status") or "").strip().lower() == "resolved"
+        and (item.get("canonical_title") or item.get("resolved_name"))
+    ), None)
+    if (
+        _resolved_workload_evidence
+        and products
+        and str(
+            _resolved_workload_evidence.get("canonical_title")
+            or _resolved_workload_evidence.get("resolved_name")
+        ).lower() not in str(assistant_message or "").lower()
+    ):
+        _workload_title = str(
+            _resolved_workload_evidence.get("canonical_title")
+            or _resolved_workload_evidence.get("resolved_name")
+        ).strip()
+        _release_state = str(
+            _resolved_workload_evidence.get("release_state") or ""
+        ).strip().lower()
+        _release_date = str(
+            _resolved_workload_evidence.get("release_date") or ""
+        ).strip()
+        _requirements_state = str(
+            _resolved_workload_evidence.get("requirements_completeness") or ""
+        ).strip().lower()
+        _source_name = str(
+            _resolved_workload_evidence.get("provider_id")
+            or _resolved_workload_evidence.get("source")
+            or "enrolled provider"
+        ).strip()
+        _identity_sentence = f"I resolved {_workload_title} through {_source_name}."
+        if _release_state:
+            _identity_sentence += f" It is {_release_state}"
+            if _release_date:
+                _identity_sentence += f" ({_release_date})"
+            _identity_sentence += "."
+        if _requirements_state == "minimum_and_recommended":
+            _identity_sentence += " Its official record includes both minimum and recommended requirements."
+        elif _requirements_state and _requirements_state != "not_published":
+            _identity_sentence += f" Its published requirements are {_requirements_state.replace('_', ' ')}."
+
+        _prices = []
+        for _product in products:
+            if not isinstance(_product, dict):
+                continue
+            try:
+                _price = float(
+                    _product.get("price")
+                    or (float(_product.get("price_cents")) / 100.0)
+                )
+            except (TypeError, ValueError):
+                continue
+            if _price > 0:
+                _prices.append((_price, str(_product.get("name") or "a matching option")))
+        _prices.sort(key=lambda item: item[0])
+        _budget = response_confirmed_slots.get("budget_max")
+        _currency_match = re.search(
+            r"\b(AUD|USD|CAD|NZD|SGD|HKD|GBP|EUR|JPY)\b",
+            str(submitted_query or q or ""),
+            re.IGNORECASE,
+        )
+        _currency_label = _currency_match.group(1).upper() if _currency_match else "$"
+        if _budget is not None and _prices:
+            _budget_amount = float(_budget)
+            _lowest_price, _lowest_name = _prices[0]
+            _budget_prefix = (
+                f"{_currency_label} {_budget_amount:,.0f}"
+                if _currency_label != "$" else f"${_budget_amount:,.0f}"
+            )
+            _price_prefix = (
+                f"{_currency_label} {_lowest_price:,.0f}"
+                if _currency_label != "$" else f"${_lowest_price:,.0f}"
+            )
+            _fit_sentence = (
+                f" Your {_budget_prefix} ceiling is enough for the current catalog matches; "
+                f"the lowest shown candidate is {_lowest_name} at {_price_prefix}."
+            )
+        else:
+            _fit_sentence = (
+                f" I found {len(products)} current catalog candidate"
+                f"{'s' if len(products) != 1 else ''} against those requirements."
+            )
+        assistant_message = _identity_sentence + _fit_sentence + (
+            " Product availability and exact configuration evidence remain separate from "
+            "workload compatibility, and no cart action was authorized."
+        )
+        _model_name = str(data.get("llm_model") or "").strip()
+        if _model_name:
+            assistant_message += (
+                f"\n\nIntent interpreted by {_model_name}; answer grounded by provider evidence and deterministic policy."
+            )
 
     out = {
         "products": products,

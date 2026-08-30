@@ -42,6 +42,13 @@ export type AmbiguityExploration = {
   canonical_truth?: Record<string, unknown> | null;
   source_intake_certificate?: {
     resolution?: { status?: string };
+    security?: {
+      link_assessment?: {
+        security_status?: string;
+        relevance?: string;
+        recommended_use?: string;
+      };
+    };
   } | null;
 };
 

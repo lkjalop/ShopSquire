@@ -2640,13 +2640,19 @@ export default function App() {
           const continuesActiveCase = Boolean(
             activeShoppingCase?.case_id && activeShoppingCase.case_id === incomingCaseId,
           );
+          const incomingRevision = Number(
+            data?.case_revision || data?.shopping_case_revision
+            || data?.interpretation_job?.case_revision || 1,
+          );
+          const revisionAdvanced = continuesActiveCase
+            && incomingRevision > Number(activeShoppingCase?.revision || 0);
           const materiallyAmendsActiveCase = Boolean(
             data?.case_additive_workload?.status === 'retained_and_added',
           );
           // The normal chat response can carry the original provisional projection.
           // It must not downgrade a researched same-case projection or replace the
           // durable case trace after later quantity/budget follow-ups.
-          if (!continuesActiveCase || materiallyAmendsActiveCase) {
+          if (!continuesActiveCase || revisionAdvanced || materiallyAmendsActiveCase) {
             setAmbiguityExploration({
               ...data.ambiguity_exploration,
               ...(sourceIntake?.source_intake_certificate ? {
@@ -2660,10 +2666,10 @@ export default function App() {
             case_id: incomingCaseId,
             retained_purpose: String(data.ambiguity_exploration.retained_purpose || ''),
             uid,
-            revision: Number(data?.case_revision || data?.interpretation_job?.case_revision || 1),
+            revision: incomingRevision,
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
-          if (!continuesActiveCase || materiallyAmendsActiveCase) {
+          if (!continuesActiveCase || revisionAdvanced || materiallyAmendsActiveCase) {
             setProductShelves(
               data?.product_shelves?.schema_version === 'product-shelves-v1'
                 ? data.product_shelves as ProductShelfProjection
@@ -3046,6 +3052,12 @@ export default function App() {
     const sourceResolutionStatus = String(
       exploration?.source_intake_certificate?.resolution?.status || '',
     ).trim().toLowerCase();
+    const sourceLinkAssessment = exploration?.source_intake_certificate?.security?.link_assessment;
+    const sourceLinkSecurity = String(sourceLinkAssessment?.security_status || '').toLowerCase();
+    const sourceLinkRelevance = String(sourceLinkAssessment?.relevance || '').toLowerCase();
+    const safeContextDiscovery = sourceResolutionStatus === 'not_enrolled'
+      && sourceLinkSecurity === 'eligible_for_guarded_resolution'
+      && sourceLinkRelevance !== 'irrelevant_to_retained_purpose';
     if (
       !exploration?.case_id
       || !exploration.research_plan_id
@@ -3053,7 +3065,9 @@ export default function App() {
       // A rejected, invalid, or ambiguous buyer URL is itself the outcome for
       // this turn.  Do not silently launch a different discovery workflow
       // after issuing that security receipt.
-      || (sourceResolutionStatus && sourceResolutionStatus !== 'resolved')
+      || (sourceResolutionStatus
+        && sourceResolutionStatus !== 'resolved'
+        && !safeContextDiscovery)
     ) return;
     const attemptKey = `${exploration.case_id}:${exploration.research_plan_id}`;
     if (autoResearchAttemptedRef.current.has(attemptKey)) return;

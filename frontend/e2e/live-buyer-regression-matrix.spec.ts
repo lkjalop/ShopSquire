@@ -189,6 +189,33 @@ test('BG3 affordability plus Emulate3D additive workload retains budget and rese
   await context.close();
 });
 
+test('an unseen Steam title resolves live identity, release state, requirements, and catalog fit', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const { context, page } = await openBuyer(browser, 'where-winds-meet');
+
+  const answer = await send(
+    page,
+    'I want to play Where Winds Meet. Has it been released, are its official requirements complete, and is AUD 3,000 excessive?',
+  );
+  const evidence = answer.workload_authorization?.evidence?.[0];
+  expect(evidence).toMatchObject({
+    provider_id: 'steam',
+    canonical_title: 'Where Winds Meet',
+    app_id: '3564740',
+    release_state: 'released',
+    requirements_completeness: 'minimum_and_recommended',
+  });
+  expect(evidence?.compiled_requirements?.length || 0).toBeGreaterThan(0);
+  expect(answer.products?.length || 0).toBeGreaterThan(0);
+  expect(answer.ambiguity_exploration || null).toBeNull();
+  expect(String(answer.assistant_message || '')).toMatch(/Where Winds Meet/i);
+  expect(String(answer.assistant_message || '')).toMatch(/3,000|released/i);
+  // A resolved workload uses the ordinary ranked-catalog view, while the
+  // `product-shelves` test id belongs to provisional research projections.
+  await expect(page.getByText(/Target-price fit|Qualified value options/i).first()).toBeVisible();
+  await context.close();
+});
+
 test('natural workload replacements advance one revision and never project the prior subject', async ({ browser }) => {
   test.setTimeout(360_000);
   const { context, page } = await openBuyer(browser, 'natural-workload-replacements');
@@ -226,6 +253,24 @@ test('natural workload replacements advance one revision and never project the p
   expect(JSON.stringify(agisoft.case_memory?.read_model || {})).not.toMatch(/Rockwell Emulate3D/i);
   expect(agisoft.products || []).toHaveLength(0);
   await expect(page.getByTestId('ambiguity-exploration')).toContainText(/Agisoft Metashape/i);
+
+  const cupix = await send(
+    page,
+    'I need hardware for CupixWorks. Please inspect this page: '
+      + 'https://www.cupix.com/home-1?utm_source=google&utm_medium=cpc&gclid=demo-secret',
+  );
+  expect(cupix.case_memory?.transition).toBe('REPLACE_WORKLOAD');
+  expect(cupix.case_memory?.read_model?.objective || cupix.shopping_case_retained_purpose)
+    .toMatch(/CupixWorks/i);
+  expect(JSON.stringify(cupix.case_memory?.read_model || {})).not.toMatch(/Agisoft Metashape/i);
+  expect(cupix.buyer_evidence_source_resolution?.resolution?.link_assessment).toMatchObject({
+    source_class: 'official_publisher',
+    relevance: 'likely_relevant_context_only',
+    requirement_authority: 'none',
+  });
+  expect(cupix.buyer_evidence_source_resolution?.resolution?.link_assessment
+    ?.tracking_parameters_removed).toBe(3);
+  expect(JSON.stringify(cupix)).not.toContain('demo-secret');
   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
   await context.close();
 });

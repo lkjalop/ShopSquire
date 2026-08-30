@@ -38,6 +38,40 @@ def test_accepted_claims_build_shared_conditional_and_budget_shelves_without_fal
     assert all(len(shelf.initial) <= 3 and len(shelf.next_page) <= 5 for shelf in projection.shelves)
 
 
+def test_generic_publisher_conditional_tier_is_projected_as_a_scoped_target():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(
+            db,
+            accepted_claims=[{
+                "claim_id": "agisoft-advanced-ram",
+                "attribute": "ram_gb",
+                "operator": ">=",
+                "value": 128,
+                "requirement_class": "conditional",
+                "condition": "Published tier: Advanced configuration",
+                "authority_status": "case_origin_critic_accepted",
+            }],
+            desired_outcome="Large Agisoft Metashape drone surveys",
+        )
+
+    conditional = next(
+        row for row in projection.shelves if row.scope_id == "conditional_scope"
+    )
+    candidates = [*conditional.initial, *conditional.next_page]
+    assert candidates
+    assert any(
+        "ram gb" in [*candidate.meets, *candidate.unknowns, *candidate.misses]
+        for candidate in candidates
+    )
+    assert all(
+        "agisoft-advanced-ram" in candidate.requirement_claim_ids
+        for candidate in candidates
+    )
+
+
 def test_hypothesis_shelf_uses_only_claims_bound_to_that_research_scope():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

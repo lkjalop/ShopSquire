@@ -35,3 +35,28 @@ def test_critic_rejects_wrong_origin_forbidden_and_unsupported_span():
     )
     assert reviewed.accepted == []
     assert reviewed.rejected[0]["reason"] == "citation_origin_mismatch"
+
+
+def test_generic_extractor_preserves_distinct_html_style_requirement_tiers():
+    text = (
+        "Minimum Specs\nMemory: 16 GB RAM\nStorage: 130 GB SSD storage\n"
+        "Recommended Specs\nMemory: 32 GB RAM\nStorage: 200 GB SSD storage"
+    )
+    claims = extract_generic_requirements(
+        text, citation_url="https://publisher.example/install-guide",
+        observed_at=datetime(2026, 8, 30, tzinfo=timezone.utc),
+    )
+    assert {
+        (row.attribute, row.value, row.requirement_class)
+        for row in claims
+    } >= {
+        ("ram_gb", 16, "minimum"),
+        ("ram_gb", 32, "recommended"),
+        ("storage_gb", 130, "minimum"),
+        ("storage_gb", 200, "recommended"),
+    }
+    reviewed = critique_extracted_requirements(
+        claims, source_text=text,
+        accepted_url="https://publisher.example/install-guide",
+    )
+    assert len(reviewed.accepted) == 4

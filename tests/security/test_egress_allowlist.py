@@ -64,6 +64,26 @@ def test_demo_qr_provider_domains_are_allowlisted():
     assert g.is_allowed("https://qr.scanned.page/uploads/pdf/demo.pdf") is True
 
 
+def test_governed_operation_scopes_one_domain_without_globally_allowing_it():
+    from src.app.security.egress_allowlist import scoped_egress_domains
+
+    g = _make_guard()
+    url = "https://store.sim3d.com/helpconsole.php"
+    assert g.is_allowed(url) is False
+    with scoped_egress_domains(["store.sim3d.com"]):
+        assert g.is_allowed(url) is True
+        assert g.is_allowed("https://unrelated.example/path") is False
+    assert g.is_allowed(url) is False
+
+
+def test_scoped_permission_never_overrides_dead_drop_denylist():
+    from src.app.security.egress_allowlist import scoped_egress_domains
+
+    g = _make_guard()
+    with scoped_egress_domains(["pastebin.com"]):
+        assert g.is_allowed("https://pastebin.com/exfil") is False
+
+
 # ---------------------------------------------------------------------------
 # is_allowed: dead-drop domains always blocked
 # ---------------------------------------------------------------------------

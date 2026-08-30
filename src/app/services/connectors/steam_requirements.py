@@ -51,9 +51,12 @@ _DEFAULT_FIXTURES_PATH = os.path.join("config", "knowledge_pool", "steam_fixture
 
 _SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 _DETAILS_URL = "https://store.steampowered.com/api/appdetails"
-_TIMEOUT_S = 1.25
+_STEAM_HOST = "store.steampowered.com"
+_TIMEOUT_S = 2.5
+_HTTP_ATTEMPTS = 2
 _MAX_RESPONSE_BYTES = 1_000_000
 _LIVE_CACHE_TTL_S = 6 * 60 * 60
+_LIVE_NEGATIVE_CACHE_TTL_S = 30
 _LIVE_CACHE_MAX = 256
 _USER_AGENT = "ShopSquireResearch/0.1 (+governed web leg; requirements lookup)"
 
@@ -274,22 +277,30 @@ def _parse_requirements_html(raw: Any) -> Dict[str, Any]:
 # ── live lane (allow_live=True only) ─────────────────────────────────────────
 def _get_json(client: Any, url: str, params: Dict[str, str]) -> Optional[Any]:
     """GET → parsed JSON with ONE retry; None after the second failure (no raise)."""
-    try:
-        resp = client.get(url, params=params)
-        if resp.status_code != 200:
-            return None
-        content_type = str(resp.headers.get("content-type") or "").lower()
-        if "json" not in content_type:
-            logger.warning("steam response rejected: non-JSON content type %r", content_type)
-            return None
-        content_length = resp.headers.get("content-length")
-        if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
-            return None
-        if len(resp.content) > _MAX_RESPONSE_BYTES:
-            return None
-        return resp.json()
-    except Exception as exc:
-        logger.debug("steam fetch failed %s: %s", url, exc)
+    for attempt in range(_HTTP_ATTEMPTS):
+        try:
+            resp = client.get(url, params=params)
+            if resp.status_code != 200:
+                if attempt + 1 < _HTTP_ATTEMPTS and (
+                    resp.status_code == 429 or resp.status_code >= 500
+                ):
+                    continue
+                return None
+            content_type = str(resp.headers.get("content-type") or "").lower()
+            if "json" not in content_type:
+                logger.warning("steam response rejected: non-JSON content type %r", content_type)
+                return None
+            content_length = resp.headers.get("content-length")
+            if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
+                return None
+            if len(resp.content) > _MAX_RESPONSE_BYTES:
+                return None
+            return resp.json()
+        except Exception as exc:
+            logger.debug(
+                "steam fetch failed attempt=%s/%s %s: %s",
+                attempt + 1, _HTTP_ATTEMPTS, url, exc,
+            )
     return None
 
 
@@ -384,20 +395,23 @@ def _live_identity_candidate(title: str) -> Optional[Dict[str, Any]]:
         import httpx
 
         gathered: Dict[int, Dict[str, Any]] = {}
-        with httpx.Client(
-            timeout=_TIMEOUT_S,
-            headers={"User-Agent": _USER_AGENT},
-            follow_redirects=False,
-        ) as client:
-            for query in _identity_query_variants(title):
-                found = _get_json(client, _SEARCH_URL, {"term": query, "cc": "us", "l": "en"})
-                for row in rank_game_identity_candidates(title, (found or {}).get("items") or []):
-                    appid = int(row["appid"])
-                    prior = gathered.get(appid)
-                    if prior is None or float(row["confidence"]) > float(prior["confidence"]):
-                        gathered[appid] = row
-                if gathered and max(float(row["confidence"]) for row in gathered.values()) >= 0.9:
-                    break
+        from src.app.security.egress_allowlist import scoped_egress_domains
+
+        with scoped_egress_domains([_STEAM_HOST]):
+            with httpx.Client(
+                timeout=_TIMEOUT_S,
+                headers={"User-Agent": _USER_AGENT},
+                follow_redirects=False,
+            ) as client:
+                for query in _identity_query_variants(title):
+                    found = _get_json(client, _SEARCH_URL, {"term": query, "cc": "us", "l": "en"})
+                    for row in rank_game_identity_candidates(title, (found or {}).get("items") or []):
+                        appid = int(row["appid"])
+                        prior = gathered.get(appid)
+                        if prior is None or float(row["confidence"]) > float(prior["confidence"]):
+                            gathered[appid] = row
+                    if gathered and max(float(row["confidence"]) for row in gathered.values()) >= 0.9:
+                        break
         ranked = sorted(
             gathered.values(), key=lambda row: (-float(row["confidence"]), len(str(row["title"]))),
         )
@@ -417,28 +431,31 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
     try:
         import httpx  # local import: the offline (fixture) lane must not require it
 
-        with httpx.Client(
-            timeout=_TIMEOUT_S,
-            headers={"User-Agent": _USER_AGENT},
-            follow_redirects=False,
-        ) as client:
-            found = _get_json(client, _SEARCH_URL, {"term": str(title), "cc": "us", "l": "en"})
-            items = (found or {}).get("items") or []
-            matching = [
-                item for item in items[:10]
-                if isinstance(item, dict) and _title_matches(title, item.get("name"))
-            ]
-            matching.sort(key=lambda item: len(_norm_title(item.get("name")).split()))
-            first = matching[0] if matching else {}
-            if not first:
-                logger.info("steam search mismatch rejected: requested=%r resolved=%r",
-                            title, (items[0].get("name") if items and isinstance(items[0], dict)
-                                    else None))
-                return None
-            appid = first.get("id")
-            if not appid:
-                return None
-            details = _get_json(client, _DETAILS_URL, {"appids": str(appid)})
+        from src.app.security.egress_allowlist import scoped_egress_domains
+
+        with scoped_egress_domains([_STEAM_HOST]):
+            with httpx.Client(
+                timeout=_TIMEOUT_S,
+                headers={"User-Agent": _USER_AGENT},
+                follow_redirects=False,
+            ) as client:
+                found = _get_json(client, _SEARCH_URL, {"term": str(title), "cc": "us", "l": "en"})
+                items = (found or {}).get("items") or []
+                matching = [
+                    item for item in items[:10]
+                    if isinstance(item, dict) and _title_matches(title, item.get("name"))
+                ]
+                matching.sort(key=lambda item: len(_norm_title(item.get("name")).split()))
+                first = matching[0] if matching else {}
+                if not first:
+                    logger.info("steam search mismatch rejected: requested=%r resolved=%r",
+                                title, (items[0].get("name") if items and isinstance(items[0], dict)
+                                        else None))
+                    return None
+                appid = first.get("id")
+                if not appid:
+                    return None
+                details = _get_json(client, _DETAILS_URL, {"appids": str(appid)})
             entry = (details or {}).get(str(appid)) or {}
             if not (isinstance(entry, dict) and entry.get("success")):
                 return None
@@ -502,8 +519,14 @@ def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[d
         key = _norm_title(title)
         cached = _LIVE_CACHE.get(key)
         now = time.monotonic()
-        if cached and now - cached[0] <= _LIVE_CACHE_TTL_S:
-            return dict(cached[1]) if cached[1] is not None else None
+        if cached:
+            cache_ttl = (
+                _LIVE_CACHE_TTL_S
+                if cached[1] is not None
+                else _LIVE_NEGATIVE_CACHE_TTL_S
+            )
+            if now - cached[0] <= cache_ttl:
+                return dict(cached[1]) if cached[1] is not None else None
         result = _live_lookup(title)
         if result is None:
             identity = _live_identity_candidate(title)

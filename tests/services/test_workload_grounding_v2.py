@@ -49,6 +49,11 @@ def test_named_game_evidence_merges_minimums_not_recommended(monkeypatch):
         "src.app.services.connectors.steam_requirements.get_game_requirements",
         lambda title, allow_live=False: {
             "title": "Alan Wake 2",
+            "appid": 1087100,
+            "publisher": "Remedy Entertainment",
+            "release_state": "released",
+            "release_date": "2023-10-27",
+            "requirements_completeness": "complete",
             "minimum": {"ram_gb": 16, "storage_gb": 90, "gpu": "RTX 2060 6GB"},
             "recommended": {"ram_gb": 32, "storage_gb": 90, "gpu": "RTX 4070 12GB"},
             "source": "steam",
@@ -71,6 +76,12 @@ def test_named_game_evidence_merges_minimums_not_recommended(monkeypatch):
     assert evidence["live_allowed"] is True
     assert evidence["consent_recorded"] is True
     assert evidence["items"][0]["source"] == "steam"
+    assert evidence["items"][0]["canonical_title"] == "Alan Wake 2"
+    assert evidence["items"][0]["publisher"] == "Remedy Entertainment"
+    assert evidence["items"][0]["app_id"] == "1087100"
+    assert evidence["items"][0]["release_state"] == "released"
+    assert evidence["items"][0]["release_date"] == "2023-10-27"
+    assert evidence["items"][0]["requirements_completeness"] == "complete"
 
 
 def test_identity_without_material_requirements_stays_unresolved(monkeypatch):

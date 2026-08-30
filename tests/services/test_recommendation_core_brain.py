@@ -3360,6 +3360,55 @@ def test_router_restores_literal_remastered_qualifier_dropped_by_model(db):
     )
 
 
+def test_resolved_named_workload_is_published_with_catalog_revision(db, monkeypatch):
+    from src.app.services.recommendation_core import workload_grounding as grounding
+
+    monkeypatch.setattr(grounding, "live_steam_allowed", lambda consent: bool(consent))
+    monkeypatch.setattr(
+        "src.app.services.connectors.steam_requirements.get_game_requirements",
+        lambda title, allow_live=False: {
+            "title": "Unseen Test Game",
+            "appid": 424242,
+            "publisher": "Test Publisher",
+            "release_state": "released",
+            "release_date": "2026-08-01",
+            "requirements_completeness": "minimum_and_recommended",
+            "minimum": {"ram_gb": 16, "storage_gb": 80, "gpu": "RTX 2060 6GB"},
+            "recommended": {"ram_gb": 32, "storage_gb": 100, "gpu": "RTX 3070 8GB"},
+            "source": "steam",
+            "source_url": "https://store.steampowered.com/app/424242/",
+            "retrieved_at": "2026-08-30T00:00:00+00:00",
+            "cached": False,
+        },
+    )
+    model = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-11-2",
+        "confidence": 0.96,
+        "use_cases": ["gaming"],
+        "workload_entities": [{"kind": "game", "name": "Unseen Test Game"}],
+    })
+
+    response = recommend_turn(
+        db,
+        _env(
+            "I want a laptop for Unseen Test Game.",
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: model,
+    )
+
+    authorization = response.extras["workload_authorization"]
+    assert authorization["status"] == "resolved"
+    assert authorization["reason"] == "official_workload_requirements_compiled"
+    assert authorization["next_permitted_action"] == "catalog_fit_evaluation"
+    evidence = authorization["evidence"][0]
+    assert evidence["canonical_title"] == "Unseen Test Game"
+    assert evidence["app_id"] == "424242"
+    assert evidence["requirements_completeness"] == "minimum_and_recommended"
+    assert response.products
+
+
 def test_router_drops_model_echo_of_covered_university_purpose(db):
     raw = json.dumps({
         "lane": "SEARCH",

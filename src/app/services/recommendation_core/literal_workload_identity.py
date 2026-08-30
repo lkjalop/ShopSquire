@@ -30,6 +30,10 @@ _GENERIC_GAME_TARGETS = {
 
 _LITERAL_SOFTWARE_PATTERNS = (
     re.compile(
+        r"(?i:\b(?:i\s+need\s+)?hardware\s+for\s+)"
+        r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){0,4})(?=[,?.!]|$)",
+    ),
+    re.compile(
         r"\b(?:process|render|simulate|model|analyse|analyze)\b.{0,100}?\b(?:in|using|with)\s+"
         r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){1,4})(?=[,?.!]|$)",
     ),
@@ -61,7 +65,10 @@ def literal_software_identity_candidate(query: str) -> Tuple[Tuple[str, str], ..
         if candidate.lower() in _GENERIC_GAME_TARGETS:
             continue
         tokens = re.findall(r"[a-z0-9]+", candidate.lower())
-        if len(tokens) >= 2:
+        # A single capitalized vendor/application token is acceptable only in
+        # the explicit "hardware for X" grammar above. Other patterns retain
+        # the two-token floor to avoid treating ordinary nouns as software.
+        if len(tokens) >= 2 or (pattern is _LITERAL_SOFTWARE_PATTERNS[0] and tokens):
             return (("software", candidate),)
     return ()
 
@@ -141,6 +148,7 @@ def deterministic_named_workload_switch(query: str) -> bool:
         return False
     return bool(re.search(
         r"\b(?:what\s+about|i\s+(?:want|process|render|simulate|model|analyse|analyze)|"
+        r"(?:i\s+need\s+)?hardware\s+for|"
         r"(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)|"
         r"(?:laptop|computer|pc)\s+for)\b",
         text,
@@ -185,9 +193,25 @@ def recover_literal_workload_identity(
     entities = list(workload_entities)
     for candidate in literal_workload_identity_candidate(query):
         normalized = re.sub(r"[^a-z0-9]+", " ", candidate[1].lower()).strip()
+        candidate_core = {
+            token for token in normalized.split()
+            if token not in {"new", "remastered", "remaster", "remake"}
+        }
         if not any(
-            re.sub(r"[^a-z0-9]+", " ", name.lower()).strip() == normalized
-            for _kind, name in entities
+            (
+                re.sub(r"[^a-z0-9]+", " ", name.lower()).strip() == normalized
+                or (
+                    kind == candidate[0]
+                    and candidate_core
+                    and candidate_core == {
+                        token for token in re.sub(
+                            r"[^a-z0-9]+", " ", name.lower()
+                        ).strip().split()
+                        if token not in {"new", "remastered", "remaster", "remake"}
+                    }
+                )
+            )
+            for kind, name in entities
         ):
             entities.append(candidate)
     return restore_literal_edition_qualifiers(entities, query_tokens)

@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from src.app.services.research_certification_faults import active_research_fault
+from src.app.security.egress_allowlist import scoped_egress_domains
 
 
 _ALLOWED_CONTENT_TYPES = (
@@ -134,7 +135,11 @@ class GovernedOfficialOriginFetcher:
                 "network_execution": True,
                 "external_call_dispatched": True,
             }
-            response = client.get(str(url), timeout=timeout_s)
+            # The adapter has already applied scheme, credential, public-IP and
+            # exact source-policy checks. Permit only its governed allowlist for
+            # this request so the global guard cannot drift from source policy.
+            with scoped_egress_domains(allowlist):
+                response = client.get(str(url), timeout=timeout_s)
             receipt = {
                 **dispatched_receipt,
                 "http_status": int(response.status_code),
@@ -234,22 +239,23 @@ class AsyncGovernedOfficialOriginFetcher(GovernedOfficialOriginFetcher):
         dispatched = {**base_receipt, "network_execution": True,
                       "external_call_dispatched": True}
         try:
-            async with client.stream("GET", str(url), timeout=timeout_s) as response:
-                receipt = {**dispatched, "http_status": int(response.status_code)}
-                if not 200 <= response.status_code < 300:
-                    return self._failed(receipt, "origin_http_status")
-                content_type = str(response.headers.get("content-type") or "").split(
-                    ";", 1,
-                )[0].lower()
-                if content_type not in _ALLOWED_CONTENT_TYPES:
-                    return self._failed(receipt, "origin_content_type_not_allowed")
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > self._max_bytes:
-                        return self._failed(receipt, "origin_body_too_large")
-                    chunks.append(chunk)
+            with scoped_egress_domains(allowlist):
+                async with client.stream("GET", str(url), timeout=timeout_s) as response:
+                    receipt = {**dispatched, "http_status": int(response.status_code)}
+                    if not 200 <= response.status_code < 300:
+                        return self._failed(receipt, "origin_http_status")
+                    content_type = str(response.headers.get("content-type") or "").split(
+                        ";", 1,
+                    )[0].lower()
+                    if content_type not in _ALLOWED_CONTENT_TYPES:
+                        return self._failed(receipt, "origin_content_type_not_allowed")
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > self._max_bytes:
+                            return self._failed(receipt, "origin_body_too_large")
+                        chunks.append(chunk)
             body = b"".join(chunks)
             completed_at = datetime.now(timezone.utc).isoformat()
             return {

@@ -19,11 +19,39 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import FrozenSet, Iterable, Optional
 from urllib.parse import urlparse
 
 _log = logging.getLogger("shopsquire.egress_allowlist")
 _log.propagate = True
+
+# Domains approved by a higher-level governed adapter for the lifetime of one
+# outbound operation.  This avoids maintaining a second, drifting copy of the
+# official-source registry in the process-wide network guard.  ContextVar keeps
+# concurrent requests isolated; the dead-drop deny-list still wins below.
+_SCOPED_ALLOWED_DOMAINS: ContextVar[frozenset[str]] = ContextVar(
+    "shopsquire_scoped_egress_domains", default=frozenset(),
+)
+
+
+@contextmanager
+def scoped_egress_domains(domains: Iterable[str]):
+    """Temporarily permit already-governed domains for this execution context."""
+
+    normalized = frozenset(
+        str(domain or "").strip().lower().rstrip(".")
+        for domain in domains
+        if str(domain or "").strip()
+    )
+    token = _SCOPED_ALLOWED_DOMAINS.set(
+        _SCOPED_ALLOWED_DOMAINS.get() | normalized,
+    )
+    try:
+        yield
+    finally:
+        _SCOPED_ALLOWED_DOMAINS.reset(token)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Default approved outbound domains
@@ -183,6 +211,9 @@ class EgressDomainGuard:
         # Dead-drop check overrides allowlist
         if self._is_dead_drop(hostname):
             return False
+        scoped = _SCOPED_ALLOWED_DOMAINS.get()
+        if any(hostname == domain or hostname.endswith("." + domain) for domain in scoped):
+            return True
         # Exact match
         if hostname in self._allowed:
             return True

@@ -911,6 +911,21 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             reason=question["reason"],
         )
         return resp.finalize()
+    if decision.workload_entities and workload_items:
+        # Resolved official evidence is part of the same revision-bound truth as
+        # the catalog constraints it authorized.  Previously only the blocked
+        # branch published this envelope, leaving the assistant and trace to
+        # re-infer current truth and contradict a successful provider lookup.
+        resp.extras["workload_authorization"] = {
+            "status": "resolved",
+            "reason": "official_workload_requirements_compiled",
+            "entities": [list(item) for item in decision.workload_entities],
+            "evidence": [
+                dict(item) for item in workload_items if isinstance(item, dict)
+            ],
+            "state_prevented": ["buyer_commitment", "supplier_rfq"],
+            "next_permitted_action": "catalog_fit_evaluation",
+        }
 
     # MIXED-TURN AUTHORITY. Explicit money/quantity/date/identity grammar is only a
     # conservative fallback; every recognized obligation is still passed through the

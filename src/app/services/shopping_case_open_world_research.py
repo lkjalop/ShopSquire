@@ -68,6 +68,25 @@ async def execute_open_world_publisher_discovery_async(
         tenant_id=tenant_id,
         runtime_status=runtime_status,
     )
+    # A process-local failure observation is diagnostic, not a circuit breaker.
+    # In the explicitly enrolled local demo profile, each new buyer-authorized
+    # operation may make one bounded retry. Otherwise one transient SearXNG
+    # startup miss disables discovery until the API process is restarted.
+    if (
+        not readiness.get("effective")
+        and readiness.get("local_proof_enrolled")
+        and readiness.get("error_code") in {
+            "discovery_endpoint_unreachable", "discovery_endpoint_degraded",
+        }
+    ):
+        readiness = {
+            **readiness,
+            "effective": True,
+            "advisory_live": True,
+            "capability_status": "bounded_retry_authorized",
+            "reason": "prior runtime failure; this operation may retry once",
+            "retrying_after_observed_failure": True,
+        }
     if not readiness.get("effective"):
         raise OpenWorldResearchUnavailable(
             code=str(readiness.get("error_code") or "external_research_degraded"),

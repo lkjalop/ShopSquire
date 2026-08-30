@@ -277,6 +277,16 @@ def _decision(
     ledger: list[FitLedgerRow] = []
     for claim in claims:
         attribute = str(claim.get("attribute") or "")
+        # Source-neutral extraction uses ``conditional`` for publisher tiers
+        # such as Basic/Advanced/Extreme.  The decision ledger represents the
+        # same fact as a target requirement scoped by ``condition``; do not let
+        # a reviewed generic source crash catalog projection merely because the
+        # two bounded vocabularies use different names.
+        raw_requirement_class = str(claim.get("requirement_class") or "minimum")
+        requirement_class = (
+            "target" if raw_requirement_class == "conditional"
+            else raw_requirement_class
+        )
         capability = _evidence_for_attribute(row, attribute, observations, now=now)
         observed = capability["observed"]
         verdict = "contested" if capability["contested"] else _verdict(claim, observed)
@@ -284,7 +294,7 @@ def _decision(
         ledger.append(FitLedgerRow(
             attribute_key=attribute,
             attribute_label=attribute.replace("_", " "),
-            requirement_class=str(claim.get("requirement_class") or "minimum"),
+            requirement_class=requirement_class,
             required=[[str(claim.get("operator") or "="), claim.get("value")]],
             required_text=f"{claim.get('operator')} {claim.get('value')}",
             observed=observed,

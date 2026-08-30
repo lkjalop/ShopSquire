@@ -75,3 +75,9 @@ def test_literal_software_identity_survives_generic_taxonomy_coverage_filter():
         workload_entities=[("software", "Agisoft Metashape")],
         node_path="so-1-10-1",
     ) == [("software", "Agisoft Metashape")]
+
+
+def test_single_token_application_in_explicit_hardware_grammar_replaces_workload():
+    utterance = "I need hardware for CupixWorks. Please inspect this page."
+    assert literal_software_identity_candidate(utterance) == (("software", "CupixWorks"),)
+    assert deterministic_named_workload_switch(utterance)

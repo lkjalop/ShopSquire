@@ -92,6 +92,14 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const evidenceItems = Array.isArray(evidenceOutput.items) ? evidenceOutput.items : [];
   const entities = Array.isArray(proposal?.output?.workload_entities)
     ? proposal.output.workload_entities : [];
+  const resolvedEvidenceEntities = evidenceItems
+    .filter((item: any) => item?.requested_name || item?.canonical_title || item?.resolved_name)
+    .map((item: any) => ({
+      kind: item?.kind,
+      name: item?.canonical_title || item?.resolved_name || item?.requested_name,
+      origin: 'provider-grounded',
+    }));
+  const displayEntities = entities.length ? entities : resolvedEvidenceEntities;
   const planOutput = researchPlan?.output || {};
   const evidenceNeeds = Array.isArray(planOutput?.evidence_needs) ? planOutput.evidence_needs : [];
   const materialSlots = Array.isArray(planOutput?.material_slots) ? planOutput.material_slots : [];
@@ -190,7 +198,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
               Purpose: <strong>{provisionalExploration.retained_purpose || 'not recorded'}</strong>
             </div>
             <div>
-              Status: <strong>not executed</strong> - provisional catalog exploration is allowed while material evidence gaps remain visible.
+              Status: <strong>{Object.keys(officialResearch).length > 0
+                ? 'superseded by the execution record below'
+                : 'not executed'}</strong> - provisional catalog exploration is allowed while material evidence gaps remain visible.
             </div>
             <div>Plan: <strong>{provisionalExploration.research_plan_id}</strong></div>
             {Array.isArray(provisionalExploration.interpretations) && provisionalExploration.interpretations.length > 0 && (
@@ -242,13 +252,19 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
         <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
           <strong>1. Model interpretation</strong>
           <div data-testid="research-model-entities" style={{ marginTop: 5 }}>
-            {entities.length
-              ? entities.map((item: any) => `${words(item?.kind)}: ${item?.name || 'unnamed'}`).join(' | ')
+            {displayEntities.length
+              ? displayEntities.map((item: any) => `${words(item?.kind)}: ${item?.name || 'unnamed'}`).join(' | ')
               : (Array.isArray(planOutput?.subject_spans) && planOutput.subject_spans.length
                 ? planOutput.subject_spans.join(' | ')
                 : 'No bounded workload entity was proposed.')}
           </div>
-          <small style={{ color: '#64748b' }}>The model proposes identity and evidence needs; it does not authorize product fit.</small>
+          <small style={{ color: '#64748b' }}>
+            {entities.length
+              ? 'The model proposes identity and evidence needs; it does not authorize product fit.'
+              : resolvedEvidenceEntities.length
+                ? 'The bounded provider record supplies this identity; provider evidence does not authorize commerce.'
+                : 'No model or provider-grounded workload identity was recorded.'}
+          </small>
           {hypotheses.length > 0 && (
             <div data-testid="research-hypotheses" style={{ marginTop: 7 }}>
               <strong>Competing hypotheses to investigate</strong>

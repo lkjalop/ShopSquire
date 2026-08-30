@@ -14,6 +14,7 @@ import pytest
 
 from src.app.services.connectors.steam_requirements import (
     _bounded_requirements,
+    _get_json,
     _identity_query_variants,
     _parse_requirements_html,
     _title_matches,
@@ -106,6 +107,32 @@ def test_live_failure_returns_none_never_raises(monkeypatch):
     # fixture-first: a fixture hit never needs the (broken) live lane
     got = get_game_requirements("elden ring", allow_live=True)
     assert got is not None and got["cached"] is True
+
+
+def test_live_json_retries_one_transient_failure_then_returns_json():
+    class _Response:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        content = b'{"items": []}'
+
+        @staticmethod
+        def json():
+            return {"items": []}
+
+    class _Client:
+        calls = 0
+
+        def get(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.ReadTimeout("transient")
+            return _Response()
+
+    client = _Client()
+    assert _get_json(client, "https://store.steampowered.com/api/storesearch/", {}) == {
+        "items": [],
+    }
+    assert client.calls == 2
 
 
 # ── requirements-HTML parsing (pure, offline) ────────────────────────────────

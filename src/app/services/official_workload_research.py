@@ -47,11 +47,21 @@ class _TextExtractor(HTMLParser):
         if value:
             self.parts.append(value)
 
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {
+            "br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
+            "section", "article", "dt", "dd",
+        }:
+            self.parts.append("\n")
+
 
 def _html_text(content: bytes) -> str:
     parser = _TextExtractor()
     parser.feed(content.decode("utf-8", errors="ignore"))
-    return " ".join(parser.parts)
+    text = " ".join(parser.parts)
+    return "\n".join(
+        " ".join(line.split()) for line in text.splitlines() if line.strip()
+    )
 
 
 def _claim(
