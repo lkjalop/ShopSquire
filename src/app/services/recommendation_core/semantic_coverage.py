@@ -198,8 +198,15 @@ def discard_covered_model_workload_echo(
     """Drop a model-only workload title when enrolled semantics already cover the turn."""
     if not workload_entities:
         return workload_entities
-    from src.app.services.recommendation_core.literal_workload_identity import literal_game_identity_candidate
-    if literal_game_identity_candidate(query):
+    from src.app.services.recommendation_core.literal_workload_identity import (
+        literal_workload_identity_candidate,
+    )
+    # A title copied from the buyer's current turn is not a model echo.  This
+    # used to protect games only, so an equally literal software title such as
+    # ``Agisoft Metashape`` was recovered by the router and then silently
+    # discarded here.  The subsequent generic taxonomy match produced an
+    # OFF_CATALOG answer and left the previous case revision on screen.
+    if literal_workload_identity_candidate(query):
         return workload_entities
     unresolved = unresolved_purpose_proposal(
         query=query, use_cases=use_cases, workload_entities=(), node_path=node_path,

@@ -3513,6 +3513,36 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             if isinstance(item, dict)
         ]
         for canonical_item in preflight_workload_evidence:
+            canonical_item = dict(canonical_item)
+            if (
+                str(canonical_item.get("status") or "").strip().lower() == "resolved"
+                and not list(canonical_item.get("compiled_requirements") or [])
+            ):
+                try:
+                    from src.app.services.recommendation_core.workload_grounding import (
+                        compile_workload_evidence_requirements,
+                    )
+
+                    _preflight_compilation = compile_workload_evidence_requirements(
+                        canonical_item,
+                        kind=str(canonical_item.get("kind") or "workload"),
+                        name=str(
+                            canonical_item.get("canonical_title")
+                            or canonical_item.get("resolved_name")
+                            or canonical_item.get("requested_name")
+                            or "workload"
+                        ),
+                    )
+                    canonical_item["compiled_requirements"] = [
+                        item.model_dump() for item in _preflight_compilation.requirements
+                    ]
+                    canonical_item["claim_rejections"] = list(
+                        _preflight_compilation.rejections
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "canonical workload requirement projection skipped: %s", exc,
+                    )
             canonical_key = str(
                 canonical_item.get("app_id")
                 or canonical_item.get("canonical_title")
@@ -3548,6 +3578,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     _workload_material_blocked = (
         str(_workload_authorization.get("status") or "").strip().lower() == "blocked"
     )
+    _workload_requirements_established = any(
+        isinstance(item, dict)
+        and str(item.get("status") or "").strip().lower() == "resolved"
+        and bool(
+            list(item.get("compiled_requirements") or [])
+            or (
+                isinstance(item.get("minimum"), dict)
+                and bool(item.get("minimum"))
+                and str(item.get("requirements_completeness") or "").strip().lower()
+                in {"minimum", "minimum_only", "minimum_and_recommended"}
+            )
+        )
+        for item in list(_workload_authorization.get("evidence") or [])
+    )
     _case_research_plan = None
     try:
         from src.app.services.case_research_plan import build_case_research_plan
@@ -3567,6 +3611,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         )
         or (
             _case_research_plan is not None
+            and not _workload_requirements_established
             and turn_intent not in {
                 "EXPLAIN", "SUPPORT_CLAIM", "POLICY_QUESTION", "CART_MUTATION",
             }
@@ -3603,6 +3648,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     item.get("identity_resolution")
                     if isinstance(item.get("identity_resolution"), dict) else {}
                 )
+                _compiled_requirements = list(item.get("compiled_requirements") or [])
+                _requirements_completeness = str(
+                    item.get("requirements_completeness") or ""
+                ).strip().lower()
                 _identity_candidates.append({
                     "requested_name": item.get("requested_name"),
                     "resolved_name": item.get("resolved_name") or identity.get("resolved_name"),
@@ -3610,13 +3659,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "source_url": item.get("source_url") or identity.get("source_url"),
                     "confidence": item.get("confidence") or identity.get("confidence"),
                     "status": item.get("status"),
-                    "requirements_status": "incomplete",
+                    "requirements_status": (
+                        "compiled_partial" if _compiled_requirements
+                        else "available" if _requirements_completeness in {
+                            "minimum", "minimum_only", "minimum_and_recommended",
+                        }
+                        else "incomplete"
+                    ),
                     "canonical_title": item.get("canonical_title") or item.get("resolved_name"),
                     "publisher": item.get("publisher"),
                     "app_id": item.get("app_id") or item.get("source_record_id"),
                     "release_state": item.get("release_state"),
                     "release_date": item.get("release_date"),
                     "requirements_completeness": item.get("requirements_completeness"),
+                    "compiled_requirement_count": len(_compiled_requirements),
                 })
 
             _semantic_hypotheses = list(semantic_resolution.get("workload_hypotheses") or [])[:3]

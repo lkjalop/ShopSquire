@@ -14,29 +14,18 @@ async function openBuyer(browser: Browser, label: string) {
 }
 
 async function send(page: Page, text: string) {
-  // The interpretation route may itself return the terminal governed outcome.
-  // Absorb the unused chat waiter in that branch so closing the isolated buyer
-  // context cannot turn a successful interpretation into an unhandled rejection.
+  // Interpretations are a persistence/preflight operation.  The completed
+  // revision-bound buyer projection is the chat answer envelope; accepting an
+  // interpretation response here reproduced the production UI race where a
+  // partial record briefly replaced the completed turn.
   const chatResponse = page.waitForResponse(
     response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
-    { timeout: 90_000 },
-  ).catch(() => null);
-  const firstResponse = page.waitForResponse(
-    response => (
-      /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
-      || /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url())
-    ),
     { timeout: 90_000 },
   );
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(text);
   await input.press('Enter');
-  const first = await firstResponse;
-  if (/\/shopping-cases\/interpretations$/.test(first.url()) && first.status() !== 204) {
-    return first.json();
-  }
-  const response = /\/chat\/(stream|query)$/.test(first.url()) ? first : await chatResponse;
-  if (!response) throw new Error('No terminal chat response was returned.');
+  const response = await chatResponse;
   const body = await response.text();
   if (!body.includes('data:')) return JSON.parse(body);
   const frames = body.replaceAll('\r\n', '\n').split('\n\n');
@@ -197,6 +186,47 @@ test('BG3 affordability plus Emulate3D additive workload retains budget and rese
   await expect(page.getByText(
     /Approved-source research (?:completed|could not complete)/i,
   )).toBeVisible({ timeout: 40_000 });
+  await context.close();
+});
+
+test('natural workload replacements advance one revision and never project the prior subject', async ({ browser }) => {
+  test.setTimeout(360_000);
+  const { context, page } = await openBuyer(browser, 'natural-workload-replacements');
+
+  const bg3 = await send(page, "Is AUD 3,000 excessive for Baldur's Gate 3?");
+  expect(bg3.workload_authorization?.evidence?.[0]).toMatchObject({
+    canonical_title: "Baldur's Gate 3",
+    provider_id: 'steam',
+    requirements_completeness: 'minimum_and_recommended',
+  });
+  expect(bg3.workload_authorization?.evidence?.[0]?.compiled_requirements?.length || 0)
+    .toBeGreaterThan(0);
+  expect(String(bg3.assistant_message || '')).toMatch(/\$3,000 is ample for Baldur's Gate 3/i);
+  expect(bg3.products?.length || 0).toBeGreaterThan(0);
+  expect(bg3.ambiguity_exploration || null).toBeNull();
+  expect(bg3.case_memory?.read_model?.objective || bg3.shopping_case_retained_purpose)
+    .toMatch(/Baldur'?s Gate 3/i);
+
+  const emulate = await send(page, 'What about Rockwell Emulate3D running locally?');
+  expect(emulate.case_memory?.transition).toBe('REPLACE_WORKLOAD');
+  expect(Number(emulate.case_memory?.version || emulate.case_revision || 0)).toBeGreaterThan(0);
+  expect(emulate.case_memory?.read_model?.objective || emulate.shopping_case_retained_purpose)
+    .toMatch(/Rockwell Emulate3D/i);
+  expect(JSON.stringify(emulate.case_memory?.read_model || {})).not.toMatch(/Baldur'?s Gate 3/i);
+  expect(emulate.products || []).toHaveLength(0);
+
+  const agisoft = await send(
+    page,
+    'I process large drone surveys in Agisoft Metashape. What hardware do I need?',
+  );
+  expect(agisoft.case_memory?.transition).toBe('REPLACE_WORKLOAD');
+  expect(Number(agisoft.case_memory?.version || agisoft.case_revision || 0)).toBeGreaterThan(0);
+  expect(agisoft.case_memory?.read_model?.objective || agisoft.shopping_case_retained_purpose)
+    .toMatch(/Agisoft Metashape/i);
+  expect(JSON.stringify(agisoft.case_memory?.read_model || {})).not.toMatch(/Rockwell Emulate3D/i);
+  expect(agisoft.products || []).toHaveLength(0);
+  await expect(page.getByTestId('ambiguity-exploration')).toContainText(/Agisoft Metashape/i);
+  await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
   await context.close();
 });
 

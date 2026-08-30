@@ -28,6 +28,49 @@ _GENERIC_GAME_TARGETS = {
     "digital twin simulations",
 }
 
+_LITERAL_SOFTWARE_PATTERNS = (
+    re.compile(
+        r"\b(?:process|render|simulate|model|analyse|analyze)\b.{0,100}?\b(?:in|using|with)\s+"
+        r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){1,4})(?=[,?.!]|$)",
+    ),
+    re.compile(
+        r"(?i:\bwhat\s+about\s+)"
+        r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){1,4})"
+        r"(?=\s+(?i:(?:running|run)\s+locally)|[?.!]|$)",
+    ),
+    re.compile(
+        r"\b(?:run|use|using)\s+"
+        r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){1,4})(?=[,?.!]|$)",
+    ),
+)
+
+
+def literal_software_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
+    """Recover a buyer-authored application name from bounded software grammar.
+
+    This only copies a title-like span already present in the current turn. It
+    does not decide that the software is supported or turn its prose into a
+    hardware requirement.
+    """
+    text = str(query or "")
+    for pattern in _LITERAL_SOFTWARE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        candidate = re.sub(r"\s+", " ", match.group(1)).strip(" ,;:-")[:80]
+        if candidate.lower() in _GENERIC_GAME_TARGETS:
+            continue
+        tokens = re.findall(r"[a-z0-9]+", candidate.lower())
+        if len(tokens) >= 2:
+            return (("software", candidate),)
+    return ()
+
+
+def literal_workload_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
+    """Return the narrow literal game or software identity from this turn."""
+    software = literal_software_identity_candidate(query)
+    return software or literal_game_identity_candidate(query)
+
 
 def literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
     """Copy a narrowly delimited game title for fail-closed identity lookup only."""
@@ -92,12 +135,14 @@ def deterministic_additive_workload_continuation(query: str) -> bool:
 
 
 def deterministic_named_workload_switch(query: str) -> bool:
-    """Recognize a literal new game subject without relying on model continuity output."""
+    """Recognize a literal new workload without relying on model continuity output."""
     text = str(query or "").strip()
-    if not literal_game_identity_candidate(text):
+    if not literal_workload_identity_candidate(text):
         return False
     return bool(re.search(
-        r"\b(?:what\s+about|i\s+want|(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)|(?:laptop|computer|pc)\s+for)\b",
+        r"\b(?:what\s+about|i\s+(?:want|process|render|simulate|model|analyse|analyze)|"
+        r"(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)|"
+        r"(?:laptop|computer|pc)\s+for)\b",
         text,
         re.IGNORECASE,
     ))
@@ -128,4 +173,21 @@ def recover_literal_game_identity(
 ) -> list[Tuple[str, str]]:
     """Recover a missing literal title, then preserve buyer-authored edition qualifiers."""
     entities = list(workload_entities) or list(literal_game_identity_candidate(query))
+    return restore_literal_edition_qualifiers(entities, query_tokens)
+
+
+def recover_literal_workload_identity(
+    query: str,
+    workload_entities: Sequence[Tuple[str, str]],
+    query_tokens: Sequence[str],
+) -> list[Tuple[str, str]]:
+    """Recover a current-turn game/software identity without overriding the model."""
+    entities = list(workload_entities)
+    for candidate in literal_workload_identity_candidate(query):
+        normalized = re.sub(r"[^a-z0-9]+", " ", candidate[1].lower()).strip()
+        if not any(
+            re.sub(r"[^a-z0-9]+", " ", name.lower()).strip() == normalized
+            for _kind, name in entities
+        ):
+            entities.append(candidate)
     return restore_literal_edition_qualifiers(entities, query_tokens)

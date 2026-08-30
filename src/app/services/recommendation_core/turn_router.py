@@ -39,7 +39,10 @@ from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
 from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIASES
 from src.app.services.recommendation_core.router_prompt import _instruction_prefix
-from src.app.services.recommendation_core.literal_workload_identity import literal_game_identity_candidate, recover_literal_game_identity
+from src.app.services.recommendation_core.literal_workload_identity import (
+    literal_workload_identity_candidate,
+    recover_literal_workload_identity,
+)
 from src.app.services.recommendation_core.semantic_coverage import discard_covered_model_workload_echo
 from src.app.services.http_defaults import DEFAULT_OUTBOUND_TIMEOUT
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
@@ -948,7 +951,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         defs_union(DEFAULT_VERTICALS),
     )
     from src.app.services import use_case_registry as use_cases_registry
-    literal_workloads = literal_game_identity_candidate(envelope.query)
+    literal_workloads = literal_workload_identity_candidate(envelope.query)
 
     # This remains deterministic fallback authority: only an exact, multiword phrase
     # declared by the data-owned registry is recoverable while the model is unavailable.
@@ -2146,7 +2149,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         entity = (kind, name)
         if entity not in workload_entities:
             workload_entities.append(entity)
-    workload_entities = recover_literal_game_identity(envelope.query, workload_entities, query_entity_tokens)
+    workload_entities = recover_literal_workload_identity(
+        envelope.query, workload_entities, query_entity_tokens,
+    )
     if not (pending and str(data.get("clarification_relation") or "").strip().lower() == "answer"):
         workload_entities = discard_covered_model_workload_echo(query=envelope.query, use_cases=use_cases, workload_entities=workload_entities, node_path=str(data.get("handle") or session.get("prior_node") or "") or None)
     use_case_variants: Dict[str, str] = {}

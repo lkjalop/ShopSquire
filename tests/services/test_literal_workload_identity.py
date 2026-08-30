@@ -2,6 +2,11 @@ from src.app.services.recommendation_core.literal_workload_identity import (
     deterministic_additive_workload_continuation,
     deterministic_named_workload_switch,
     literal_game_identity_candidate,
+    literal_software_identity_candidate,
+    recover_literal_workload_identity,
+)
+from src.app.services.recommendation_core.semantic_coverage import (
+    discard_covered_model_workload_echo,
 )
 
 
@@ -41,3 +46,32 @@ def test_named_local_application_resolves_ambiguous_workload_without_also():
     assert deterministic_additive_workload_continuation(
         "It must run Rockwell Emulate3D locally."
     )
+
+
+def test_literal_software_identity_recovers_natural_processing_workload_switch():
+    utterance = "I process large drone surveys in Agisoft Metashape. What hardware do I need?"
+    assert literal_software_identity_candidate(utterance) == (
+        ("software", "Agisoft Metashape"),
+    )
+    assert deterministic_named_workload_switch(utterance)
+    assert recover_literal_workload_identity(utterance, [], set()) == [
+        ("software", "Agisoft Metashape"),
+    ]
+
+
+def test_literal_software_identity_recovers_what_about_local_application():
+    utterance = "What about Rockwell Emulate3D running locally?"
+    assert literal_software_identity_candidate(utterance) == (
+        ("software", "Rockwell Emulate3D"),
+    )
+    assert deterministic_named_workload_switch(utterance)
+
+
+def test_literal_software_identity_survives_generic_taxonomy_coverage_filter():
+    utterance = "I process large drone surveys in Agisoft Metashape. What hardware do I need?"
+    assert discard_covered_model_workload_echo(
+        query=utterance,
+        use_cases=["image_processing"],
+        workload_entities=[("software", "Agisoft Metashape")],
+        node_path="so-1-10-1",
+    ) == [("software", "Agisoft Metashape")]

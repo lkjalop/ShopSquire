@@ -65,6 +65,40 @@ def _minimum_constraints(requirements: Dict[str, Any]) -> Dict[str, Tuple[str, f
     return out
 
 
+def compile_workload_evidence_requirements(
+    result: Dict[str, Any], *, kind: str, name: str,
+):
+    """Compile one enrolled provider record into registry-authorized receipts.
+
+    Both recommendation execution and the revision-bound buyer projection call
+    this function.  Keeping a single compiler boundary prevents the UI from
+    showing ``identity only`` after the fit engine has already applied official
+    RAM/VRAM predicates.
+    """
+    from src.app.services.recommendation_core.requirement_compiler import (
+        compile_authoritative_requirements,
+    )
+
+    claims = []
+    for attr, predicate in _minimum_constraints(result).items():
+        claims.append({
+            "need_id": f"{kind}:{attr}",
+            "subject_span": str(name)[:120],
+            "claim_type": "minimum_requirements",
+            "status": "accepted",
+            "source_id": result.get("source") or result.get("provider_id"),
+            "source_record_id": result.get("source_record_id") or result.get("app_id"),
+            "observed_at": result.get("retrieved_at"),
+            "confidence": result.get("confidence"),
+            "attribute_key": attr,
+            "operator": predicate[0],
+            "value": predicate[1],
+            "authority": "official_requirements",
+            "lineage_root": result.get("source") or result.get("provider_id"),
+        })
+    return compile_authoritative_requirements(claims)
+
+
 def resolve_named_workloads(
     entities: Iterable[Tuple[str, str]], *, consent: bool,
 ) -> Dict[str, Any]:
@@ -105,29 +139,9 @@ def resolve_named_workloads(
                 "enrolled_providers": list(enrolled_providers),
             })
             continue
-        proposed_constraints = _minimum_constraints(result)
-        from src.app.services.recommendation_core.requirement_compiler import (
-            compile_authoritative_requirements,
+        compilation = compile_workload_evidence_requirements(
+            result, kind=kind, name=name,
         )
-
-        claims = []
-        for attr, predicate in proposed_constraints.items():
-            claims.append({
-                "need_id": f"{kind}:{attr}",
-                "subject_span": str(name)[:120],
-                "claim_type": "minimum_requirements",
-                "status": "accepted",
-                "source_id": result.get("source"),
-                "source_record_id": result.get("source_record_id"),
-                "observed_at": result.get("retrieved_at"),
-                "confidence": result.get("confidence"),
-                "attribute_key": attr,
-                "operator": predicate[0],
-                "value": predicate[1],
-                "authority": "official_requirements",
-                "lineage_root": result.get("source"),
-            })
-        compilation = compile_authoritative_requirements(claims)
         if not compilation.requirements:
             evidence.append({
                 "kind": kind,
