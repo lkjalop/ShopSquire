@@ -1580,6 +1580,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     ).strip()[:200]
     active_shopping_case_purpose = ""
     canonical_case_snapshot: Dict[str, Any] = {}
+    additive_workload_receipt: Dict[str, Any] | None = None
+    routing_query = q
     if active_shopping_case_id:
         active_case = db.execute(sql_text(
             "SELECT uid, retained_purpose FROM shopping_cases "
@@ -1637,6 +1639,68 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 status_code=503,
                 detail="procurement_case_state_unavailable",
             ) from exc
+
+    # ``also`` / ``as well`` adds a workload to the current procurement case;
+    # it is neither an answer to an old clarification nor a subject reset. Bind
+    # the buyer-authored combination before model routing so the stricter
+    # workload, retained budget and new research plan are evaluated together.
+    if active_shopping_case_id and active_shopping_case_purpose:
+        try:
+            from src.app.services.case_research_plan import build_case_research_plan
+            from src.app.services.recommendation_core.literal_workload_identity import (
+                deterministic_additive_workload_continuation,
+                literal_game_identity_candidate,
+            )
+
+            _additive_plan = (
+                build_case_research_plan(submitted_query, allow_open_world=True)
+                if deterministic_additive_workload_continuation(submitted_query)
+                else None
+            )
+            _additive_identity_is_bounded = bool(
+                (_additive_plan and _additive_plan.publisher_status == "resolved_enrolled"
+                 and _additive_plan.source_candidate_ids)
+                or literal_game_identity_candidate(submitted_query)
+            )
+            if _additive_plan is not None and _additive_identity_is_bounded:
+                prior_purpose = active_shopping_case_purpose
+                combined_purpose = (
+                    f"{prior_purpose.rstrip(' .')}. Additional required workload: "
+                    f"{submitted_query.strip()}"
+                )[:500]
+                active_shopping_case_purpose = combined_purpose
+                routing_query = combined_purpose
+                if canonical_case_snapshot:
+                    canonical_case_snapshot = {
+                        **canonical_case_snapshot,
+                        "objective": combined_purpose,
+                    }
+                    params["canonical_case"] = canonical_case_snapshot
+                db.execute(sql_text(
+                    "UPDATE shopping_cases SET retained_purpose=:purpose,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE tenant_id=:tenant_id "
+                    "AND case_id=:case_id AND status='active'"
+                ), {
+                    "purpose": combined_purpose,
+                    "tenant_id": tenant_id,
+                    "case_id": active_shopping_case_id,
+                })
+                db.commit()
+                additive_workload_receipt = {
+                    "schema_version": "case-additive-workload.v1",
+                    "status": "retained_and_added",
+                    "case_id": active_shopping_case_id,
+                    "prior_purpose": prior_purpose,
+                    "added_buyer_turn": submitted_query[:500],
+                    "combined_purpose": combined_purpose,
+                    "source_candidate_ids": list(_additive_plan.source_candidate_ids),
+                    "preserved_shared_constraints": ["budget", "currency", "quantity", "destinations"],
+                    "research_authority": "not_inherited",
+                    "commerce_authority": "none",
+                }
+        except Exception:
+            db.rollback()
+            logger.warning("additive workload case binding failed closed", exc_info=True)
     pending_clarification: Dict[str, Any] = {}
     try:
         pending_clarification = Memory(
@@ -1824,6 +1888,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         and clarification_reduction.suspend_pending
         and pending_clarification
     )
+    if additive_workload_receipt and pending_clarification:
+        pending_clarification_consumed = True
+        pending_clarification_suspended = False
     from src.app.services.clarification_state import commercial_obligations
 
     case_commercial_obligations = list(
@@ -1870,7 +1937,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "relation": str(clarification_reduction.relation)[:40],
             "authority": "buyer_authored_candidate",
         }
-    params["query"] = q
+    params["query"] = routing_query
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
         try:
@@ -3122,12 +3189,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         products = []
 
     response_confirmed_slots = dict(confirmed_slots or {})
-    response_confirmed_slots.update(
-        _extract_confirmed_slots(
-            query=q,
-            response=data if isinstance(data, dict) else {},
-        )
+    fresh_turn_confirmed_slots = _extract_confirmed_slots(
+        query=q,
+        response=data if isinstance(data, dict) else {},
     )
+    response_confirmed_slots.update(fresh_turn_confirmed_slots)
     routed_decision = (
         data.get("decision") if isinstance(data.get("decision"), dict) else {}
     )
@@ -3269,7 +3335,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "order_quantity", "budget_scope", "total_budget_cents",
             "budget_min", "budget_max",
         ):
-            response_slots_for_output.pop(key, None)
+            # A material subject boundary may not inherit commercial state, but
+            # a constraint literally restated on this turn belongs to the new
+            # subject. This is what keeps "Is AUD 3,000 excessive for BG3?"
+            # from immediately asking the buyer for the same budget again.
+            if key not in fresh_turn_confirmed_slots:
+                response_slots_for_output.pop(key, None)
 
     # Buyer-provided OCR/text can propose requirement claims, but it is never
     # qualification authority. Keep the proposal at the chat edge so the UI can
@@ -3469,9 +3540,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
             _identity_candidates = []
             for item in list(_workload_authorization.get("evidence") or [])[:3]:
-                if not isinstance(item, dict) or not str(
-                    item.get("status") or ""
-                ).startswith("identity_resolved"):
+                if not isinstance(item, dict):
+                    continue
+                _item_status = str(item.get("status") or "").strip().lower()
+                _canonical_identity_resolved = bool(
+                    _item_status == "resolved"
+                    and (item.get("app_id") or item.get("source_record_id"))
+                    and (item.get("canonical_title") or item.get("resolved_name"))
+                )
+                if not (
+                    _item_status.startswith("identity_resolved")
+                    or _canonical_identity_resolved
+                ):
                     continue
                 identity = (
                     item.get("identity_resolution")
@@ -3548,9 +3628,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 ),
                 "trace_id": decision_trace_id,
                 "retained_purpose": _retained_case_purpose,
-                "status": "context_only" if _identity_candidates else "provisional",
+                # An already resolved identity (BG3) cannot hide a newly added
+                # workload (Emulate3D) whose requirements remain material. Keep
+                # the combined case in the auto-research state until that new
+                # source has actually been adjudicated.
+                "status": (
+                    "provisional" if additive_workload_receipt
+                    else "context_only" if _identity_candidates
+                    else "provisional"
+                ),
                 "interpretations": _semantic_hypotheses,
                 "next_question": (
+                    ({"id": "research_scope", "text": _case_research_plan.next_question}
+                     if additive_workload_receipt and _case_research_plan is not None
+                     else
                     # A generic catalog budget question must not displace the
                     # evidence question that resolves an open-world suitability
                     # gap.  The durable plan owns that material question.
@@ -3560,7 +3651,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                      and not _identity_candidates
                      else _questions[0]) if _questions
                     else ({"id": "research_scope", "text": _case_research_plan.next_question}
-                          if _case_research_plan is not None else None)
+                          if _case_research_plan is not None else None))
                 ),
                 "research_choices": (["research_approved_sources"] if _case_research_plan else []) + [
                     "upload_requirements", "enter_specifications", "continue_provisionally",
@@ -3569,7 +3660,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "provider_lookup_completed" if _identity_candidates
                     else "local_exploration_completed"
                 ),
-                "evidence": "identity_only" if _identity_candidates else "material_gaps",
+                "evidence": (
+                    "partial_identity_material_gap" if additive_workload_receipt
+                    else "identity_only" if _identity_candidates
+                    else "material_gaps"
+                ),
                 "decision": "clarification_required" if _workload_material_blocked else "exploration_allowed",
                 "cart_authority": "none",
                 "provider_accounting": {
@@ -3615,6 +3710,35 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "Before I recommend hardware, I need current authoritative requirements for "
                     f"{workload_label}."
                     + (f" {material_question_text}" if material_question_text else "")
+                )
+            if additive_workload_receipt and _case_research_plan is not None:
+                # Do not re-present the prior single-workload shelf as though it
+                # satisfies the newly combined case. The browser may now perform
+                # its policy-authorized research call from this provisional
+                # envelope; until then qualification stays visibly closed.
+                products = []
+                ambiguous_product_shelves = None
+                _retained_budget = response_confirmed_slots.get("budget_max")
+                _currency_match = re.search(
+                    r"\b(AUD|USD|CAD|NZD|SGD|HKD|GBP|EUR|JPY)\b",
+                    str(additive_workload_receipt.get("prior_purpose") or ""),
+                    re.IGNORECASE,
+                )
+                _currency_label = (
+                    _currency_match.group(1).upper() if _currency_match else "$"
+                )
+                _budget_label = (
+                    f"{_currency_label} {float(_retained_budget):,.0f}"
+                    if _retained_budget is not None and _currency_label != "$"
+                    else f"${float(_retained_budget):,.0f}"
+                    if _retained_budget is not None
+                    else "existing"
+                )
+                assistant_message = (
+                    f"I retained your {_budget_label} budget and existing workload requirements, "
+                    f"and added this local requirement: {submitted_query.strip()} I need approved "
+                    "current requirements for the added workload before I can qualify one computer "
+                    "for both; no earlier single-workload recommendation is being reused."
                 )
             if not active_shopping_case_id and ambiguity_exploration.get("case_id"):
                 # The legacy chat path can discover ambiguity after the fast
@@ -3906,6 +4030,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "shopping_case_obligations": case_commercial_obligations,
         "shopping_case_id": active_shopping_case_id or None,
         "shopping_case_retained_purpose": active_shopping_case_purpose or None,
+        "case_additive_workload": additive_workload_receipt,
         "shopping_case_revision": (
             durable_interpretation_job.get("case_revision")
             if durable_interpretation_job else None
@@ -4190,6 +4315,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 or semantic.get("catalog_authority") == "blocked"
             )
         ), None)
+        if additive_workload_receipt:
+            # The named application/locality turn has replaced the generic
+            # local-vs-remote question with a bounded research plan. Do not
+            # persist a stale copy of that earlier question for the next turn.
+            material_question = None
         pending_record = None
         if material_question:
             from src.app.services.clarification_state import build_pending_clarification, replacement_root_query

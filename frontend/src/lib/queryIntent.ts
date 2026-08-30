@@ -47,6 +47,7 @@ export function requiresExternalResearchConsent(query: string): boolean {
 export function hasNamedGameWorkload(query: string): boolean {
   const text = String(query || '');
   const patterns = [
+    /\b(?:is|would)\s+(?:aud\s*)?\$?\d[\d,]*(?:\.\d+)?\s+(?:enough|sufficient|acceptable|ok(?:ay)?|excessive|overkill|too\s+much)\s+for\s+(.{3,120}?)(?=[?.!,;]|$)/i,
     /\bplay\s+(?:the\s+)?(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
     /\bwhat\s+about\s+(.{3,120}?)(?=[?.!,;]|\s+is\s+(?:aud\s*)?\$?\d|$)/i,
     /\b(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)\s+(.{3,120}?)(?=[?.!,;]|$)/i,

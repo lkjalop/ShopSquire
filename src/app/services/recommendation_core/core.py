@@ -1549,8 +1549,22 @@ def _capability_phrase(decision: TurnDecision) -> str:
     ucs = list(getattr(decision, "use_cases", None) or [])
     if ucs:
         return str(ucs[0]).replace("_", " ")
+    # A resolved workload identity is substantially more useful to a buyer than
+    # leaking normalized predicate keys into prose ("ram gb, gpu vram gb").
+    # This label is presentation-only; the requirements below still own fit.
+    entities = list(getattr(decision, "workload_entities", None) or [])
+    for _kind, label in entities:
+        clean = str(label or "").strip()
+        if clean:
+            return clean
     keys = list((decision.requirements or {}).keys())
-    return ", ".join(k.replace("_", " ") for k in keys[:3]) or "your use case"
+    friendly_keys = {
+        "ram_gb": "memory",
+        "gpu_vram_gb": "graphics performance",
+        "storage_gb": "storage",
+        "cpu_cores": "processor performance",
+    }
+    return ", ".join(friendly_keys.get(k, k.replace("_", " ")) for k in keys[:3]) or "your use case"
 
 
 def _capability_scope_nodes(decision: TurnDecision) -> list:
@@ -1735,7 +1749,7 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
         # fill-only: a lane-base message (closest-match / compare) outranks this confirm — the
         # CAPABILITY_WITHIN_BUDGET priority (< LANE_BASE) reproduces the old `if not message` guard.
         direct_affordability_question = bool(re.search(
-            r"\b(?:enough|ok|okay|acceptable|afford)\b",
+            r"\b(?:enough|sufficient|insufficient|ok|okay|acceptable|afford|excessive|overkill|too\s+much)\b",
             envelope.buyer_query or envelope.query,
             re.IGNORECASE,
         ))

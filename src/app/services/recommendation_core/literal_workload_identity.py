@@ -6,6 +6,15 @@ from typing import Sequence, Tuple
 
 
 _LITERAL_GAME_PATTERNS = (
+    # Budget-first suitability questions still name a literal workload. Keep
+    # the money outside the captured title so identity lookup and budget
+    # interpretation can proceed independently.
+    re.compile(
+        r"\b(?:is|would)\s+(?:(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\s*)?\$?[\d,]+(?:\.\d+)?\s+"
+        r"(?:be\s+)?(?:enough|sufficient|insufficient|ok|okay|acceptable|excessive|overkill|too\s+much)\s+for\s+"
+        r"(.+?)(?=[?.!]|$)",
+        re.I,
+    ),
     re.compile(r"\bplay\s+(?:the\s+)?(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
     re.compile(r"\bwhat\s+about\s+(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
     re.compile(r"\b(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)\s+(.+?)(?=[?.!]|$)", re.I),
@@ -52,6 +61,34 @@ def literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
         if not re.search(r"\d", candidate) and len(title_words) < 2:
             return ()
     return (("game", candidate),) if len(significant) >= 2 else ()
+
+
+def deterministic_additive_workload_continuation(query: str) -> bool:
+    """Recognize an explicit request to add a workload to the active case.
+
+    This does not identify or authorize the workload. The governed source
+    planner/model must still resolve the named application. It only protects
+    the conversation boundary from treating ``also``/``as well`` as either a
+    subject replacement or an unrelated clarification answer.
+    """
+    text = str(query or "").strip()
+    additive_marker = bool(re.search(
+        r"\b(?:also|as\s+well|in\s+addition|too)\b", text, re.I,
+    ))
+    local_application_answer = bool(re.search(
+        r"\b(?:it|this|that|the\s+(?:laptop|computer|pc|machine))\s+"
+        r"(?:must|needs?\s+to|should|has\s+to|will)\s+run\s+.+?\s+locally\b",
+        text,
+        re.I,
+    ))
+    if not additive_marker and not local_application_answer:
+        return False
+    return bool(re.search(
+        r"\b(?:must|needs?\s+to|should|has\s+to|will)\s+(?:also\s+)?(?:run|support|handle)\b"
+        r"|\b(?:run|support|handle)\b.{0,100}\b(?:also|as\s+well|too)\b",
+        text,
+        re.I,
+    )) or local_application_answer
 
 
 def deterministic_named_workload_switch(query: str) -> bool:

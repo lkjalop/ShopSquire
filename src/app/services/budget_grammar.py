@@ -66,7 +66,7 @@ def interpret_price_intent(text: str) -> Optional[PriceIntent]:
         return None
     q = str(text or "").lower()
     affordability = bool(
-        re.search(r"\b(?:is|would|will|could)\s*(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)?\s*[\d,]+(?:\.\d+)?\s+(?:be\s+)?(?:enough|ok|okay|acceptable)\b", q)
+        re.search(r"\b(?:is|would|will|could)\s*(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)?\s*[\d,]+(?:\.\d+)?\s+(?:be\s+)?(?:enough|sufficient|insufficient|ok|okay|acceptable|excessive|overkill|too\s+much)\b", q)
         or re.search(r"\benough\b[^\d$€£]{0,18}(?:at|with|on)\s*(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)?\s*[\d,]+", q)
     )
     if affordability and parsed.budget_max is not None:
@@ -278,6 +278,14 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
         if v is not None and v >= _floor:
             return BudgetParse(v, None, "floor")
 
+    # Explicit approximation language must win over the broad budget/spend
+    # anchor below. This is a preferred target, not a hard ceiling.
+    m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
+
     # 6) budget-anchored single value BEFORE the around-band — "can spend about $2000" is a stated
     #    CEILING (the buyer named their limit), not a fuzzy band. "budget is 1600", "budget: $1,400".
     m = re.search(rf"\b(?:budget|spend|afford\w*)\b[^\d$€£]{{0,18}}{_CUR}?\s*{_NUM}{_UNIT_GUARD}(?!\s*(?:-|–|—|to|and)\s*[\$€£]?\d)", q)
@@ -287,10 +295,12 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
             return BudgetParse(None, v, "ceiling")
 
     # 7) around — "around 1500", "about $2k", "roughly 1200" → ±20% band
-    # Affordability question: "is $1800 enough?", "would 1500 be enough?", or
-    # "do I have enough at $1000?". This is a proposed maximum, not a product specification.
-    m = (re.search(rf"\b(?:is|would|will|could)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?enough\b", q)
-         or re.search(rf"\b(?:is|would)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?(?:ok|okay|acceptable)\b{_UNIT_GUARD}", q)
+    # Affordability question: "is $1800 enough?", "is AUD 3000 excessive
+    # for X?", or "do I have enough at $1000?". This is a proposed maximum,
+    # not a product specification. The adjective is buyer-facing semantics;
+    # it must not cause the amount to disappear before workload resolution.
+    m = (re.search(rf"\b(?:is|would|will|could)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?(?:enough|sufficient|insufficient)\b", q)
+         or re.search(rf"\b(?:is|would)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?(?:ok|okay|acceptable|excessive|overkill|too\s+much)\b{_UNIT_GUARD}", q)
          or re.search(rf"\benough\b[^\d$â‚¬Â£]{{0,18}}(?:at|with|on)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q))
     if m:
         v = _to_int(m.group(1), m.group(2))

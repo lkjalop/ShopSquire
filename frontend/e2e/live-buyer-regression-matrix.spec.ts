@@ -137,9 +137,66 @@ test('a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled resea
   expect(dispatched.postDataJSON().authorization_basis).toMatch(/buyer_action|tenant_policy/);
   await expect(page.getByText(
     /Approved-source research (?:completed|could not complete)/i,
-  )).toBeVisible({ timeout: 40_000 });
+  ).last()).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
+  await context.close();
+});
+
+test('BG3 affordability plus Emulate3D additive workload retains budget and researches the combined case', async ({ browser }) => {
+  test.setTimeout(300_000);
+  const { context, page } = await openBuyer(browser, 'bg3-emulate3d-additive');
+
+  const bg3 = await send(page, "Is AUD 3,000 excessive for Baldur's Gate 3");
+  expect(bg3.confirmed_slots?.budget_max).toBe(3000);
+  expect(bg3.price_intent).toMatchObject({
+    mode: 'affordability_check', target: 3000, hard_ceiling: 3000,
+  });
+  expect(String(bg3.assistant_message || '')).toMatch(
+    /(?:AUD\s*)?\$?3,000 is ample for Baldur's Gate 3/i,
+  );
+  expect(bg3.products?.length || 0).toBeGreaterThan(0);
+  expect(bg3.workload_authorization?.evidence?.[0]).toMatchObject({
+    canonical_title: "Baldur's Gate 3",
+    publisher: 'Larian Studios',
+    app_id: '1086940',
+    release_state: 'released',
+    requirements_completeness: 'minimum_and_recommended',
+  });
+
+  const researchRequest = page.waitForRequest(
+    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
+    { timeout: 60_000 },
+  );
+  const combined = await send(page, 'It must run Rockwell Emulate3D locally as well');
+  expect(combined.shopping_case_id).toBe(bg3.shopping_case_id);
+  expect(combined.confirmed_slots?.budget_max).toBe(3000);
+  expect(combined.case_additive_workload).toMatchObject({
+    status: 'retained_and_added',
+    commerce_authority: 'none',
+  });
+  expect(combined.case_additive_workload?.combined_purpose).toMatch(
+    /Baldur's Gate 3.*Rockwell Emulate3D/i,
+  );
+  expect(combined.products || []).toHaveLength(0);
+  expect(combined.ambiguity_exploration).toMatchObject({
+    status: 'provisional',
+    evidence: 'partial_identity_material_gap',
+  });
+
+  const panel = page.getByTestId('ambiguity-exploration');
+  await expect(panel).toContainText(/Baldur's Gate 3/i);
+  await expect(panel).toContainText(/Rockwell Emulate3D/i);
+  await expect(page.getByTestId('product-shelves')).toHaveCount(0);
+  const dispatched = await researchRequest;
+  expect(dispatched.postDataJSON()).toMatchObject({
+    research_authorized: true,
+    authorization_basis: 'tenant_policy',
+    research_plan_id: combined.ambiguity_exploration.research_plan_id,
+  });
+  await expect(page.getByText(
+    /Approved-source research (?:completed|could not complete)/i,
+  )).toBeVisible({ timeout: 40_000 });
   await context.close();
 });
 

@@ -21,6 +21,7 @@ describe('hasNamedGameWorkload', () => {
     expect(hasNamedGameWorkload('can this laptop run Heroes of Might and Magic III Remake?')).toBe(true);
     expect(hasNamedGameWorkload('I want a laptop that can play Cyberpunk 2077')).toBe(true);
     expect(hasNamedGameWorkload('I need a laptop for Baldurs Gate 3')).toBe(true);
+    expect(hasNamedGameWorkload("Is AUD 3,000 excessive for Baldur's Gate 3")).toBe(true);
     expect(hasNamedGameWorkload('I need a laptop for university study')).toBe(false);
     expect(hasNamedGameWorkload('I need a laptop for game development')).toBe(false);
   });

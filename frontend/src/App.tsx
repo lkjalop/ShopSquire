@@ -2624,10 +2624,13 @@ export default function App() {
           const continuesActiveCase = Boolean(
             activeShoppingCase?.case_id && activeShoppingCase.case_id === incomingCaseId,
           );
+          const materiallyAmendsActiveCase = Boolean(
+            data?.case_additive_workload?.status === 'retained_and_added',
+          );
           // The normal chat response can carry the original provisional projection.
           // It must not downgrade a researched same-case projection or replace the
           // durable case trace after later quantity/budget follow-ups.
-          if (!continuesActiveCase) {
+          if (!continuesActiveCase || materiallyAmendsActiveCase) {
             setAmbiguityExploration({
               ...data.ambiguity_exploration,
               ...(sourceIntake?.source_intake_certificate ? {
@@ -2644,7 +2647,7 @@ export default function App() {
             revision: Number(data?.interpretation_job?.case_revision || 1),
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
-          if (!continuesActiveCase) {
+          if (!continuesActiveCase || materiallyAmendsActiveCase) {
             setProductShelves(
               data?.product_shelves?.schema_version === 'product-shelves-v1'
                 ? data.product_shelves as ProductShelfProjection
