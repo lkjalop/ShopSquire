@@ -520,6 +520,7 @@ def ensure_case_state(
     subject_ref: str,
     authoritative_anchor: dict[str, Any],
     now_iso: str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     if not all(str(value or "").strip() for value in (tenant_id, case_id, session_epoch, subject_ref)):
         raise ValueError("conversation_case_scope_required")
@@ -560,7 +561,8 @@ def ensure_case_state(
             "state": _json(state), "timestamp": timestamp,
         },
     )
-    db.commit()
+    if commit:
+        db.commit()
     return {"case_state_id": state_id, "version": revision, "state": state, "created": True}
 
 
@@ -714,6 +716,180 @@ def get_case_state(db, *, tenant_id: str, case_id: str, session_epoch: str) -> d
         {"tenant": tenant_id, "case_id": case_id, "epoch": session_epoch},
     ).first()
     return json.loads(row[0]) if row else {}
+
+
+def commit_turn_transition(
+    db,
+    *,
+    tenant_id: str,
+    session_epoch: str,
+    subject_ref: str,
+    commit: Any,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """Atomically commit one complete conversational turn against one case revision.
+
+    The durable JSON document and its buyer/trace read model advance together.
+    Redis may cache the returned read model, but it is never an authority here.
+    """
+    from src.app.services.procurement_case_state import (
+        CasePatch,
+        MoneyConstraint,
+        ProcurementCaseState,
+        apply_case_patch_set,
+        project_legacy_case_anchor,
+    )
+    from src.app.services.shopping_case_revision import advance_material_case_revision
+    from src.app.services.turn_transition import (
+        TurnCommit,
+        TurnTransition,
+        build_turn_read_model,
+    )
+
+    accepted = commit if isinstance(commit, TurnCommit) else TurnCommit.model_validate(commit)
+    if accepted.case_id == "" or not all(str(value or "").strip() for value in (
+        tenant_id, session_epoch, subject_ref,
+    )):
+        raise ValueError("conversation_case_scope_required")
+    row = db.execute(text(
+        "SELECT id,state_json,version FROM conversation_case_state "
+        "WHERE tenant_id=:tenant AND case_id=:case_id AND session_epoch=:epoch "
+        "AND subject_ref=:subject"
+    ), {
+        "tenant": tenant_id, "case_id": accepted.case_id,
+        "epoch": session_epoch, "subject": subject_ref,
+    }).first()
+    if not row:
+        raise ValueError("conversation_case_not_found")
+    version = int(row[2])
+    identity = hashlib.sha256(
+        f"{tenant_id}|{session_epoch}|{accepted.idempotency_key}|turn_commit".encode()
+    ).hexdigest()
+    existing = db.execute(text(
+        "SELECT status FROM conversation_case_amendment WHERE id=:id"
+    ), {"id": identity}).first()
+    current = json.loads(row[1])
+    if existing:
+        return {
+            "turn_commit_id": identity,
+            "status": existing[0],
+            "idempotent": True,
+            "version": version,
+            "read_model": current.get("turn_read_model"),
+        }
+    if version != accepted.expected_revision:
+        raise ValueError("case_revision_conflict")
+
+    prior_read_model = current.get("turn_read_model")
+    typed_raw = current.get("procurement_case_state")
+    typed = (
+        ProcurementCaseState.model_validate({**typed_raw, "revision": version})
+        if isinstance(typed_raw, dict)
+        else project_legacy_case_anchor({**current, "case_id": accepted.case_id, "revision": version})
+    )
+    normalized_patches = [CasePatch.model_validate(item) for item in accepted.case_patches]
+    if normalized_patches:
+        typed = apply_case_patch_set(
+            typed, expected_revision=version, patches=normalized_patches,
+        ).state
+    next_workloads = list(typed.workloads)
+    if accepted.transition in {TurnTransition.REPLACE_WORKLOAD, TurnTransition.NEW_CATEGORY}:
+        next_workloads = list(dict.fromkeys(accepted.workloads))
+    elif accepted.transition == TurnTransition.ADD_WORKLOAD:
+        next_workloads = list(dict.fromkeys([*next_workloads, *accepted.workloads]))
+    elif accepted.workloads:
+        next_workloads = list(dict.fromkeys(accepted.workloads))
+
+    updates: dict[str, Any] = {
+        "objective": accepted.objective if accepted.objective is not None else typed.objective,
+        "workloads": next_workloads,
+        "research": dict(accepted.research),
+        "requirements": {
+            "accepted": list(accepted.requirements.accepted),
+            "rejected": list(accepted.requirements.rejected),
+            "unresolved": list(accepted.requirements.unresolved),
+        },
+        "authority": {
+            "catalog": accepted.catalog_authority,
+            "commerce": accepted.commerce_authority,
+            "external_research_authorized": accepted.external_research_authorized,
+        },
+    }
+    shared = dict(accepted.shared_constraints)
+    if isinstance(shared.get("budget"), dict):
+        updates["budget"] = MoneyConstraint.model_validate(shared["budget"])
+    if shared.get("requested_quantity") is not None:
+        updates["requested_quantity"] = int(shared["requested_quantity"])
+    typed = typed.model_copy(update=updates)
+
+    new_revision = version + 1
+    read_model = build_turn_read_model(accepted, revision=new_revision)
+    current["procurement_case_state"] = typed.model_copy(
+        update={"revision": new_revision},
+    ).model_dump(mode="json")
+    current["turn_transition"] = accepted.transition.value
+    current["pending_clarification"] = accepted.pending_clarification.model_dump(mode="json")
+    current["source_intake_receipts"] = list(accepted.source_intake_receipts)
+    current["turn_read_model"] = read_model.model_dump(mode="json")
+    current["objective"] = updates["objective"]
+    current["workloads"] = next_workloads
+    timestamp = _now(now_iso)
+
+    db.execute(text(
+        "INSERT INTO conversation_case_amendment "
+        "(id,case_state_id,tenant_id,case_id,session_epoch,source_message_id,trace_id,dialogue_act,"
+        "field_name,old_value_json,proposed_value_json,confidence,risk,requires_confirmation,status,reason,"
+        "provenance_json,supersedes_id,observed_at,effective_at,created_at) VALUES "
+        "(:id,:state_id,:tenant,:case_id,:epoch,:message,:trace,'turn_transition',"
+        "'turn_read_model',:old,:proposed,1.0,'low',:confirmation,'accepted',:reason,"
+        ":provenance,NULL,:observed,:effective,:created)"
+    ), {
+        "id": identity, "state_id": row[0], "tenant": tenant_id,
+        "case_id": accepted.case_id, "epoch": session_epoch,
+        "message": accepted.source_message_id, "trace": accepted.trace_id,
+        "old": _json(prior_read_model),
+        "proposed": _json(read_model.model_dump(mode="json")),
+        "confirmation": False, "reason": accepted.transition.value,
+        "provenance": _json({
+            "kind": "atomic_turn_commit",
+            "schema_version": accepted.schema_version,
+            "source_message_id": accepted.source_message_id,
+            "commerce_authority": False,
+        }),
+        "observed": timestamp, "effective": timestamp, "created": timestamp,
+    })
+    # Keep the compatibility purpose column synchronized in this same transaction.
+    tables = set(inspect(db.connection()).get_table_names())
+    if accepted.objective and "shopping_cases" in tables:
+        db.execute(text(
+            "UPDATE shopping_cases SET retained_purpose=:purpose,updated_at=:stamp "
+            "WHERE tenant_id=:tenant AND case_id=:case_id"
+        ), {
+            "purpose": accepted.objective, "stamp": timestamp,
+            "tenant": tenant_id, "case_id": accepted.case_id,
+        })
+    advanced = advance_material_case_revision(
+        db,
+        tenant_id=tenant_id,
+        case_id=accepted.case_id,
+        expected_revision=version,
+        reason=f"turn_transition:{accepted.transition.value.lower()}",
+        conversation_state_overrides={str(row[0]): current},
+        now_iso=timestamp,
+    )
+    if advanced != new_revision:
+        raise ValueError("case_revision_advance_mismatch")
+    db.commit()
+    return {
+        "turn_commit_id": identity,
+        "status": "accepted",
+        "idempotent": False,
+        "version": advanced,
+        "transition": accepted.transition.value,
+        "state": current,
+        "read_model": read_model.model_dump(mode="json"),
+        "commerce_authority": False,
+    }
 
 
 def record_case_turn(

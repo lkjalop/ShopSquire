@@ -64,16 +64,35 @@ def _request_tenant_id(request: Request | None) -> str:
 
 
 def _chat_in_progress(*, idempotency_key: str = "") -> Dict[str, Any]:
+    operation_key = str(idempotency_key or "")[:128] or None
     return {
         "status": "in_progress",
+        "schema_version": "completed-turn-envelope.v1",
         "retryable": True,
         "retry_after_ms": 750,
-        "idempotency_key": str(idempotency_key or "")[:128] or None,
+        "idempotency_key": operation_key,
+        "operation_id": f"chat:{operation_key}" if operation_key else None,
+        "retrieval": {
+            "method": "POST",
+            "path": "/api/v1/chat/query",
+            "idempotency_key": operation_key,
+        },
         "assistant_message": (
             "I’m still working on that request. Retrying with the same "
             "request key will return the completed result without running it twice."
         ),
     }
+
+
+def _chat_idempotency_cache_key(
+    *, tenant_id: str, uid: str, session_id: str, idempotency_key: str,
+) -> str:
+    """Scope a caller-controlled operation key without placing identity in Redis keys."""
+    scope = hashlib.sha256(
+        f"{tenant_id}|{uid}|{session_id}".encode("utf-8")
+    ).hexdigest()[:24]
+    operation = str(idempotency_key or "").strip()[:128]
+    return f"chat:idem:{scope}:{operation}"
 
 
 def _chat_request_timeout_seconds() -> float:
@@ -926,6 +945,9 @@ async def chat_query(
     rather than double-resolving. No key (or no redis) → straight through."""
     idem = (request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
             or (payload or {}).get("idempotency_key"))
+    transport_uid = _resolve_uid(payload, request)
+    transport_session = str((payload or {}).get("session_id") or "").strip()[:128]
+    transport_tenant = _request_tenant_id(request)
 
     async def _run() -> Dict[str, Any]:
         if not idem or redis is None:
@@ -942,7 +964,12 @@ async def chat_query(
         )
         return await _idem_single_flight(
             redis,
-            f"chat:idem:{str(idem)[:128]}",
+            _chat_idempotency_cache_key(
+                tenant_id=transport_tenant,
+                uid=transport_uid,
+                session_id=transport_session,
+                idempotency_key=str(idem),
+            ),
             lambda: _chat_query_impl(request, payload, redis, db, role),
             wait_timeout_seconds=wait_budget,
         )
@@ -1578,6 +1605,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     active_shopping_case_id = str(
         (payload or {}).get("shopping_case_id") or ""
     ).strip()[:200]
+    case_active_at_turn_start = bool(active_shopping_case_id)
     active_shopping_case_purpose = ""
     canonical_case_snapshot: Dict[str, Any] = {}
     additive_workload_receipt: Dict[str, Any] | None = None
@@ -1633,6 +1661,24 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         "revision": int(case_state_row[1]),
                     }
                     params["canonical_case"] = canonical_case_snapshot
+                    # Redis may accelerate recent-message and shortlist display,
+                    # but accepted buyer constraints come from the durable case
+                    # revision whenever one exists.
+                    durable_slots: Dict[str, Any] = {}
+                    durable_budget = canonical_case_snapshot.get("budget")
+                    if isinstance(durable_budget, dict):
+                        amount_minor = durable_budget.get("amount_minor")
+                        if amount_minor is not None:
+                            durable_slots["budget_max"] = int(amount_minor) // 100
+                            if durable_budget.get("scope") == "total":
+                                durable_slots["total_budget_cents"] = int(amount_minor)
+                        durable_slots["budget_scope"] = durable_budget.get("scope")
+                        durable_slots["currency"] = durable_budget.get("currency")
+                    durable_quantity = canonical_case_snapshot.get("requested_quantity")
+                    if durable_quantity is not None:
+                        durable_slots["order_quantity"] = int(durable_quantity)
+                    if durable_slots:
+                        payload["confirmed_slots"] = durable_slots
         except Exception as exc:
             logger.error("pre-router procurement case hydration failed", exc_info=True)
             raise HTTPException(
@@ -4294,6 +4340,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         out["agent_steps_readable"] = ResponseNormalizer.agent_steps_to_english(
             data.get("agent_steps") or []
         )
+    clarification_memory = None
+    pending_record = None
+    active_case_id = ""
+    turn_commit_succeeded = False
     try:
         if not persist_conversation:
             raise RuntimeError("temporary_chat")
@@ -4320,7 +4370,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             # local-vs-remote question with a bounded research plan. Do not
             # persist a stale copy of that earlier question for the next turn.
             material_question = None
-        pending_record = None
         if material_question:
             from src.app.services.clarification_state import build_pending_clarification, replacement_root_query
 
@@ -4355,20 +4404,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 original_intent=turn_intent,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
-        from src.app.services.clarification_state import persist_clarification_transition
-
-        persist_clarification_transition(
-            clarification_memory,
-            uid=uid,
-            prior=pending_clarification,
-            consume_prior=pending_clarification_consumed,
-            suspend_prior=pending_clarification_suspended,
-            replacement=pending_record,
-            ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
-        )
     except Exception:
         if persist_conversation:
-            logger.warning("pending chat clarification persistence failed", exc_info=True)
+            logger.warning("pending chat clarification preparation failed", exc_info=True)
     try:
         if not persist_conversation:
             raise RuntimeError("temporary_chat")
@@ -4405,10 +4443,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     observation_exc,
                 )
             # A transcript observation is not enough to preserve an active procurement
-            # case. Project the same turn through the canonical case reducer when the
-            # response carries a durable case identity. This is isolated from the request
-            # transaction and is advisory only: consequential amendments remain pending
-            # until the appropriate confirmation/execution boundary applies them.
+            # case. Commit the complete turn through the canonical case reducer when the
+            # response carries a durable case identity. The shopping-case id created by
+            # this request is authoritative; semantic/case anchors may be synthetic
+            # evidence identifiers and must never displace it.
             fulfillment_case = (
                 out.get("fulfillment_case")
                 if isinstance(out.get("fulfillment_case"), dict)
@@ -4418,14 +4456,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 out.get("case_anchor") if isinstance(out.get("case_anchor"), dict) else {}
             )
             active_case_id = str(
-                fulfillment_case.get("case_id") or case_anchor.get("case_id") or ""
+                out.get("shopping_case_id")
+                or (
+                    ambiguity_exploration.get("case_id")
+                    if isinstance(ambiguity_exploration, dict) else None
+                )
+                or fulfillment_case.get("case_id")
+                or case_anchor.get("case_id")
+                or ""
             ).strip()
             if active_case_id:
                 try:
                     from src.app.services.conversation_case_state import (
+                        commit_turn_transition,
                         ensure_case_state,
-                        record_case_turn,
-                        record_typed_case_patch_set,
+                    )
+                    from src.app.services.turn_transition import (
+                        PendingClarificationCommit,
+                        RequirementCommit,
+                        TurnCommit,
+                        derive_turn_transition,
                     )
 
                     bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
@@ -4484,6 +4534,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             session_epoch=session_epoch,
                             subject_ref=hash_uid(uid),
                             authoritative_anchor=anchor,
+                            # The initial case projection and this turn must
+                            # become visible together at one canonical revision.
+                            commit=False,
                         )
                         decision_payload = (
                             out.get("decision") if isinstance(out.get("decision"), dict) else {}
@@ -4493,40 +4546,208 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             out.get("case_patch_application")
                             if isinstance(out.get("case_patch_application"), dict) else None
                         )
-                        if preflight_application is not None:
-                            out["case_memory"] = dict(preflight_application)
-                        elif isinstance(case_patches, list) and case_patches:
-                            out["case_memory"] = record_typed_case_patch_set(
-                                case_db,
-                                tenant_id=tenant_id,
+                        routed_subject_action = str(
+                            routed_decision.get("subject_action") or ""
+                        ).strip().lower()
+                        transition = derive_turn_transition(
+                            active_case=case_active_at_turn_start,
+                            pending_clarification=pending_clarification,
+                            clarification_relation=routed_clarification_relation,
+                            subject_action=routed_subject_action,
+                            additive_workload=bool(additive_workload_receipt),
+                            commercial_amendment=bool(
+                                case_commercial_obligations
+                                or (isinstance(case_patches, list) and case_patches)
+                            ),
+                            new_category=bool(
+                                not case_active_at_turn_start
+                                and not subject_switch_receipt
+                            ),
+                            workload_refinement=bool(
+                                active_case_id and not subject_switch_receipt
+                                and isinstance(out.get("semantic_resolution"), dict)
+                            ),
+                        )
+                        pending_action = "none"
+                        if pending_record:
+                            pending_action = "replace"
+                        elif pending_clarification_consumed:
+                            pending_action = "consume"
+                        elif pending_clarification_suspended:
+                            pending_action = "suspend"
+                        elif pending_clarification:
+                            pending_action = "retain"
+                        workload_labels: list[str] = []
+                        if isinstance(additive_workload_receipt, dict):
+                            label = str(additive_workload_receipt.get("added_workload") or "").strip()
+                            if label:
+                                workload_labels.append(label)
+                        semantic_out = out.get("semantic_resolution")
+                        if isinstance(semantic_out, dict):
+                            for item in list(semantic_out.get("workload_hypotheses") or []):
+                                if isinstance(item, dict):
+                                    label = str(item.get("label") or item.get("name") or "").strip()
+                                    if label and label not in workload_labels:
+                                        workload_labels.append(label)
+                        source_receipts: list[dict[str, Any]] = []
+                        if isinstance(source_intake_result, dict):
+                            certificate = source_intake_result.get("source_intake_certificate")
+                            if isinstance(certificate, dict):
+                                source_receipts.append(certificate)
+                        accepted_requirements: list[dict[str, Any]] = []
+                        rejected_requirements: list[dict[str, Any]] = []
+                        unresolved_requirements: list[dict[str, Any]] = []
+                        for claim in buyer_requirement_claims:
+                            if not isinstance(claim, dict):
+                                continue
+                            status = str(claim.get("status") or claim.get("authority") or "").lower()
+                            if status in {"accepted", "verified", "approved"}:
+                                accepted_requirements.append(dict(claim))
+                            elif status in {"rejected", "blocked", "invalid"}:
+                                rejected_requirements.append(dict(claim))
+                            else:
+                                unresolved_requirements.append(dict(claim))
+                        if not accepted_requirements and not rejected_requirements and not unresolved_requirements and semantic_catalog_blocked:
+                            unresolved_requirements.append({"reason": "material_requirements_unresolved"})
+                        semantic_authority = str(
+                            (semantic_out or {}).get("catalog_authority")
+                            if isinstance(semantic_out, dict) else ""
+                        ).lower()
+                        catalog_authority = (
+                            semantic_authority
+                            if semantic_authority in {"permitted", "blocked"}
+                            else "blocked" if semantic_catalog_blocked else "unknown"
+                        )
+                        shared_constraints: dict[str, Any] = {}
+                        if out.get("requested_quantity") is not None:
+                            shared_constraints["requested_quantity"] = out.get("requested_quantity")
+                        budget_minor = response_confirmed_slots.get("total_budget_cents")
+                        if budget_minor is None and response_confirmed_slots.get("budget_max") is not None:
+                            budget_minor = int(response_confirmed_slots["budget_max"]) * 100
+                        if budget_minor is not None:
+                            shared_constraints["budget"] = {
+                                "amount_minor": int(budget_minor),
+                                "currency": str(
+                                    response_confirmed_slots.get("currency")
+                                    or out.get("currency") or "AUD"
+                                )[:3].upper(),
+                                "scope": str(
+                                    response_confirmed_slots.get("budget_scope") or "unknown"
+                                ),
+                            }
+                        out["case_memory"] = commit_turn_transition(
+                            case_db,
+                            tenant_id=tenant_id,
+                            session_epoch=session_epoch,
+                            subject_ref=hash_uid(uid),
+                            commit=TurnCommit(
                                 case_id=active_case_id,
-                                session_epoch=session_epoch,
-                                subject_ref=hash_uid(uid),
+                                expected_revision=int(ensured["version"]),
                                 source_message_id=user_message_id,
                                 idempotency_key=params_case_patch_idempotency_key,
-                                expected_version=int(ensured["version"]),
-                                patches=case_patches,
                                 trace_id=decision_trace_id,
+                                transition=transition,
+                                objective=(
+                                    active_shopping_case_purpose
+                                    or str(out.get("shopping_case_retained_purpose") or "").strip()
+                                    or str(q or "").strip()
+                                ),
+                                workloads=workload_labels,
+                                preserved_fields=list(
+                                    (additive_workload_receipt or {}).get("preserved_shared_constraints")
+                                    or (subject_switch_receipt or {}).get("retained_shared_fields")
+                                    or []
+                                ),
+                                cleared_fields=list(
+                                    (subject_switch_receipt or {}).get("cleared_fields") or []
+                                ),
+                                shared_constraints=shared_constraints,
+                                case_patches=(
+                                    list(case_patches)
+                                    if preflight_application is None and isinstance(case_patches, list)
+                                    else []
+                                ),
+                                pending_clarification=PendingClarificationCommit(
+                                    action=pending_action,
+                                    prior_question_id=str(
+                                        pending_clarification.get("question_id") or ""
+                                    ).strip() or None,
+                                    current=pending_record,
+                                ),
+                                external_research_authorized=turn_research_authorized,
+                                research={
+                                    "policy": turn_research_policy,
+                                    "execution_state": out.get("execution_state_envelope"),
+                                    "ambiguity_exploration": ambiguity_exploration,
+                                    "source_resolution": source_intake_result,
+                                },
+                                source_intake_receipts=source_receipts,
+                                requirements=RequirementCommit(
+                                    accepted=accepted_requirements,
+                                    rejected=rejected_requirements,
+                                    unresolved=unresolved_requirements,
+                                ),
+                                catalog_authority=catalog_authority,
+                                assistant_message=str(out.get("assistant_message") or ""),
+                                right_panel=(
+                                    out.get("right_panel")
+                                    if isinstance(out.get("right_panel"), dict) else None
+                                ),
+                                products=[dict(item) for item in products if isinstance(item, dict)],
+                            ),
+                        )
+                        out["turn_read_model"] = out["case_memory"].get("read_model")
+                        committed_state = out["case_memory"].get("state")
+                        if isinstance(committed_state, dict):
+                            out["procurement_case_state"] = committed_state.get(
+                                "procurement_case_state"
                             )
-                        else:
-                            out["case_memory"] = record_case_turn(
-                                case_db,
-                                tenant_id=tenant_id,
-                                case_id=active_case_id,
-                                session_epoch=session_epoch,
-                                subject_ref=hash_uid(uid),
-                                source_message_id=user_message_id,
-                                trace_id=decision_trace_id,
-                                message=q,
-                            )
+                        out["case_revision"] = out["case_memory"].get("version")
+                        out["shopping_case_revision"] = out["case_memory"].get("version")
+                        turn_commit_succeeded = True
                 except Exception as case_state_exc:
-                    logger.warning(
-                        "conversation case projection unavailable tenant=%s case=%s trace=%s: %s",
+                    logger.error(
+                        "atomic conversation turn commit failed tenant=%s case=%s trace=%s: %s",
                         tenant_id,
                         active_case_id,
                         decision_trace_id,
                         case_state_exc,
+                        exc_info=True,
                     )
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    status_code = 409 if "case_revision_conflict" in str(case_state_exc) else 503
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail={
+                            "code": "turn_commit_failed",
+                            "case_id": active_case_id,
+                            "trace_id": decision_trace_id,
+                            "retryable": status_code != 409,
+                        },
+                    ) from case_state_exc
+        if clarification_memory is not None and (not active_case_id or turn_commit_succeeded):
+            # Redis is a short-lived acceleration cache only. The authoritative
+            # clarification transition was committed in the case revision above.
+            from src.app.services.clarification_state import persist_clarification_transition
+
+            persist_clarification_transition(
+                clarification_memory,
+                uid=uid,
+                prior=pending_clarification,
+                consume_prior=pending_clarification_consumed,
+                suspend_prior=pending_clarification_suspended,
+                replacement=pending_record,
+                ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
+            )
+    except HTTPException:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
     except Exception:
         if persist_conversation:
             logger.warning("chat message persistence failed", exc_info=True)
@@ -4559,6 +4780,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             case_anchor=(
                 out.get("case_anchor")
                 if isinstance(out.get("case_anchor"), dict) else None
+            ),
+            turn_read_model=(
+                out.get("turn_read_model")
+                if isinstance(out.get("turn_read_model"), dict) else None
             ),
         )
         if persistence_receipt.errors:

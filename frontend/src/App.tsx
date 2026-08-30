@@ -2375,6 +2375,22 @@ export default function App() {
             throw new Error('chat_completion_poll_timeout');
           }
         }
+        // A completed case turn has one revision-bound projection. The assistant,
+        // shelves, right panel and Decision Trace must consume it together rather
+        // than independently re-deriving which response fields are current.
+        const turnReadModel = data?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
+          ? data.turn_read_model : null;
+        if (turnReadModel) {
+          data = {
+            ...data,
+            assistant_message: turnReadModel.assistant_message ?? data.assistant_message,
+            right_panel: turnReadModel.right_panel ?? data.right_panel,
+            products: Array.isArray(turnReadModel.products) ? turnReadModel.products : data.products,
+            decision_trace_id: turnReadModel.trace_id || data.decision_trace_id,
+            case_revision: turnReadModel.case_revision,
+            shopping_case_revision: turnReadModel.case_revision,
+          };
+        }
         mergeTrustEvidence(data);
         const governedOutcome = nonRecommendationOutcome(data);
         if (governedOutcome) {
@@ -2644,7 +2660,7 @@ export default function App() {
             case_id: incomingCaseId,
             retained_purpose: String(data.ambiguity_exploration.retained_purpose || ''),
             uid,
-            revision: Number(data?.interpretation_job?.case_revision || 1),
+            revision: Number(data?.case_revision || data?.interpretation_job?.case_revision || 1),
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
           if (!continuesActiveCase || materiallyAmendsActiveCase) {
@@ -2668,7 +2684,10 @@ export default function App() {
             revision: Number(data?.shopping_case_revision || 1),
           });
         }
-        setTraceEvidence(data.evidence || null);
+        setTraceEvidence({
+          ...(data.evidence && typeof data.evidence === 'object' ? data.evidence : {}),
+          ...(turnReadModel ? { turn_read_model: turnReadModel } : {}),
+        });
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
         // Pin the sourcing trace to THIS turn when it produced a sourcing preview. If the turn carries NO
         // procurement context at all (no sourcing preview, no open case, no bulk options/quantity), RELEASE

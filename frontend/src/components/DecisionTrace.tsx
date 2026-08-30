@@ -665,6 +665,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // component can use the authenticated operator projection rather than the buyer-safe trace summary.
   const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
+  const localTurnProjection = evidence?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
+    ? evidence.turn_read_model : null;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -695,7 +697,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
+  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
   const noTraceTelemetrySentRef = useRef(false);
@@ -995,6 +997,25 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     let es: EventSource | null = null;
     let ws: WebSocket | null = null;
     let pollIv: ReturnType<typeof setInterval> | null = null;
+    let terminalTransportFailure = false;
+
+    if (localTurnProjection) {
+      setTrace({
+        decision_id: String(localTurnProjection.trace_id || currentTraceId),
+        timestamp: new Date().toISOString(),
+        input_query: String(localTurnProjection.objective || ''),
+        products: Array.isArray(localTurnProjection.products) ? localTurnProjection.products : [],
+        right_panel: localTurnProjection.right_panel || null,
+      });
+    }
+
+    const stopLiveTransport = () => {
+      if (pollIv !== null) { clearInterval(pollIv); pollIv = null; }
+      try { es?.close(); } catch {}
+      es = null;
+      try { ws?.close(); } catch {}
+      ws = null;
+    };
 
     const mergeEvents = (incoming: any[]) => {
       if (!mounted || !Array.isArray(incoming)) return;
@@ -1022,19 +1043,37 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
           }
           return;
         }
-        // fallback to query endpoint
+        if (r.status === 401 || r.status === 403) {
+          terminalTransportFailure = true;
+          stopLiveTransport();
+          if (mounted) setStreamMode('auth');
+          return;
+        }
+        if (r.status === 429) {
+          terminalTransportFailure = true;
+          stopLiveTransport();
+          return;
+        }
+        // Query fallback is only for a missing/degraded projection. Authentication
+        // failures are terminal and must never become a 401 -> polling -> 429 loop.
         const qr = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}/query?include_events=true`), {
           signal: ctl.signal,
           credentials: 'include',
           headers: authHeaders,
         });
+        if (qr.status === 401 || qr.status === 403 || qr.status === 429) {
+          terminalTransportFailure = true;
+          stopLiveTransport();
+          if (mounted && (qr.status === 401 || qr.status === 403)) setStreamMode('auth');
+          return;
+        }
         if (!qr.ok) throw new Error(`trace_query_${qr.status}`);
         const qd = await safeJson(qr);
         if (!mounted || !qd) return;
         setTrace(qd as any);
         if (Array.isArray((qd as any).events)) setEvents((qd as any).events);
       } catch {
-        if (mounted) setTrace(null);
+        if (mounted && !localTurnProjection) setTrace(null);
       } finally {
         if (mounted) setUpdating(false);
       }
@@ -1050,13 +1089,19 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     // trace with no live updates AND no fallback.
     let fallbackStarted = false;
     const startPoll = () => {
-      if (!mounted || pollIv !== null) return;
+      if (!mounted || terminalTransportFailure || pollIv !== null) return;
       setStreamMode('poll');
       pollIv = setInterval(fetchCanonicalTrace, 5000);
     };
     const startFallback = () => {
-      if (!mounted || fallbackStarted || es) return;
+      if (!mounted || terminalTransportFailure || fallbackStarted || es) return;
       fallbackStarted = true;
+      // EventSource cannot attach the operator x-api-key. Use authenticated fetch
+      // polling when a key is present instead of deliberately opening a 401 SSE.
+      if (effectiveApiKey) {
+        startPoll();
+        return;
+      }
       try {
         if ((window as any).EventSource) {
           const source = new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`));
@@ -2033,6 +2078,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </div>
               ))}
             </div>
+            {localTurnProjection && (
+              <div
+                data-testid="revision-bound-turn-projection"
+                style={{ padding: '7px 18px', borderBottom: '1px solid #dbe4ef', color: '#42526b', fontSize: 12 }}
+              >
+                Case revision <strong>{localTurnProjection.case_revision}</strong>
+                {' · '}transition <strong>{localTurnProjection.transition}</strong>
+                {' · '}catalog authority <strong>{localTurnProjection.catalog_authority}</strong>
+              </div>
+            )}
             {/* Tabs */}
             <div className={styles.sectionTabs} aria-label="Decision Trace sections">
               {TRACE_SECTIONS.filter((section) => section.id !== 'audit-technical').map((section) => (

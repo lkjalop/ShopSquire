@@ -9,6 +9,7 @@ from src.app.services.conversation_case_state import (
     CaseTurn,
     apply_case_amendment,
     classify_case_turn,
+    commit_turn_transition,
     decompose_case_obligations,
     ensure_case_state,
     get_case_state,
@@ -16,6 +17,7 @@ from src.app.services.conversation_case_state import (
     record_typed_case_patch_set,
     reduce_case_obligations,
 )
+from src.app.services.turn_transition import TurnCommit, TurnTransition
 
 
 class _FakeResult:
@@ -147,6 +149,94 @@ def test_material_patch_advances_one_revision_across_case_projections() -> None:
     state = json.loads(row.state_json)
     assert state["procurement_case_state"]["revision"] == 2
     assert state["procurement_case_state"]["requested_quantity"] == 30
+
+
+def test_atomic_turn_commit_advances_one_revision_and_publishes_one_read_model() -> None:
+    db = _db()
+    ShoppingCase.__table__.create(db.bind)
+    db.add(ShoppingCase(
+        case_id="case-1", tenant_id="tenant-a", uid="buyer-1",
+        status="active", retained_purpose="Gaming", revision=1,
+    ))
+    db.commit()
+    _seed(db)
+    result = commit_turn_transition(
+        db,
+        tenant_id="tenant-a",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        commit=TurnCommit(
+            case_id="case-1",
+            expected_revision=1,
+            source_message_id="message-emulate",
+            idempotency_key="idem-emulate",
+            transition=TurnTransition.ADD_WORKLOAD,
+            objective="Gaming plus Rockwell Emulate3D",
+            workloads=["Rockwell Emulate3D"],
+            preserved_fields=["budget", "requested_quantity"],
+            pending_clarification={"action": "consume", "prior_question_id": "locality"},
+            research={"status": "planned"},
+            requirements={"unresolved": [{"field": "official_requirements"}]},
+            catalog_authority="blocked",
+            assistant_message="I retained the shared constraints and added Emulate3D.",
+        ),
+        now_iso="2026-08-30T04:00:00+00:00",
+    )
+    assert result["version"] == 2
+    state = get_case_state(
+        db, tenant_id="tenant-a", case_id="case-1", session_epoch="epoch-1",
+    )
+    assert state["turn_transition"] == "ADD_WORKLOAD"
+    assert state["turn_read_model"]["case_revision"] == 2
+    assert state["turn_read_model"]["pending_clarification"]["action"] == "consume"
+    assert state["procurement_case_state"]["workloads"] == ["Rockwell Emulate3D"]
+    assert state["procurement_case_state"]["authority"]["catalog"] == "blocked"
+    assert db.query(ShoppingCase).filter_by(case_id="case-1").one().retained_purpose == (
+        "Gaming plus Rockwell Emulate3D"
+    )
+    amendment = db.execute(text(
+        "SELECT old_value_json,proposed_value_json FROM conversation_case_amendment "
+        "WHERE dialogue_act='turn_transition'"
+    )).one()
+    assert amendment.old_value_json is None
+    assert json.loads(amendment.proposed_value_json)["case_revision"] == 2
+
+    second = commit_turn_transition(
+        db,
+        tenant_id="tenant-a",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        commit=TurnCommit(
+            case_id="case-1",
+            expected_revision=2,
+            source_message_id="message-scale",
+            idempotency_key="idem-scale",
+            transition=TurnTransition.REFINE_WORKLOAD,
+            objective="Small PLC models with occasional large factory simulation",
+            workloads=["Rockwell Emulate3D"],
+            shared_constraints={
+                "budget": {"amount_minor": 300_000, "currency": "AUD", "scope": "total"},
+            },
+            catalog_authority="blocked",
+            assistant_message="I retained Emulate3D and refined the simulation scale.",
+        ),
+        now_iso="2026-08-30T04:01:00+00:00",
+    )
+    assert second["version"] == 3
+    durable = get_case_state(
+        db, tenant_id="tenant-a", case_id="case-1", session_epoch="epoch-1",
+    )
+    assert durable["turn_read_model"]["case_revision"] == 3
+    assert durable["turn_read_model"]["transition"] == "REFINE_WORKLOAD"
+    rows = db.execute(text(
+        "SELECT old_value_json,proposed_value_json FROM conversation_case_amendment "
+        "WHERE dialogue_act='turn_transition' ORDER BY created_at"
+    )).fetchall()
+    assert json.loads(rows[-1].old_value_json)["case_revision"] == 2
+    assert json.loads(rows[-1].proposed_value_json)["case_revision"] == 3
+    assert durable["procurement_case_state"]["budget"] == {
+        "amount_minor": 300_000, "currency": "AUD", "scope": "total",
+    }
 
 
 def test_status_and_summary_read_case_without_proposing_a_mutation() -> None:

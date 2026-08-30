@@ -36,6 +36,7 @@ def persist_chat_result(
     confirmed_slots: dict[str, Any] | None = None,
     semantic_resolution: dict[str, Any] | None = None,
     case_anchor: dict[str, Any] | None = None,
+    turn_read_model: dict[str, Any] | None = None,
 ) -> ChatResultPersistenceReceipt:
     """Persist a completed assistant result through independent optional stores."""
     errors: list[str] = []
@@ -70,6 +71,7 @@ def persist_chat_result(
             confirmed_slots=confirmed_slots,
             semantic_resolution=semantic_resolution,
             case_anchor=case_anchor,
+            turn_read_model=turn_read_model,
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )
@@ -152,6 +154,7 @@ def persist_chat_structured_state(
     confirmed_slots: dict[str, Any] | None = None,
     semantic_resolution: dict[str, Any] | None = None,
     case_anchor: dict[str, Any] | None = None,
+    turn_read_model: dict[str, Any] | None = None,
     tenant_id: str | None = None, session_epoch: str | None = None,
 ) -> None:
     """Persist bounded conversational state without recommendation dispatch authority."""
@@ -163,6 +166,8 @@ def persist_chat_structured_state(
     out.update({
         "last_chat_query": str(query or "")[:500], "last_chat_trace_id": trace_id,
         "last_chat_ts": int(time.time()),
+        "cache_only": True,
+        "durable_authority": "postgres_case_revision",
     })
     merged = dict(out.get("confirmed_slots") or {})
     if budget.get("budget_min") is not None:
@@ -204,6 +209,10 @@ def persist_chat_structured_state(
             out.pop("semantic_resolution", None)
     if isinstance(case_anchor, dict) and str(case_anchor.get("case_id") or "").strip():
         out["case_anchor"] = dict(case_anchor)
+    if isinstance(turn_read_model, dict):
+        # A convenience copy for reconnect rendering only. It never grants
+        # authority; its case id + revision point back to PostgreSQL truth.
+        out["turn_read_model_cache"] = dict(turn_read_model)
     mem.set_structured_state(uid, out)
     bank = mem.get_product_memory_bank(uid) or {}
     history = list(bank.get("chat_turns") or [])

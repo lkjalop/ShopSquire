@@ -46,6 +46,9 @@ async def idempotent_single_flight(
                 except Exception:
                     break
         if in_progress_factory is not None:
+            # The operation id is stable across SSE and query fallback calls. The
+            # caller can retrieve the completed envelope by repeating the request
+            # with this same idempotency key; no second orchestration is started.
             return in_progress_factory(key.rsplit(":", 1)[-1])
     try:
         result = await producer()
