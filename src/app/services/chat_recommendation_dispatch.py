@@ -139,6 +139,8 @@ async def dispatch_chat_recommendation(
             return normalize_chat_recommendation_result(v2_only_unavailable_response(
                 status=facade.status, reason=facade.reason, lane=facade.lane,
                 trace_id=command.trace_id,
+                query=command.query,
+                external_research_authorized=command.external_research_consent,
             ), command=command)
         from src.app.services.recommendation_compatibility import serve_v2_compatibility
         try:

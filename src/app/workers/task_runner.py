@@ -310,7 +310,11 @@ def _consumer_loop() -> None:
                 GROUP_NAME, CONSUMER_NAME,
                 {STREAM_NAME: ">"},
                 count=5,
-                block=2000,
+                # The shared Redis client has a 2 s operation timeout.  A 2 s
+                # server-side block races that timeout and turns an empty stream
+                # into a warning/reconnect loop.  Keep the normal idle poll well
+                # inside the transport boundary.
+                block=1000,
             )
             if not entries:
                 continue

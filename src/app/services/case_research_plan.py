@@ -21,12 +21,28 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 _ACRONYM = re.compile(r"\b(?:[A-Z][A-Z0-9+.-]{1,7}|[0-9]+[A-Z][A-Z0-9+.-]{0,6})\b")
 _PROPER_NAME = re.compile(
     r"\b(?:[A-Z][a-z0-9+_-]{2,})(?:\s+(?:[A-Z][A-Za-z0-9+_-]{2,}|"
-    r"[0-9]+[A-Z][A-Za-z0-9+_-]*|[0-9]{4}\s*R[0-9])){0,3}\b"
+    r"[0-9]+[A-Z][A-Za-z0-9+_-]*|[0-9]{4}(?:\s*R[0-9])?)){0,3}\b"
 )
 _NEGATED_CLAUSE = re.compile(
     r"\b(?:i\s+)?(?:do\s+not|don't|does\s+not|doesn't|without|not\s+interested\s+in)\b"
     r"[^.!?;]*(?:[.!?;]|$)",
     re.IGNORECASE,
+)
+_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z])")
+# Split a product stem from a digit-leading suffix (Emulate3D -> Emulate 3D)
+# while retaining meaningful tokens such as 8K, 3D, H264, and version years.
+_LETTER_DIGIT_BOUNDARY = re.compile(r"(?<=[A-Za-z])(?=\d)")
+_CURRENCY_AMOUNT = re.compile(
+    r"(?ix)"
+    r"(?:\b(?:AUD|USD|CAD|NZD|EUR|GBP)\s*[$€£]?|[$€£]\s*)"
+    r"\d[\d,]*(?:\.\d+)?\b"
+)
+_COMMERCIAL_NUMBER = re.compile(
+    r"(?ix)\b(?:budget(?:\s+(?:is|of|around|under|over|up\s+to))?|"
+    r"spend(?:ing)?(?:\s+(?:around|under|over|up\s+to))?|"
+    r"cost(?:ing)?(?:\s+(?:around|under|over|up\s+to))?)\s*"
+    r"\d[\d,]*(?:\.\d+)?\b"
 )
 _STOP = {
     "a", "an", "and", "are", "as", "at", "be", "buyer", "current", "do",
@@ -41,10 +57,29 @@ _GENERIC_ACTIVATION_PHRASES = {
 _DISCOVERY_FILLER = _STOP | {
     "acceptable", "actually", "anything", "care", "could", "engineering", "gaming", "good",
     "about", "but", "buy", "can", "could", "edit", "help", "laptop", "looking", "machine", "need",
-    "officially", "please", "process", "product", "recommend", "run", "should",
+    "officially", "play", "please", "process", "product", "recommend", "run", "should",
     "something", "supported", "suitable", "team", "thing", "this", "vendor",
-    "wants", "what", "which", "will", "would", "our",
+    "under", "wants", "what", "which", "will", "would", "our",
 }
+_PROPER_NAME_FILLER = _DISCOVERY_FILLER | {
+    "answer", "check", "compare", "find", "inspect", "look", "maybe", "tell",
+}
+
+
+def _lexical_boundaries(value: str) -> str:
+    """Expose CamelCase and letter/digit product boundaries to tokenization."""
+
+    split = _CAMEL_BOUNDARY.sub(" ", str(value or ""))
+    return _LETTER_DIGIT_BOUNDARY.sub(" ", split)
+
+
+def _sanitize_discovery_input(value: str) -> str:
+    """Remove transport and commercial data without deleting titles or versions."""
+
+    sanitized = _URL.sub(" ", str(value or ""))
+    sanitized = _CURRENCY_AMOUNT.sub(" ", sanitized)
+    sanitized = _COMMERCIAL_NUMBER.sub(" ", sanitized)
+    return _lexical_boundaries(sanitized)
 
 
 class CaseResearchHypothesis(BaseModel):
@@ -118,9 +153,7 @@ def _proper_names(value: str) -> tuple[list[str], set[str]]:
     for raw_name in _PROPER_NAME.findall(value):
         name = raw_name.strip()
         name_tokens = set(_TOKEN.findall(name.lower()))
-        if name.casefold() in {
-            "can", "could", "exclude", "only", "this", "we", "what", "which", "will",
-        } or name_tokens <= tokens:
+        if name.casefold() in _PROPER_NAME_FILLER or name_tokens <= _PROPER_NAME_FILLER or name_tokens <= tokens:
             continue
         names.append(name)
         tokens.update(name_tokens)
@@ -130,7 +163,7 @@ def _proper_names(value: str) -> tuple[list[str], set[str]]:
 def _discovery_subject(value: str) -> str:
     """Bound buyer prose to salient terms without classifying a workload."""
 
-    positive_text = _NEGATED_CLAUSE.sub(" ", str(value or ""))
+    positive_text = _NEGATED_CLAUSE.sub(" ", _sanitize_discovery_input(value))
     proper_names, proper_tokens = _proper_names(positive_text)
     acronyms = [
         item.strip("+.-") for item in _ACRONYM.findall(positive_text)
@@ -153,6 +186,24 @@ def _discovery_subject(value: str) -> str:
     return " ".join(terms) or "buyer described workload"
 
 
+def _publisher_domain_hypothesis(proper_names: list[str]) -> str | None:
+    """Return one low-authority origin hint for a named publisher/product pair.
+
+    This is deliberately only a search constraint. The resulting origin still
+    has to survive candidate ranking and explicit case approval before fetch.
+    """
+
+    if not proper_names:
+        return None
+    tokens = _TOKEN.findall(_lexical_boundaries(proper_names[0]).lower())
+    if len(tokens) < 2:
+        return None
+    stem = tokens[0]
+    if len(stem) < 4 or stem in _PROPER_NAME_FILLER or not stem.isalpha():
+        return None
+    return f"{stem}.com"
+
+
 def _source_terms(source: Mapping[str, Any]) -> set[str]:
     applicability = source.get("applicability") or {}
     values: list[str] = [
@@ -165,7 +216,7 @@ def _source_terms(source: Mapping[str, Any]) -> set[str]:
 
 
 def _normalized_phrase(value: str) -> str:
-    tokens = _TOKEN.findall(str(value or "").replace("_", " ").lower())
+    tokens = _TOKEN.findall(_lexical_boundaries(str(value or "").replace("_", " ")).lower())
     return " ".join(token[:-1] if len(token) > 4 and token.endswith("s") else token for token in tokens)
 
 
@@ -330,6 +381,12 @@ def build_case_research_plan(
         discovery_subject = _discovery_subject(purpose)
         proper_names, _ = _proper_names(_NEGATED_CLAUSE.sub(" ", purpose))
         requirements_subject = proper_names[0] if proper_names else discovery_subject
+        publisher_domain_hint = _publisher_domain_hypothesis(proper_names)
+        support_query = (
+            f"site:{publisher_domain_hint} {requirements_subject} documentation requirements"
+            if publisher_domain_hint
+            else f"{requirements_subject} vendor support certification security"
+        )
         return CaseResearchPlan(
             plan_id="crp-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             retained_purpose=purpose,
@@ -346,9 +403,13 @@ def build_case_research_plan(
             source_candidate_ids=[],
             publisher_status="unresolved",
             discovery_queries=[
+                # Resolve a bounded publisher-origin hypothesis first. Some
+                # public engines throttle later requests in a burst; spending
+                # the healthiest call on the authority candidate is safer than
+                # spending it on broad contextual results.
+                CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=support_query),
                 CaseDiscoveryQuery(query_id="concept", axis="concept_and_software", query=f"{discovery_subject} official documentation"),
                 CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{requirements_subject} system requirements compatibility"),
-                CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=f"{requirements_subject} vendor support certification security"),
             ],
             obligations=[
                 CaseResearchObligation(

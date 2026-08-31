@@ -828,6 +828,12 @@ async def _accept_requirement_proposal_with_db(
     accepted_case_origin = any(
         item.get("authority_status") == "case_origin_critic_accepted" for item in accepted
     )
+    reviewed_at = _now().isoformat()
+    review_resolution = (
+        "approved" if accepted and not rejected_ids
+        else "rejected" if rejected_ids and not accepted
+        else "partially_approved"
+    )
     result = {
         "schema_version": "requirement-acceptance-v1",
         "case_id": case_id,
@@ -842,6 +848,22 @@ async def _accept_requirement_proposal_with_db(
         "cart_mutation": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+        "review_receipt": {
+            "schema_version": "case-requirement-review-receipt-v1",
+            "reviewer_id": body.uid,
+            "reviewer_kind": "buyer_case_reviewer",
+            "reviewed_at": reviewed_at,
+            "resolution": review_resolution,
+            "approved_claim_ids": [item["claim_id"] for item in accepted],
+            "rejected_claim_ids": sorted(rejected_ids),
+            "authority_effect": (
+                "accepted_case_only" if accepted_case_origin
+                else "buyer_provisional_only" if accepted
+                else "no_claim_authority"
+            ),
+            "publisher_verification_granted": False,
+            "commerce_authority": "none",
+        },
     }
     case = db.execute(select(ShoppingCase).where(
         ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
@@ -962,6 +984,27 @@ async def _accept_requirement_proposal_with_db(
         reason="buyer_requirement_acceptance", now_iso=_now().isoformat(),
     )
     result["case_revision"] = case_revision
+    from src.app.services.research_outcome import build_research_outcome
+
+    result["research_outcome"] = build_research_outcome(
+        case_id=case_id,
+        case_revision=case_revision,
+        operation_id=f"requirement-acceptance:{proposal_id}:v{proposal.version + 1}",
+        research=(
+            result.get("corroboration")
+            if isinstance(result.get("corroboration"), dict)
+            else {"status": result["status"]}
+        ),
+        requirements={
+            "accepted": accepted,
+            "rejected": [source_by_id[claim_id] for claim_id in sorted(rejected_ids)],
+        },
+        catalog_authority=(
+            "permitted" if result["qualification_authority"] == "requirements"
+            else "provisional"
+        ),
+        commerce_authority="none",
+    ).model_dump(mode="json")
     propagate_case_supersession(
         db, tenant_id=tenant_id, case_id=case_id,
         amendment_id=f"requirement:{proposal_id}:v{proposal.version + 1}",
@@ -1399,6 +1442,17 @@ async def _resolve_case_evidence_source_with_db(
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
         "cart_mutation": "not_authorized", "supplier_send": "not_authorized",
     }
+    from src.app.services.research_outcome import build_research_outcome
+
+    base["research_outcome"] = build_research_outcome(
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        operation_id=f"source-intake:{resolution.submitted_url_hash or 'vendor'}",
+        research={"source_intake_certificate": source_intake_certificate},
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    ).model_dump(mode="json")
     try:
         log_trace_event(
             trace_id=base["trace_id"],
@@ -1522,6 +1576,14 @@ async def _resolve_case_evidence_source_with_db(
         case_id=case_id,
         tenant_id=tenant_id,
         uid=body.uid,
+        source_policy_review=selected.get("independent_review") or {},
+        research_lineage={
+            "status": research.get("status"),
+            "evidence_outcome": research.get("evidence_outcome"),
+            "provider_accounting": research.get("provider_accounting") or {},
+            "source_execution": research.get("source_execution") or [],
+            "claim_compilation_receipts": research.get("claim_compilation_receipts") or [],
+        },
     )
 
     from src.app.services.procurement_truth_adjudicator import (
@@ -1554,6 +1616,22 @@ async def _resolve_case_evidence_source_with_db(
         } if proposal else None),
         "canonical_truth": canonical_truth,
     }
+    result["research_outcome"] = build_research_outcome(
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        operation_id=f"source-research:{resolution.selected_source_id or 'unresolved'}",
+        research={
+            **research,
+            "source_intake_certificate": source_intake_certificate,
+        },
+        requirements={"accepted": accepted_claims, "rejected": rejected_claims},
+        catalog_authority=(
+            "permitted" if evidence_outcome == "product_requirements"
+            else "provisional" if shelves.get("sections")
+            else "blocked"
+        ),
+        commerce_authority="none",
+    ).model_dump(mode="json")
     if proposal is not None:
         db.commit()
     try:
@@ -1819,6 +1897,7 @@ async def _research_shopping_case_with_db(
             approved_sources=list(approved_sources),
             tenant_id=tenant_id,
             case_id=case_id,
+            uid=body.uid,
             case=case,
             hypothesis_ids=body.hypothesis_ids,
             candidate_configuration_ids=_case_catalog_candidate_set_from_trace(

@@ -4816,6 +4816,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 expected_revision=int(ensured["version"]),
                                 source_message_id=user_message_id,
                                 idempotency_key=params_case_patch_idempotency_key,
+                                operation_id=f"chat:{params_case_patch_idempotency_key}",
                                 trace_id=decision_trace_id,
                                 transition=transition,
                                 objective=(
@@ -4851,6 +4852,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     "execution_state": out.get("execution_state_envelope"),
                                     "ambiguity_exploration": ambiguity_exploration,
                                     "source_resolution": source_intake_result,
+                                    "workload_authorization": out.get("workload_authorization"),
                                 },
                                 source_intake_receipts=source_receipts,
                                 requirements=RequirementCommit(
@@ -4868,6 +4870,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             ),
                         )
                         out["turn_read_model"] = out["case_memory"].get("read_model")
+                        if isinstance(out["turn_read_model"], dict):
+                            out["research_outcome"] = out["turn_read_model"].get(
+                                "research_outcome"
+                            )
                         committed_state = out["case_memory"].get("state")
                         if isinstance(committed_state, dict):
                             out["procurement_case_state"] = committed_state.get(

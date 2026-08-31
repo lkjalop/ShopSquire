@@ -49,6 +49,30 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
   });
 
+  it('prefers the revision-bound research outcome over a stale legacy truth event', () => {
+    render(<WorkloadResearchTrace
+      executionSteps={[]}
+      researchOutcome={{
+        schema_version: 'research-outcome-v1', case_id: 'case-1', case_revision: 2,
+        discovery_status: 'completed', source_ownership_status: 'discovered_candidate',
+        fetch_status: 'not_attempted', parsed_claim_count: 0, held_claim_count: 0,
+        accepted_claim_count: 0, rejected_claim_count: 0,
+        requirement_completeness: 'identity_only', catalog_authority: 'blocked',
+        commerce_authority: 'none', next_action: 'approve_publisher_origin',
+        failure_code: 'publisher_not_yet_accepted',
+      }}
+      events={[{
+        event_type: 'open_world_discovery_completed',
+        payload: { canonical_truth: { research_execution: 'NOT_ATTEMPTED' } },
+      }]}
+    />);
+
+    expect(screen.getByTestId('research-outcome-summary')).toHaveTextContent(
+      /Publisher discovered.*Discovery: completed.*Catalog authority: blocked/i,
+    );
+    expect(screen.queryByTestId('canonical-procurement-truth')).toBeNull();
+  });
+
   it('renders every governed ladder rung and engine-level degradation truth', () => {
     render(<WorkloadResearchTrace executionSteps={[]} events={[{
       event_type: 'official_research_rerank_completed',

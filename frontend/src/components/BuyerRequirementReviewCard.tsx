@@ -11,6 +11,12 @@ export type BuyerRequirementClaim = {
   source_excerpt?: string;
   condition?: string | null;
   authority_status: 'unverified' | 'case_origin_critic_accepted' | string;
+  source_policy_review?: {
+    status?: string;
+    reviewer?: string;
+    reviewed_at?: string | null;
+    authority_effect?: string;
+  };
 };
 
 type Props = {
@@ -66,13 +72,33 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
       });
       await onAccept([...selected], choice, corrections);
       setCompleted(true);
-      setStatus(choice === 'local_only' ? 'Accepted for provisional browsing.' : 'Accepted; approved-source research requested.');
+      setStatus(selected.size === 0
+        ? 'Rejected all extracted requirements.'
+        : choice === 'local_only'
+          ? 'Reviewed for provisional browsing.'
+          : 'Reviewed; approved-source research requested.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not accept these requirements.');
     } finally {
       setBusy(false);
     }
   };
+  const rejectAll = async () => {
+    setSelected(new Set());
+    if (!onAccept || busy) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await onAccept([], 'local_only', []);
+      setCompleted(true);
+      setStatus('Rejected all extracted requirements.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not reject these requirements.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sourceReview = claims.find((claim) => claim.source_policy_review)?.source_policy_review;
   return (
     <section
       aria-label="Review extracted requirements"
@@ -94,6 +120,13 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
             ? 'These cited claims were extracted from the reviewed canonical publisher page. They may be used only as provisional buyer constraints until the independent source-policy review is signed off; no product or cart action was authorized.'
             : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
       </div>
+      {policyPendingSourceEvidence && sourceReview && (
+        <div data-testid="source-policy-review-receipt" style={{ marginTop: 6, fontSize: 12 }}>
+          Source-policy review: <strong>{label(sourceReview.status || 'not recorded')}</strong>
+          {' · '}reviewer <strong>{sourceReview.reviewer || 'not recorded'}</strong>
+          {' · '}observed <strong>{sourceReview.reviewed_at || 'not recorded'}</strong>
+        </div>
+      )}
       <ul style={{ margin: '8px 0 0', padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
         {claims.slice(0, 12).map((claim) => (
           <li key={claim.claim_id} style={{ listStyle: 'none', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 7px', background: '#fff' }}>
@@ -132,7 +165,10 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
       {onAccept && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
-            {caseOriginEvidence ? 'Accept case evidence' : 'Use provisionally'}
+            {caseOriginEvidence ? 'Accept selected case evidence' : 'Use selected provisionally'}
+          </button>
+          <button type="button" disabled={busy || completed} onClick={() => { void rejectAll(); }}>
+            Reject all
           </button>
           {!caseOriginEvidence && !policyPendingSourceEvidence && (
             <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>

@@ -1,5 +1,11 @@
+import pytest
+
 from src.app.services.case_research_plan import build_case_research_plan
 from src.app.services.open_world_research_discovery import discover_open_world_publishers
+from src.app.services.shopping_case_open_world_research import (
+    _consume_interpretation_with_bounded_wait,
+    _merge_governed_discovery_retry,
+)
 
 
 class StubFetcher:
@@ -137,9 +143,13 @@ def test_open_world_queries_lead_with_named_software_not_buyer_filler():
         allow_open_world=True,
     )
     assert plan is not None
-    assert all(row.query.lower().startswith("agisoft metashape") for row in plan.discovery_queries)
+    assert all(
+        row.query.lower().startswith("agisoft metashape")
+        for row in plan.discovery_queries[1:]
+    )
     assert all("process" not in row.query.lower() for row in plan.discovery_queries)
-    assert plan.discovery_queries[1].query == "Agisoft Metashape system requirements compatibility"
+    assert plan.discovery_queries[2].query == "Agisoft Metashape system requirements compatibility"
+    assert plan.discovery_queries[0].query.startswith("site:agisoft.com Agisoft Metashape")
 
 
 class PublisherHostFetcher(StubFetcher):
@@ -174,6 +184,7 @@ def test_named_publisher_host_outranks_blogs_with_the_same_requirements_title():
     )
 
     assert result["candidates"][0]["domain"] == "www.acmesolver.com"
+    assert result["candidates"][0]["registrable_domain"] == "acmesolver.com"
     assert result["candidates"][0]["authority"] == "not_accepted"
 
 
@@ -206,6 +217,57 @@ def test_completed_search_with_no_credible_publisher_remains_unresolved():
     assert result["candidates"] == []
     assert result["provider_accounting"]["discovery_calls"] == 3
     assert result["next_action"] == "approve_publisher_origin_or_upload_requirements"
+
+
+def test_model_retry_merge_caps_authority_and_accumulates_provider_calls():
+    primary = {
+        "status": "no_publisher_candidates", "candidates": [], "claims": [],
+        "receipts": [{"query_id": "q1"}],
+        "provider_accounting": {
+            "discovery_calls": 3, "external_calls": 3,
+            "official_origin_fetches": 0, "paid_calls": 0,
+        },
+    }
+    retry = {
+        "status": "publisher_candidates_found",
+        "candidates": [{
+            "url": "https://docs.vendor.example/requirements", "quality_score": 20,
+            "authority": "not_accepted",
+        }],
+        "claims": [{"attribute": "ram_gb", "value": 64}],
+        "receipts": [{"query_id": "model_1"}],
+        "provider_accounting": {
+            "discovery_calls": 1, "external_calls": 1,
+            "official_origin_fetches": 0, "paid_calls": 0,
+        },
+    }
+
+    merged = _merge_governed_discovery_retry(primary, retry)
+
+    assert merged["status"] == "publisher_candidates_found"
+    assert merged["provider_accounting"]["external_calls"] == 4
+    assert merged["claims"] == []
+    assert merged["candidates"][0]["authority"] == "not_accepted"
+
+
+@pytest.mark.asyncio
+async def test_completed_durable_query_plan_is_consumed_without_waiting(monkeypatch):
+    plan = build_case_research_plan("novel scientific solver", allow_open_world=True)
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.services.shopping_case_open_world_research.consume_completed_case_interpretation",
+        lambda *_args, **_kwargs: (plan, {
+            "status": "completed_durable", "authority": "discovery_proposal_only",
+        }),
+    )
+
+    proposed, receipt = await _consume_interpretation_with_bounded_wait(
+        object(), tenant_id="default", case_id="sc-1", case_revision=1, plan=plan,
+    )
+
+    assert proposed == plan
+    assert receipt["bounded_wait_ms"] == 600
+    assert receipt["fallback_used"] is False
 
 
 def test_cooperative_cancellation_stops_remaining_query_dispatches():

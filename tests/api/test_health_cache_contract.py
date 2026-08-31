@@ -49,3 +49,15 @@ def test_health_projects_typed_startup_capabilities(monkeypatch):
         "status": "degraded", "required": False,
         "error_code": "startup_optional_search_warmup_failed",
     }
+
+
+def test_readyz_exposes_research_policy_search_and_database_revision():
+    response = TestClient(create_app()).get("/readyz")
+    payload = response.json()
+
+    assert {"external_search", "source_governance", "database_revision"} <= set(
+        payload["components"]
+    )
+    assert "effective" in payload["components"]["external_search"]["details"]
+    assert "governance_status" in payload["components"]["source_governance"]["details"]
+    assert "revision" in payload["components"]["database_revision"]["details"]

@@ -11,6 +11,8 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.app.services.research_outcome import ResearchOutcome, build_research_outcome
+
 
 class TurnTransition(str, Enum):
     ANSWER_PENDING = "ANSWER_PENDING"
@@ -48,6 +50,7 @@ class TurnCommit(BaseModel):
     expected_revision: int = Field(ge=1)
     source_message_id: str = Field(min_length=1, max_length=200)
     idempotency_key: str = Field(min_length=1, max_length=200)
+    operation_id: str | None = Field(default=None, max_length=240)
     trace_id: str | None = Field(default=None, max_length=240)
     transition: TurnTransition
     objective: str | None = Field(default=None, max_length=2_000)
@@ -87,6 +90,7 @@ class RevisionBoundTurnReadModel(BaseModel):
     pending_clarification: PendingClarificationCommit
     external_research_authorized: bool
     research: dict[str, Any] = Field(default_factory=dict)
+    research_outcome: ResearchOutcome
     source_intake_receipts: list[dict[str, Any]] = Field(default_factory=list)
     requirements: RequirementCommit
     catalog_authority: Literal["permitted", "blocked", "unknown"]
@@ -128,6 +132,15 @@ def derive_turn_transition(
 
 
 def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBoundTurnReadModel:
+    outcome = build_research_outcome(
+        case_id=commit.case_id,
+        case_revision=revision,
+        operation_id=commit.operation_id,
+        research=commit.research,
+        requirements=commit.requirements.model_dump(mode="python"),
+        catalog_authority=commit.catalog_authority,
+        commerce_authority=commit.commerce_authority,
+    )
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         case_revision=revision,
@@ -140,6 +153,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         pending_clarification=commit.pending_clarification,
         external_research_authorized=commit.external_research_authorized,
         research=dict(commit.research),
+        research_outcome=outcome,
         source_intake_receipts=list(commit.source_intake_receipts),
         requirements=commit.requirements,
         catalog_authority=commit.catalog_authority,

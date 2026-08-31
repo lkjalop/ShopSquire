@@ -65,6 +65,7 @@ async def execute_enrolled_official_research(
     approved_sources: Sequence[dict[str, Any]],
     tenant_id: str,
     case_id: str,
+    uid: str,
     case: ShoppingCase,
     hypothesis_ids: list[str],
     candidate_configuration_ids: list[str],
@@ -242,6 +243,32 @@ async def execute_enrolled_official_research(
         "research_receipt": receipt.model_dump(mode="json"),
         "narration_projection": narration.model_dump(mode="json"),
     })
+    from src.app.services.source_requirement_review import create_source_review_proposal
+
+    provisional_claims = list(research.get("provisional_claims") or [])
+    provisional_source_id = str(
+        provisional_claims[0].get("source_id") if provisional_claims else ""
+    )
+    provisional_source = next((
+        source for source in sources
+        if str(source.get("source_id") or "") == provisional_source_id
+    ), sources[0] if sources else {})
+    review_claims, review_proposal = create_source_review_proposal(
+        db,
+        provisional_claims=provisional_claims,
+        source_id=provisional_source_id or "official-source",
+        case_id=case_id,
+        tenant_id=tenant_id,
+        uid=uid,
+        source_policy_review=provisional_source.get("independent_review") or {},
+        research_lineage={
+            "status": research.get("status"),
+            "evidence_outcome": research.get("evidence_outcome"),
+            "provider_accounting": research.get("provider_accounting") or {},
+            "source_execution": research.get("source_execution") or [],
+            "claim_compilation_receipts": research.get("claim_compilation_receipts") or [],
+        },
+    )
     mode = str(research.get("execution_mode") or "").strip().lower()
     accounting = research.get("provider_accounting") or {}
     if was_cancelled:
@@ -311,7 +338,28 @@ async def execute_enrolled_official_research(
         "supplier_send": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
         "canonical_truth": exploration["canonical_truth"],
+        "claims": review_claims,
+        "buyer_requirement_proposal": ({
+            "case_id": case_id,
+            "proposal_id": review_proposal.proposal_id,
+            "proposal_version": review_proposal.version,
+        } if review_proposal else None),
     }
+    from src.app.services.research_outcome import build_research_outcome
+
+    result["research_outcome"] = build_research_outcome(
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        operation_id=str(consent_receipt.get("execution_id") or "") or None,
+        research={**research, "evidence_outcome": outcome},
+        requirements={"accepted": research.get("claims") or [], "rejected": []},
+        catalog_authority=(
+            "permitted" if outcome == "product_requirements"
+            else "provisional" if after.get("sections")
+            else "blocked"
+        ),
+        commerce_authority="none",
+    ).model_dump(mode="json")
     case.retained_purpose = plan.retained_purpose
     case.updated_at = datetime.now(timezone.utc)
     from src.app.services.shopping_case_decision_persistence import (

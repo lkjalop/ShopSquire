@@ -14,18 +14,21 @@ async function openBuyer(browser: Browser, label: string) {
 }
 
 async function send(page: Page, text: string) {
-  // Interpretations are a persistence/preflight operation.  The completed
-  // revision-bound buyer projection is the chat answer envelope; accepting an
-  // interpretation response here reproduced the production UI race where a
-  // partial record briefly replaced the completed turn.
-  const chatResponse = page.waitForResponse(
-    response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
+  // A 204 interpretation is preflight and the completed chat envelope follows.
+  // A 200 interpretation is itself the terminal, revision-bound answer for the
+  // fast ambiguity lane; requiring a chat request after it creates a false wait.
+  const turnResponse = page.waitForResponse(
+    response => (
+      /\/api\/v1\/chat\/(stream|query)$/.test(response.url())
+      || (/\/api\/v1\/shopping-cases\/interpretations$/.test(response.url())
+        && response.status() !== 204)
+    ),
     { timeout: 90_000 },
   );
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(text);
   await input.press('Enter');
-  const response = await chatResponse;
+  const response = await turnResponse;
   const body = await response.text();
   if (!body.includes('data:')) return JSON.parse(body);
   const frames = body.replaceAll('\r\n', '\n').split('\n\n');
@@ -127,7 +130,40 @@ test('a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled resea
   await expect(page.getByText(
     /Approved-source research (?:completed|could not complete)/i,
   ).last()).toBeVisible({ timeout: 40_000 });
+  const outcome = page.getByTestId('research-outcome-summary');
+  await expect(outcome).toContainText(/Held for review/i);
+  const outcomeText = await outcome.textContent() || '';
+  const parsedCount = Number(outcomeText.match(/Parsed:\s*(\d+)/i)?.[1] || 0);
+  const heldCount = Number(outcomeText.match(/Held:\s*(\d+)/i)?.[1] || 0);
+  expect(parsedCount).toBeGreaterThan(0);
+  expect(heldCount).toBe(parsedCount);
+  await expect(outcome).toContainText(/Commerce authority:\s*none/i);
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
+  await page.getByTitle('Decision Trace').click();
+  const traceOutcome = page.getByTestId('revision-bound-research-outcome');
+  await expect(traceOutcome).toContainText(new RegExp(`0 accepted,\\s*${heldCount} held`, 'i'));
+  await page.getByTestId('decision-trace-modal').getByTitle('Close').click();
+  const review = page.getByTestId('buyer-requirement-review').last();
+  await expect(review.getByTestId('source-policy-review-receipt')).toContainText(
+    /shopsquire-source-policy-review-v1/i,
+  );
+  const rejectionResponse = page.waitForResponse(
+    response => /\/requirement-proposals\/[^/]+\/accept$/.test(response.url()),
+    { timeout: 30_000 },
+  );
+  await review.getByRole('button', { name: 'Reject all' }).click();
+  const rejection = await (await rejectionResponse).json();
+  expect(rejection.review_receipt).toMatchObject({
+    reviewer_kind: 'buyer_case_reviewer',
+    resolution: 'rejected',
+    publisher_verification_granted: false,
+    commerce_authority: 'none',
+  });
+  expect(rejection.research_outcome.rejected_claim_count).toBe(heldCount);
+  await expect(page.getByTestId('research-outcome-summary'))
+    .toContainText(/Held source evidence.*rejected for case/i);
+  await expect(page.getByTestId('research-outcome-summary'))
+    .toContainText(`Parsed: ${heldCount}`);
   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
   await context.close();
 });
@@ -206,6 +242,15 @@ test('an unseen Steam title resolves live identity, release state, requirements,
     requirements_completeness: 'minimum_and_recommended',
   });
   expect(evidence?.compiled_requirements?.length || 0).toBeGreaterThan(0);
+  expect(answer.research_outcome).toMatchObject({
+    schema_version: 'research-outcome-v1',
+    case_id: answer.shopping_case_id,
+    case_revision: answer.case_revision,
+    identity: { title: 'Where Winds Meet', app_id: '3564740' },
+    discovery_status: 'completed',
+    requirement_completeness: 'complete',
+  });
+  expect(answer.research_outcome?.accepted_claim_count || 0).toBeGreaterThan(0);
   expect(answer.products?.length || 0).toBeGreaterThan(0);
   expect(answer.ambiguity_exploration || null).toBeNull();
   expect(String(answer.assistant_message || '')).toMatch(/Where Winds Meet/i);
@@ -228,6 +273,14 @@ test('natural workload replacements advance one revision and never project the p
   });
   expect(bg3.workload_authorization?.evidence?.[0]?.compiled_requirements?.length || 0)
     .toBeGreaterThan(0);
+  expect(bg3.research_outcome).toMatchObject({
+    schema_version: 'research-outcome-v1',
+    case_id: bg3.shopping_case_id,
+    case_revision: bg3.case_revision,
+    identity: { title: "Baldur's Gate 3", app_id: '1086940' },
+    discovery_status: 'completed',
+    requirement_completeness: 'complete',
+  });
   expect(String(bg3.assistant_message || '')).toMatch(/\$3,000 is ample for Baldur's Gate 3/i);
   expect(bg3.products?.length || 0).toBeGreaterThan(0);
   expect(bg3.ambiguity_exploration || null).toBeNull();

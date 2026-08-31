@@ -3,6 +3,7 @@ import asyncio
 from starlette.requests import Request
 
 from src.app.routers.chat import _call_recommend_in_process, _effective_chat_query
+from src.app.services.recommendation_delegation_policy import v2_only_unavailable_response
 from src.app.services.recommendation_facade import FacadeOutcome
 
 
@@ -130,11 +131,36 @@ def test_v2_only_pilot_never_invokes_compatibility_cutover(monkeypatch):
     assert body["execution_lane"] == "SUPPORT_CLAIM"
     assert body["products"] == []
     assert body["action_executed"] is False
+    assert body["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert body["execution_state_envelope"]["catalog_authority"] == "blocked"
+    assert body["execution_state_envelope"]["commerce_authority"] == "none"
+    assert body["execution_state_envelope"]["research_authority"] == "required"
     assert dispatches == [{
         "outcome": "v2_unavailable",
         "lane": "SUPPORT_CLAIM",
         "reason": "lane_not_enrolled",
     }]
+
+
+def test_v2_deadline_fails_closed_with_revision_safe_authority_envelope():
+    body = v2_only_unavailable_response(
+        status="degraded",
+        reason="request_cancelled:request_deadline_exceeded",
+        lane="SEARCH",
+        trace_id="future-game-timeout",
+        query="I want to play an unreleased game",
+        external_research_authorized=True,
+    )
+
+    envelope = body["execution_state_envelope"]
+    assert envelope["model_status"] == "timeout"
+    assert envelope["research_authority"] == "granted"
+    assert envelope["provider_status"] == "not_attempted"
+    assert envelope["catalog_authority"] == "blocked"
+    assert envelope["commerce_authority"] == "none"
+    assert body["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert body["products"] == []
+    assert body["action_executed"] is False
 
 
 def test_v2_compatibility_failure_is_observable(monkeypatch):

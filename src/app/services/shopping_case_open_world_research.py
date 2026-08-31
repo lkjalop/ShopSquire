@@ -6,11 +6,13 @@ commerce authority until the separate approval/fetch/extraction path accepts it.
 """
 from __future__ import annotations
 
+import asyncio
+import os
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
-
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
 from src.app.services.case_publisher_candidate_workflow import persist_discovered_candidates
 from src.app.services.case_research_plan import CaseResearchPlan
@@ -34,6 +36,76 @@ from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthPro
 class OpenWorldResearchUnavailable(Exception):
     code: str
     readiness: dict[str, Any]
+
+
+async def _consume_interpretation_with_bounded_wait(
+    db,
+    *,
+    tenant_id: str,
+    case_id: str,
+    case_revision: int,
+    plan: CaseResearchPlan,
+) -> tuple[CaseResearchPlan, dict[str, Any]]:
+    """Wait briefly for the durable advisory plan, then fall back honestly."""
+
+    try:
+        wait_ms = int(os.getenv("OPEN_WORLD_QUERY_PLAN_WAIT_MS", "600") or 600)
+    except (TypeError, ValueError):
+        wait_ms = 600
+    wait_ms = max(300, min(wait_ms, 800))
+    deadline = time.monotonic() + wait_ms / 1_000.0
+    while True:
+        proposed, receipt = consume_completed_case_interpretation(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            case_revision=case_revision,
+            plan=plan,
+        )
+        if receipt.get("status") not in {
+            "queued", "running", "retry", "enqueue_degraded",
+        } or time.monotonic() >= deadline:
+            return proposed, {
+                **receipt,
+                "bounded_wait_ms": wait_ms,
+                "fallback_used": receipt.get("status") != "completed_durable",
+            }
+        # End the current SQLite/PostgreSQL read transaction so the next poll
+        # can observe the worker's revision-bound commit.
+        db.rollback()
+        await asyncio.sleep(0.05)
+
+
+def _merge_governed_discovery_retry(
+    primary: dict[str, Any], retry: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge one model-planned retry without widening claim authority."""
+
+    merged = dict(primary)
+    candidates_by_url = {
+        str(row.get("url")): dict(row)
+        for row in [*(primary.get("candidates") or []), *(retry.get("candidates") or [])]
+        if row.get("url")
+    }
+    merged["candidates"] = sorted(
+        candidates_by_url.values(),
+        key=lambda row: (-int(row.get("quality_score") or 0), str(row.get("url") or "")),
+    )[:12]
+    merged["receipts"] = [
+        *(primary.get("receipts") or []), *(retry.get("receipts") or []),
+    ]
+    first_accounting = dict(primary.get("provider_accounting") or {})
+    retry_accounting = dict(retry.get("provider_accounting") or {})
+    merged["provider_accounting"] = {
+        key: int(first_accounting.get(key) or 0) + int(retry_accounting.get(key) or 0)
+        for key in ("discovery_calls", "external_calls", "official_origin_fetches", "paid_calls")
+    }
+    merged["status"] = (
+        "publisher_candidates_found" if merged["candidates"]
+        else retry.get("status") or primary.get("status")
+    )
+    merged["claims"] = []
+    return merged
 
 
 def _governed_domains() -> list[str]:
@@ -126,7 +198,7 @@ async def execute_open_world_publisher_discovery_async(
         ShoppingCase.tenant_id == tenant_id,
         ShoppingCase.case_id == case_id,
     )).scalar_one()
-    discovery_plan, query_proposal = consume_completed_case_interpretation(
+    discovery_plan, query_proposal = await _consume_interpretation_with_bounded_wait(
         db,
         tenant_id=tenant_id,
         case_id=case_id,
@@ -138,6 +210,39 @@ async def execute_open_world_publisher_discovery_async(
         search_url_template=search_url_template,
         cancellation_requested=cancellation_requested,
     )
+    # If deterministic discovery found no credible origin, consume a planner
+    # that may have completed while those calls were in flight. Dispatch only
+    # its first distinct query: total provider fan-out is capped at four.
+    if not discovery.get("candidates") and not (discovery.get("cancellation") or {}).get("requested"):
+        retry_plan, retry_proposal = await _consume_interpretation_with_bounded_wait(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            case_revision=int(case.revision or 1),
+            plan=plan,
+        )
+        original_queries = [row.query for row in discovery_plan.discovery_queries]
+        retry_queries = [
+            row for row in retry_plan.discovery_queries if row.query not in original_queries
+        ]
+        if retry_proposal.get("status") == "completed_durable" and retry_queries:
+            bounded_retry_plan = retry_plan.model_copy(update={
+                "discovery_queries": retry_queries[:1],
+            })
+            retry_result = await open_world_research_discovery.discover_open_world_publishers_async(
+                bounded_retry_plan,
+                search_url_template=search_url_template,
+                cancellation_requested=cancellation_requested,
+            )
+            discovery = _merge_governed_discovery_retry(discovery, retry_result)
+            query_proposal = {
+                **retry_proposal,
+                "retry_dispatched": True,
+                "retry_query_count": 1,
+                "total_provider_fan_out": int(
+                    (discovery.get("provider_accounting") or {}).get("external_calls") or 0
+                ),
+            }
     discovery["query_proposal"] = query_proposal
     # Discovery receipts prove dispatch/reachability, but discovered snippets
     # remain candidate metadata and can never compile as requirements.
@@ -218,6 +323,17 @@ async def execute_open_world_publisher_discovery_async(
         "supplier_send": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
     }
+    from src.app.services.research_outcome import build_research_outcome
+
+    result["research_outcome"] = build_research_outcome(
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        operation_id=str(discovery.get("run_id") or plan.plan_id),
+        research=discovery,
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    ).model_dump(mode="json")
     log_trace_event(
         trace_id=result["trace_id"],
         event_type="open_world_discovery_completed",

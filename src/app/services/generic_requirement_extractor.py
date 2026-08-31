@@ -41,6 +41,25 @@ _SECTION_CLASS = re.compile(
     r"\b(minimum|minimal|recommended|basic|advanced|extreme|high)\b", re.I,
 )
 
+_CPU_MODEL = re.compile(r"^(?:processor|cpu)\s*[:\-]\s*(?P<value>.+)$", re.I)
+_GPU_MODEL = re.compile(r"^(?:graphics(?:\s+card)?|gpu)\s*[:\-]\s*(?P<value>.+)$", re.I)
+_OPERATING_SYSTEM = re.compile(r"^(?:operating\s+system|os)\s*[:\-]\s*(?P<value>.+)$", re.I)
+_GRAPHICS_API = re.compile(r"^(?:graphics\s+)?api\s*[:\-]\s*(?P<value>.+)$", re.I)
+_ARCHITECTURE = re.compile(r"^architecture\s*[:\-]\s*(?P<value>.+)$", re.I)
+_STORAGE_TYPE = re.compile(r"\b(?P<value>NVMe\s+SSD|solid[ -]state drive|SSD|HDD)\b", re.I)
+_RESOLUTION = re.compile(r"\b(?P<width>\d{3,5})\s*[x×]\s*(?P<height>\d{3,5})\b", re.I)
+_FPS = re.compile(r"\b(?P<value>\d{2,3})\s*FPS\b", re.I)
+_PROJECT_SCALE = re.compile(
+    r"\b(?P<value>\d{1,3}(?:,\d{3})+|\d{2,9})\s*"
+    r"(?P<unit>images?|photos?|points?|polygons?|parts?|objects?|instances?)\b",
+    re.I,
+)
+_API_TOKEN = re.compile(
+    r"\b(?:DirectX\s*\d+(?:\.\d+)?|Vulkan\s*\d+(?:\.\d+)?|"
+    r"OpenGL\s*\d+(?:\.\d+)?|Metal\s*\d+(?:\.\d+)?|CUDA\s*\d+(?:\.\d+)?)\b",
+    re.I,
+)
+
 
 def _requirement_class(value: str) -> Literal["minimum", "recommended", "target", "conditional"]:
     folded = value.lower()
@@ -104,6 +123,77 @@ def extract_generic_requirements(
                 citation_url=citation_url, page_section=section,
                 quoted_evidence_span=span, observed_at=observed_at,
             ))
+
+    def add_labelled(
+        *, attribute: str, value: int | float | str | list[str], line: str,
+        section: str, operator: Literal[">=", "<=", "equals", "in"] = "equals",
+        unit: str | None = None,
+    ) -> None:
+        requirement_class = _requirement_class(line)
+        if requirement_class == "target":
+            requirement_class = _requirement_class(section)
+        rows.append(ExtractedOfficialRequirement(
+            attribute=attribute, operator=operator, value=value, unit=unit,
+            requirement_class=requirement_class,
+            condition=(
+                f"Published tier: {section}"
+                if requirement_class == "conditional" else None
+            ),
+            citation_url=citation_url, page_section=section,
+            quoted_evidence_span=line[:600], observed_at=observed_at,
+        ))
+
+    # Textual compatibility and model claims are accepted only when a publisher
+    # labels the field.  This avoids interpreting prose mentions as requirements
+    # while preserving exact evidence spans for the deterministic critic.
+    for line, section in annotated_lines:
+        cpu = _CPU_MODEL.match(line)
+        if cpu:
+            add_labelled(attribute="cpu_model", value=cpu.group("value").strip(), line=line, section=section)
+        gpu = _GPU_MODEL.match(line)
+        if gpu and not line.lower().startswith("graphics api"):
+            add_labelled(attribute="gpu_model", value=gpu.group("value").strip(), line=line, section=section)
+        os_match = _OPERATING_SYSTEM.match(line)
+        if os_match:
+            add_labelled(attribute="operating_system", value=os_match.group("value").strip(), line=line, section=section)
+        api_match = _GRAPHICS_API.match(line)
+        if api_match:
+            api_values = [match.group(0) for match in _API_TOKEN.finditer(api_match.group("value"))]
+            if api_values:
+                add_labelled(attribute="api_compatibility", value=api_values, line=line, section=section, operator="in")
+        architecture = _ARCHITECTURE.match(line)
+        if architecture:
+            add_labelled(
+                attribute="architecture_compatibility",
+                value=architecture.group("value").strip(), line=line, section=section,
+            )
+        storage_type = _STORAGE_TYPE.search(line) if re.search(r"\bstorage\b", line, re.I) else None
+        if storage_type:
+            normalized_storage = storage_type.group("value")
+            if normalized_storage.lower().startswith("solid"):
+                normalized_storage = "SSD"
+            add_labelled(attribute="storage_type", value=normalized_storage, line=line, section=section)
+        resolution = _RESOLUTION.search(line)
+        if resolution:
+            add_labelled(
+                attribute="resolution",
+                value=f"{resolution.group('width')}x{resolution.group('height')}",
+                line=line, section=section,
+            )
+        fps = _FPS.search(line)
+        if fps:
+            add_labelled(
+                attribute="fps", value=int(fps.group("value")), unit="FPS",
+                line=line, section=section, operator=">=",
+            )
+        project_scale = _PROJECT_SCALE.search(line)
+        if project_scale and re.search(r"\b(project|scene|model|dataset|survey)s?\b", line, re.I):
+            add_labelled(
+                attribute="project_scale",
+                value=int(project_scale.group("value").replace(",", "")),
+                unit=project_scale.group("unit").lower(), line=line, section=section,
+                operator=">=",
+            )
     return rows
 
 

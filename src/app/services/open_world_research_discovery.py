@@ -29,6 +29,23 @@ _QUALITY_STOP = {
     "only", "or", "requirements", "software", "support", "system", "the", "to",
     "vendor", "with",
 }
+_COMPOUND_PUBLIC_SUFFIXES = {
+    "com.au", "net.au", "org.au", "co.nz", "co.uk", "org.uk", "ac.uk",
+    "co.jp", "co.kr", "com.br", "com.cn", "com.sg", "com.mx", "co.za",
+}
+
+
+def _registrable_domain(hostname: str) -> str:
+    """Conservatively collapse common subdomains without substring matching."""
+
+    host = str(hostname or "").strip(".").lower()
+    labels = [label for label in host.split(".") if label]
+    if len(labels) <= 2:
+        return host
+    suffix2 = ".".join(labels[-2:])
+    if suffix2 in _COMPOUND_PUBLIC_SUFFIXES and len(labels) >= 3:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
 
 
 def _terms(value: str) -> set[str]:
@@ -143,7 +160,7 @@ def discover_open_world_publishers(
     *,
     search_url_template: str,
     fetcher: DiscoveryFetcher | None = None,
-    timeout_s: float = 9.0,
+    timeout_s: float = 12.0,
     cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Discover candidate origins; never fetch them or compile their snippets as claims."""
@@ -186,6 +203,7 @@ def discover_open_world_publishers(
             candidate = candidates.setdefault(url, {
                 "url": url,
                 "domain": host,
+                "registrable_domain": _registrable_domain(host),
                 "title": str(row.get("title") or "")[:200],
                 "discovery_only": True,
                 "authority": "not_accepted",
@@ -198,7 +216,7 @@ def discover_open_world_publishers(
             candidate["query_ids"] = sorted({*candidate["query_ids"], item.query_id})
             result_terms = _terms(f"{candidate['domain']} {candidate['title']} {urlparse(url).path}")
             purpose_terms = _terms(plan.retained_purpose)
-            host_terms = _terms(candidate["domain"].replace(".", " "))
+            host_terms = _terms(candidate["registrable_domain"].replace(".", " "))
             candidate["subject_overlap_count"] = max(
                 int(candidate["subject_overlap_count"]), len(result_terms & purpose_terms),
             )
@@ -328,7 +346,7 @@ async def discover_open_world_publishers_async(
     plan: CaseResearchPlan,
     *,
     search_url_template: str,
-    timeout_s: float = 9.0,
+    timeout_s: float = 12.0,
     cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Cancellable live transport with the exact synchronous projection semantics."""

@@ -25,7 +25,7 @@ from src.app.services.model_execution_gateway import (
     ModelExecutionRequest,
     sha256_text,
 )
-from src.app.services.model_transports import ollama_generate_transport
+from src.app.services.model_transports import make_ollama_generate_transport
 from src.app.services.ollama_artifact_verification import verify_ollama_artifact
 
 
@@ -34,6 +34,7 @@ Axis = Literal[
 ]
 _WORD = re.compile(r"[a-z0-9]+")
 _URL = re.compile(r"(?:https?://|\bsite:|\bwww\.)", re.IGNORECASE)
+_DOMAIN = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 _HARDWARE_FLOOR = re.compile(
     r"\b\d+(?:\.\d+)?\s*(?:gb|tb|cores?|hz|watts?|w)\b", re.IGNORECASE,
 )
@@ -75,6 +76,7 @@ class OpenWorldQueryProposal(BaseModel):
     interpretations: list[str] = Field(min_length=1, max_length=3)
     shared_concepts: list[str] = Field(min_length=1, max_length=8)
     divergent_axes: list[str] = Field(default_factory=list, max_length=4)
+    publisher_domain_hypotheses: list[str] = Field(default_factory=list, max_length=2)
     queries: list[ProposedDiscoveryQuery] = Field(min_length=2, max_length=3)
     authority: Literal["discovery_proposal_only"] = "discovery_proposal_only"
 
@@ -90,13 +92,17 @@ def _prompt(purpose: str) -> str:
     return (
         "Return strict JSON only. Interpret an unfamiliar buyer workload for web discovery, "
         "without recommending hardware or inventing requirements. Produce 1-3 plausible "
-        "interpretations, shared_concepts, divergent_axes, and 2-3 search queries. Queries must "
+        "interpretations, shared_concepts, divergent_axes, and 2-3 search queries. Every one of "
+        "interpretations, shared_concepts, and divergent_axes must be a JSON array of strings. Queries must "
         "cover distinct axes selected from concept_and_software, requirements_and_compatibility, "
         "support_and_constraints. Expand acronyms and domain terminology when useful. Do not name "
-        "a vendor unless the buyer named it. Do not include URLs, site: filters, prices, hardware "
+        "a vendor unless the buyer named it. If the buyer named a publisher or product, include up "
+        "to two likely registrable publisher domains in publisher_domain_hypotheses; otherwise use [] . "
+        "Domains are untrusted discovery hints only. Do not include URLs, site: filters, prices, hardware "
         "numbers, products, or claims. Search is discovery only and establishes no authority.\n"
         f"Buyer outcome: {purpose!r}\n"
         "JSON schema: {interpretations:[string],shared_concepts:[string],divergent_axes:[string],"
+        "publisher_domain_hypotheses:[string],"
         "queries:[{axis:string,query:string}]}"
     )
 
@@ -130,11 +136,16 @@ def _ollama_call(prompt: str, timeout_s: float) -> str:
         prompt_id="open-world-query-proposal", prompt_version="v1",
         prompt_hash=sha256_text(prompt), context_hash=sha256_text("open-world-research"),
         data_classes={"buyer_workload"}, timeout_ms=round(timeout_s * 1_000),
-        max_output_tokens=600,
+        # This is a three-query routing artifact, not narration. A compact cap
+        # keeps a prewarmed 14B local model inside the six-second worker budget.
+        max_output_tokens=420,
+    )
+    transport = make_ollama_generate_transport(
+        response_format="json", keep_alive="30m", think=False,
     )
     result = ModelExecutionGateway(
         [deployment], ledger=application_agent_run_ledger(),
-    ).execute(request, prompt=prompt, transport=ollama_generate_transport)
+    ).execute(request, prompt=prompt, transport=transport)
     if result.status != "completed" or result.text is None:
         raise RuntimeError(result.failure_code or result.status)
     return result.text
@@ -167,11 +178,22 @@ def propose_open_world_queries(
         data["schema_version"] = "open-world-query-proposal-v1"
         data["authority"] = "discovery_proposal_only"
         proposal = OpenWorldQueryProposal.model_validate(data)
-        axes = [row.axis for row in proposal.queries]
-        if len(set(axes)) != len(axes):
-            raise ValueError("duplicate_query_axis")
-        buyer_terms = _terms(plan.retained_purpose)
+        # Small local models sometimes repeat a semantically reasonable axis.
+        # The axis is routing metadata, so deterministically relabel duplicates
+        # rather than discarding otherwise bounded queries.
+        axis_order: list[Axis] = [
+            "concept_and_software", "requirements_and_compatibility", "support_and_constraints",
+        ]
+        used_axes: set[Axis] = set()
+        normalized_rows: list[ProposedDiscoveryQuery] = []
         for row in proposal.queries:
+            axis = row.axis
+            if axis in used_axes:
+                axis = next(item for item in axis_order if item not in used_axes)
+            used_axes.add(axis)
+            normalized_rows.append(row.model_copy(update={"axis": axis}))
+        buyer_terms = _terms(plan.retained_purpose)
+        for row in normalized_rows:
             if _URL.search(row.query):
                 raise ValueError("url_or_site_filter_not_allowed")
             if _HARDWARE_FLOOR.search(row.query) and not _HARDWARE_FLOOR.search(
@@ -180,13 +202,33 @@ def propose_open_world_queries(
                 raise ValueError("invented_hardware_floor")
             if not (_terms(row.query) & buyer_terms):
                 raise ValueError("query_not_anchored_to_buyer_outcome")
+        domain_hypotheses: list[str] = []
+        for raw_domain in proposal.publisher_domain_hypotheses:
+            domain = str(raw_domain or "").strip().lower().removeprefix("www.")
+            domain_terms = _terms(domain.replace(".", " ").replace("-", " "))
+            if not _DOMAIN.fullmatch(domain) or not (domain_terms & buyer_terms):
+                continue
+            if domain not in domain_hypotheses:
+                domain_hypotheses.append(domain)
         queries = [
             CaseDiscoveryQuery(
                 query_id=f"model_{index + 1}", axis=row.axis,
                 query=" ".join(row.query.split()),
             )
-            for index, row in enumerate(proposal.queries)
+            for index, row in enumerate(normalized_rows)
         ]
+        if domain_hypotheses:
+            subject = " ".join(sorted(buyer_terms, key=lambda token: (-len(token), token))[:4])
+            origin_query = CaseDiscoveryQuery(
+                query_id="model_origin", axis="support_and_constraints",
+                query=f"site:{domain_hypotheses[0]} {subject} documentation requirements",
+            )
+            queries = [row for row in queries if row.axis != "support_and_constraints"][:2]
+            queries.append(origin_query)
+        proposal = proposal.model_copy(update={
+            "queries": normalized_rows,
+            "publisher_domain_hypotheses": domain_hypotheses,
+        })
         return plan.model_copy(update={"discovery_queries": queries}), {
             "status": "accepted",
             "model_calls": 1,

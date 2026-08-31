@@ -1,6 +1,9 @@
+import ResearchOutcomeSummary, { type ResearchOutcome } from './ResearchOutcomeSummary';
+
 type Props = {
   executionSteps?: any[];
   events?: any[];
+  researchOutcome?: ResearchOutcome | null;
 };
 
 const words = (value: unknown) => String(value || 'not recorded').replace(/[_-]+/g, ' ');
@@ -56,7 +59,7 @@ const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   );
 };
 
-export default function WorkloadResearchTrace({ executionSteps = [], events = [] }: Props) {
+export default function WorkloadResearchTrace({ executionSteps = [], events = [], researchOutcome = null }: Props) {
   const proposal = executionSteps.find((step) => step?.id === 'model-proposal') || {};
   const evidence = executionSteps.find((step) => step?.id === 'workload-evidence') || {};
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
@@ -138,8 +141,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   return (
     <section data-testid="workload-research-trace">
       <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>Research and product-fit authorization</h3>
+      {researchOutcome ? <ResearchOutcomeSummary outcome={researchOutcome} /> : null}
       <div style={{ display: 'grid', gap: 8 }}>
-        {canonicalTruth && (
+        {!researchOutcome && canonicalTruth && (
           <div data-testid="canonical-procurement-truth" style={{ border: '1px solid #0f766e', padding: 10, borderRadius: 6 }}>
             <strong>Canonical procurement truth</strong>
             <div style={{ marginTop: 5 }}>
@@ -368,7 +372,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
                     ? 'governed evidence cache'
                     : officialResearch?.execution_mode || 'not executed'
               )}</strong>
-              {' Â· '}
+              {' · '}
               External provider calls: <strong>{String(officialResearch?.provider_accounting?.external_calls ?? 0)}</strong>
               {' · '}Official fetches: <strong>{String(officialResearch?.provider_accounting?.official_origin_fetches ?? 0)}</strong>
               {' · '}Cache hits: <strong>{String(officialResearch?.provider_accounting?.cache_hits ?? 0)}</strong>

@@ -44,6 +44,7 @@ import {
 import { useMarketHippographTrace } from '../hooks/useMarketHippographTrace';
 import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from '../hooks/useDecisionTraceData';
 import DecisionRunTracePanel from './decision-trace/DecisionRunTracePanel';
+import type { ResearchOutcome } from './ResearchOutcomeSummary';
 
 export { TRACE_LEAF_LABELS, TRACE_SECTIONS, normalizeTraceLeaf, traceSectionForLeaf } from './decision-trace/traceNavigation';
 export type { TraceLeafTab } from './decision-trace/traceNavigation';
@@ -657,7 +658,7 @@ export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
   return <HippographEvidencePanel insights={insights} classNames={styles} />;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any }) {
+export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
@@ -667,6 +668,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const localTurnProjection = evidence?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
     ? evidence.turn_read_model : null;
+  const currentResearchOutcome = researchOutcome || localTurnProjection?.research_outcome || null;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -1030,7 +1032,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const fetchCanonicalTrace = async () => {
       setUpdating(true);
       try {
-        const r = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}`), {
+        // The primary read must include the persisted event envelope.  The plain
+        // decision projection intentionally omits events, while SSE only emits
+        // events created after subscription.  Reading the plain projection first
+        // therefore lost already-committed URL/security and research receipts.
+        const r = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}/query?include_events=true`), {
           signal: ctl.signal,
           credentials: 'include',
           headers: authHeaders,
@@ -1054,9 +1060,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
           stopLiveTransport();
           return;
         }
-        // Query fallback is only for a missing/degraded projection. Authentication
-        // failures are terminal and must never become a 401 -> polling -> 429 loop.
-        const qr = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}/query?include_events=true`), {
+        // Compatibility fallback for deployments that have the canonical
+        // projection but not the revision-envelope query. Authentication failures
+        // are terminal and must never become a 401 -> polling -> 429 loop.
+        const qr = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}`), {
           signal: ctl.signal,
           credentials: 'include',
           headers: authHeaders,
@@ -2078,14 +2085,28 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </div>
               ))}
             </div>
-            {localTurnProjection && (
+            {(localTurnProjection || currentResearchOutcome) && (
               <div
                 data-testid="revision-bound-turn-projection"
                 style={{ padding: '7px 18px', borderBottom: '1px solid #dbe4ef', color: '#42526b', fontSize: 12 }}
               >
-                Case revision <strong>{localTurnProjection.case_revision}</strong>
-                {' · '}transition <strong>{localTurnProjection.transition}</strong>
-                {' · '}catalog authority <strong>{localTurnProjection.catalog_authority}</strong>
+                {currentResearchOutcome && (
+                  <span data-testid="revision-bound-research-outcome" style={{ marginRight: 8 }}>
+                    Research <strong>{humanizeKey(currentResearchOutcome.discovery_status)}</strong>
+                    {' / '}claims <strong>
+                      {currentResearchOutcome.accepted_claim_count} accepted,
+                      {' '}{currentResearchOutcome.held_claim_count} held
+                    </strong>
+                    {' | '}
+                  </span>
+                )}
+                Case revision <strong>{currentResearchOutcome?.case_revision || localTurnProjection?.case_revision}</strong>
+                {localTurnProjection?.transition ? <>
+                  {' · '}transition <strong>{localTurnProjection.transition}</strong>
+                </> : null}
+                {' · '}catalog authority <strong>
+                  {currentResearchOutcome?.catalog_authority || localTurnProjection?.catalog_authority}
+                </strong>
               </div>
             )}
             {/* Tabs */}
@@ -2627,7 +2648,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
               {activeTab === 'research' && (
                 <div style={{ padding: '12px 14px' }}>
-                  <WorkloadResearchTrace executionSteps={typedExecutionSteps} events={allDisplayEvents} />
+                  <WorkloadResearchTrace
+                    executionSteps={typedExecutionSteps}
+                    events={allDisplayEvents}
+                    researchOutcome={currentResearchOutcome}
+                  />
                 </div>
               )}
               {activeTab === 'why' && (

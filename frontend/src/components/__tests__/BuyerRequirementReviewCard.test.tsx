@@ -37,7 +37,7 @@ describe('BuyerRequirementReviewCard', () => {
     }]} onAccept={onAccept} />);
 
     fireEvent.change(screen.getByLabelText(/Correct ram gb value/i), { target: { value: '48' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Use provisionally' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use selected provisionally' }));
     await vi.waitFor(() => expect(onAccept).toHaveBeenCalledWith(
       ['claim-ram'], 'local_only', [expect.objectContaining({
         claim_id: 'claim-ram', value: 48, requirement_class: 'recommended',
@@ -50,11 +50,33 @@ describe('BuyerRequirementReviewCard', () => {
       claim_id: 'claim-emulate-ram', attribute: 'ram_gb', operator: '>=', value: 64,
       unit: 'GB', requirement_class: 'recommended', constraint_tier: 'preferred',
       authority_status: 'pending_independent_policy_review',
+      source_policy_review: {
+        status: 'automated_policy_checks_passed_human_signoff_pending',
+        reviewer: 'source-policy-reviewer-v1',
+        reviewed_at: '2026-08-25T00:00:00Z',
+      },
     }]} onAccept={vi.fn()} />);
 
     expect(screen.getByText(/reviewed canonical publisher page/i)).toBeVisible();
     expect(screen.getByText(/independent source-policy review is signed off/i)).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Use provisionally' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Use selected provisionally' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reject all' })).toBeVisible();
+    expect(screen.getByTestId('source-policy-review-receipt')).toHaveTextContent(
+      /source-policy-reviewer-v1.*2026-08-25/i,
+    );
     expect(screen.queryByRole('button', { name: 'Research and corroborate' })).toBeNull();
+  });
+
+  it('records an explicit reject-all action', async () => {
+    const onAccept = vi.fn().mockResolvedValue(undefined);
+    render(<BuyerRequirementReviewCard claims={[{
+      claim_id: 'claim-reject', attribute: 'gpu', operator: 'contains', value: 'RTX',
+      requirement_class: 'recommended', constraint_tier: 'preferred',
+      authority_status: 'pending_independent_policy_review',
+    }]} onAccept={onAccept} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject all' }));
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledWith([], 'local_only', []));
+    expect(await screen.findByRole('status')).toHaveTextContent(/rejected all/i);
   });
 });

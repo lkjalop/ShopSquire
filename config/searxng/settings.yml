@@ -1,4 +1,11 @@
-use_default_settings: true
+use_default_settings:
+  engines:
+    # Keep the demo provider bounded to engines that currently return
+    # server-side results from this deployment. Authority is still decided by
+    # the source workflow, never by an engine or snippet.
+    keep_only:
+      - privacywall
+      - yandex
 
 server:
   limiter: false
@@ -11,22 +18,16 @@ search:
     - json
 
 outgoing:
-  request_timeout: 8.0
-  max_request_timeout: 12.0
+  # The caller permits four seconds per query. Return partial engine results
+  # before that boundary instead of letting the caller discard the response.
+  request_timeout: 3.2
+  max_request_timeout: 3.6
 
 # The local certification profile deliberately uses engines that currently
 # return server-side results without browser CAPTCHA challenges. Discovery is
 # still best-effort; official-origin fetches remain the authority boundary.
 engines:
-  - name: mojeek
+  - name: privacywall
     disabled: false
-  - name: bing
+  - name: yandex
     disabled: false
-  - name: brave
-    disabled: true
-  - name: startpage
-    disabled: true
-  - name: duckduckgo
-    disabled: true
-  - name: qwant
-    disabled: true

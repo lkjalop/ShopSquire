@@ -16,6 +16,8 @@ def create_source_review_proposal(
     case_id: str,
     tenant_id: str,
     uid: str,
+    source_policy_review: Mapping[str, Any] | None = None,
+    research_lineage: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], RequirementProposal | None]:
     if not provisional_claims:
         return [], None
@@ -33,6 +35,13 @@ def create_source_review_proposal(
             "evidence_class": "official_policy_pending_source",
             "extraction_confidence": 1.0,
             "acceptance_status": "pending_buyer_review",
+            "source_policy_review": {
+                "status": str((source_policy_review or {}).get("status") or "not_recorded"),
+                "reviewer": str((source_policy_review or {}).get("reviewer") or "not_recorded"),
+                "reviewed_at": (source_policy_review or {}).get("reviewed_at"),
+                "authority_effect": "held_until_independent_human_signoff",
+            },
+            "research_lineage": dict(research_lineage or {}),
         })
         claims.append(claim)
     now = datetime.now(timezone.utc)

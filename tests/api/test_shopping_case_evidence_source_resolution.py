@@ -335,3 +335,34 @@ def test_emulate3d_policy_pending_claims_are_returned_for_review_with_execution_
     assert payload["canonical_truth"]["evidence_status"] == "OBSERVED_PENDING_REVIEW"
     assert payload["canonical_truth"]["freshness"] == "CURRENT"
     assert payload["source_intake_certificate"]["claim_compilation"]["provisional"] == 1
+    policy_review = payload["claims"][0]["source_policy_review"]
+    assert policy_review["status"].endswith("pending")
+    assert policy_review["reviewer"] == "shopsquire-source-policy-review-v1"
+    assert policy_review["reviewed_at"] == "2026-08-25"
+
+    proposal = payload["buyer_requirement_proposal"]
+    rejected = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals/"
+        f"{proposal['proposal_id']}/accept",
+        headers={"Idempotency-Key": "reject-held-emulate-claims"},
+        json={
+            "uid": "buyer-link", "expected_proposal_version": 1,
+            "accepted_claim_ids": [],
+            "rejected_claim_ids": [payload["claims"][0]["claim_id"]],
+            "corrections": [], "research_choice": "local_only",
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
+    receipt = rejected.json()["review_receipt"]
+    assert receipt["reviewer_id"] == "buyer-link"
+    assert receipt["reviewer_kind"] == "buyer_case_reviewer"
+    assert receipt["resolution"] == "rejected"
+    assert receipt["publisher_verification_granted"] is False
+    rejected_outcome = rejected.json()["research_outcome"]
+    assert rejected_outcome["fetch_status"] == "completed"
+    assert rejected_outcome["source_ownership_status"] == "observed_held"
+    assert rejected_outcome["held_claim_count"] == 1
+    assert rejected_outcome["rejected_claim_count"] == 1
+    assert rejected_outcome["parsed_claim_count"] == 1
+    assert receipt["commerce_authority"] == "none"
+    assert receipt["reviewed_at"].endswith("+00:00")

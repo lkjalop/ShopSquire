@@ -18,7 +18,7 @@ describe('BuyerRequirementReviewCard', () => {
     }]} onAccept={async () => {}} />);
 
     expect(screen.getByText(/exact publisher origin/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Accept case evidence' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept selected case evidence' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Research and corroborate' })).toBeNull();
   });
 });

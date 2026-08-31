@@ -358,7 +358,10 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
         "research_authorized": True,
     })
     assert discovered.status_code == 200, discovered.text
-    candidate = discovered.json()["research"]["candidates"][0]
+    discovered_payload = discovered.json()
+    assert discovered_payload["research_outcome"]["source_ownership_status"] == "discovered_candidate"
+    assert discovered_payload["research_outcome"]["case_revision"] == 1
+    candidate = discovered_payload["research"]["candidates"][0]
 
     def official_origin(*args, **kwargs):
         source = kwargs["sources"][0]
@@ -416,6 +419,10 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     assert result["qualification_authority"] == "none"
     assert result["claims"][0]["authority_status"] == "case_origin_critic_accepted"
     assert result["claims"][0]["acceptance_status"] == "pending_buyer_review"
+    assert result["research_outcome"]["source_ownership_status"] == "observed_held"
+    assert result["research_outcome"]["parsed_claim_count"] == 1
+    assert result["research_outcome"]["held_claim_count"] == 1
+    assert result["research_outcome"]["catalog_authority"] == "blocked"
     runtime = external_research_runtime_observation()
     assert runtime["last_official_fetch_success_at"]
     assert runtime["last_claim_compilation_count"] == 1
@@ -441,6 +448,11 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     )
     assert accepted_payload["cart_mutation"] == "not_authorized"
     assert accepted_payload["case_revision"] == 2
+    assert accepted_payload["research_outcome"]["case_revision"] == 2
+    assert accepted_payload["research_outcome"]["discovery_status"] == "completed"
+    assert accepted_payload["research_outcome"]["fetch_status"] == "completed"
+    assert accepted_payload["research_outcome"]["source_ownership_status"] == "accepted_case_only"
+    assert accepted_payload["research_outcome"]["accepted_claim_count"] == 1
 
 
 def test_case_only_publisher_policy_rejects_cross_origin_and_forbidden_claims(monkeypatch):
@@ -822,6 +834,9 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     )["status"] == "resolved"
     assert payload["cart_mutation"] == "not_authorized"
     assert payload["supplier_send"] == "not_authorized"
+    assert payload["research_outcome"]["case_revision"] == 1
+    assert payload["research_outcome"]["accepted_claim_count"] == 1
+    assert payload["research_outcome"]["catalog_authority"] == "permitted"
 
     with Session(client.app.state.test_engine) as db:
         db.add(Product(

@@ -2,7 +2,8 @@ param(
     [string]$LogRoot = "",
     [switch]$NoMarketSignal,
     [switch]$LiveDemo,
-    [string]$LiveModel = "qwen3:14b"
+    [string]$LiveModel = "qwen3:14b",
+    [string]$QueryModel = "granite4:micro"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,8 @@ if (-not $LogRoot) {
     $LogRoot = Join-Path $env:TEMP ("shopsquire-recording-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
 New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+$recordingRunKey = ([IO.Path]::GetFileName($LogRoot) -replace '[^A-Za-z0-9_-]', '-')
+if (-not $recordingRunKey) { $recordingRunKey = Get-Date -Format 'yyyyMMdd-HHmmss' }
 
 $redisContainer = "shopsquire-recording-redis"
 $redisExists = docker ps -a --filter "name=^/$redisContainer$" --format "{{.Names}}"
@@ -66,7 +69,12 @@ if ($LiveDemo) {
     $env:OLLAMA_DEFAULT_MODEL = $LiveModel
     $env:OLLAMA_MEDIUM_MODEL = $LiveModel
     $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
-    $env:OPEN_WORLD_QUERY_MODEL = $LiveModel
+    $env:OPEN_WORLD_QUERY_MODEL = $QueryModel
+    # The durable query-planning job runs through the app's Redis-stream
+    # consumer, not the Celery worker. Isolate each recording so enabling that
+    # consumer never replays another rehearsal's historical task backlog.
+    $env:TASK_CONSUMER_ENABLED = "1"
+    $env:TASK_STREAM_NAME = "shopsquire:tasks:recording:$recordingRunKey"
     $env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED = "1"
     $env:PORTFOLIO_NARRATION_MODEL = $LiveModel
     $env:PORTFOLIO_NARRATION_TIMEOUT_SEC = "8"
@@ -117,9 +125,27 @@ if ($LiveDemo) {
         $env:ROUTER_MODEL_DIGEST = $liveDigest
         $env:OLLAMA_DEFAULT_MODEL_DIGEST = $liveDigest
         $env:OLLAMA_MEDIUM_MODEL_DIGEST = $liveDigest
-        $env:OPEN_WORLD_QUERY_MODEL_DIGEST = $liveDigest
         $env:PORTFOLIO_NARRATION_MODEL_DIGEST = $liveDigest
+        $queryWarmupBody = @{
+            model = $QueryModel
+            prompt = 'Return {"status":"READY"} only.'
+            stream = $false
+            think = $false
+            keep_alive = "30m"
+            options = @{ num_predict = 16; temperature = 0 }
+        } | ConvertTo-Json -Depth 4
+        Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
+            -ContentType "application/json" -Body $queryWarmupBody -TimeoutSec 180 | Out-Null
+        $queryManifest = $ollamaTags.models | Where-Object {
+            $_.name -eq $QueryModel -or $_.model -eq $QueryModel
+        } | Select-Object -First 1
+        $queryDigest = [string]$queryManifest.digest
+        if ($queryDigest -notmatch '^[a-fA-F0-9]{64}$') {
+            throw "Ollama did not report a verifiable manifest digest for '$QueryModel'."
+        }
+        $env:OPEN_WORLD_QUERY_MODEL_DIGEST = $queryDigest
         Write-Output "OLLAMA_PREWARMED=$LiveModel"
+        Write-Output "QUERY_PLANNER_PREWARMED=$QueryModel"
         Write-Output "OLLAMA_MANIFEST_VERIFIED=$($liveDigest.Substring(0, 12))"
     } catch {
         throw "Live demo requested, but Ollama prewarm failed for '$LiveModel': $($_.Exception.Message)"
@@ -165,6 +191,13 @@ $recordingEnv = Join-Path $LogRoot "recording-env.ps1"
 `$env:CELERY_RESULT_BACKEND = '$($env:CELERY_RESULT_BACKEND)'
 `$env:VITE_API_KEY = 'local-merchant-key'
 `$env:PYTHON_EXECUTABLE = 'python'
+`$env:SHOPSQUIRE_RUNTIME_PROFILE = '$($env:SHOPSQUIRE_RUNTIME_PROFILE)'
+`$env:RECOMMEND_CORE_MODE = '$($env:RECOMMEND_CORE_MODE)'
+`$env:RECOMMEND_CART_SERVE = '$($env:RECOMMEND_CART_SERVE)'
+`$env:RECOMMEND_PROCUREMENT_ADVICE_MODE = '$($env:RECOMMEND_PROCUREMENT_ADVICE_MODE)'
+`$env:RECOMMEND_POLICY_ANSWER_MODE = '$($env:RECOMMEND_POLICY_ANSWER_MODE)'
+`$env:RECOMMEND_SUPPORT_HANDOFF_MODE = '$($env:RECOMMEND_SUPPORT_HANDOFF_MODE)'
+`$env:RECOMMEND_INVENTORY_READ_MODE = '$($env:RECOMMEND_INVENTORY_READ_MODE)'
 "@ | Set-Content -LiteralPath $recordingEnv -Encoding utf8
 if ($LiveDemo) {
 @"
@@ -181,6 +214,8 @@ if ($LiveDemo) {
 `$env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = '$($env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED)'
 `$env:OPEN_WORLD_QUERY_MODEL = '$($env:OPEN_WORLD_QUERY_MODEL)'
 `$env:OPEN_WORLD_QUERY_MODEL_DIGEST = '$($env:OPEN_WORLD_QUERY_MODEL_DIGEST)'
+`$env:TASK_CONSUMER_ENABLED = '$($env:TASK_CONSUMER_ENABLED)'
+`$env:TASK_STREAM_NAME = '$($env:TASK_STREAM_NAME)'
 `$env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED = '$($env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED)'
 `$env:PORTFOLIO_NARRATION_MODEL = '$($env:PORTFOLIO_NARRATION_MODEL)'
 `$env:PORTFOLIO_NARRATION_MODEL_DIGEST = '$($env:PORTFOLIO_NARRATION_MODEL_DIGEST)'

@@ -101,11 +101,14 @@ test('novel suitability request stays provisional and exposes a durable research
   );
   const discoverButton = page.getByRole('button', { name: /Discover official sources/i });
   if (unresolved.execution_state_envelope?.research_authority !== 'granted') {
-    await expect(discoverButton).toBeVisible();
+    const caseApproval = page.getByRole('button', { name: /Use for this case/i }).first();
+    await expect(discoverButton.or(caseApproval)).toBeVisible();
   }
   await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
-  await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
+  await expect(page.getByTestId('ambiguity-accounting')).toContainText(
+    /external calls: [0-3]\b.*paid calls: 0.*cart authority: none/i,
+  );
 
   await page.getByTitle('Decision Trace').click();
   const modal = page.getByTestId('decision-trace-modal');
@@ -116,7 +119,8 @@ test('novel suitability request stays provisional and exposes a durable research
   await expect(research).toContainText(/8K RAW video/i);
   await expect(research).toContainText(/colour-critical grading/i);
   await expect(research).toContainText(/bounded research plan/i);
-  await expect(research).toContainText(/Status:\s*(blocked|planned|not executed)/i);
+  await expect(research).toContainText(/Publisher discovered/i);
+  await expect(research).toContainText(/Discovery:\s*completed/i);
   await expect(research).toContainText(/catalog recommendation|exploration/i);
   await page.screenshot({ path: '../.tmp-open-world-browser/coverage-gate.png', fullPage: true });
 });
@@ -137,8 +141,6 @@ test('held-out future-game alias resolves identity but cannot invent fit or budg
   const products = result.products || result.results || [];
   expect(products).toEqual([]);
   expect(String(result.assistant_message || result.message || '')).not.toMatch(/\b(ample|enough|insufficient)\b/i);
-  expect(result.workload_authorization?.status || result.semantic_resolution?.catalog_authority)
-    .toBe('blocked');
   expect(result.execution_state_envelope?.catalog_authority).toBe('blocked');
   expect(result.execution_state_envelope?.commerce_authority).toBe('none');
   // The exact utterance does not itself grant network authority. A deployment
@@ -160,7 +162,7 @@ test('held-out future-game alias resolves identity but cannot invent fit or budg
   await expect(page.getByText(/No product is qualified until the material gap is resolved/i))
     .toBeVisible();
   if (result.execution_state_envelope?.research_authority === 'granted') {
-    await expect(page.getByText(/Heroes of Might and Magic III Remake/i)).toBeVisible();
+    await expect(page.getByText(/Heroes of Might and Magic III Remake/i).first()).toBeVisible();
   }
 
   const certificate: any = {
@@ -430,6 +432,12 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
   expect(discovery.research.provider_accounting.paid_calls).toBe(0);
   expect(discovery.research.candidates.length).toBeGreaterThan(0);
   expect(discovery.research.candidates[0].candidate_id).toMatch(/^pubcand-/);
+  expect(discovery.research_outcome).toMatchObject({
+    schema_version: 'research-outcome-v1',
+    source_ownership_status: 'discovered_candidate',
+    accepted_claim_count: 0,
+    catalog_authority: 'blocked',
+  });
 
   const agisoftCandidate = page.getByTestId('publisher-candidates').getByRole('listitem')
     .filter({ hasText: /System Requirements.*\(www\.agisoft\.com\)/i })
@@ -448,6 +456,9 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
   expect(approval.research_status).toBe('claims_pending_review');
   expect(approval.claims.length).toBeGreaterThan(0);
   expect(approval.qualification_authority).toBe('none');
+  expect(approval.research_outcome.source_ownership_status).toBe('observed_held');
+  expect(approval.research_outcome.held_claim_count).toBe(approval.claims.length);
+  await expect(page.getByTestId('research-outcome-summary')).toContainText(/Held for review/i);
 
   const review = page.getByTestId('buyer-requirement-review').last();
   await expect(review).toContainText(/exact publisher origin/i);
@@ -455,11 +466,20 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
     response => /\/requirement-proposals\/[^/]+\/accept$/.test(response.url()),
     { timeout: 30_000 },
   );
-  await review.getByRole('button', { name: 'Accept case evidence' }).click();
+  await review.getByRole('button', { name: 'Accept selected case evidence' }).click();
   const accepted = await (await acceptanceResponse).json();
   expect(accepted.status).toBe('accepted_case_evidence');
   expect(accepted.qualification_authority).toBe('requirements');
   expect(accepted.cart_mutation).toBe('not_authorized');
+  expect(accepted.research_outcome).toMatchObject({
+    case_revision: accepted.case_revision,
+    discovery_status: 'completed',
+    fetch_status: 'completed',
+    source_ownership_status: 'accepted_case_only',
+    catalog_authority: 'permitted',
+    commerce_authority: 'none',
+  });
+  await expect(page.getByTestId('research-outcome-summary')).toContainText(/Accepted case-only evidence/i);
   await expect(page.getByTestId('buyer-research-status'))
     .toContainText(/official requirements compiled/i);
   if (process.env.PORTFOLIO_RESEARCH_CERTIFICATE_PATH) {

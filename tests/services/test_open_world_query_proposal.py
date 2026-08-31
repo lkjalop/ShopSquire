@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import Future
+from types import SimpleNamespace
 
 from src.app.services.case_research_plan import build_case_research_plan
 from src.app.services import open_world_query_proposal as subject
@@ -39,6 +40,33 @@ def test_local_model_can_expand_vocabulary_but_gains_no_authority():
     assert planned.authority == "proposal_only"
 
 
+def test_named_publisher_domain_hint_becomes_a_candidate_only_site_query():
+    plan = build_case_research_plan(
+        "I process large drone surveys in Agisoft Metashape", allow_open_world=True,
+    )
+    assert plan is not None
+    result = {
+        "interpretations": ["Agisoft Metashape drone processing"],
+        "shared_concepts": ["Agisoft Metashape"],
+        "divergent_axes": [],
+        "publisher_domain_hypotheses": ["www.agisoft.com", "unrelated.example"],
+        "queries": [
+            {"axis": "requirements_and_compatibility", "query": "Agisoft Metashape requirements"},
+            {"axis": "requirements_and_compatibility", "query": "Agisoft Metashape compatibility"},
+            {"axis": "support_and_constraints", "query": "Agisoft Metashape support"},
+        ],
+    }
+
+    planned, receipt = propose_open_world_queries(
+        plan, model_fn=lambda prompt, timeout: json.dumps(result),
+    )
+
+    assert receipt["status"] == "accepted"
+    assert len({row.axis for row in planned.discovery_queries}) == 3
+    assert planned.discovery_queries[-1].query.startswith("site:agisoft.com ")
+    assert "unrelated.example" not in receipt["proposal"]["publisher_domain_hypotheses"]
+
+
 def test_unanchored_or_hardware_inventing_model_output_falls_back():
     original = _plan()
     bad = {
@@ -64,6 +92,29 @@ def test_model_timeout_or_invalid_json_falls_back_without_hanging_contract():
     )
     assert planned == original
     assert receipt["status"] == "rejected_or_unavailable"
+
+
+def test_live_query_planner_uses_a_compact_output_budget(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("OPEN_WORLD_QUERY_MODEL", "qwen3:14b")
+    monkeypatch.setenv("OPEN_WORLD_QUERY_MODEL_DIGEST", "a" * 64)
+    monkeypatch.setattr(
+        subject, "verify_ollama_artifact",
+        lambda **_kwargs: SimpleNamespace(status="verified", error_code=None),
+    )
+
+    class Gateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def execute(self, request, **_kwargs):
+            captured["max_output_tokens"] = request.max_output_tokens
+            return SimpleNamespace(status="completed", text="{}", failure_code=None)
+
+    monkeypatch.setattr(subject, "ModelExecutionGateway", Gateway)
+
+    assert subject._ollama_call("compact query plan", 6.0) == "{}"
+    assert captured["max_output_tokens"] <= 420
 
 
 def test_model_timeout_falls_back_without_stranding_the_buyer():

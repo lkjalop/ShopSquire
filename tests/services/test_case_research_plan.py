@@ -1,4 +1,5 @@
 from src.app.services.case_research_plan import (
+    _discovery_subject,
     approved_sources_for_plan,
     build_case_research_plan,
 )
@@ -154,6 +155,37 @@ def test_open_world_queries_preserve_digit_leading_product_name_tokens():
     assert plan is not None
     queries = [row.query for row in plan.discovery_queries]
     assert any("Rockwell Emulate 3D" in query for query in queries)
+
+
+def test_discovery_subject_removes_filler_url_and_commercial_amounts() -> None:
+    subject = _discovery_subject(
+        "Please inspect CupixWorks at "
+        "https://www.cupix.com/home-1?utm_source=google&gclid=secret "
+        "and tell me whether AUD 3,000 is enough."
+    )
+
+    folded = subject.casefold()
+    assert "please" not in folded
+    assert "http" not in folded
+    assert "google" not in folded
+    assert "secret" not in folded
+    assert "3,000" not in subject
+    assert "3000" not in subject
+    assert "cupix" in folded
+    assert "works" in folded
+
+
+def test_discovery_subject_splits_product_boundaries_but_preserves_versions() -> None:
+    emulate = _discovery_subject("What about Rockwell Emulate3D running locally?")
+    flight = _discovery_subject(
+        "Can this play Microsoft Flight Simulator 2024 for under AUD 3,000?"
+    )
+    baldur = _discovery_subject("Is AUD 3,000 excessive for Baldur's Gate 3?")
+
+    assert "Rockwell Emulate 3D" in emulate
+    assert "Microsoft Flight Simulator 2024" in flight
+    assert "3000" not in flight
+    assert "Baldur" in baldur and "Gate" in baldur and "3" in baldur
 
 
 def test_open_world_queries_drop_negated_preferences_and_buyer_filler():

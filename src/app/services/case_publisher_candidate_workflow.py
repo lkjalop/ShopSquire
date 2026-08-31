@@ -240,6 +240,21 @@ async def execute_case_candidate_research(
         if source_execution else {}
     )
     claims = case_review_claims(research.get("claims") or [], candidate=approved)
+    lineage = {
+        "status": research.get("status") or "completed",
+        "evidence_outcome": research.get("evidence_outcome"),
+        "provider_accounting": research.get("provider_accounting") or {},
+        "source_execution": research.get("source_execution") or [],
+        "candidates": [{
+            "candidate_id": approved.candidate_id,
+            "title": approved.title,
+            "publisher": approved.domain,
+            "url": approved.url,
+            "status": "researched",
+        }],
+    }
+    for claim in claims:
+        claim["research_lineage"] = lineage
     proposal: RequirementProposal | None = None
     if claims:
         proposal = RequirementProposal(
@@ -278,6 +293,17 @@ async def execute_case_candidate_research(
         "qualification_authority": "none", "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized", "trace_id": case.case_id.removeprefix("sc-"),
     }
+    from src.app.services.research_outcome import build_research_outcome
+
+    result["research_outcome"] = build_research_outcome(
+        case_id=case.case_id,
+        case_revision=max(1, int(getattr(case, "revision", 1) or 1)),
+        operation_id=f"publisher-approval:{approved.candidate_id}:v{approved.version}",
+        research=result,
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    ).model_dump(mode="json")
     json.dumps(result, sort_keys=True)
     approved.research_result_json = result
     db.commit()

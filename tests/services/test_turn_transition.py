@@ -36,6 +36,22 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
         preserved_fields=["budget"],
         pending_clarification={"action": "consume", "prior_question_id": "locality"},
         external_research_authorized=True,
+        operation_id="chat:idem-1",
+        research={
+            "source_resolution": {
+                "source_intake_certificate": {
+                    "resolution": {"status": "resolved"},
+                    "security": {"status": "observed_untrusted_content_pending_compilation"},
+                    "execution": {"origin_fetch_status": "completed"},
+                    "claim_compilation": {
+                        "status": "claims_pending_policy_review",
+                        "accepted": 0,
+                        "provisional": 9,
+                        "rejected": 0,
+                    },
+                },
+            },
+        },
         catalog_authority="blocked",
         assistant_message="I retained the budget and added Emulate3D.",
     )
@@ -45,3 +61,6 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert projection.pending_clarification.action == "consume"
     assert projection.catalog_authority == "blocked"
     assert projection.commerce_authority == "none"
+    assert projection.research_outcome.case_revision == 5
+    assert projection.research_outcome.operation_id == "chat:idem-1"
+    assert projection.research_outcome.held_claim_count == 9

@@ -1580,7 +1580,10 @@ def create_app() -> FastAPI:
             "cv_ocr": {"status": "skipped", "details": {"mode": "deep_only"}},
             "redis": {"status": "skipped", "details": {"mode": "deep_only"}},
             "db": {"status": "unknown", "details": {}},
+            "database_revision": {"status": "unknown", "details": {}},
             "router_model": {"status": "unknown", "details": {}},
+            "external_search": {"status": "unknown", "details": {}},
+            "source_governance": {"status": "unknown", "details": {}},
         }
 
         def _set_component(name: str, ready: bool, details: dict[str, Any] | None = None) -> None:
@@ -1622,7 +1625,21 @@ def create_app() -> FastAPI:
                 try:
                     with eng.connect() as conn:
                         conn.execute(sql_text("SELECT 1"))
+                        revision = None
+                        try:
+                            revision = conn.execute(
+                                sql_text("SELECT version_num FROM alembic_version LIMIT 1")
+                            ).scalar()
+                        except Exception:
+                            revision = None
                     _set_component("db", True)
+                    _set_component(
+                        "database_revision", bool(revision),
+                        {
+                            "revision": str(revision) if revision else None,
+                            "dialect": str(getattr(eng.dialect, "name", "unknown")),
+                        },
+                    )
                 except Exception:
                     ok = False
                     reasons.append("db_connect_failed")
@@ -1644,6 +1661,32 @@ def create_app() -> FastAPI:
         else:
             _set_component("router_model", False, {"status": "not_started"})
 
+        try:
+            from src.app.config import get_settings, load_feature_flags
+            from src.app.platform.store_profile import profile_slot
+            from src.app.services.commerce_feature_readiness import external_search_readiness
+            from src.app.services.research_policy import external_research_runtime_status
+
+            settings = get_settings()
+            flags = load_feature_flags(settings.feature_flags_path)
+            search = external_search_readiness(
+                flags,
+                allowlist=list(profile_slot("external_research_allowlist", default=[]) or []),
+                runtime_status=external_research_runtime_status(),
+            )
+            _set_component("external_search", bool(search.get("effective")), search)
+        except Exception as exc:
+            _set_component("external_search", False, {"error": type(exc).__name__})
+
+        try:
+            from src.app.services.official_source_governance import source_governance_readiness
+
+            governance = source_governance_readiness()
+            governance_ready = bool(governance.get("operationally_enrolled"))
+            _set_component("source_governance", governance_ready, governance)
+        except Exception as exc:
+            _set_component("source_governance", False, {"error": type(exc).__name__})
+
         if deep:
             try:
                 from src.app.observability.health import dependency_health_snapshot
@@ -1658,6 +1701,31 @@ def create_app() -> FastAPI:
                         if dep_name == "redis" and not dep_ok:
                             ok = False
                             reasons.append("redis_unhealthy")
+                try:
+                    import json as _json
+                    import urllib.request as _urlreq
+
+                    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+                    with _urlreq.urlopen(f"{ollama_url}/api/ps", timeout=1.5) as response:
+                        resident = _json.loads(response.read().decode("utf-8"))
+                    resident_models = [
+                        str(row.get("name") or row.get("model") or "")
+                        for row in (resident.get("models") or []) if isinstance(row, dict)
+                    ]
+                    expected_model = str((router_prewarm or {}).get("router_model") or "")
+                    resident_ok = bool(expected_model) and any(
+                        name == expected_model or name.startswith(f"{expected_model}:")
+                        for name in resident_models
+                    )
+                    components["ollama"]["details"].update({
+                        "resident_models": resident_models,
+                        "expected_router_model": expected_model or None,
+                        "router_model_resident": resident_ok,
+                    })
+                    if components["ollama"]["status"] == "ready" and not resident_ok:
+                        components["ollama"]["status"] = "not_ready"
+                except Exception as exc:
+                    components["ollama"]["details"]["residency_error"] = type(exc).__name__
             except Exception:
                 _set_component("redis", False, {"error": "health_snapshot_failed"})
                 ok = False

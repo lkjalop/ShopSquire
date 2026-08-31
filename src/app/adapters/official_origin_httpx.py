@@ -11,9 +11,10 @@ import hashlib
 import asyncio
 import ipaddress
 import socket
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -25,6 +26,8 @@ _ALLOWED_CONTENT_TYPES = (
     "text/html", "text/plain", "application/json", "application/pdf",
     "application/xhtml+xml",
 )
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 3
 
 
 def _domain_allowed(host: str, allowlist: Iterable[str]) -> bool:
@@ -138,11 +141,62 @@ class GovernedOfficialOriginFetcher:
             # The adapter has already applied scheme, credential, public-IP and
             # exact source-policy checks. Permit only its governed allowlist for
             # this request so the global guard cannot drift from source policy.
+            deadline = time.monotonic() + max(0.25, float(timeout_s))
+            current_url = str(url)
+            redirect_chain: list[dict[str, Any]] = []
             with scoped_egress_domains(allowlist):
-                response = client.get(str(url), timeout=timeout_s)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return self._failed(dispatched_receipt, "origin_total_timeout")
+                    response = client.get(current_url, timeout=remaining)
+                    if response.status_code not in _REDIRECT_STATUSES:
+                        break
+                    if len(redirect_chain) >= _MAX_REDIRECTS:
+                        return self._failed(
+                            {**dispatched_receipt, "redirect_chain": redirect_chain},
+                            "origin_redirect_limit_exceeded",
+                        )
+                    location = str(response.headers.get("location") or "").strip()
+                    next_url = urljoin(current_url, location)
+                    next_parsed = urlparse(next_url)
+                    next_host = str(next_parsed.hostname or "").lower()
+                    redirect_chain.append({
+                        "hop": len(redirect_chain) + 1,
+                        "http_status": int(response.status_code),
+                        "from_host": str(urlparse(current_url).hostname or "").lower(),
+                        "to_host": next_host or None,
+                        "location_hash": hashlib.sha256(next_url.encode("utf-8")).hexdigest()[:16],
+                    })
+                    if next_parsed.scheme not in {"http", "https"} or not next_host:
+                        return self._failed(
+                            {**dispatched_receipt, "redirect_chain": redirect_chain},
+                            "origin_redirect_url_invalid",
+                        )
+                    if next_parsed.username or next_parsed.password:
+                        return self._failed(
+                            {**dispatched_receipt, "redirect_chain": redirect_chain},
+                            "origin_redirect_credentials_forbidden",
+                        )
+                    if not _domain_allowed(next_host, allowlist):
+                        return self._failed(
+                            {**dispatched_receipt, "redirect_chain": redirect_chain},
+                            "origin_redirect_domain_not_allowlisted",
+                        )
+                    if not _public_host(
+                        next_host, resolver=self._resolver, allow_private=self._allow_private,
+                    ):
+                        return self._failed(
+                            {**dispatched_receipt, "redirect_chain": redirect_chain},
+                            "origin_redirect_host_not_public",
+                        )
+                    current_url = next_url
             receipt = {
                 **dispatched_receipt,
                 "http_status": int(response.status_code),
+                "redirect_chain": redirect_chain,
+                "redirect_count": len(redirect_chain),
+                "final_origin_host": str(urlparse(current_url).hostname or "").lower(),
             }
             if not 200 <= response.status_code < 300:
                 return self._failed(receipt, "origin_http_status")
@@ -156,7 +210,7 @@ class GovernedOfficialOriginFetcher:
             digest = hashlib.sha256(body).hexdigest()
             return {
                 "status": "completed",
-                "url": str(url)[:1000],
+                "url": current_url[:1000],
                 "content": body,
                 "content_type": content_type,
                 # Raw origin content is untrusted input. It is not a requirement.
@@ -239,31 +293,80 @@ class AsyncGovernedOfficialOriginFetcher(GovernedOfficialOriginFetcher):
         dispatched = {**base_receipt, "network_execution": True,
                       "external_call_dispatched": True}
         try:
+            deadline = time.monotonic() + max(0.25, float(timeout_s))
+            current_url = str(url)
+            redirect_chain: list[dict[str, Any]] = []
             with scoped_egress_domains(allowlist):
-                async with client.stream("GET", str(url), timeout=timeout_s) as response:
-                    receipt = {**dispatched, "http_status": int(response.status_code)}
-                    if not 200 <= response.status_code < 300:
-                        return self._failed(receipt, "origin_http_status")
-                    content_type = str(response.headers.get("content-type") or "").split(
-                        ";", 1,
-                    )[0].lower()
-                    if content_type not in _ALLOWED_CONTENT_TYPES:
-                        return self._failed(receipt, "origin_content_type_not_allowed")
-                    chunks: list[bytes] = []
-                    size = 0
-                    async for chunk in response.aiter_bytes():
-                        size += len(chunk)
-                        if size > self._max_bytes:
-                            return self._failed(receipt, "origin_body_too_large")
-                        chunks.append(chunk)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return self._failed(dispatched, "origin_total_timeout")
+                    async with client.stream("GET", current_url, timeout=remaining) as response:
+                        receipt = {
+                            **dispatched, "http_status": int(response.status_code),
+                            "redirect_chain": list(redirect_chain),
+                        }
+                        if response.status_code in _REDIRECT_STATUSES:
+                            if len(redirect_chain) >= _MAX_REDIRECTS:
+                                return self._failed(receipt, "origin_redirect_limit_exceeded")
+                            next_url = urljoin(
+                                current_url, str(response.headers.get("location") or "").strip(),
+                            )
+                            next_parsed = urlparse(next_url)
+                            next_host = str(next_parsed.hostname or "").lower()
+                            redirect_chain.append({
+                                "hop": len(redirect_chain) + 1,
+                                "http_status": int(response.status_code),
+                                "from_host": str(urlparse(current_url).hostname or "").lower(),
+                                "to_host": next_host or None,
+                                "location_hash": hashlib.sha256(next_url.encode("utf-8")).hexdigest()[:16],
+                            })
+                            redirect_receipt = {**dispatched, "redirect_chain": list(redirect_chain)}
+                            if next_parsed.scheme not in {"http", "https"} or not next_host:
+                                return self._failed(redirect_receipt, "origin_redirect_url_invalid")
+                            if next_parsed.username or next_parsed.password:
+                                return self._failed(
+                                    redirect_receipt, "origin_redirect_credentials_forbidden",
+                                )
+                            if not _domain_allowed(next_host, allowlist):
+                                return self._failed(
+                                    redirect_receipt, "origin_redirect_domain_not_allowlisted",
+                                )
+                            if not _public_host(
+                                next_host, resolver=self._resolver,
+                                allow_private=self._allow_private,
+                            ):
+                                return self._failed(
+                                    redirect_receipt, "origin_redirect_host_not_public",
+                                )
+                            current_url = next_url
+                            continue
+                        if not 200 <= response.status_code < 300:
+                            return self._failed(receipt, "origin_http_status")
+                        content_type = str(response.headers.get("content-type") or "").split(
+                            ";", 1,
+                        )[0].lower()
+                        if content_type not in _ALLOWED_CONTENT_TYPES:
+                            return self._failed(receipt, "origin_content_type_not_allowed")
+                        chunks: list[bytes] = []
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            if size > self._max_bytes:
+                                return self._failed(receipt, "origin_body_too_large")
+                            chunks.append(chunk)
+                        break
             body = b"".join(chunks)
             completed_at = datetime.now(timezone.utc).isoformat()
             return {
-                "status": "completed", "url": str(url)[:1000], "content": body,
+                "status": "completed", "url": current_url[:1000], "content": body,
                 "content_type": content_type,
                 "authority": "untrusted_origin_content_pending_compilation",
                 "receipt": {
-                    **receipt, "completed_at": completed_at, "observed_at": completed_at,
+                    **receipt, "redirect_chain": redirect_chain,
+                    "redirect_count": len(redirect_chain),
+                    "final_origin_host": str(urlparse(current_url).hostname or "").lower(),
+                    "completed_at": completed_at, "observed_at": completed_at,
                     "response_body_hash": hashlib.sha256(body).hexdigest(),
                     "response_bytes": len(body), "execution_status": "completed",
                 },

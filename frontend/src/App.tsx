@@ -48,6 +48,7 @@ import type { BuyerClaimReconciliation } from './components/BuyerClaimReconcilia
 import ProductShelvesPanel, { type ProductShelfProjection } from './components/ProductShelvesPanel';
 import SupplierContinuationCard from './components/SupplierContinuationCard';
 import AmbiguityExplorationPanel, { type AmbiguityExploration } from './components/AmbiguityExplorationPanel';
+import ResearchOutcomeSummary, { type ResearchOutcome } from './components/ResearchOutcomeSummary';
 import {
   detectCVIssueType,
   detectPanelMode,
@@ -436,6 +437,7 @@ export default function App() {
   const [traceOpen, setTraceOpen] = useState(false);
   const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
   const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
+  const [researchOutcome, setResearchOutcome] = useState<ResearchOutcome | null>(null);
   // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
   // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
   const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
@@ -2390,6 +2392,11 @@ export default function App() {
             case_revision: turnReadModel.case_revision,
             shopping_case_revision: turnReadModel.case_revision,
           };
+          setResearchOutcome(
+            turnReadModel.research_outcome?.schema_version === 'research-outcome-v1'
+              ? turnReadModel.research_outcome as ResearchOutcome
+              : null,
+          );
         }
         mergeTrustEvidence(data);
         const governedOutcome = nonRecommendationOutcome(data);
@@ -2943,6 +2950,9 @@ export default function App() {
       rejectedClaimIds: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
       corrections, researchChoice,
     });
+    if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
+      setResearchOutcome(payload.research_outcome as ResearchOutcome);
+    }
     if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
       dispatchPresentationEvent({
         type: 'shopping_case.shelves.replaced', source: 'research',
@@ -3010,6 +3020,9 @@ export default function App() {
     setIsThinking(true);
     try {
       const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized, authorizationBasis });
+      if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
+        setResearchOutcome(payload.research_outcome as ResearchOutcome);
+      }
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         dispatchPresentationEvent({
           type: 'shopping_case.shelves.replaced', source: 'research',
@@ -3032,7 +3045,11 @@ export default function App() {
           : payload?.evidence_outcome === 'context_only'
           ? `Approved-source research completed in the same shopping case. It established ${payload?.research?.context_claims?.length || 0} context claims but no authoritative product requirements, so the shortlist remains provisional. Tell me the named software/version or accept uploaded requirements to continue. No cart or supplier action was authorized.`
           : `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
-        timestamp: new Date() },
+        timestamp: new Date(),
+        buyerRequirementClaims: Array.isArray(payload?.claims)
+          ? payload.claims as BuyerRequirementClaim[] : undefined,
+        buyerRequirementProposal: payload?.buyer_requirement_proposal || undefined,
+        },
       });
     } catch (error: any) {
       dispatchPresentationEvent({
@@ -3085,6 +3102,9 @@ export default function App() {
     researchAuthorized: boolean,
   ) => {
     const payload = await executeEvidenceSourceResolution(uid, hint, researchAuthorized);
+    if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
+      setResearchOutcome(payload.research_outcome as ResearchOutcome);
+    }
     if (researchAuthorized && ['completed', 'claims_pending_review'].includes(payload?.research_status)) {
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         setProductShelves({
@@ -3132,6 +3152,9 @@ export default function App() {
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => {
     const payload = await executePublisherApproval(uid, candidate);
+    if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
+      setResearchOutcome(payload.research_outcome as ResearchOutcome);
+    }
     setTraceId(normalizeTraceId(payload?.trace_id || traceId));
     setMessages((current) => [...current, {
       role: 'assistant',
@@ -3650,6 +3673,7 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
                   {ambiguityExploration && (
                     <AmbiguityExplorationPanel
                       exploration={ambiguityExploration}
@@ -4139,7 +4163,7 @@ export default function App() {
               ambiguityExploration?.trace_id || activeShoppingCase.case_id.replace(/^sc-/, ''),
             )
             : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
-          onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />
+          onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} researchOutcome={researchOutcome} />
       </Suspense>}
 
       {/* Login Modal */}

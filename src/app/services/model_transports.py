@@ -37,6 +37,7 @@ def make_ollama_generate_transport(
     options: dict[str, Any] | None = None,
     keep_alive: str = "10m",
     think: bool = False,
+    response_format: str | dict[str, Any] | None = None,
 ):
     """Build a payload-specific transport which remains behind the gateway."""
 
@@ -54,6 +55,8 @@ def make_ollama_generate_transport(
             "keep_alive": keep_alive,
             "options": {**frozen_options, "num_predict": request.max_output_tokens},
         }
+        if response_format is not None:
+            payload["format"] = response_format
         if frozen_images:
             payload["images"] = list(frozen_images)
         response = requests.post(
