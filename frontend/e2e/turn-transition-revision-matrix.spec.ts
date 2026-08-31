@@ -64,7 +64,11 @@ test('every conversational transition publishes one matching case revision', asy
 
     const projectionCase = String(projection.case_id);
     const prior = priorByCase.get(projectionCase);
-    if (prior != null) expect(Number(projection.case_revision)).toBe(prior + 1);
+    // Research/interpretation operations are independently revision-bound and
+    // may commit between buyer turns. The completed turn must publish one exact
+    // revision and revisions must be monotonic; an intervening governed
+    // operation is not a lost or duplicated buyer turn.
+    if (prior != null) expect(Number(projection.case_revision)).toBeGreaterThan(prior);
     priorByCase.set(projectionCase, Number(projection.case_revision));
     caseId = String(data.shopping_case_id || data.ambiguity_exploration?.case_id || projectionCase);
     expect(caseId).toMatch(/^sc-/);

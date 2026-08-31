@@ -141,6 +141,11 @@ def source_governance_readiness(path: Path | None = None) -> dict[str, Any]:
     ]
     domains = sorted({domain for item in sources for domain in item.get("allowed_domains") or []})
     entrypoints = sorted({url for item in sources for url in item.get("canonical_entrypoints") or []})
+    errors = list(manifest.get("errors") or [])
+    # Pending policies grant no authority, but they must not make the reviewed
+    # subset appear unavailable. Report operational and full-review states
+    # independently so callers cannot confuse the two.
+    fully_reviewed = bool(sources and len(reviewed) == len(sources) and not errors)
     return {
         "schema_version": manifest.get("schema_version"),
         "valid_source_count": len(sources),
@@ -148,9 +153,11 @@ def source_governance_readiness(path: Path | None = None) -> dict[str, Any]:
         "pending_independent_human_review_count": len(pending),
         "domain_allowlist": domains,
         "canonical_entrypoints": entrypoints,
-        "errors": list(manifest.get("errors") or []),
+        "errors": errors,
         "governance_status": manifest.get("governance_status") or "unknown",
-        "operationally_enrolled": bool(sources and len(reviewed) == len(sources) and not manifest.get("errors")),
+        "operational_source_count": len(reviewed),
+        "fully_reviewed": fully_reviewed,
+        "operationally_enrolled": bool(reviewed and not errors),
     }
 
 

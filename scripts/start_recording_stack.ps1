@@ -3,7 +3,9 @@ param(
     [switch]$NoMarketSignal,
     [switch]$LiveDemo,
     [string]$LiveModel = "qwen3:14b",
-    [string]$QueryModel = "granite4:micro"
+    [string]$QueryModel = "granite4:micro",
+    [ValidateRange(10, 120)]
+    [int]$OllamaWarmupTimeoutSec = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -105,6 +107,7 @@ if ($LiveDemo) {
     $env:SEMANTIC_SIMULATION_AUTHORITY_ENABLED = "0"
 
     try {
+        Write-Output "OLLAMA_PREWARM_STARTED=$LiveModel timeout=${OllamaWarmupTimeoutSec}s"
         $warmupBody = @{
             model = $LiveModel
             prompt = "Reply with READY only."
@@ -113,7 +116,7 @@ if ($LiveDemo) {
             options = @{ num_predict = 8; temperature = 0 }
         } | ConvertTo-Json -Depth 4
         Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
-            -ContentType "application/json" -Body $warmupBody -TimeoutSec 180 | Out-Null
+            -ContentType "application/json" -Body $warmupBody -TimeoutSec $OllamaWarmupTimeoutSec | Out-Null
         $ollamaTags = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 10
         $liveManifest = $ollamaTags.models | Where-Object {
             $_.name -eq $LiveModel -or $_.model -eq $LiveModel
@@ -126,6 +129,7 @@ if ($LiveDemo) {
         $env:OLLAMA_DEFAULT_MODEL_DIGEST = $liveDigest
         $env:OLLAMA_MEDIUM_MODEL_DIGEST = $liveDigest
         $env:PORTFOLIO_NARRATION_MODEL_DIGEST = $liveDigest
+        Write-Output "QUERY_PLANNER_PREWARM_STARTED=$QueryModel timeout=${OllamaWarmupTimeoutSec}s"
         $queryWarmupBody = @{
             model = $QueryModel
             prompt = 'Return {"status":"READY"} only.'
@@ -135,7 +139,7 @@ if ($LiveDemo) {
             options = @{ num_predict = 16; temperature = 0 }
         } | ConvertTo-Json -Depth 4
         Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
-            -ContentType "application/json" -Body $queryWarmupBody -TimeoutSec 180 | Out-Null
+            -ContentType "application/json" -Body $queryWarmupBody -TimeoutSec $OllamaWarmupTimeoutSec | Out-Null
         $queryManifest = $ollamaTags.models | Where-Object {
             $_.name -eq $QueryModel -or $_.model -eq $QueryModel
         } | Select-Object -First 1

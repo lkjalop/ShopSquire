@@ -74,19 +74,32 @@ const requestHeaders = (idempotencyKey?: string) => ({
   ...csrfHeaders(),
 });
 
-async function postShoppingCase(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
-  const response = await fetch(apiUrl(path), {
-    method: 'POST', credentials: 'include', headers: requestHeaders(idempotencyKey),
-    body: JSON.stringify(body),
-  });
-  const payload = await safeJson(response);
-  if (!response.ok) {
-    throw new Error(String(
-      payload?.detail?.message || payload?.detail?.code || payload?.detail
-      || 'Shopping-case operation failed.',
-    ));
+async function postShoppingCase(
+  path: string, body: Record<string, unknown>, idempotencyKey?: string, deadlineMs = 45_000,
+) {
+  const controller = new AbortController();
+  const deadline = globalThis.setTimeout(() => controller.abort('shopping_case_operation_deadline'), deadlineMs);
+  try {
+    const response = await fetch(apiUrl(path), {
+      method: 'POST', credentials: 'include', headers: requestHeaders(idempotencyKey),
+      signal: controller.signal, body: JSON.stringify(body),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(String(
+        payload?.detail?.message || payload?.detail?.code || payload?.detail
+        || 'Shopping-case operation failed.',
+      ));
+    }
+    return payload;
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Shopping-case operation timed out; no authority was granted. Retry explicitly.');
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(deadline);
   }
-  return payload;
 }
 
 /**
@@ -112,6 +125,7 @@ export function useShoppingCaseResearch() {
     dispatchPresentation({ type: 'supplier.replaced', value });
   }, []);
   const [researchState, setResearchState] = useState<ShoppingCaseResearchState>('idle');
+  const [researchStartedAt, setResearchStartedAt] = useState<number | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const executionRef = useRef<{ caseId: string; uid: string; executionId: string } | null>(null);
 
@@ -267,6 +281,7 @@ export function useShoppingCaseResearch() {
     controllerRef.current = controller;
     executionRef.current = { caseId: exploration.case_id, uid, executionId };
     setResearchState('running');
+    setResearchStartedAt(Date.now());
     const deadline = window.setTimeout(
       () => cancelResearch('research_deadline_exceeded'),
       deadlineMs,
@@ -312,6 +327,7 @@ export function useShoppingCaseResearch() {
       window.clearTimeout(deadline);
       if (controllerRef.current === controller) controllerRef.current = null;
       if (executionRef.current?.executionId === executionId) executionRef.current = null;
+      setResearchStartedAt(null);
     }
   }, [ambiguityExploration, cancelResearch]);
 
@@ -392,6 +408,7 @@ export function useShoppingCaseResearch() {
     supplierContinuation,
     setSupplierContinuation,
     researchState,
+    researchStartedAt,
     executeResearch,
     cancelResearch,
     acceptRequirementProposal,

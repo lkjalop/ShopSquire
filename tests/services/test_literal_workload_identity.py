@@ -31,6 +31,12 @@ def test_literal_switch_rejects_generic_use_cases():
     assert deterministic_named_workload_switch("what about Baldur's Gate 3?")
 
 
+def test_explicit_replace_workload_is_a_switch_not_an_addition():
+    utterance = "Actually replace that workload with Baldur's Gate 3."
+    assert literal_game_identity_candidate(utterance) == (("game", "Baldur's Gate 3"),)
+    assert deterministic_named_workload_switch(utterance) is True
+
+
 def test_additive_workload_continuation_is_explicit_and_does_not_imply_identity():
     assert deterministic_additive_workload_continuation(
         "It must run Rockwell Emulate3D locally as well"

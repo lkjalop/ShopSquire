@@ -33,6 +33,11 @@ _COMPOUND_PUBLIC_SUFFIXES = {
     "com.au", "net.au", "org.au", "co.nz", "co.uk", "org.uk", "ac.uk",
     "co.jp", "co.kr", "com.br", "com.cn", "com.sg", "com.mx", "co.za",
 }
+_DISCOVERY_INTERMEDIARY_DOMAINS = {
+    "academia.edu", "freelancer.com", "linkedin.com", "medium.com",
+    "reddit.com", "researchgate.net", "sci-hub.se", "sci-hub.st",
+    "sci-hub.su", "wikipedia.org", "youtube.com",
+}
 
 
 def _registrable_domain(hostname: str) -> str:
@@ -121,9 +126,11 @@ def _publisher_ownership_evaluation(row: dict[str, Any]) -> dict[str, Any]:
         host.startswith(("docs.", "documentation.", "help.", "support."))
         or any(token in path for token in ("requirements", "system-requirements", "manual", "support"))
     )
-    excluded_intermediary = any(token in host for token in (
-        "reddit.", "wikipedia.", "youtube.", "linkedin.", "facebook.", "medium.",
-    ))
+    registrable = _registrable_domain(host)
+    excluded_intermediary = (
+        registrable in _DISCOVERY_INTERMEDIARY_DOMAINS
+        or any(token in host for token in ("facebook.",))
+    )
     if excluded_intermediary:
         status = "unlikely_publisher_origin"
     elif host_overlap > 0 and documentation_surface:
@@ -228,17 +235,27 @@ def discover_open_world_publishers(
     # must at least look like requirements, documentation, a manual, or a
     # publisher support surface. Publisher ownership is still unresolved and
     # must be approved separately.
-    ranked = [] if cancelled else sorted(
-        (
-            row for row in candidates.values()
-            if int(row.get("subject_overlap_count") or 0) > 0
-            and _quality_score(row) >= 3
-        ),
-        key=_quality,
-    )[:12]
+    eligible: list[dict[str, Any]] = []
+    if not cancelled:
+        for row in candidates.values():
+            ownership = _publisher_ownership_evaluation(row)
+            row["publisher_ownership_evaluation"] = ownership
+            # Query-axis repetition alone must not promote blogs, paper hosts,
+            # labour marketplaces or other intermediaries as possible official
+            # publishers. Keep only a direct-looking subject origin or a
+            # corroborated documentation surface; returning no candidate is an
+            # honest and actionable result.
+            if (
+                int(row.get("subject_overlap_count") or 0) > 0
+                and _quality_score(row) >= 3
+                and ownership["status"] in {
+                    "plausible_direct_origin", "plausible_documentation_origin",
+                }
+            ):
+                eligible.append(row)
+    ranked = sorted(eligible, key=_quality)[:12]
     for row in ranked:
         row["quality_score"] = _quality_score(row)
-        row["publisher_ownership_evaluation"] = _publisher_ownership_evaluation(row)
     external_calls = sum(bool(row.get("external_call_dispatched")) for row in receipts)
     engine_failures = list({
         (str(failure.get("engine") or "unknown"), str(failure.get("reason") or "unresponsive")):

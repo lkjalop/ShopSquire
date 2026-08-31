@@ -33,7 +33,10 @@ test('buyer checks an official URL locally then explicitly authorizes canonical 
   await expect(panel.getByTestId('buyer-research-status')).toContainText(
     /Official requirements compiled|Research found context|No approved requirement source/i,
   );
-  await expect(page.getByText(/no cart or supplier action was authorized/i)).toBeVisible();
+  // Auto research may have already emitted the same truthful no-commerce
+  // receipt. Assert the newest completed source result instead of relying on a
+  // strict singleton locator.
+  await expect(page.getByText(/no cart or supplier action was authorized/i).last()).toBeVisible();
 
   await page.getByRole('button', { name: 'Decision Trace' }).click();
   const trace = page.getByTestId('decision-trace-modal');

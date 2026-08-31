@@ -219,6 +219,33 @@ def test_completed_search_with_no_credible_publisher_remains_unresolved():
     assert result["next_action"] == "approve_publisher_origin_or_upload_requirements"
 
 
+class IntermediaryRequirementsFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"intermediary-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed", "http_status": 200,
+        }
+        return [{
+            "title": "AcmeSolver official system requirements documentation",
+            "url": "https://www.researchgate.net/publication/acmesolver-system-requirements",
+        }]
+
+
+def test_repeated_search_axes_do_not_promote_an_intermediary_as_a_publisher():
+    plan = build_case_research_plan(
+        "I use AcmeSolver and need official system requirements", allow_open_world=True,
+    )
+    assert plan is not None
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}",
+        fetcher=IntermediaryRequirementsFetcher(),
+    )
+    assert result["status"] == "no_publisher_candidates"
+    assert result["candidates"] == []
+    assert result["provider_accounting"]["discovery_calls"] == 3
+
+
 def test_model_retry_merge_caps_authority_and_accumulates_provider_calls():
     primary = {
         "status": "no_publisher_candidates", "candidates": [], "claims": [],

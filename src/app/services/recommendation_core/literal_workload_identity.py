@@ -6,6 +6,11 @@ from typing import Sequence, Tuple
 
 
 _LITERAL_GAME_PATTERNS = (
+    re.compile(
+        r"\breplace\s+(?:(?:that|this|the|my)\s+)?"
+        r"(?:workload|software|game|application)\s+with\s+(.+?)(?=[?.!]|$)",
+        re.I,
+    ),
     # Budget-first suitability questions still name a literal workload. Keep
     # the money outside the captured title so identity lookup and budget
     # interpretation can proceed independently.
@@ -147,7 +152,8 @@ def deterministic_named_workload_switch(query: str) -> bool:
     if not literal_workload_identity_candidate(text):
         return False
     return bool(re.search(
-        r"\b(?:what\s+about|i\s+(?:want|process|render|simulate|model|analyse|analyze)|"
+        r"\b(?:replace\s+(?:(?:that|this|the|my)\s+)?(?:workload|software|game|application)\s+with|"
+        r"what\s+about|i\s+(?:want|process|render|simulate|model|analyse|analyze)|"
         r"(?:i\s+need\s+)?hardware\s+for|"
         r"(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)|"
         r"(?:laptop|computer|pc)\s+for)\b",

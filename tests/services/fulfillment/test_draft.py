@@ -322,6 +322,27 @@ def test_requirements_block_renders_buyer_constraints_excluding_budget(db):
     assert "this request does not constitute a purchase order" in body  # cage intact
 
 
+def test_requirements_block_includes_accepted_typed_os_but_not_pending_claims(db):
+    cs = {"requirements": {
+        "needed_by": "2026-09-30", "ship_to": "AU",
+        "accepted": [
+            {"attribute": "operating_system", "operator": "one_of", "value": ["Windows 11 Pro"],
+             "authority_status": "unverified", "acceptance_status": "accepted_provisional"},
+            {"attribute": "ram_gb", "operator": ">=", "value": 64, "unit": "GB",
+             "authority_status": "verified_official"},
+            {"attribute": "gpu_model", "operator": "=", "value": "Unreviewed GPU",
+             "authority_status": "pending_independent_policy_review"},
+        ],
+    }}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-OS", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert draft is not None
+    body = draft.body.lower()
+    assert "operating system: one of windows 11 pro" in body
+    assert "ram: at least 64 gb" in body
+    assert "unreviewed gpu" not in body
+
+
 def test_no_requirements_block_when_case_has_none(db):
     draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
                           rank_fn=_rank_ok, allowlist_fn=_allow)
@@ -572,6 +593,21 @@ def test_multi_line_draft_quotes_shortfall_not_full_order(db):
     body = draft.body
     assert "14 units to source (of 30 ordered)" in body        # per-line shortfall, ordered qty for context
     assert "30 units" not in body                              # never the ambiguous full-order qty as the ask
+    assert [line["quantity"] for line in draft.commercial_scope["lines"]] == [14, 14]
+    assert [line["ordered_quantity"] for line in draft.commercial_scope["lines"]] == [30, 30]
+    assert [line["shortfall"] for line in draft.commercial_scope["lines"]] == [14, 14]
+
+
+def test_multi_line_draft_omits_explicit_zero_shortfall(db):
+    draft = D.build_draft(
+        db, item_ref="SKU-1", quantity=4, case_ref="FC-ZERO",
+        lines=[{"item_ref": "SKU-STOCKED", "quantity": 10, "shortfall": 0},
+               {"item_ref": "SKU-1", "quantity": 10, "shortfall": 4}],
+        rank_fn=_rank_ok, allowlist_fn=_allow,
+    )
+    assert draft is not None
+    assert "SKU-STOCKED" not in draft.body
+    assert [line["item_ref"] for line in draft.commercial_scope["lines"]] == ["SKU-1"]
 
 
 def test_no_supplier_alternatives_offers_substitutes_not_dead_end(db):

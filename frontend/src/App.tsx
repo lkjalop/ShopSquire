@@ -397,6 +397,7 @@ export default function App() {
     supplierContinuation,
     setSupplierContinuation,
     researchState,
+    researchStartedAt,
     executeResearch: executeShoppingCaseResearch,
     acceptRequirementProposal: executeRequirementAcceptance,
     submitManualSpecifications: executeManualSpecifications,
@@ -3677,13 +3678,15 @@ export default function App() {
                   {ambiguityExploration && (
                     <AmbiguityExplorationPanel
                       exploration={ambiguityExploration}
-                      onResearch={() => { void researchAmbiguousShoppingCase(); }}
+                      onResearch={(refreshAuthorized) => { void researchAmbiguousShoppingCase(refreshAuthorized); }}
                       onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
                       onResolveEvidenceSource={resolveBuyerEvidenceSource}
                       onApprovePublisherCandidate={approvePublisherCandidate}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
                       onSubmitSpecifications={submitManualSpecifications}
                       autoResearchEnabled={autoPublicResearchEnabled}
+                      researchState={researchState}
+                      researchStartedAt={researchStartedAt}
                     />
                   )}
                   {productShelves && !materialProductFitBlocked && <ProductShelvesPanel

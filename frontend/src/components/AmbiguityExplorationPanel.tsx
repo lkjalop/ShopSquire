@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { ShoppingCaseResearchState } from '../hooks/useShoppingCaseResearch';
 
 const secondaryActionStyle = {
   background: '#fff', color: '#c2410c', border: '1px solid #f15a0a',
@@ -66,11 +67,14 @@ type Props = {
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => Promise<void>;
   autoResearchEnabled?: boolean;
+  researchState?: ShoppingCaseResearchState;
+  researchStartedAt?: number | null;
 };
 
 export default function AmbiguityExplorationPanel({
   exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
   onSubmitSpecifications, onApprovePublisherCandidate, autoResearchEnabled = false,
+  researchState = 'idle', researchStartedAt = null,
 }: Props) {
   const [showSourceResolver, setShowSourceResolver] = useState(false);
   const [sourceHint, setSourceHint] = useState('');
@@ -82,6 +86,17 @@ export default function AmbiguityExplorationPanel({
   const [manualBusy, setManualBusy] = useState(false);
   const [approvingCandidate, setApprovingCandidate] = useState<string | null>(null);
   const [candidateStatus, setCandidateStatus] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (researchState !== 'running' || researchStartedAt == null) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const update = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - researchStartedAt) / 1000)));
+    update();
+    const timer = globalThis.setInterval(update, 1000);
+    return () => globalThis.clearInterval(timer);
+  }, [researchState, researchStartedAt]);
   const openWorldDiscovery = (exploration.source_candidate_ids?.length || 0) === 0;
   const question = exploration.next_question?.text || exploration.next_question?.question;
   const buyerStatus = String(exploration.evidence || '').includes('pending_policy_review')
@@ -92,8 +107,16 @@ export default function AmbiguityExplorationPanel({
       ? 'Research found context, but no authoritative product requirements.'
       : exploration.status === 'unresolved'
         ? 'No approved requirement source was established; recommendations remain provisional.'
-        : autoResearchEnabled
-          ? 'Approved external research is running; recommendations remain provisional.'
+        : researchState === 'running'
+          ? `Approved external research is running (${elapsedSeconds}s); recommendations remain provisional.`
+          : researchState === 'timed_out'
+            ? 'Approved research timed out. No evidence or authority was inferred; retry requires an explicit action.'
+            : researchState === 'failed'
+              ? 'Approved research failed. No evidence or authority was inferred; inspect the failure receipt or retry.'
+              : researchState === 'completed'
+                ? 'Research completed, but no accepted product requirements were established.'
+                : autoResearchEnabled
+                  ? 'Automatic governed research is ready and will start for this case.'
           : 'External research has not produced evidence; provide an official link, upload, or typed requirements.';
   const resolveSource = async (researchAuthorized: boolean) => {
     if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;

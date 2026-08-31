@@ -381,6 +381,58 @@ def _requirements_block(case_state: Optional[Dict[str, Any]]) -> str:
     specs = reqs.get("specs")
     if isinstance(specs, list) and specs:
         bullets.append("Required specs: " + ", ".join(str(s) for s in specs[:6]))
+    # Typed claims arrive under either key depending on the case workflow.
+    # Only explicitly accepted/verified claims may reach a supplier RFQ;
+    # observed, pending, rejected and held claims remain internal.
+    typed = reqs.get("accepted_claims")
+    if not isinstance(typed, list):
+        typed = reqs.get("accepted")
+    if isinstance(typed, list):
+        labels = {
+            "operating_system": "Operating system", "os": "Operating system",
+            "ram_gb": "RAM", "storage_gb": "Storage", "storage_type": "Storage type",
+            "cpu": "CPU", "cpu_model": "CPU", "gpu": "GPU", "gpu_model": "GPU",
+            "gpu_vram_gb": "GPU VRAM", "architecture": "Architecture",
+            "api_compatibility": "API compatibility", "resolution": "Resolution",
+            "fps": "Frame rate", "project_scale": "Project scale",
+        }
+        allowed_authority = {
+            "case_origin_critic_accepted", "accepted_case_only", "verified",
+            "verified_official", "buyer_accepted",
+        }
+        allowed_acceptance = {"accepted_provisional", "accepted_case_origin", "accepted_case_only"}
+        rendered: List[str] = []
+        for claim in typed[:32]:
+            if not isinstance(claim, dict):
+                continue
+            authority = str(claim.get("authority_status") or "").lower()
+            acceptance = str(claim.get("acceptance_status") or "").lower()
+            if authority not in allowed_authority and acceptance not in allowed_acceptance:
+                continue
+            attr = str(claim.get("attribute") or claim.get("attribute_key") or "").strip().lower()
+            value = claim.get("value")
+            if value in (None, "") or not attr:
+                continue
+            value_text = (
+                " or ".join(str(item) for item in value[:6])
+                if isinstance(value, list) else str(value)
+            )
+            unit = str(claim.get("unit") or "").strip()
+            operator = str(claim.get("operator") or "=").strip()
+            if operator in {">=", "at_least"}:
+                value_text = f"at least {value_text}"
+            elif operator in {"one_of", "in"}:
+                value_text = f"one of {value_text}"
+            text = (
+                f"{labels.get(attr, attr.replace('_', ' ').title())}: {value_text}"
+                f"{(' ' + unit) if unit else ''}"
+            )
+            condition = str(claim.get("condition") or "").strip()
+            if condition:
+                text += f" ({condition})"
+            if text not in rendered:
+                rendered.append(text)
+        bullets.extend(rendered[:10])
     days = reqs.get("needed_within_days")
     if days:
         bullets.append(f"Needed within: {int(days)} days")
@@ -575,7 +627,8 @@ def _line_items_block(db, lines: List[Dict[str, Any]], tenant_id: str) -> str:
             continue
         ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
         q_req = int(ln.get("quantity") or ln.get("requested_qty") or 0)
-        q_source = int(ln.get("shortfall") or 0) or q_req  # no explicit shortfall → source the full order
+        has_shortfall = "shortfall" in ln and ln.get("shortfall") is not None
+        q_source = int(ln.get("shortfall") or 0) if has_shortfall else q_req
         if not ir or q_source <= 0:
             continue
         desc = _sku_description(db, ir, tenant_id)
@@ -733,16 +786,29 @@ def build_draft(
         ["sku_description", "deadline_date", "ship_to", "quantity"]
     comp_reason = rfq_completeness_reason(slots, required)
     completeness = {"complete": comp_reason is None, "reason": comp_reason, "required_fields": list(required)}
+    scoped_lines: List[Dict[str, Any]] = []
+    for line in lines or []:
+        if not isinstance(line, dict):
+            continue
+        line_ref = str(line.get("item_ref") or line.get("sku") or "").strip()
+        ordered = int(line.get("quantity") or line.get("requested_qty") or 0)
+        has_shortfall = "shortfall" in line and line.get("shortfall") is not None
+        to_source = int(line.get("shortfall") or 0) if has_shortfall else ordered
+        if not line_ref or to_source <= 0:
+            continue
+        scoped_lines.append({
+            "item_ref": line_ref,
+            "quantity": to_source,
+            "shortfall": to_source,
+            "ordered_quantity": ordered,
+        })
     return SupplierDraft(
         recipient_ref=recipient_ref, recipient_domain=domain, subject=subject, body=body,
         content_hash=content_hash(subject, body), confidence=_confidence(reliability, evidence),
         rationale=rationale, evidence=[asdict(e) for e in evidence],
         commercial_scope={"item_ref": item_ref, "quantity": int(quantity),
                           "estimated_value_cents": int(estimated_value_cents),
-                          **({"lines": [{"item_ref": str(l.get("item_ref") or l.get("sku") or ""),
-                                         "quantity": int(l.get("quantity") or l.get("requested_qty") or
-                                                          l.get("shortfall") or 0)}
-                                        for l in lines if isinstance(l, dict)]} if lines else {})},
+                          **({"lines": scoped_lines} if lines else {})},
         recipient_email=recipient_email, completeness=completeness,
     )
 
