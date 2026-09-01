@@ -2683,6 +2683,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         except Exception:
             pass
     assistant_message = data.get("assistant_message") or data.get("message")
+    if additive_workload_receipt:
+        from src.app.services.additive_workload_projection import hold_prior_slate
+        products, assistant_message = hold_prior_slate(additive_workload_receipt, confirmed_slots)
     if bool(image_security_posture.get("image_untrusted")):
         warning = str(
             image_security_posture.get("warning_message")
@@ -3619,7 +3622,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     except Exception as exc:
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
-        semantic_catalog_blocked
+        additive_workload_receipt or semantic_catalog_blocked
         or _workload_material_blocked
         or (
             turn_intent == "SEARCH"
@@ -3831,10 +3834,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     + (f" {material_question_text}" if material_question_text else "")
                 )
             if additive_workload_receipt and _case_research_plan is not None:
-                # Do not re-present the prior single-workload shelf as though it
-                # satisfies the newly combined case. The browser may now perform
-                # its policy-authorized research call from this provisional
-                # envelope; until then qualification stays visibly closed.
                 products = []
                 ambiguous_product_shelves = None
                 _retained_budget = response_confirmed_slots.get("budget_max")
@@ -4778,16 +4777,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 rejected_requirements.append(dict(claim))
                             else:
                                 unresolved_requirements.append(dict(claim))
-                        if not accepted_requirements and not rejected_requirements and not unresolved_requirements and semantic_catalog_blocked:
+                        no_requirements = not (
+                            accepted_requirements or rejected_requirements or unresolved_requirements
+                        )
+                        if no_requirements and (semantic_catalog_blocked or additive_workload_receipt):
                             unresolved_requirements.append({"reason": "material_requirements_unresolved"})
-                        semantic_authority = str(
-                            (semantic_out or {}).get("catalog_authority")
-                            if isinstance(semantic_out, dict) else ""
-                        ).lower()
+                        semantic_authority = str((semantic_out or {}).get("catalog_authority", "")).lower()
                         catalog_authority = (
                             semantic_authority
                             if semantic_authority in {"permitted", "blocked"}
-                            else "blocked" if semantic_catalog_blocked else "unknown"
+                            else "blocked" if (semantic_catalog_blocked or additive_workload_receipt)
+                            else "unknown"
                         )
                         shared_constraints: dict[str, Any] = {}
                         if out.get("requested_quantity") is not None:

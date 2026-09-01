@@ -11,18 +11,24 @@ _SEEN = []
 
 async def _fake_unresolved_recommend(request, params, **kwargs):
     _SEEN.append(dict(params or {}))
+    combined = "Additional required workload:" in str((params or {}).get("query") or "")
     return 200, {
-        "results": [],
+        # Reproduce the real failure mode: the upstream ranker can return the
+        # prior workload's qualified slate while the added workload is pending.
+        "results": ([{
+            "sku": "OLD-BG3-FIT", "name": "Prior gaming fit",
+            "price": 1800, "currency": "AUD",
+        }] if combined else []),
         "assistant_message": "Research is required before product qualification.",
         "decision_trace_id": f"trace-additive-{len(_SEEN)}",
         "turn_intent": "SEARCH",
         "semantic_resolution": {
-            "catalog_authority": "blocked",
-            "reasons": ["requirements_unresolved"],
+            "catalog_authority": "permitted" if combined else "blocked",
+            "reasons": [] if combined else ["requirements_unresolved"],
         },
         "workload_authorization": {
-            "status": "blocked",
-            "reason": "requirements_unresolved",
+            "status": "authorized" if combined else "blocked",
+            "reason": None if combined else "requirements_unresolved",
             "evidence": [],
         },
         "next_questions": [],

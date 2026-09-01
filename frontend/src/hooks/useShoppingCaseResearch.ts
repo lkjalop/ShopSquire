@@ -20,6 +20,7 @@ type ResearchRequest = {
   refreshAuthorized?: boolean;
   deadlineMs?: number;
   authorizationBasis?: 'buyer_action' | 'tenant_policy';
+  exploration?: AmbiguityExploration;
 };
 
 type StateUpdate<T> = T | ((current: T) => T);
@@ -265,8 +266,12 @@ export function useShoppingCaseResearch() {
     // transport requests cooperative cancellation.
     deadlineMs = 40_000,
     authorizationBasis = 'buyer_action',
+    exploration: requestedExploration,
   }: ResearchRequest) => {
-    const exploration = ambiguityExploration;
+    // Automatic research is triggered by a newly committed case revision. Use
+    // that exact read model rather than a callback closure that may still point
+    // at the preceding revision during the same React update cycle.
+    const exploration = requestedExploration || ambiguityExploration;
     if (!exploration?.case_id) {
       throw new Error('This exploration is missing its shopping-case identity.');
     }

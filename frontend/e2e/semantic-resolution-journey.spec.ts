@@ -56,15 +56,18 @@ test('unfamiliar capability request plans research before buyer-specific clarifi
   await expect(research).toContainText(/digital twin/i);
   await expect(research).toContainText(/bounded research plan/i);
   await expect(research).toContainText(/official publisher requirements/i);
-  await expect(research).toContainText(/Consent recorded:\s*Yes/i);
+  // The final commercial amendment is a new revision. Research consent from
+  // the earlier revision must not leak into this revision-bound read model.
+  await expect(research).toContainText(/Consent recorded:\s*No/i);
   await expect(research).not.toContainText(/cost budget exceeded/i);
   await expect(research).toContainText(/External provider calls:/i);
   await expect(research).toContainText(/Paid calls:\s*(?:0|not recorded)/i);
-  await expect(research).toContainText(/Evidence:\s*context only/i);
-  await expect(research).toContainText(/product requirements not established/i);
-  await expect(research).toContainText(/Cart authority:\s*none.*Supplier authority:\s*none/i);
-  const retained = research.getByTestId('shopping-case-retained-obligations');
-  await expect(retained).toContainText(/quantity.*owner: buyer/i);
-  await expect(retained).toContainText(/total budget is AUD 75,000/i);
-  await expect(retained).toContainText(/reduce it by 10 units/i);
+  await expect(research).toContainText(/Research unresolved/i);
+  await expect(research).toContainText(/Requirements:\s*none/i);
+  await expect(research).toContainText(/consent required|product requirements not established/i);
+  await expect(research).toContainText(/Commerce authority:\s*none/i);
+  await expect(research).toContainText(/Prevented:.*supplier enquiry/i);
+  await expect(research).toContainText(/Commercial feasibility and amendments/i);
+  await expect(research).toContainText(/Status:\s*accepted/i);
+  await expect(research).toContainText(/Prior quantity:\s*30/i);
 });

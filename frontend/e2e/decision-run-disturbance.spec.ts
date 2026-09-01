@@ -16,6 +16,12 @@ test('inventory disturbance projects selective invalidation and unresolved deliv
   };
   await page.route('**/api/v1/decisions/trace-disturbance/**', (route) => route.fulfill({ json: {} }));
   await page.route('**/api/v1/decisions/trace-disturbance', (route) => route.fulfill({ json: trace }));
+  // Decision Trace now reads the revision envelope first. Return the persisted
+  // events on that canonical endpoint; an empty catch-all would otherwise make
+  // the audit leaf correctly conclude that no shopping case is bound.
+  await page.route('**/api/v1/decisions/trace-disturbance/query?include_events=true', (route) => (
+    route.fulfill({ json: trace })
+  ));
   await page.route('**/api/v1/trace/trace-disturbance/events**', (route) => route.fulfill({ json: trace }));
   await page.route('**/api/v1/shopping-cases/case-disturbance/decision-runs**', (route) => route.fulfill({ json: {
     schema_version: 'shopping-case-decision-runs-v1', case_id: 'case-disturbance', history_count: 2,

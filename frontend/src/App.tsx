@@ -72,6 +72,20 @@ import {
   setStoredAuthIdentity,
 } from './lib/browserSession';
 
+function initialTraceDeepLink(): { traceId: string | null; tab?: string } {
+  if (typeof window === 'undefined') return { traceId: null };
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const traceId = (params.get('trace') || '').trim();
+    return {
+      traceId: traceId || null,
+      tab: (params.get('tracetab') || '').trim() || undefined,
+    };
+  } catch {
+    return { traceId: null };
+  }
+}
+
 export type Product = {
   sku: string;
   name: string;
@@ -434,9 +448,10 @@ export default function App() {
   const [multiIntent, setMultiIntent] = useState<MultiIntentPlan | null>(null);
   const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
-  const [traceId, setTraceId] = useState<string | null>(null);
-  const [traceOpen, setTraceOpen] = useState(false);
-  const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
+  const [traceDeepLink] = useState(initialTraceDeepLink);
+  const [traceId, setTraceId] = useState<string | null>(traceDeepLink.traceId);
+  const [traceOpen, setTraceOpen] = useState(Boolean(traceDeepLink.traceId));
+  const [traceInitialTab] = useState<string | undefined>(traceDeepLink.tab);
   const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
   const [researchOutcome, setResearchOutcome] = useState<ResearchOutcome | null>(null);
   // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
@@ -446,20 +461,9 @@ export default function App() {
   // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
   // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
   const staleCartNoticeShown = useRef(false);
-  // Deep-link: /?trace=<id>&tracetab=procurement opens the Decision Trace straight onto a tab. Lets an
-  // operator/demo jump to a specific decision (e.g. the procurement drafted-RFQ + audit) without replaying
-  // the whole turn — also what makes the Procurement-tab recording deterministic.
-  useEffect(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      const t = (p.get('trace') || '').trim();
-      if (t) {
-        setTraceId(t);
-        setTraceInitialTab((p.get('tracetab') || '').trim() || undefined);
-        setTraceOpen(true);
-      }
-    } catch { /* no query params available — ignore */ }
-  }, []);
+  // Deep links are read in the initial state rather than an effect. This makes
+  // the requested trace part of the first render and prevents startup state
+  // hydration from briefly rendering (and retaining) a closed trace.
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [readyz, setReadyz] = useState<ReadyzResponse | null>(null);
@@ -3017,10 +3021,16 @@ export default function App() {
   const researchAmbiguousShoppingCase = useCallback(async (
     refreshAuthorized = false,
     authorizationBasis: 'buyer_action' | 'tenant_policy' = 'buyer_action',
+    explorationOverride?: AmbiguityExploration,
   ) => {
     setIsThinking(true);
     try {
-      const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized, authorizationBasis });
+      const payload = await executeShoppingCaseResearch({
+        uid,
+        refreshAuthorized,
+        authorizationBasis,
+        exploration: explorationOverride,
+      });
       if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
         setResearchOutcome(payload.research_outcome as ResearchOutcome);
       }
@@ -3037,7 +3047,9 @@ export default function App() {
           exploration: payload.ambiguity_exploration as AmbiguityExploration,
         });
       }
-      setTraceId(normalizeTraceId(payload?.trace_id || ambiguityExploration.trace_id || traceId));
+      setTraceId(normalizeTraceId(
+        payload?.trace_id || explorationOverride?.trace_id || ambiguityExploration?.trace_id || traceId,
+      ));
       dispatchPresentationEvent({
         type: 'conversation.message.appended', source: 'research',
         authority: 'presentation_only', message: { role: 'assistant',
@@ -3090,7 +3102,7 @@ export default function App() {
     const attemptKey = `${exploration.case_id}:${exploration.research_plan_id}`;
     if (autoResearchAttemptedRef.current.has(attemptKey)) return;
     autoResearchAttemptedRef.current.add(attemptKey);
-    void researchAmbiguousShoppingCase(false, 'tenant_policy');
+    void researchAmbiguousShoppingCase(false, 'tenant_policy', exploration);
   }, [
     ambiguityExploration,
     autoPublicResearchEnabled,

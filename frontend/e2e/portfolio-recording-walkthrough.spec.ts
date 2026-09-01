@@ -139,12 +139,16 @@ test('deterministic portfolio recording walkthrough', async ({ page }) => {
     const trace = page.getByTestId('decision-trace-modal');
     await expect(trace).toBeVisible();
     await trace.getByRole('button', { name: 'Research & Fit', exact: true }).click();
-    const canonicalTruth = trace.getByTestId('canonical-procurement-truth').first();
-    await expect(canonicalTruth).toBeVisible();
-    await expect(canonicalTruth).toContainText(/Research:/i);
-    await expect(canonicalTruth).not.toContainText(/Research:\s*Not attempted/i);
-    await expect(canonicalTruth).toContainText(/Decision:\s*Provisional/i);
-    await expect(canonicalTruth).toContainText(/Commerce authority:\s*None/i);
+    const outcome = trace.getByTestId('research-outcome-summary').first();
+    await expect(outcome).toBeVisible();
+    await expect(outcome).toContainText(/Discovery:/i);
+    await expect(outcome).toContainText(/Parsed:\s*[1-9]/i);
+    // Parsed official-origin claims are held for independent review. They may
+    // support a visibly provisional exploration, but catalog authority itself
+    // remains blocked until a reviewer accepts them for this case.
+    await expect(outcome).toContainText(/Held for review/i);
+    await expect(outcome).toContainText(/Catalog authority:\s*blocked/i);
+    await expect(outcome).toContainText(/Commerce authority:\s*none/i);
     await expect(trace).toContainText(/Authority unrecorded|Proposal only/i);
     await pause(page, 3);
   }
