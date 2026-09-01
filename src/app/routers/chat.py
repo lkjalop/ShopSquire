@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -31,8 +32,7 @@ from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
-
-import logging
+from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
 
 logger = logging.getLogger(__name__)
 
@@ -2684,7 +2684,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             pass
     assistant_message = data.get("assistant_message") or data.get("message")
     if additive_workload_receipt:
-        from src.app.services.additive_workload_projection import hold_prior_slate
         products, assistant_message = hold_prior_slate(additive_workload_receipt, confirmed_slots)
     if bool(image_security_posture.get("image_untrusted")):
         warning = str(
@@ -4782,12 +4781,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         )
                         if no_requirements and (semantic_catalog_blocked or additive_workload_receipt):
                             unresolved_requirements.append({"reason": "material_requirements_unresolved"})
-                        semantic_authority = str((semantic_out or {}).get("catalog_authority", "")).lower()
-                        catalog_authority = (
-                            semantic_authority
-                            if semantic_authority in {"permitted", "blocked"}
-                            else "blocked" if (semantic_catalog_blocked or additive_workload_receipt)
-                            else "unknown"
+                        catalog_authority = catalog_authority_for_turn(
+                            (semantic_out or {}).get("catalog_authority", ""),
+                            material_blocked=bool(
+                                semantic_catalog_blocked or additive_workload_receipt
+                            ),
+                            has_products=bool(products),
+                            requirements_established=_workload_requirements_established,
                         )
                         shared_constraints: dict[str, Any] = {}
                         if out.get("requested_quantity") is not None:

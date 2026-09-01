@@ -4,6 +4,24 @@ from __future__ import annotations
 from typing import Any
 
 
+def catalog_authority_for_turn(
+    semantic_authority: object,
+    *,
+    material_blocked: bool,
+    has_products: bool,
+    requirements_established: bool,
+) -> str:
+    """Resolve catalog authority without letting stale permissive state win."""
+    if material_blocked:
+        return "blocked"
+    normalized = str(semantic_authority or "").strip().lower()
+    if normalized in {"permitted", "blocked"}:
+        return normalized
+    if has_products and requirements_established:
+        return "permitted"
+    return "unknown"
+
+
 def hold_prior_slate(
     receipt: dict[str, Any],
     slots: dict[str, Any] | None,
