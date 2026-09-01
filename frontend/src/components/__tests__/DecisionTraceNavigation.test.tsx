@@ -23,6 +23,17 @@ function renderTrace(initialTab: TraceLeafTab = 'summary') {
 }
 
 describe('Decision Trace rendered navigation', () => {
+  it('docks on desktop by default and can return to a floating panel', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    renderTrace();
+
+    const dialog = screen.getByTestId('decision-trace-modal');
+    expect(dialog.className).toContain('docked');
+    fireEvent.click(screen.getByRole('button', { name: 'Float trace panel' }));
+    expect(dialog.className).not.toContain('docked');
+    expect(screen.getByRole('button', { name: 'Dock trace panel on the right' })).toBeVisible();
+  });
+
   it('keeps every legacy leaf reachable through the five sections', () => {
     renderTrace();
 

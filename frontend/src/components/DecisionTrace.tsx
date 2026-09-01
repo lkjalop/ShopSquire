@@ -699,6 +699,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [docked, setDocked] = useState(() => window.innerWidth >= 1100);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
@@ -806,11 +807,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   // Handle drag start
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (docked) return;
     if ((e.target as HTMLElement).closest('button')) return; // Don't drag when clicking buttons
     setIsDragging(true);
     dragStartPos.current = { x: e.clientX - position.x, y: e.clientY - position.y };
     e.preventDefault();
-  }, [position]);
+  }, [docked, position]);
 
   // Handle drag move
   useEffect(() => {
@@ -2029,15 +2031,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         aria-label="Decision Trace"
         data-testid="decision-trace-modal"
         data-trace-id={effectiveTraceId || ''}
-        className={`${styles.modal} ${minimized ? styles.minimized : ''}`}
-        style={{ left: position.x, top: position.y }}
+        className={`${styles.modal} ${docked ? styles.docked : ''} ${minimized ? styles.minimized : ''}`}
+        style={docked ? undefined : { left: position.x, top: position.y }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header - Draggable */}
         <div
           className={styles.header}
           onMouseDown={handleDragStart}
-          style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+          style={{ cursor: docked ? 'default' : (isDragging ? 'grabbing' : 'grab') }}
         >
           <div className={styles.headerLeft}>
             <strong>Decision Trace</strong>
@@ -2059,6 +2061,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
             </span>
           </div>
           <div className={styles.headerRight}>
+            <button
+              className={styles.iconBtn}
+              onClick={() => setDocked(!docked)}
+              title={docked ? 'Float trace panel' : 'Dock trace panel on the right'}
+              aria-label={docked ? 'Float trace panel' : 'Dock trace panel on the right'}
+            >
+              <span aria-hidden="true">{docked ? '↗' : '⇥'}</span>
+            </button>
             <button className={styles.iconBtn} onClick={() => setMinimized(!minimized)} title={minimized ? 'Expand' : 'Minimize'}>
               <MinimizeIcon />
             </button>

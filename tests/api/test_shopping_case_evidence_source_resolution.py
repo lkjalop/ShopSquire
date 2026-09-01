@@ -242,6 +242,30 @@ def test_private_or_credentialed_url_triggers_ssrf_control_without_incident_clai
     assert receipt["threat_intel"]["incident_tags"] == []
 
 
+def test_private_url_resolution_emits_one_blocked_zero_fetch_receipt():
+    client = _client()
+    case_id = _case(client)
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/evidence-source-resolutions",
+        json={
+            "uid": "buyer-link",
+            "source_url": "https://127.0.0.1/admin?token=discard",
+            "research_authorized": True,
+        },
+    )
+    assert response.status_code == 200
+    assert "discard" not in response.text
+    payload = response.json()
+    assert payload["resolution"]["status"] == "invalid"
+    assert payload["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
+    certificate = payload["source_intake_certificate"]
+    assert certificate["security"]["status"] == "blocked"
+    assert certificate["security"]["url_syntax"] == "rejected"
+    assert certificate["security"]["link_assessment"]["security_status"] == "blocked"
+    assert certificate["execution"]["network_execution"] is False
+    assert certificate["decision_effect"]["cart_authority"] == "none"
+
+
 def test_larian_bg3_canonical_source_is_enrolled_but_other_larian_host_is_rejected():
     client = _client()
     case_id = _case(client)

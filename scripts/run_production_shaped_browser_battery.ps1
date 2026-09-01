@@ -137,6 +137,23 @@ try {
     }
 
     $env:APP_ENV = "testing"
+    # Fault injection is fail-closed and ignored unless certification mode is
+    # explicit. When the caller selects a supported profile, bind that profile
+    # to both the backend and the browser certificate in this disposable stack.
+    if ($env:RESEARCH_CERTIFICATION_FAULT_PROFILE) {
+        $allowedResearchFaults = @("publisher_timeout", "zero_parser_yield")
+        if ($allowedResearchFaults -notcontains $env:RESEARCH_CERTIFICATION_FAULT_PROFILE) {
+            throw "unsupported_research_certification_fault_profile"
+        }
+        if (
+            $env:RESEARCH_DEGRADATION_PROFILE -and
+            $env:RESEARCH_DEGRADATION_PROFILE -ne $env:RESEARCH_CERTIFICATION_FAULT_PROFILE
+        ) {
+            throw "research_certification_profile_mismatch"
+        }
+        $env:RESEARCH_CERTIFICATION_MODE = "1"
+        $env:RESEARCH_DEGRADATION_PROFILE = $env:RESEARCH_CERTIFICATION_FAULT_PROFILE
+    }
     $env:DATABASE_URL = (
         "postgresql+psycopg2://postgres:shopsquire_test@" +
         "127.0.0.1:$pgPort/shopsquire"
@@ -507,6 +524,7 @@ catch {
     throw
 }
 finally {
+    Remove-Item Env:RESEARCH_CERTIFICATION_MODE -ErrorAction SilentlyContinue
     if ($officialProviderProcess -and -not $officialProviderProcess.HasExited) {
         Stop-ProcessTree -ProcessId $officialProviderProcess.Id
     }

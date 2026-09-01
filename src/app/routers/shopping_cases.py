@@ -1405,7 +1405,11 @@ async def _resolve_case_evidence_source_with_db(
             "status": resolution.security_status,
             "url_syntax": (
                 "accepted_https_no_credentials"
-                if resolution.submitted_url else "rejected"
+                if (
+                    resolution.submitted_url
+                    and str((resolution_payload.get("link_assessment") or {}).get("security_status") or "")
+                    != "blocked"
+                ) else "rejected"
             ),
             "publisher_authority": (
                 "enrolled" if resolution.status == "resolved" else "not_enrolled"

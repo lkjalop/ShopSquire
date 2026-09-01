@@ -496,6 +496,12 @@ body {
   animation: pulse 1s infinite;
 }
 
+.inputIconBtn.temporaryActive {
+  background: #fff7ed;
+  color: #c2410c;
+  box-shadow: inset 0 0 0 1px #fdba74;
+}
+
 .whisperDot {
   position: absolute;
   top: 4px;

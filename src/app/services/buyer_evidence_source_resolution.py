@@ -137,6 +137,12 @@ def resolve_buyer_evidence_source(
             candidates=[], reason="provide_exactly_one_url_or_vendor_name",
             security_status="blocked", link_assessment=link_assessment,
         )
+    if source_url and str((link_assessment or {}).get("security_status") or "") == "blocked":
+        return BuyerEvidenceSourceResolution(
+            status="invalid", **submitted_metadata, candidates=[],
+            reason="unsafe_or_unsupported_evidence_url",
+            security_status="blocked", link_assessment=link_assessment,
+        )
     registry = list(sources) if sources is not None else list(
         load_official_source_manifest().get("sources") or []
     )

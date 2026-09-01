@@ -119,8 +119,13 @@ test('novel suitability request stays provisional and exposes a durable research
   await expect(research).toContainText(/8K RAW video/i);
   await expect(research).toContainText(/colour-critical grading/i);
   await expect(research).toContainText(/bounded research plan/i);
-  await expect(research).toContainText(/Publisher discovered/i);
-  await expect(research).toContainText(/Discovery:\s*completed/i);
+  // This turn did not grant external-research authority. The trace must keep
+  // publisher discovery as an unresolved obligation instead of claiming that
+  // discovery completed without consent or a provider call.
+  await expect(research).toContainText(/publisher discovery/i);
+  await expect(research).toContainText(
+    /buyer consent recorded:\s*no|discovery:\s*(?:planned|not attempted|consent required)/i,
+  );
   await expect(research).toContainText(/catalog recommendation|exploration/i);
   await page.screenshot({ path: '../.tmp-open-world-browser/coverage-gate.png', fullPage: true });
 });
@@ -322,6 +327,43 @@ test('unenrolled Larian URL is rejected with a visible zero-fetch security recei
   await modal.getByRole('button', { name: /^Research & Fit/ }).click();
   await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
   await expect(modal.getByTestId('source-intake-certificate')).toContainText(/source intake: not enrolled/i);
+});
+
+test('private-IP source is blocked before fetch with one visible SSRF receipt', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-private-link-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  const result = await send(page,
+    'I need a laptop. Inspect https://127.0.0.1/admin?token=do-not-store', true);
+  const source = result.buyer_evidence_source_resolution;
+  expect(source.resolution.status).toBe('invalid');
+  expect(source.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+  expect(JSON.stringify(source)).not.toContain('do-not-store');
+  expect(source.source_intake_certificate.security).toMatchObject({
+    status: 'blocked',
+    url_syntax: 'rejected',
+    canonical_fetch_eligible: false,
+    arbitrary_submitted_path_fetch_allowed: false,
+  });
+  expect(source.source_intake_certificate.security.link_assessment).toMatchObject({
+    security_status: 'blocked',
+    recommended_use: 'block_before_fetch',
+    requirement_authority: 'none',
+    commerce_authority: 'none',
+  });
+  expect(source.source_intake_certificate.execution.network_execution).toBe(false);
+  expect(source.source_intake_certificate.decision_effect.cart_authority).toBe('none');
+
+  await page.getByTitle('Decision Trace').click();
+  const modal = page.getByTestId('decision-trace-modal');
+  await modal.getByRole('button', { name: /^Research & Fit/ }).click();
+  await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
+  await expect(modal.getByTestId('source-intake-certificate')).toContainText(/safety blocked/i);
 });
 
 test('demo URL policy strips ad tracking and rejects a purpose-mismatched community page', async ({ page }) => {

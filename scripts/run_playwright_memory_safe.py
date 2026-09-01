@@ -50,6 +50,7 @@ def main() -> int:
                 "test",
                 "--reporter=line",
                 "--workers=1",
+                "--retries=0",
                 f"--output={output}",
                 relative,
             ],

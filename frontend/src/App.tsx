@@ -3499,24 +3499,6 @@ export default function App() {
 
               {/* Composer Card */}
               <div className={styles.chatFooter}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-                  <button
-                    type="button"
-                    className={styles.filterBtn}
-                    aria-pressed={temporaryChat}
-                    data-testid="temporary-chat-toggle"
-                    title="Temporary chat is not written to conversation history or memory"
-                    onClick={() => {
-                      const next = !temporaryChat;
-                      setTemporaryChat(next);
-                      setConversationEpoch(rotateConversationEpoch());
-                      setMessages([]);
-                      setConfirmedSlots({});
-                    }}
-                  >
-                    {temporaryChat ? 'Temporary chat: on' : 'Temporary chat: off'}
-                  </button>
-                </div>
                 {/* Thumbnail strip for attached images */}
                 {attachedThumbs.length > 0 && (
                   <div className={styles.thumbStrip}>
@@ -3546,6 +3528,23 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.composerRow}>
+                  <button
+                    type="button"
+                    className={`${styles.inputIconBtn} ${temporaryChat ? styles.temporaryActive : ''}`}
+                    aria-pressed={temporaryChat}
+                    data-testid="temporary-chat-toggle"
+                    title="Temporary chat is not written to conversation history or memory"
+                    aria-label={temporaryChat ? 'Disable temporary chat' : 'Enable temporary chat'}
+                    onClick={() => {
+                      const next = !temporaryChat;
+                      setTemporaryChat(next);
+                      setConversationEpoch(rotateConversationEpoch());
+                      setMessages([]);
+                      setConfirmedSlots({});
+                    }}
+                  >
+                    <span aria-hidden="true">{temporaryChat ? '◐' : '○'}</span>
+                  </button>
                   <AttachmentButton onFiles={handleAttach} className={styles.inputIconBtn} />
                   <textarea
                     ref={textareaRef}
@@ -3569,7 +3568,7 @@ export default function App() {
                   <button
                     className={styles.sendBtn}
                     onClick={() => handleSend()}
-                    disabled={isThinking || imageRoutingInFlight}
+                    disabled={isThinking || imageRoutingInFlight || (!inputValue.trim() && attachedFiles.length === 0)}
                     aria-label="Send message"
                   ><SendIcon /></button>
                 </div>
