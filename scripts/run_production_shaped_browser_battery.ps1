@@ -215,6 +215,19 @@ try {
     $env:USE_MOCK_LLM = "1"
     $env:USE_OLLAMA_INTENT = "0"
     $env:MODEL_WARMUP_ON_STARTUP = "0"
+    if ($env:MODEL_CERTIFICATION_FAULT_PROFILE) {
+        if ($env:MODEL_CERTIFICATION_FAULT_PROFILE -ne "ollama_offline") {
+            throw "unsupported_model_certification_fault_profile"
+        }
+        # Exercise the real provider failure boundary against a closed local
+        # port. This is process-scoped certification configuration, not an
+        # application fallback or title-specific route.
+        $env:USE_MOCK_LLM = "0"
+        $env:USE_OLLAMA_INTENT = "1"
+        $env:ROUTER_MODEL_ENABLED = "1"
+        $env:OLLAMA_URL = "http://127.0.0.1:1"
+        $env:ROUTER_TIMEOUT_SEC = "2"
+    }
     $env:AUTO_SEED_CATALOG_ON_START = "0"
     # The requirements-image slice uses bounded, read-only local OCR while the
     # general vision provider remains disabled. QR inspection must complete before

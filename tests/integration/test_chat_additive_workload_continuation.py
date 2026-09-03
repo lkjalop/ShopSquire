@@ -22,6 +22,9 @@ async def _fake_unresolved_recommend(request, params, **kwargs):
         "assistant_message": "Research is required before product qualification.",
         "decision_trace_id": f"trace-additive-{len(_SEEN)}",
         "turn_intent": "SEARCH",
+        # A weak/stochastic router may call a newly named application a switch.
+        # The validated additive receipt must remain the continuity authority.
+        "decision": {"subject_action": "switch"},
         "semantic_resolution": {
             "catalog_authority": "permitted" if combined else "blocked",
             "reasons": [] if combined else ["requirements_unresolved"],
@@ -105,6 +108,8 @@ def test_bg3_budget_then_emulate3d_as_well_retains_shared_budget_and_combines_ca
     body = second.json()
     receipt = body["case_additive_workload"]
     assert receipt["status"] == "retained_and_added"
+    assert body["shopping_case_id"] == case_id
+    assert body["turn_read_model"]["transition"] == "ADD_WORKLOAD"
     assert receipt["source_candidate_ids"] == [
         "rockwell_emulate3d_official_requirements"
     ]
@@ -119,3 +124,8 @@ def test_bg3_budget_then_emulate3d_as_well_retains_shared_budget_and_combines_ca
     assert "Rockwell Emulate3D" in body["assistant_message"]
     assert _SEEN[-1]["confirmed_slots"]["budget_max"] == 3200
     assert _SEEN[-1]["query"] == receipt["combined_purpose"]
+    terminal = body["terminal_outcome"]
+    assert terminal["schema_version"] == "turn-terminal-outcome-v1"
+    assert terminal["case_id"] == body["shopping_case_id"]
+    assert terminal["case_revision"] == body["case_revision"]
+    assert terminal["decision_trace_id"] == body["decision_trace_id"]

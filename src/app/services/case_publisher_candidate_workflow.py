@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -85,6 +86,7 @@ def approve_case_candidate(
     expected_version: int,
     idempotency_key: str,
     allowed_claim_types: Sequence[str],
+    approval_basis: str = "explicit_buyer_approval",
 ) -> tuple[ShoppingCasePublisherCandidate | None, str | None]:
     if row.uid != uid:
         return None, "publisher_candidate_not_owned"
@@ -98,10 +100,15 @@ def approve_case_candidate(
     if not requested or not requested <= CASE_ALLOWED_CLAIM_TYPES:
         return None, "publisher_claim_policy_invalid"
     row.status = "approved"
-    row.authority_status = "buyer_attested_case_only"
+    row.authority_status = (
+        "policy_accepted_case_only"
+        if approval_basis.startswith("demo_policy_") else "buyer_attested_case_only"
+    )
     row.approval_scope = "case_only"
     row.allowed_claim_types_json = sorted(requested)
-    row.approved_by = uid
+    row.approved_by = (
+        f"policy:{approval_basis}" if approval_basis.startswith("demo_policy_") else uid
+    )
     row.approval_idempotency_key = idempotency_key
     row.version += 1
     row.updated_at = _now()
@@ -123,7 +130,10 @@ def case_source_policy(row: ShoppingCasePublisherCandidate, *, purpose: str) -> 
         "applicability": {
             "workloads": ["case_open_world"],
             "scope": purpose,
-            "resolution_owner": "buyer",
+            "resolution_owner": (
+                "tenant_policy" if row.authority_status == "policy_accepted_case_only"
+                else "buyer"
+            ),
             "exclusions": ["global publisher enrollment", "exact product fit"],
         },
         "freshness_sla_hours": 24,
@@ -133,7 +143,11 @@ def case_source_policy(row: ShoppingCasePublisherCandidate, *, purpose: str) -> 
             "direct_origin_required": True,
             "search_snippets_forbidden": True,
             "approval_scope": "case_only",
-            "publisher_ownership_status": "buyer_attested_not_independently_verified",
+            "publisher_ownership_status": (
+                "policy_resolved_not_independently_verified"
+                if row.authority_status == "policy_accepted_case_only"
+                else "buyer_attested_not_independently_verified"
+            ),
             "semantic_ownership_verification_required": True,
         },
         "cache_policy": {"store_source_text": False, "store_hashes_and_claims_only": True},
@@ -184,7 +198,11 @@ def case_review_claims(
             "authority_status": "case_origin_critic_accepted",
             "acceptance_status": "pending_buyer_review",
             "approval_scope": "case_only",
-            "publisher_ownership_status": "buyer_attested_not_independently_verified",
+            "publisher_ownership_status": (
+                "policy_resolved_not_independently_verified"
+                if candidate.authority_status == "policy_accepted_case_only"
+                else "buyer_attested_not_independently_verified"
+            ),
         })
         rows.append(item)
     return rows
@@ -200,6 +218,7 @@ async def execute_case_candidate_research(
     expected_version: int,
     idempotency_key: str,
     allowed_claim_types: Sequence[str],
+    approval_basis: str = "explicit_buyer_approval",
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Approve, fetch, extract, and persist reviewable claims for one case.
 
@@ -212,6 +231,7 @@ async def execute_case_candidate_research(
     approved, error = approve_case_candidate(
         candidate, uid=uid, expected_version=expected_version,
         idempotency_key=idempotency_key, allowed_claim_types=allowed_claim_types,
+        approval_basis=approval_basis,
     )
     if error or approved is None:
         return None, error or "publisher_candidate_approval_failed"
@@ -227,7 +247,9 @@ async def execute_case_candidate_research(
     research = await await_provider_result(research_official_sources(
         case.retained_purpose or "Buyer requested workload",
         search_url_template="", sources=[source], tenant_id=tenant_id,
-        evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE, total_timeout_s=12.0,
+        evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
+        total_timeout_s=float(os.getenv("OPEN_WORLD_OFFICIAL_FETCH_TIMEOUT_S", "24") or 24),
+        parser_timeout_s=float(os.getenv("REQUIREMENT_EXTRACTION_TIMEOUT_S", "18") or 18),
     ))
     from src.app.services.commerce_feature_readiness import (
         record_external_research_runtime_observation,
@@ -276,7 +298,11 @@ async def execute_case_candidate_research(
             "url": approved.url, "domain": approved.domain, "title": approved.title,
             "status": approved.status, "authority_status": approved.authority_status,
             "approval_scope": approved.approval_scope,
-            "publisher_ownership_status": "buyer_attested_not_independently_verified",
+            "publisher_ownership_status": (
+                "policy_resolved_not_independently_verified"
+                if approved.authority_status == "policy_accepted_case_only"
+                else "buyer_attested_not_independently_verified"
+            ),
             "publisher_origin_verification": origin_verification,
         },
         "research_status": "claims_pending_review" if claims else "zero_parser_yield",

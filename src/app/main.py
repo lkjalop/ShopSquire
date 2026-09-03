@@ -1584,6 +1584,8 @@ def create_app() -> FastAPI:
             "router_model": {"status": "unknown", "details": {}},
             "external_search": {"status": "unknown", "details": {}},
             "source_governance": {"status": "unknown", "details": {}},
+            "open_world_query_proposer": {"status": "unknown", "details": {}},
+            "catalog_grounding": {"status": "unknown", "details": {}},
         }
 
         def _set_component(name: str, ready: bool, details: dict[str, Any] | None = None) -> None:
@@ -1640,6 +1642,20 @@ def create_app() -> FastAPI:
                             "dialect": str(getattr(eng.dialect, "name", "unknown")),
                         },
                     )
+                    from sqlalchemy.orm import Session
+                    from src.app.services.commerce_feature_readiness import catalog_grounding_readiness
+
+                    storefront_tenant = str(
+                        os.getenv("STOREFRONT_TENANT_ID") or "default"
+                    ).strip() or "default"
+                    with Session(eng) as readiness_db:
+                        catalog = catalog_grounding_readiness(
+                            readiness_db, tenant_id=storefront_tenant,
+                        )
+                    _set_component("catalog_grounding", bool(catalog["ready"]), catalog)
+                    if not catalog["ready"]:
+                        ok = False
+                        reasons.append("storefront_catalog_ungrounded")
                 except Exception:
                     ok = False
                     reasons.append("db_connect_failed")
@@ -1687,6 +1703,29 @@ def create_app() -> FastAPI:
         except Exception as exc:
             _set_component("source_governance", False, {"error": type(exc).__name__})
 
+        try:
+            from src.app.services.model_runtime_profile import model_latency_profile
+            from src.app.services.open_world_query_proposal import open_world_query_timeout_s
+
+            proposer_profile = model_latency_profile(
+                prompt_id="open-world-query-proposal",
+            )
+            proposer_profile["current_derived_budget_ms"] = round(
+                open_world_query_timeout_s() * 1_000,
+            )
+            proposer_profile["last_full_contract_succeeded"] = bool(
+                proposer_profile.get("last_success_at_ms")
+            )
+            _set_component(
+                "open_world_query_proposer",
+                bool(proposer_profile["last_full_contract_succeeded"]),
+                proposer_profile,
+            )
+        except Exception as exc:
+            _set_component(
+                "open_world_query_proposer", False, {"error": type(exc).__name__},
+            )
+
         if deep:
             try:
                 from src.app.observability.health import dependency_health_snapshot
@@ -1724,6 +1763,11 @@ def create_app() -> FastAPI:
                     })
                     if components["ollama"]["status"] == "ready" and not resident_ok:
                         components["ollama"]["status"] = "not_ready"
+                        if str(os.getenv("ROUTER_PREWARM_REQUIRED", "0")).strip().lower() in (
+                            "1", "true", "yes", "on",
+                        ):
+                            ok = False
+                            reasons.append("router_model_not_resident")
                 except Exception as exc:
                     components["ollama"]["details"]["residency_error"] = type(exc).__name__
             except Exception:

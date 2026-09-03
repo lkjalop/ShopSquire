@@ -154,7 +154,11 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
         case_id = job.case_id
 
     try:
-        proposed, receipt = propose_open_world_queries(plan, timeout_s=6.0)
+        from src.app.services.open_world_query_proposal import open_world_query_timeout_s
+
+        proposed, receipt = propose_open_world_queries(
+            plan, timeout_s=open_world_query_timeout_s(),
+        )
     except Exception as exc:
         # A task runner may retry this job. Return it to a claimable state so a
         # transient model/runtime failure cannot strand the durable row as
@@ -180,9 +184,16 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
             ShoppingCase.case_id == case_id,
         )).scalar_one_or_none()
         stamp = _now()
-        if case is None or int(case.revision or 1) != expected_revision:
+        current_revision = int(case.revision or 1) if case is not None else None
+        same_buyer_purpose = bool(
+            case is not None
+            and " ".join(str(case.retained_purpose or "").split()).casefold()
+            == " ".join(str(plan.retained_purpose or "").split()).casefold()
+        )
+        revision_unchanged = current_revision == expected_revision
+        if case is None or not (revision_unchanged or same_buyer_purpose):
             job.status = "superseded"
-            job.error_code = "case_revision_superseded"
+            job.error_code = "buyer_purpose_superseded"
             job.receipt_json = receipt
             job.completed_at = stamp
             job.updated_at = stamp
@@ -199,8 +210,14 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
             "state": "current",
         }
         job.status = "completed"
+        job.error_code = None
         job.result_plan_json = proposed_json
-        job.receipt_json = {**receipt, "evidence_watermark": watermark}
+        job.receipt_json = {
+            **receipt,
+            "scheduled_case_revision": expected_revision,
+            "applies_to_case_revision": current_revision,
+            "evidence_watermark": watermark,
+        }
         job.completed_at = stamp
         job.updated_at = stamp
         from src.app.services.decision_dependency_graph import (
@@ -262,12 +279,19 @@ def consume_completed_case_interpretation(
     job = db.execute(select(ShoppingCaseInterpretationJob).where(
         ShoppingCaseInterpretationJob.tenant_id == tenant_id,
         ShoppingCaseInterpretationJob.case_id == case_id,
-        ShoppingCaseInterpretationJob.case_revision == case_revision,
         ShoppingCaseInterpretationJob.plan_id == plan.plan_id,
-    )).scalar_one_or_none()
+    ).order_by(ShoppingCaseInterpretationJob.created_at.desc())).scalars().first()
     if job is None:
         return plan, {"status": "not_scheduled", "authority": "none", "model_calls": 0}
-    if job.status != "completed" or not job.result_plan_json:
+    applies_to_revision = int(
+        (job.receipt_json or {}).get("applies_to_case_revision")
+        or job.case_revision
+    )
+    if (
+        job.status != "completed"
+        or not job.result_plan_json
+        or applies_to_revision != int(case_revision)
+    ):
         return plan, {
             "status": job.status,
             "authority": "none",

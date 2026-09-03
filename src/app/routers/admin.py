@@ -2120,7 +2120,22 @@ def demo_readiness(
     model["total_decisions"] = int(total)
     model["low_confidence_count"] = int(low)
     model["low_confidence_fallback_rate"] = round(float(low) / float(max(1, total)), 4)
-    return {"window_hours": int(hours), "security_posture": sec, "model_quality": model}
+    try:
+        from src.app.services.local_model_roles import local_model_scheduler_snapshot
+
+        model_scheduler = local_model_scheduler_snapshot()
+    except Exception as exc:
+        model_scheduler = {
+            "policy": "unavailable",
+            "roles": {},
+            "failure_code": type(exc).__name__,
+        }
+    return {
+        "window_hours": int(hours),
+        "security_posture": sec,
+        "model_quality": model,
+        "model_scheduler": model_scheduler,
+    }
 
 
 @router.post("/alertmanager/test")

@@ -6,10 +6,21 @@ import pytest
 from src.app.services.official_evidence_cache import OfficialEvidenceCache
 from src.app.services.official_workload_research import (
     compile_source_claims,
+    model_extraction_timeout_s,
     ranking_delta,
     research_official_sources,
     research_official_sources_sync,
 )
+
+
+def test_model_extraction_reserves_one_third_for_critic_and_fallback(monkeypatch):
+    monkeypatch.setenv("REQUIREMENT_MODEL_TIMEOUT_S", "30")
+    assert model_extraction_timeout_s(18) == 12.0
+
+
+def test_model_extraction_honours_smaller_configured_budget(monkeypatch):
+    monkeypatch.setenv("REQUIREMENT_MODEL_TIMEOUT_S", "7")
+    assert model_extraction_timeout_s(18) == 7.0
 
 
 def _approved_source(
@@ -98,7 +109,10 @@ def test_reviewed_source_without_fast_parser_uses_cited_generic_extractor() -> N
 
     assert context == []
     assert {row["attribute"] for row in claims} == {"ram_gb", "gpu_vram_gb"}
-    assert all(row["extractor"] == "provider_neutral_deterministic" for row in claims)
+    assert all(
+        row["extractor"] == "provider_neutral_deterministic_heuristic_fallback"
+        for row in claims
+    )
     assert all(row["quoted_evidence_span"] for row in claims)
     assert all(row["citation_url"].startswith("https://docs.vendor.example/") for row in claims)
 

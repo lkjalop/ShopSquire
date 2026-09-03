@@ -86,7 +86,7 @@ def test_interpretation_is_durable_revision_bound_and_reconnectable(monkeypatch)
     assert {row.relation for row in dependencies} == {"produced_by", "consumed_by"}
 
 
-def test_late_interpretation_is_superseded_not_applied(monkeypatch):
+def test_revision_only_receipt_bump_does_not_supersede_same_buyer_purpose(monkeypatch):
     engine = _database()
     monkeypatch.setenv("OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED", "1")
     monkeypatch.setattr(
@@ -96,6 +96,7 @@ def test_late_interpretation_is_superseded_not_applied(monkeypatch):
     assert plan is not None
     with Session(engine) as db:
         case = _case(db)
+        case.retained_purpose = plan.retained_purpose
         scheduled = schedule_case_interpretation(db, case=case, plan=plan)
         case.revision = 2
         db.commit()
@@ -108,8 +109,44 @@ def test_late_interpretation_is_superseded_not_applied(monkeypatch):
     })
     with Session(engine) as db:
         stored = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
+        consumed, consumed_receipt = consume_completed_case_interpretation(
+            db, tenant_id="portfolio", case_id="sc-case-1",
+            case_revision=2, plan=plan,
+        )
+    assert stored.status == "completed"
+    assert stored.error_code is None
+    assert stored.result_plan_json is not None
+    assert stored.receipt_json["scheduled_case_revision"] == 1
+    assert stored.receipt_json["applies_to_case_revision"] == 2
+    assert consumed.plan_id == plan.plan_id
+    assert consumed_receipt["status"] == "completed_durable"
+
+
+def test_late_interpretation_is_superseded_when_buyer_purpose_changed(monkeypatch):
+    engine = _database()
+    monkeypatch.setenv("OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED", "1")
+    monkeypatch.setattr(
+        "src.app.workers.task_runner.submit_task", lambda *_args, **_kwargs: "task-2b",
+    )
+    plan = build_case_research_plan("novel workload", allow_open_world=True)
+    assert plan is not None
+    with Session(engine) as db:
+        case = _case(db)
+        scheduled = schedule_case_interpretation(db, case=case, plan=plan)
+        case.revision = 2
+        case.retained_purpose = "different buyer workload"
+        db.commit()
+    monkeypatch.setattr(
+        "src.app.services.open_world_query_proposal.propose_open_world_queries",
+        lambda incoming, timeout_s: (incoming, {"status": "accepted", "model_calls": 1}),
+    )
+    execute_case_interpretation_job({
+        "job_id": scheduled["job_id"], "tenant_id": "portfolio",
+    })
+    with Session(engine) as db:
+        stored = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
     assert stored.status == "superseded"
-    assert stored.error_code == "case_revision_superseded"
+    assert stored.error_code == "buyer_purpose_superseded"
     assert stored.result_plan_json is None
 
 

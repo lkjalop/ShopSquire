@@ -409,6 +409,20 @@ def _weighted_relevance(decision: Any) -> float:
     return earned / total
 
 
+def _candidate_relevance(decisions: Mapping[str, Any]) -> float:
+    score = max((_weighted_relevance(item) for item in decisions.values()), default=0.0)
+    if score > 0:
+        return score
+    # A contested or below-minimum exact attribute is still relevant evidence;
+    # zero relevance means the catalog has no observed attribute for the
+    # accepted requirement, not merely that the product failed it.
+    return 0.01 if any(
+        row.observed is not None or bool(row.capability_claim_ids)
+        for decision in decisions.values()
+        for row in decision.fit_ledger
+    ) else 0.0
+
+
 def project_accepted_catalog(
     db,
     *,
@@ -523,7 +537,7 @@ def project_accepted_catalog(
             )
         candidates.append(ShelfCandidateInput(
             product=identity, title=row.title, price_cents=row.price_cents,
-            relevance_score=_weighted_relevance(decisions["shared"]),
+            relevance_score=_candidate_relevance(decisions),
             fit_by_scope=decisions,
             evidence_freshness=_configuration_freshness(
                 row, availability_by_configuration[row.id], now=observed_now,
@@ -534,6 +548,7 @@ def project_accepted_catalog(
     return build_product_shelves(
         candidates, hypothesis_ids=hypothesis_ids, scope_labels=labels,
         budget_cents=budget_cents, requested_quantity=requested_quantity,
+        suppress_zero_relevance=bool(accepted_claims), suppress_unavailable=True,
     )
 
 

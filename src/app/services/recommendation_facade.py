@@ -88,6 +88,10 @@ class FacadeOutcome:
     reason: str = ""
     lane: Optional[str] = None
     latency_ms: float = 0.0
+    facts: Dict[str, Any] = None
+    semantic_status: Dict[str, Any] = None
+    execution_evidence: Dict[str, Any] = None
+    diagnostics: Dict[str, Any] = None
 
     @property
     def served(self) -> bool:
@@ -962,6 +966,22 @@ def dispatch_recommendation_core_typed(
     quota_budget = None
     quota_estimated = 0
     quota_recorded = False
+    core_invocation_count = 0
+    active_core = None
+    tenant = tenant_id or "default"
+    literal_buyer_query = str(
+        (clarification_answer or {}).get("value") or query or ""
+    ).strip()
+    # Canonical literal facts exist before quota, mode, guard, model or catalog work.
+    # Later we replace this with the enriched envelope, but no exit may lose what the
+    # buyer actually wrote merely because a downstream component degraded.
+    active_envelope = TurnEnvelope.from_suggest_params(
+        query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
+        budget_max=budget_max, trace_id=trace_id, buyer_query=literal_buyer_query,
+        intent_hint=intent_hint, external_research_consent=external_research_consent,
+        clarification_answer=clarification_answer,
+        session=dict(confirmed_slots or {}), cancellation=cancellation,
+    )
     if record_failure is None:
         from src.app.services.safe_stage import record_partial_failure
         record_failure = record_partial_failure
@@ -986,9 +1006,92 @@ def dispatch_recommendation_core_typed(
                 quota_recorded = True
             except Exception as exc:
                 record_failure("recommend_facade_quota_record", exc, trace_id=trace_id)
+        from src.app.services.recommendation_core.turn_outcome import TurnFacts
+        facts = TurnFacts.from_envelope(active_envelope).to_dict()
+        extras = getattr(active_core, "extras", {}) if active_core is not None else {}
+        extras = extras if isinstance(extras, dict) else {}
+        decision = extras.get("decision") if isinstance(extras.get("decision"), dict) else {}
+        router = extras.get("router_outcome") if isinstance(extras.get("router_outcome"), dict) else {}
+        model = extras.get("model_invocation") if isinstance(extras.get("model_invocation"), dict) else {}
+        budgets = extras.get("execution_budgets") if isinstance(extras.get("execution_budgets"), dict) else {}
+        router_budget = budgets.get("router") if isinstance(budgets.get("router"), dict) else {}
+        router_status = str(router.get("status") or "").strip().lower()
+        decision_source = str(decision.get("source") or router.get("source") or "").strip()
+        semantic_evaluation = (
+            "fallback" if decision_source.startswith("fallback:")
+            else "evaluated" if decision
+            else "not_evaluated"
+        )
+        subject_role = decision.get("subject_role")
+        if not subject_role:
+            # A provider outage may occur after literal facts were captured but
+            # before the core attached its decision receipt.  Role is a semantic
+            # description, not commerce authority, so recover only the closed
+            # generic role from the buyer's own words and mark it as fallback.
+            from src.app.services.subject_role import validate_subject_role
+            subject_role = validate_subject_role(
+                facts.get("buyer_query") or query,
+                node_handle=None,
+                sold_state=None,
+            ).value
+            if subject_role != "UNRESOLVED":
+                semantic_evaluation = "fallback"
+        failure_code = None
+        component = "recommendation_core"
+        evidence_status = "completed" if status == "served" else status
+        if router_status:
+            component = "recommendation_turn_router"
+            evidence_status = router_status
+            if router_status in {"timed_out", "timeout", "queue_timeout"}:
+                failure_code = "model_execution_timeout"
+            elif router_status in {"source_unavailable", "unavailable"}:
+                failure_code = "model_execution_unavailable"
+        if failure_code is None and str(reason).startswith("grounding:"):
+            failure_code = "catalog_grounding_" + str(reason).split(":", 1)[1]
+        if failure_code is None and status in {"blocked", "delegate", "degraded", "error"}:
+            failure_code = str(reason or status).replace(":", "_")[:120]
+        evidence = {
+            "component": component,
+            "status": evidence_status,
+            "failure_code": failure_code,
+            "elapsed_ms": int(model.get("wall_ms") or 0),
+            "deadline_ms": int(
+                router_budget.get("total_deadline_ms")
+                or router_budget.get("deadline_ms") or 0
+            ),
+            "fallback_used": bool(status != "served" or decision_source.startswith("fallback:")),
+            "core_invocation_count": core_invocation_count,
+            "operation_id": str(trace_id or active_envelope.trace_id),
+        }
+        scheduler_receipt = {
+            key.removeprefix("scheduler_"): model.get(key)
+            for key in (
+                "scheduler_role", "scheduler_priority", "scheduler_status", "scheduler_failure_code",
+                "scheduler_queue_ms", "scheduler_execution_ms",
+                "scheduler_deadline_ms", "scheduler_cancelled",
+            )
+            if model.get(key) is not None
+        }
+        if scheduler_receipt:
+            evidence["model_scheduler"] = scheduler_receipt
         return FacadeOutcome(
             status=status, payload=payload, reason=reason, lane=lane,
             latency_ms=round((time.perf_counter() - dispatch_started) * 1000.0, 1),
+            facts=facts,
+            semantic_status={
+                "status": semantic_evaluation,
+                "subject_role": subject_role,
+                "source": decision_source or (
+                    "deterministic_fallback" if semantic_evaluation == "fallback" else None
+                ),
+            },
+            execution_evidence=evidence,
+            diagnostics={
+                "requested_quantity": facts.get("quantity"),
+                "bulk_budget": extras.get("bulk") if isinstance(extras.get("bulk"), dict) else None,
+                "router_outcome": router or None,
+                "model_invocation": model or None,
+            },
         )
 
     mode, pct = _resolve_mode()
@@ -997,11 +1100,6 @@ def dispatch_recommendation_core_typed(
     cart_mode = _cart_mode()
     if mode == "off" and cart_mode == "off":
         return outcome("delegate", reason="mode_off")
-    tenant = tenant_id or "default"
-    literal_buyer_query = str(
-        (clarification_answer or {}).get("value") or query or ""
-    ).strip()
-
     # Universal quota admission belongs at the typed ingress. Legacy delegation retains its own
     # check during migration; checks are read-only, so delegation cannot double-charge usage.
     try:
@@ -1240,7 +1338,7 @@ def dispatch_recommendation_core_typed(
         session = _merge_authoritative_cart_anchor(
             session, cart_slice, db=db, tenant_id=tenant,
         )
-        envelope = TurnEnvelope.from_suggest_params(
+        active_envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
             buyer_query=literal_buyer_query,
@@ -1251,12 +1349,15 @@ def dispatch_recommendation_core_typed(
             clarification_answer=clarification_answer,
             session=session, cart=cart_slice, pre_gate=guard,
             cancellation=cancellation)
+        envelope = active_envelope
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn
         from src.app.services.recommendation_core.legacy_adapter import to_legacy
         _t0 = time.perf_counter()
+        core_invocation_count += 1
         core = recommend_turn(db, envelope)
+        active_core = core
         _latency_ms = int((time.perf_counter() - _t0) * 1000)
 
         # A material clarification is safe across a delegated-lane boundary: it contains no

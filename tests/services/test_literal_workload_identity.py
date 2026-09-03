@@ -31,6 +31,13 @@ def test_literal_switch_rejects_generic_use_cases():
     assert deterministic_named_workload_switch("what about Baldur's Gate 3?")
 
 
+def test_explicit_run_grammar_retains_an_unfamiliar_single_token_title():
+    assert literal_game_identity_candidate(
+        "Can a laptop under AUD 3,000 run TETORD?"
+    ) == (("game", "TETORD"),)
+    assert literal_game_identity_candidate("I need a laptop for work") == ()
+
+
 def test_explicit_replace_workload_is_a_switch_not_an_addition():
     utterance = "Actually replace that workload with Baldur's Gate 3."
     assert literal_game_identity_candidate(utterance) == (("game", "Baldur's Gate 3"),)

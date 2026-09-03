@@ -157,6 +157,18 @@ def test_open_world_queries_preserve_digit_leading_product_name_tokens():
     assert any("Rockwell Emulate 3D" in query for query in queries)
 
 
+def test_slash_acronym_and_compact_acronym_match_the_same_enrolled_source():
+    manifest = {"sources": [
+        _source("factory", ["factory_io"], ["Factory I/O", "System Requirements"]),
+    ]}
+    plan = build_case_research_plan(
+        "I need a workstation that can run Factory IO locally.", manifest=manifest,
+    )
+    assert plan is not None
+    assert plan.publisher_status == "resolved_enrolled"
+    assert plan.source_candidate_ids == ["factory"]
+
+
 def test_discovery_subject_removes_filler_url_and_commercial_amounts() -> None:
     subject = _discovery_subject(
         "Please inspect CupixWorks at "
@@ -272,3 +284,16 @@ def test_source_activation_policy_prevents_digital_twin_from_inventing_cyber_sco
     )
     assert cyber is not None
     assert "context" in cyber.source_candidate_ids
+
+
+def test_unseen_title_does_not_invent_a_publisher_domain_before_search():
+    plan = build_case_research_plan(
+        "What about Where Winds Meet? Has it been released?",
+        manifest=_manifest(),
+        allow_open_world=True,
+    )
+    assert plan is not None
+    queries = [row.query.lower() for row in plan.discovery_queries]
+    assert all("site:" not in query for query in queries)
+    assert all("where.com" not in query for query in queries)
+    assert any("where winds meet" in query for query in queries)

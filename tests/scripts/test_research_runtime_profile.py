@@ -50,9 +50,11 @@ def test_live_recording_profile_runs_query_planner_on_an_isolated_task_stream():
     assert '$env:TASK_STREAM_NAME = "shopsquire:tasks:recording:$recordingRunKey"' in script
     assert "`$env:TASK_CONSUMER_ENABLED" in script
     assert "`$env:TASK_STREAM_NAME" in script
-    assert '[string]$QueryModel = "granite4:micro"' in script
+    assert '[string]$QueryModel = "qwen3:14b"' in script
     assert '$env:OPEN_WORLD_QUERY_MODEL = $QueryModel' in script
     assert 'QUERY_PLANNER_PREWARMED=$QueryModel' in script
+    assert 'ROUTER_RESIDENCY_RESTORED=$LiveModel' in script
+    assert '$env:ROUTER_PREWARM_REQUIRED = "1"' in script
 
 
 def test_local_discovery_profile_uses_a_bounded_working_engine_set():

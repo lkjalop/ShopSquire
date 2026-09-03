@@ -6,6 +6,7 @@ readiness report tells the truth so we never claim a capability that won't produ
 from __future__ import annotations
 
 from src.app.services.commerce_feature_readiness import (
+    catalog_grounding_readiness,
     commerce_feature_readiness,
     external_research_runtime_observation,
     external_search_readiness,
@@ -13,6 +14,22 @@ from src.app.services.commerce_feature_readiness import (
     reset_external_research_runtime_observation,
     visual_search_readiness,
 )
+
+
+def test_catalog_grounding_is_bound_to_the_exact_storefront_tenant():
+    rows = {"default": {"el-6-6"}, "portfolio-demo": set()}
+    grounding = lambda _db, tenant_id: "grounded" if rows[tenant_id] else "empty"
+    sold = lambda _db, tenant_id: frozenset(rows[tenant_id]) or None
+
+    assert catalog_grounding_readiness(
+        object(), tenant_id="default", grounding_fn=grounding, sold_nodes_fn=sold,
+    )["ready"] is True
+    missing = catalog_grounding_readiness(
+        object(), tenant_id="portfolio-demo", grounding_fn=grounding, sold_nodes_fn=sold,
+    )
+    assert missing["ready"] is False
+    assert missing["tenant_id"] == "portfolio-demo"
+    assert missing["sold_taxonomy_count"] == 0
 
 
 # ── visual similarity ──
@@ -88,6 +105,7 @@ def test_external_live_when_all_present(monkeypatch):
     assert r["last_success_at"] == "2026-08-09T01:02:03Z"
     assert r["advisory_live"] is True
     assert r["requirement_authority_ready"] is True
+    assert r["requirements_provider_authority_ready"] is True
     assert r["requirements_credential_configured"] is True
     assert r["freshness_sla_hours"] == 24
 
@@ -110,6 +128,25 @@ def test_external_search_does_not_claim_requirement_authority_without_review(mon
     assert r["live"] is True
     assert r["reason"] == "live_advisory_only"
     assert "review" in r["authority_reason"].lower()
+
+
+def test_reviewed_canonical_origins_are_an_independent_authority_lane(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "tenant-a")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", "reviewer@example.com")
+    monkeypatch.delenv("OFFICIAL_REQUIREMENTS_API_URL", raising=False)
+    monkeypatch.delenv("OFFICIAL_REQUIREMENTS_API_KEY", raising=False)
+
+    r = external_search_readiness(
+        {}, allowlist=["trusted.com"], tenant_id="tenant-a",
+        probe_fn=lambda endpoint: {"reachable": True},
+    )
+
+    assert r["canonical_source_authority_ready"] is True
+    assert r["requirements_provider_authority_ready"] is False
+    assert r["requirement_authority_ready"] is True
+    assert r["source_governance"]["pending_independent_human_review_count"] == 8
 
 
 def test_external_search_requires_tenant_enrollment(monkeypatch):

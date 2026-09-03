@@ -14,7 +14,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
 from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, OperatorSubject, operator_subject, require_role
@@ -759,6 +759,133 @@ class ConfirmCartBody(BaseModel):
     trace_id: Optional[str] = None
     supersede: bool = False                        # buyer amending a confirmed order → retire old cases + re-source
     requirements: Optional[Dict[str, Any]] = None  # buyer deadline/use_case/ship_to (from the preview) → onto the case
+
+
+class OffCatalogSourcingBody(BaseModel):
+    uid: Optional[str] = None
+    shopping_case_id: str
+    expected_case_revision: int
+    trace_id: str
+    subject_label: str
+    quantity: int = 1
+    constraints: Optional[Dict[str, Any]] = None
+    commercial_terms: Optional[Dict[str, Any]] = None
+    canonical_identity: Optional[Dict[str, Any]] = None
+    accepted_claim_ids: list[str] = Field(default_factory=list, max_length=64)
+    source_urls: list[str] = Field(default_factory=list, max_length=16)
+    budget_gap_cents: Optional[int] = Field(default=None, ge=0)
+    best_catalog_alternative: Optional[Dict[str, Any]] = None
+
+
+@router.post("/cases/from-off-catalog")
+def confirm_off_catalog_sourcing(body: OffCatalogSourcingBody, request: Request) -> Dict[str, Any]:
+    """Turn an explicit off-catalog acceptance into an internal sourcing case.
+
+    The click is GATE 1 buyer confirmation.  No supplier is selected or contacted;
+    the returned draft is an internal sourcing brief awaiting operator resolution.
+    """
+    import hashlib
+    import json
+    import re
+    from sqlalchemy import text
+    from src.app.security.buyer_principal import resolve_buyer_principal
+    from src.app.services.shopping_case_revision import canonical_case_revision
+
+    principal = resolve_buyer_principal(request, supplied_uid=body.uid)
+    buyer_uid = principal.subject if principal else str(body.uid or "guest")
+    tenant_id = principal.tenant_id if principal else "default"
+    shopping_case_id = str(body.shopping_case_id or "").strip()[:200]
+    trace_id = str(body.trace_id or "").strip()[:200]
+    subject = re.sub(r"\s+", " ", str(body.subject_label or "")).strip()[:240]
+    quantity = max(1, min(100_000, int(body.quantity or 1)))
+    if not shopping_case_id or not trace_id or len(subject) < 2:
+        raise HTTPException(status_code=422, detail="invalid_off_catalog_sourcing_scope")
+
+    with db_session() as db:
+        # The acceptance endpoint can be the first fulfilment operation in a
+        # fresh demo or tenant database.  Ensure the durable workflow tables
+        # exist before the idempotency lookup below.
+        fwf.repository.ensure_tables(db)
+        current_revision = canonical_case_revision(
+            db, tenant_id=tenant_id, case_id=shopping_case_id, fallback=0,
+        )
+        if current_revision <= 0:
+            raise HTTPException(status_code=404, detail="shopping case not found")
+        if current_revision != int(body.expected_case_revision):
+            raise HTTPException(status_code=409, detail="case_revision_conflict")
+
+        existing = db.execute(text(
+            "SELECT id FROM fulfillment_case WHERE tenant_id=:tenant AND buyer_uid_hash=:buyer "
+            "AND source_trace_id=:trace ORDER BY created_at DESC LIMIT 1"
+        ), {"tenant": tenant_id, "buyer": buyer_uid, "trace": trace_id}).fetchone()
+        if existing:
+            cur = fwf.repository.current_version(db, str(existing[0]), tenant_id)
+            return {
+                "case_id": str(existing[0]), "state": cur.state if cur else "COMMITTED",
+                "idempotent": True, "shopping_case_id": shopping_case_id,
+                "case_revision": current_revision, "supplier_contacted": False,
+                "draft": {"status": "internal_sourcing_brief", "requires_operator_supplier_resolution": True},
+            }
+
+        item_ref = "offcatalog:" + hashlib.sha256(subject.lower().encode("utf-8")).hexdigest()[:20]
+        state_json = {
+            "source_shopping_case": {"case_id": shopping_case_id, "revision": current_revision},
+            "availability": {
+                "item_ref": item_ref, "requested_qty": quantity, "in_stock": 0,
+                "shortfall": quantity, "authority": "off_catalog_refusal",
+            },
+            "sourcing_brief": {
+                "subject": subject, "quantity": quantity,
+                "commercial_terms": dict(body.commercial_terms or {}),
+                "constraints": dict(body.constraints or {}),
+                "canonical_identity": dict(body.canonical_identity or {}),
+                "accepted_claim_ids": list(dict.fromkeys(body.accepted_claim_ids)),
+                "source_urls": list(dict.fromkeys(body.source_urls)),
+                "budget_gap_cents": body.budget_gap_cents,
+                "best_catalog_alternative": dict(body.best_catalog_alternative or {}),
+                "status": "internal_draft", "supplier_contacted": False,
+            },
+        }
+        case_id = fwf.open_case(
+            db, buyer_uid_hash=buyer_uid, source_trace_id=trace_id,
+            requested_by="buyer_off_catalog_acceptance", tenant_id=tenant_id,
+            state_json=state_json,
+        )
+        if not case_id:
+            raise HTTPException(status_code=500, detail="could not open sourcing case")
+        assessed = fwf.transition(
+            db, case_id=case_id, event="availability_assessed", actor=_agent(),
+            state_patch=state_json, reason_code="off_catalog_not_stocked",
+            evidence={"shopping_case_id": shopping_case_id, "case_revision": current_revision},
+            tenant_id=tenant_id, trace_id=trace_id,
+        )
+        _raise_if_failed(assessed)
+        _raise_if_failed(fwf.transition(
+            db, case_id=case_id, event="request_buyer_commitment", actor=_agent(),
+            reason_code="explicit_sourcing_confirmation_required", tenant_id=tenant_id,
+            trace_id=trace_id,
+        ))
+        committed = fwf.transition(
+            db, case_id=case_id, event="buyer_committed",
+            actor=Actor(ActorType.BUYER, buyer_uid),
+            reason_code="buyer_confirmed_off_catalog_sourcing",
+            evidence={"shopping_case_id": shopping_case_id, "case_revision": current_revision},
+            tenant_id=tenant_id, trace_id=trace_id,
+        )
+        _raise_if_failed(committed)
+        brief_hash = hashlib.sha256(json.dumps(
+            state_json["sourcing_brief"], sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        return {
+            "case_id": case_id, "state": committed.state, "idempotent": False,
+            "shopping_case_id": shopping_case_id, "case_revision": current_revision,
+            "supplier_contacted": False,
+            "draft": {
+                "status": "internal_sourcing_brief", "content_hash": brief_hash,
+                "requires_operator_supplier_resolution": True,
+                "rfq_preview_path": f"/api/v1/fulfillment/cases/{case_id}/rfq-fanout",
+            },
+        }
 
 
 def _client_network(request: Optional[Request]) -> Dict[str, Any]:

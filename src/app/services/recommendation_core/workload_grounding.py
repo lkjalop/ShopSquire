@@ -211,6 +211,79 @@ def resolve_named_workloads(
     }
 
 
+def resolve_canonical_workload_identity(
+    identity_resolution: Dict[str, Any] | None,
+    *,
+    workload_kind_hints: Iterable[str],
+    consent: bool,
+) -> Dict[str, Any]:
+    """Re-query enrolled structured providers after cited identity resolution.
+
+    The first recommendation pass can only use the buyer's literal phrase.  An
+    unfamiliar title may therefore miss a structured provider even though the
+    later governed discovery stage resolves its canonical spelling.  This
+    adapter performs one bounded second lookup using that cited title. It does
+    not maintain title aliases. The kind normally comes from the turn router;
+    a cited structured-store origin may also provide the bounded provider kind.
+    """
+
+    resolution = dict(identity_resolution or {})
+    identity = dict(resolution.get("identity") or {})
+    canonical_title = str(identity.get("canonical_title") or "").strip()
+    if resolution.get("status") != "resolved" or not canonical_title:
+        return {
+            "status": "not_attempted",
+            "failure_code": "canonical_identity_not_resolved",
+            "requirements": {},
+            "evidence": [],
+        }
+    kinds: list[str] = []
+    for value in workload_kind_hints:
+        kind = str(value or "").strip().lower()
+        if kind in {"game", "software"} and kind not in kinds:
+            kinds.append(kind)
+    if not kinds:
+        # A Steam row already clamped by identity resolution is a grounded
+        # provider-kind hint. This authorizes only another structured lookup;
+        # requirements and product fit still require the normal compilation
+        # and policy gates.
+        cited_rows = list(resolution.get("cited_rows") or [])
+        if any(
+            (
+                "store.steampowered.com" in str(row.get("url") or "").casefold()
+                or str(row.get("registrable_domain") or "").casefold()
+                == "store.steampowered.com"
+            )
+            for row in cited_rows
+            if isinstance(row, dict)
+        ):
+            kinds.append("game")
+    if not kinds:
+        # Identity resolution has already produced a cited canonical title.
+        # Ask the small, enrolled provider registry which bounded capability
+        # owns it instead of requiring the language router to know the tool in
+        # advance. Every provider still performs its own exact identity check,
+        # and this fan-out grants no evidence when all providers reject it.
+        kinds.extend(("game", "software"))
+    result = resolve_named_workloads(
+        [(kind, canonical_title) for kind in kinds[:2]],
+        consent=consent,
+    )
+    resolved = any(
+        str(item.get("status") or "").strip().lower() == "resolved"
+        and bool(item.get("compiled_requirements"))
+        for item in result.get("evidence") or []
+        if isinstance(item, dict)
+    )
+    return {
+        **result,
+        "status": "resolved" if resolved else "not_resolved",
+        "canonical_title": canonical_title,
+        "lookup_basis": "cited_canonical_identity",
+        "failure_code": None if resolved else "structured_provider_no_authoritative_result",
+    }
+
+
 def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -> Dict[str, Any]:
     """Compatibility alias for callers migrating to source-neutral workloads."""
     return resolve_named_workloads(entities, consent=consent)

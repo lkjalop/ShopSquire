@@ -51,3 +51,43 @@ def test_case_marker_cannot_cross_tenants():
     assert load_case_trace_events(
         db, case_id="sc-case-1", tenant_id="default",
     ) == []
+
+
+def test_continuing_case_uses_explicit_new_turn_trace_without_identity_substitution():
+    db = _db()
+    db.execute(text(
+        "INSERT INTO decision_trace_events VALUES "
+        "(:trace, :tenant, 'ambiguity_exploration_projected', :payload, 'now')"
+    ), {
+        "trace": "decision-new-turn-2", "tenant": "default",
+        "payload": json.dumps({
+            "case_id": "sc-original-turn-1",
+            "research_plan_id": "crp-new-turn-plan",
+        }),
+    })
+    # A caller must not be able to bind another case to the trace merely by
+    # knowing its identifier.
+    db.execute(text(
+        "INSERT INTO decision_trace_events VALUES "
+        "(:trace, :tenant, 'ambiguity_exploration_projected', :payload, 'later')"
+    ), {
+        "trace": "decision-wrong-case", "tenant": "default",
+        "payload": json.dumps({"case_id": "sc-someone-else"}),
+    })
+    db.commit()
+
+    events = load_case_trace_events(
+        db,
+        case_id="sc-original-turn-1",
+        tenant_id="default",
+        decision_trace_id="decision-new-turn-2",
+    )
+    rejected = load_case_trace_events(
+        db,
+        case_id="sc-original-turn-1",
+        tenant_id="default",
+        decision_trace_id="decision-wrong-case",
+    )
+
+    assert [row["trace_id"] for row in events] == ["decision-new-turn-2"]
+    assert rejected == []

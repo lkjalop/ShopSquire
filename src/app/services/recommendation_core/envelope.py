@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.app.services.recommendation_core.cancellation import RecommendationCancellation
+from src.app.services.budget_grammar import BudgetParse, parse_budget
+from src.app.services.commercial_terms import CommercialTerms, parse_commercial_terms
 
 
 logger = logging.getLogger("shopsquire.recommendation_core.envelope")
@@ -96,6 +98,8 @@ class TurnEnvelope:
     intent_hint: Optional[str] = None
     budget_min_cents: Optional[int] = None
     budget_max_cents: Optional[int] = None
+    budget_parse: Optional[BudgetParse] = None
+    commercial_terms: CommercialTerms = field(default_factory=CommercialTerms)
     has_image: bool = False
     image_observations: List[ImageObservation] = field(default_factory=list)
     source_ip: Optional[str] = None
@@ -139,18 +143,33 @@ class TurnEnvelope:
         to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
         # Legacy suggest() historically parsed free-text budgets after V2 dispatch. Normalize
         # the shared grammar here so the core does not depend on order inside that monolith.
+        literal_buyer_text = str(buyer_query or query or "")
+        parsed_budget = parse_budget(literal_buyer_text)
         if budget_min is None and budget_max is None:
             try:
-                from src.app.services.budget_grammar import parse_budget
-                parsed = parse_budget(query)
-                if parsed is not None:
-                    budget_min, budget_max = parsed.budget_min, parsed.budget_max
+                if parsed_budget is not None:
+                    budget_min, budget_max = parsed_budget.budget_min, parsed_budget.budget_max
             except Exception as exc:
                 # Input normalization is best-effort; no budget remains an honest core state.
                 logger.debug(
                     "Budget grammar normalization skipped: %s",
                     repr(exc)[:120],
                 )
+        # The envelope describes facts authored at this ingress only. Session
+        # constraints are durable prior-case facts, not current-turn facts;
+        # copying them here before routing made fresh searches inherit stale
+        # budgets and made genuine continuations look locally authored. The
+        # finalized transition in the core is the sole inheritance gate.
+        if parsed_budget is None and (budget_min is not None or budget_max is not None):
+            parsed_budget = BudgetParse(
+                budget_min=(int(float(budget_min)) if budget_min is not None else None),
+                budget_max=(int(float(budget_max)) if budget_max is not None else None),
+                mode=(
+                    "range" if budget_min is not None and budget_max is not None
+                    else "ceiling" if budget_max is not None else "floor"
+                ),
+                source_span=None,
+            )
         normalized_hint = str(intent_hint or "").strip().upper()
         if normalized_hint not in LANES:
             normalized_hint = None
@@ -169,6 +188,10 @@ class TurnEnvelope:
                    currency=normalized_currency,
                    intent_hint=normalized_hint,
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
+                   budget_parse=parsed_budget,
+                   commercial_terms=parse_commercial_terms(
+                       literal_buyer_text, default_currency=normalized_currency,
+                   ),
                    has_image=bool(has_image or image_observations),
                    image_observations=list(image_observations or []), source_ip=source_ip,
                    external_research_consent=bool(external_research_consent),
@@ -185,7 +208,10 @@ class TurnEnvelope:
                 "trace_id": self.trace_id, "currency": self.currency,
                 "intent_hint": self.intent_hint,
                 "budget_min_cents": self.budget_min_cents,
-                "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
+                "budget_max_cents": self.budget_max_cents,
+                "budget_parse": self.budget_parse.to_dict() if self.budget_parse else None,
+                "commercial_terms": self.commercial_terms.to_dict(),
+                "has_image": self.has_image,
                 "image_observations": [item.to_dict() for item in self.image_observations],
                 "source_ip": self.source_ip,
                 "external_research_consent": self.external_research_consent,
@@ -208,6 +234,8 @@ class TurnEnvelope:
                    intent_hint=hint,
                    budget_min_cents=_int(d.get("budget_min_cents")),
                    budget_max_cents=_int(d.get("budget_max_cents")),
+                   budget_parse=BudgetParse.from_dict(d.get("budget_parse")),
+                   commercial_terms=CommercialTerms.from_dict(d.get("commercial_terms")),
                    has_image=bool(d.get("has_image") or d.get("image_observations")),
                    image_observations=[ImageObservation.from_dict(item) for item in
                                        (d.get("image_observations") or []) if isinstance(item, dict)],

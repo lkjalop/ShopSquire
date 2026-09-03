@@ -50,9 +50,34 @@ def normalize_chat_recommendation_result(
     """Project every dispatch lane into one stable, router-safe result shape."""
     normalized = dict(result) if isinstance(result, dict) else {}
     normalized.setdefault("trace_id", command.trace_id)
+    normalized.setdefault("decision_trace_id", normalized.get("trace_id") or command.trace_id)
+    normalized.setdefault("operation_id", f"chat:{command.trace_id}")
+    normalized.setdefault("case_id", None)
+    normalized.setdefault("case_revision", None)
+    normalized.setdefault("research_run_id", None)
     if command.observed_lane:
         normalized.setdefault("execution_lane", command.observed_lane)
     normalized.setdefault("execution_mode", "recommendation_result")
+    # ``canonical_facts`` is the one ingress-owned fact contract.  Some served
+    # and degraded lanes historically flattened only a subset of it, which let
+    # a correctly parsed budget survive in the facade while disappearing from
+    # the terminal case/read-model projection.  Project the stable public fields
+    # here once; callers must not reparse the query to recover them.
+    facts = normalized.get("canonical_facts")
+    if isinstance(facts, dict):
+        if isinstance(facts.get("canonical_budget"), dict):
+            normalized.setdefault("canonical_budget", facts["canonical_budget"])
+        if isinstance(facts.get("commercial_terms"), dict):
+            normalized.setdefault("commercial_terms", facts["commercial_terms"])
+        if facts.get("quantity") is not None:
+            normalized.setdefault("requested_quantity", facts["quantity"])
+        if facts.get("budget_scope") is not None:
+            normalized.setdefault("budget_scope", facts["budget_scope"])
+        if facts.get("total_budget_cents") is not None:
+            normalized.setdefault("total_budget_cents", facts["total_budget_cents"])
+    semantic = normalized.get("semantic_status")
+    if isinstance(semantic, dict) and semantic.get("subject_role"):
+        normalized.setdefault("subject_role", semantic["subject_role"])
     return normalized
 
 
@@ -68,7 +93,6 @@ async def dispatch_chat_recommendation(
 ) -> tuple[int, dict[str, Any]]:
     """Dispatch chat through the typed recommendation facade and V2 cutover."""
     from src.app.services.recommendation_delegation_policy import (
-        compatibility_cutover_enabled,
         v2_only_unavailable_response,
     )
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
@@ -120,6 +144,11 @@ async def dispatch_chat_recommendation(
             served = dict(facade.payload or {})
             served.setdefault("execution_mode", "v2_served")
             served.setdefault("execution_lane", facade.lane)
+            served["canonical_facts"] = dict(facade.facts or {})
+            served["semantic_status"] = dict(
+                facade.semantic_status or {"status": "not_evaluated"}
+            )
+            served["execution_evidence"] = dict(facade.execution_evidence or {})
             return normalize_chat_recommendation_result(served, command=command)
         if facade.status == "blocked":
             record_recommendation_dispatch(
@@ -131,37 +160,26 @@ async def dispatch_chat_recommendation(
                 "reason": facade.reason,
                 "trace_id": command.trace_id,
             })
-        if not compatibility_cutover_enabled():
-            record_recommendation_dispatch(
-                outcome="v2_unavailable", lane=facade.lane or command.observed_lane,
-                reason=facade.reason or facade.status,
-            )
-            return normalize_chat_recommendation_result(v2_only_unavailable_response(
-                status=facade.status, reason=facade.reason, lane=facade.lane,
-                trace_id=command.trace_id,
-                query=command.query,
-                external_research_authorized=command.external_research_consent,
-            ), command=command)
-        from src.app.services.recommendation_compatibility import serve_v2_compatibility
-        try:
-            delegated = serve_v2_compatibility(
-                request=request, params=params, redis=redis, db=db, role=role,
-            )
-        except Exception:
-            record_recommendation_dispatch(
-                outcome="error", lane=facade.lane or command.observed_lane,
-                reason=facade.reason or facade.status,
-            )
-            raise
         record_recommendation_dispatch(
-            outcome="v2_compatibility", lane=facade.lane or command.observed_lane,
+            outcome="v2_unavailable", lane=facade.lane or command.observed_lane,
             reason=facade.reason or facade.status,
         )
-        delegated = dict(delegated or {})
-        delegated.setdefault("execution_mode", "v2_compatibility")
-        delegated.setdefault("delegation_reason", facade.reason or facade.status)
-        delegated.setdefault("execution_lane", facade.lane)
-        return normalize_chat_recommendation_result(delegated, command=command)
+        terminal = v2_only_unavailable_response(
+            status=facade.status, reason=facade.reason, lane=facade.lane,
+            trace_id=command.trace_id, query=command.query,
+            external_research_authorized=command.external_research_consent,
+            facts=facade.facts, semantic_status=facade.semantic_status,
+            execution_evidence=facade.execution_evidence,
+        )
+        # Preserve bounded, read-only receipts from the single core invocation.
+        # Products and actions are deliberately absent from this projection.
+        diagnostics = facade.diagnostics if isinstance(facade.diagnostics, dict) else {}
+        for key in (
+            "requested_quantity", "bulk_budget", "router_outcome", "model_invocation",
+        ):
+            if diagnostics.get(key) is not None:
+                terminal[key] = diagnostics[key]
+        return normalize_chat_recommendation_result(terminal, command=command)
 
     try:
         data = await anyio.to_thread.run_sync(invoke, abandon_on_cancel=True)

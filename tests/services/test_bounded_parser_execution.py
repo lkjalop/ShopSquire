@@ -6,6 +6,11 @@ from src.app.services import bounded_parser_execution
 from src.app.services.bounded_parser_execution import ParserBudget, execute_parser_bounded
 
 
+def test_parser_budget_preserves_measured_model_stage_deadline():
+    assert ParserBudget(timeout_ms=18_000).normalized().timeout_ms == 18_000
+    assert ParserBudget(timeout_ms=90_000).normalized().timeout_ms == 30_000
+
+
 def test_parser_completes_with_explicit_budget_projection():
     outcome = asyncio.run(execute_parser_bounded(
         b"requirements",

@@ -63,7 +63,7 @@ def test_named_publisher_domain_hint_becomes_a_candidate_only_site_query():
 
     assert receipt["status"] == "accepted"
     assert len({row.axis for row in planned.discovery_queries}) == 3
-    assert planned.discovery_queries[-1].query.startswith("site:agisoft.com ")
+    assert all("site:" not in row.query for row in planned.discovery_queries)
     assert "unrelated.example" not in receipt["proposal"]["publisher_domain_hypotheses"]
 
 
@@ -113,8 +113,23 @@ def test_live_query_planner_uses_a_compact_output_budget(monkeypatch):
 
     monkeypatch.setattr(subject, "ModelExecutionGateway", Gateway)
 
-    assert subject._ollama_call("compact query plan", 6.0) == "{}"
-    assert captured["max_output_tokens"] <= 420
+    assert subject._ollama_call("compact query plan", 9.0) == "{}"
+    assert captured["max_output_tokens"] <= 180
+
+
+def test_query_planner_budget_is_derived_from_observed_router_latency(monkeypatch):
+    monkeypatch.setenv("RESEARCH_TOTAL_TIMEOUT_MS", "12000")
+    monkeypatch.setenv("OPEN_WORLD_QUERY_MIN_TIMEOUT_MS", "8000")
+    monkeypatch.setattr(subject, "observed_model_latency_ms", lambda **_kwargs: 7000)
+
+    assert subject.open_world_query_timeout_s() == 10.5
+
+
+def test_query_planner_budget_respects_governed_total_deadline(monkeypatch):
+    monkeypatch.setenv("RESEARCH_TOTAL_TIMEOUT_MS", "10000")
+    monkeypatch.setattr(subject, "observed_model_latency_ms", lambda **_kwargs: 11000)
+
+    assert subject.open_world_query_timeout_s() == 10.0
 
 
 def test_model_timeout_falls_back_without_stranding_the_buyer():
@@ -129,7 +144,8 @@ def test_model_timeout_falls_back_without_stranding_the_buyer():
 
     assert planned == original
     assert receipt["status"] == "rejected_or_unavailable"
-    assert receipt["reason"] == "TimeoutError"
+    assert receipt["failure_code"] == "model_execution_timeout"
+    assert receipt["reason"] == "model_execution_timeout"
     assert receipt["authority"] == "none"
 
 

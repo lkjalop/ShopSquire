@@ -1,11 +1,8 @@
 """Budget grammar (agnostic CORE) — the ONE place a money budget is parsed from buyer text.
 
-Five near-duplicate budget grammars grew across the stack (nlp_search_agent.parse_query,
-query_decomposer._extract_budget_range, chat._extract_budget_bounds,
-recommend._extract_explicit_budget_override, recommendations._extract_price_range), and every new
-phrasing had to be fixed five times — "cut it to 1000 max" reached three of them before the LIVE one.
-This module is the canonical grammar; the five call it FIRST and keep their local patterns only as
-legacy fallback. Add a phrasing HERE once → every lane benefits.
+Near-duplicate budget grammars grew across the stack and produced contradictory
+answers. This module is the canonical buyer-query grammar. Callers consume its
+typed result; response-price prose remains a separate parsing responsibility.
 
 Vertical-blind: pure numbers, currency symbols, and generic verbs — no product vocabulary. Pure function,
 no DB, no network. Returns a BudgetParse or None (None = this grammar saw no budget; the caller may still
@@ -15,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 # a number with optional commas/decimals and a k/m suffix ("1,600", "1.5k", "2k").
 # Hardened against two real regressions: it cannot END on a comma and cannot be FOLLOWED by
@@ -38,10 +35,41 @@ class BudgetParse:
     budget_min: Optional[int]
     budget_max: Optional[int]
     mode: str               # range | ceiling | floor | around | revision_down | per_unit
+    source_span: Optional[Tuple[int, int]] = None
 
     @property
     def found(self) -> bool:
         return self.budget_min is not None or self.budget_max is not None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "budget_min": self.budget_min,
+            "budget_max": self.budget_max,
+            "mode": self.mode,
+            "source_span": list(self.source_span) if self.source_span is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Dict[str, Any] | None) -> Optional["BudgetParse"]:
+        if not isinstance(value, dict):
+            return None
+        span = value.get("source_span")
+        bounded_span = None
+        if isinstance(span, (list, tuple)) and len(span) == 2:
+            try:
+                bounded_span = (max(0, int(span[0])), max(0, int(span[1])))
+            except (TypeError, ValueError):
+                bounded_span = None
+        try:
+            lo = int(value["budget_min"]) if value.get("budget_min") is not None else None
+            hi = int(value["budget_max"]) if value.get("budget_max") is not None else None
+        except (TypeError, ValueError):
+            return None
+        mode = str(value.get("mode") or "").strip()
+        if mode not in {"range", "ceiling", "floor", "around", "revision_down", "per_unit"}:
+            return None
+        parsed = cls(lo, hi, mode, bounded_span)
+        return parsed if parsed.found else None
 
 
 @dataclass(frozen=True)
@@ -128,7 +156,7 @@ def classify_budget_scope(text: str) -> str:
     if re.search(r"\b(?:each|apiece|a\s+piece|per\s+(?:unit|item|device|laptop|computer|pc))\b", q):
         return "per_unit"
     if re.search(
-        r"\b(?:total(?:\s+order)?\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
+        r"\b(?:total(?:\s+(?:order|annual|yearly|monthly))?\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
         r"(?:keep|cap|hold)\s+(?:the\s+)?total(?:\s+(?:under|below|at|to))?|"
         r"all\s+in|altogether|combined|grand\s+total|in\s+total|for\s+all)\b",
         q,
@@ -215,7 +243,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         a, b = _to_int(m.group(1), m.group(2)), _to_int(m.group(3), m.group(4))
         if a is not None and b is not None and a != b:
-            return BudgetParse(min(a, b), max(a, b), "range")
+            return BudgetParse(min(a, b), max(a, b), "range", m.span())
     m = re.search(
         rf"\b(?:good|options?|products?|recommendations?)\b[^.?!]{{0,16}}"
         rf"\bfor\s*{_CUR}?\s*{_NUM}\s*(?:-|to|and)\s*"
@@ -225,7 +253,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         a, b = _to_int(m.group(1), m.group(2)), _to_int(m.group(3), m.group(4))
         if a is not None and b is not None and a != b:
-            return BudgetParse(min(a, b), max(a, b), "range")
+            return BudgetParse(min(a, b), max(a, b), "range", m.span())
 
     # 2) revision DOWN — "cut it to 1000 max", "drop the budget to 800": a new CEILING (floor cleared).
     #    Requires a budget cue and >= 100 so "reduce to 10" stays a quantity amendment.
@@ -234,7 +262,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m and re.search(rf"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|{_CUR}|\bgrand\b|\bk\b", q):
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= 100:
-            return BudgetParse(None, v, "revision_down")
+            return BudgetParse(None, v, "revision_down", m.span())
 
     # 3) per-unit ceiling — "1900 each", "$1,800 per <anything>" (vertical-blind: "per X" is a per-unit
     #    budget cue regardless of what X is — the noun is never inspected)
@@ -242,7 +270,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "per_unit")
+            return BudgetParse(None, v, "per_unit", m.span())
 
     # 3b) explicit whole-order amount with trailing scope: "$3500 total". Currency is
     # mandatory here so a specification followed by the word "total" cannot become money.
@@ -250,7 +278,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "ceiling")
+            return BudgetParse(None, v, "ceiling", m.span())
 
     # 4) ceiling — "under 1500", "below $2k", "up to 5 grand", "no more than 1200", "1500 max"
     m = (re.search(rf"\b(?:under|below|less than|within|up\s*to|no more than|max(?:imum)?(?:\s+of)?)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
@@ -258,7 +286,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "ceiling")
+            return BudgetParse(None, v, "ceiling", m.span())
 
     # 4b) NEGATED floor = ceiling — "nothing over 2k", "not above 1500", "don't go over 1800",
     #     "never more than 900". Without this, the floor rule below read these as MINIMUMS and
@@ -269,14 +297,14 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "ceiling")
+            return BudgetParse(None, v, "ceiling", m.span())
 
     # 5) floor — "over 1000", "at least $800", "minimum 500"
     m = re.search(rf"\b(?:over|above|at least|more than|minimum(?:\s+of)?|starting\s+at)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(v, None, "floor")
+            return BudgetParse(v, None, "floor", m.span())
 
     # Explicit approximation language must win over the broad budget/spend
     # anchor below. This is a preferred target, not a hard ceiling.
@@ -284,7 +312,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
+            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
 
     # 6) budget-anchored single value BEFORE the around-band — "can spend about $2000" is a stated
     #    CEILING (the buyer named their limit), not a fuzzy band. "budget is 1600", "budget: $1,400".
@@ -292,7 +320,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "ceiling")
+            return BudgetParse(None, v, "ceiling", m.span())
 
     # 7) around — "around 1500", "about $2k", "roughly 1200" → ±20% band
     # Affordability question: "is $1800 enough?", "is AUD 3000 excessive
@@ -305,13 +333,13 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(None, v, "ceiling")
+            return BudgetParse(None, v, "ceiling", m.span())
 
     m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
+            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
 
     # A singular product price ("I need a 4000 laptop") is a target tier,
     # not permission to ignore the amount and start at the cheapest item. The
@@ -324,6 +352,17 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
+            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
+
+    # 8) bare currency-anchored amount — "headsets for $1200", "$1,200 for those". The currency
+    #    marker is ITSELF the money cue, so no cue word is required here; a bare number with NO
+    #    currency marker still never parses (that stays a quantity/spec). This is the LAST branch
+    #    so every cue-anchored reading above wins first, and the plausibility floor still applies
+    #    (so "$45 per user per month" stays commercial terms, not a hardware ceiling).
+    m = re.search(rf"{_CUR}\s*{_NUM}{_UNIT_GUARD}", q)
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(None, v, "ceiling", m.span())
 
     return None

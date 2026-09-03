@@ -118,3 +118,14 @@ def test_generic_critic_rejects_conflicting_values_within_one_requirement_tier()
     )
     assert len(reviewed.accepted) == 1
     assert reviewed.rejected == [{"attribute": "ram_gb", "reason": "contradictory_claim"}]
+
+
+def test_resolution_accepts_the_publisher_multiplication_glyph():
+    text = "Recommended display target: 3840 × 2160 at 60 FPS"
+    claims = extract_generic_requirements(
+        text, citation_url="https://publisher.example/requirements",
+        observed_at=datetime(2026, 8, 31, tzinfo=timezone.utc),
+    )
+    assert [(row.attribute, row.value) for row in claims] == [
+        ("resolution", "3840x2160"), ("fps", 60),
+    ]

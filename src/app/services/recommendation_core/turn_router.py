@@ -29,7 +29,7 @@ import os
 import re as _re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.app.services.attribute_registry import defs_union
@@ -41,7 +41,7 @@ from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIAS
 from src.app.services.recommendation_core.router_prompt import _instruction_prefix
 from src.app.services.recommendation_core.literal_workload_identity import (
     literal_workload_identity_candidate,
-    recover_literal_workload_identity,
+    restore_literal_edition_qualifiers,
 )
 from src.app.services.recommendation_core.semantic_coverage import discard_covered_model_workload_echo
 from src.app.services.http_defaults import DEFAULT_OUTBOUND_TIMEOUT
@@ -61,10 +61,27 @@ def router_runtime_contract() -> Dict[str, Any]:
     Queue contention must not consume the entire inference allowance.  A caller
     can still override these values for a deliberately slower BYO deployment.
     """
+    configured_timeout = str(os.getenv("ROUTER_TIMEOUT_SEC") or "").strip()
+    timeout_basis = "operator_override" if configured_timeout else "measured_p90"
+    observed_p90_ms: int | None = None
     try:
-        inference_s = max(0.5, min(float(os.getenv("ROUTER_TIMEOUT_SEC", "12") or 12), 60.0))
+        if configured_timeout:
+            inference_s = max(0.5, min(float(configured_timeout), 60.0))
+        else:
+            from src.app.services.model_runtime_profile import observed_model_latency_ms
+
+            observed_p90_ms = observed_model_latency_ms(prompt_id="recommend-router-v2")
+            # A single-runner model may be finishing one already-admitted
+            # bounded role before the router starts inference. Use measured
+            # execution instead of the former fixed 12 s cliff, with a hard
+            # ceiling so degraded model service still fails closed.
+            inference_s = min(
+                30.0,
+                max(12.0, (float(observed_p90_ms or 12_000) / 1_000.0) * 1.75),
+            )
     except (TypeError, ValueError):
         inference_s = 12.0
+        timeout_basis = "safe_fallback"
     try:
         queue_s = max(0.01, min(float(os.getenv("ROUTER_QUEUE_TIMEOUT_SEC", "0.25") or 0.25), 5.0))
     except (TypeError, ValueError):
@@ -74,6 +91,8 @@ def router_runtime_contract() -> Dict[str, Any]:
         "queue_timeout_s": min(queue_s, inference_s),
         "max_concurrency": _ROUTER_MAX_CONCURRENCY,
         "late_results_accepted": False,
+        "timeout_basis": timeout_basis,
+        "observed_p90_ms": observed_p90_ms,
     }
 
 def last_router_call_metrics() -> Dict[str, Any]:
@@ -148,11 +167,6 @@ _ALLOWED_OPS = (">=", "<=", ">", "<", "==")
 _WORKLOAD_RE = _re.compile(r"^(so|me)(-|$)")
 # a capability verb signals 'device to run/use X' (not 'buy X') — the purchase-vs-capability
 # disambiguator for software/media routes (review #4). Small, principled, vertical-blind.
-_CAPABILITY_VERB_RE = _re.compile(
-    r"\b(play|playing|run|running|edit|editing|render|rendering|stream|streaming|"
-    r"develop|development|train|training)\b|\bfor\s+\w", _re.IGNORECASE)
-
-
 def _number_has_size_unit(query: str, value: float) -> bool:
     """Does the query state `value` next to a storage/memory unit? '1TB'→1000, '1000gb'→1000,
     '16 gb'→16. Guards the budget-bleed clamp from dropping a GENUINE spec (review #3)."""
@@ -266,6 +280,7 @@ class TurnDecision:
     request_scope: str = "uncertain"               # product | service_or_place | uncertain
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
+    subject_role: str = "UNRESOLVED"                # validated semantics; never sellability authority
     # SESSION (M3-C2): the prior turn's shortlist SKUs. CONSUMED since R9.4 (review-6 #17
     # closed): an EXPLAIN/COMPARE turn whose subject came from the session retrieves exactly
     # these SKUs in shown order ('the first one' = cards[0] of what the shopper actually saw).
@@ -361,6 +376,7 @@ class TurnDecision:
                 "exact_product_sku": self.exact_product_sku,
                 "request_scope": self.request_scope,
                 "workloads": list(self.workloads), "relationship": self.relationship,
+                "subject_role": self.subject_role,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
                 "preferred_brand": self.preferred_brand, "exclude_brand": self.exclude_brand,
@@ -614,6 +630,7 @@ def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
     requirements = data.get("requirements") if isinstance(data.get("requirements"), dict) else {}
     operational = (data.get("operational_constraints")
                    if isinstance(data.get("operational_constraints"), dict) else {})
+    entity = data.get("entity_frame") if isinstance(data.get("entity_frame"), dict) else {}
     return {
         "lane": short(data.get("lane")),
         "handle": short(data.get("handle")),
@@ -639,6 +656,17 @@ def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
         "total_budget": data.get("total_budget") if isinstance(data.get("total_budget"), (int, float)) else None,
         "budget_scope": short(data.get("budget_scope")),
         "subject_action": short(data.get("subject_action")),
+        "subject_role": short(data.get("subject_role")),
+        "entity_frame": {
+            "identity": short(entity.get("identity")),
+            "entity_category": short(entity.get("entity_category")),
+            "turn_role": short(entity.get("turn_role")),
+            "buyer_span": short(entity.get("buyer_span")),
+            "confidence": (
+                float(entity.get("confidence"))
+                if isinstance(entity.get("confidence"), (int, float)) else 0.0
+            ),
+        },
         "procurement_context": short(data.get("procurement_context")),
         "case_patches": [dict(item) for item in _bounded_case_patches(data)],
     }
@@ -840,6 +868,15 @@ def _authorization_changes(proposal: Dict[str, Any], accepted: Dict[str, Any]) -
 DEFAULT_DECISION = TurnDecision(source="default")
 
 
+def _decision(**changes: Any) -> TurnDecision:
+    """Construct a complete branch proposal from the canonical default.
+
+    Raw branches may vary fields, but they no longer instantiate partial
+    ``TurnDecision`` objects with an accidental second set of defaults.
+    """
+    return replace(DEFAULT_DECISION, **changes)
+
+
 _BLOCKED_COMMERCE_COMMAND = _re.compile(
     r"\b(?:choose|select|pick|add(?:\s+it)?\s+to\s+(?:my\s+)?cart|"
     r"confirm|commit|place\s+(?:the\s+)?order|purchase\s+order|proceed|buy)\b",
@@ -892,7 +929,7 @@ def persisted_semantic_blocker_decision(
         "state_prevented": list(resolution.get("state_prevented") or ()),
         "persisted_case_blocker": True,
     }
-    return TurnDecision(
+    return _decision(
         lane="SEARCH",
         source="deterministic_persisted_semantic_blocker",
         semantic_proposal=proposal,
@@ -924,7 +961,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     # this read-only lane when the optional model router is unavailable so a hosted or
     # edge deployment does not relabel an answer it can ground deterministically as SEARCH.
     if _approved_policy_lane(envelope):
-        return TurnDecision(
+        return _decision(
             lane="POLICY_QUESTION",
             confidence=1.0,
             source=f"fallback:{reason}",
@@ -961,7 +998,27 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     named_handles = set(_query_named_sold_handles(db, envelope))
     node = None
     subject_action = "switch"
+    # A router outage must not erase an explicit commercial software request.
+    # This is intentionally open-vocabulary: the buyer-authored licence/seat/
+    # subscription language establishes the turn role, while the generic
+    # software taxonomy node supplies only the tenant sellability check.  No
+    # application-name catalogue or inferred product facts are involved.
+    from src.app.services.subject_role import (
+        SubjectRole,
+        is_explicit_software_procurement,
+        propose_subject_role,
+    )
+
+    fallback_subject_role = propose_subject_role(envelope.buyer_query or envelope.query)
+    explicit_software_purchase = bool(
+        fallback_subject_role is SubjectRole.PROCURE_SUBJECT
+        and is_explicit_software_procurement(envelope.buyer_query or envelope.query)
+    )
+    if explicit_software_purchase:
+        node = get_node("so-1") or get_node("so")
     for candidate, _score in cands:
+        if node is not None:
+            break
         if (candidate.handle in named_handles
                 and sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True):
             node = candidate
@@ -1042,7 +1099,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             parsed_budget = parse_budget(envelope.query)
             if parsed_budget is not None and parsed_budget.budget_max is not None:
                 total_budget_cents = int(parsed_budget.budget_max) * 100
-        return TurnDecision(
+        return _decision(
             lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
             source=f"fallback:{reason}",
             quantity=quantity,
@@ -1053,6 +1110,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             requirements=explicit_requirements,
             workload_entities=literal_workloads,
             clarification_relation=("answer" if pending_budget_answer else "none"),
+            subject_role=fallback_subject_role.value,
         )
 
     compatible_use_cases = tuple(
@@ -1085,8 +1143,15 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             node_path=node.full_path,
             existing_semantic=semantic,
         )
-    return TurnDecision(
-        lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
+    fallback_refusal = bool(
+        explicit_software_purchase
+        and refusal_allowed(db, node.handle, tenant_id=envelope.tenant_id)
+    )
+    return _decision(
+        lane=(
+            "OFF_CATALOG" if fallback_refusal else
+            "PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH"
+        ),
         node_handle=node.handle,
         node_path=node.full_path,
         confidence=0.4,
@@ -1102,6 +1167,8 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         requirements=explicit_requirements,
         workload_entities=literal_workloads,
         clarification_relation=("answer" if pending_budget_answer else "none"),
+        subject_role=fallback_subject_role.value,
+        refusal_granted=fallback_refusal,
     )
 
 
@@ -1315,7 +1382,7 @@ def _active_case_read_decision(envelope: TurnEnvelope) -> Optional[TurnDecision]
     operation = "summary" if _re.search(
         r"\b(?:summari[sz]e|recap)\b", envelope.query, _re.I
     ) else "status"
-    return TurnDecision(
+    return _decision(
         lane="PROCUREMENT",
         node_handle=prior_node.handle,
         node_path=prior_node.full_path,
@@ -1366,7 +1433,7 @@ def _active_case_amendment_decision(envelope: TurnEnvelope) -> Optional[TurnDeci
     operational = _bounded_operational_constraints({}, envelope.query)
     if not operational:
         return None
-    return TurnDecision(
+    return _decision(
         lane="PROCUREMENT",
         node_handle=prior_node.handle,
         node_path=prior_node.full_path,
@@ -1539,6 +1606,11 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         '"quantity": <positive integer or null>, "total_budget": <dollars or null>, '
         '"budget_scope": "per_unit|total|null", '
         '"subject_action": "continue|switch|uncertain|null", '
+        '"subject_role": "PROCURE_SUBJECT|RUN_SUBJECT_ON_PRODUCT|COMPATIBILITY_CHECK|ADJACENT_PRODUCT|UNRESOLVED", '
+        '"entity_frame": {"identity": "<literal buyer span or null>", '
+        '"entity_category": "product|software|service|content|unknown", '
+        '"turn_role": "PROCURE_SUBJECT|RUN_SUBJECT_ON_PRODUCT|COMPATIBILITY_CHECK|ADJACENT_PRODUCT|UNRESOLVED", '
+        '"buyer_span": "<literal buyer span or null>", "confidence": <0.0-1.0>}, '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
 
@@ -1718,8 +1790,63 @@ def _repair_pending_clarification_relation(
     return "ambiguous"
 
 
-def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
-               timeout: float | None = None) -> TurnDecision:
+def _repair_missing_workload_entity(
+    fn,
+    *,
+    message: str,
+    timeout: float,
+) -> dict[str, str] | None:
+    """Ask the model to copy one omitted named workload from buyer text.
+
+    This is deliberately not a title parser. The proposal is limited to an
+    exact buyer-authored span and the closed ``game|software`` vocabulary, and
+    the normal router clamp validates it again before any provider can run.
+    """
+    prompt = (
+        "NAMED WORKLOAD COVERAGE REPAIR. The prior commerce interpretation "
+        "identified a run/play/compatibility relationship but omitted its named "
+        "game or software subject. Return JSON only. If BUYER MESSAGE explicitly "
+        "names a game or software application, copy the smallest complete literal "
+        "title as name and classify kind as game or software. Do not infer, "
+        "normalize, correct, or complete a title. Generic activities such as "
+        "gaming, simulation, rendering, editing, work, and school are not named "
+        "entities. Otherwise return {\"workload_entity\":null}. Schema: "
+        "{\"workload_entity\":{\"kind\":\"game|software\",\"name\":\"exact buyer span\"}|null}.\n"
+        "BUYER MESSAGE:" + json.dumps(str(message or "")[:1_000]) + "\nJSON:"
+    )
+    primary_metrics = dict(getattr(_ROUTER_CALL_STATE, "metrics", {}) or {})
+    try:
+        raw = fn(prompt, min(max(float(timeout), 1.0), 8.0))
+        from src.app.services.recommendation_core.router_parser import parse_router_payload
+
+        payload = parse_router_payload(raw)
+        item = (payload or {}).get("workload_entity")
+        if not isinstance(item, dict):
+            return None
+        kind = str(item.get("kind") or "").strip().lower()
+        name = _re.sub(r"[\x00-\x1f\x7f]+", " ", str(item.get("name") or ""))
+        name = _re.sub(r"\s+", " ", name).strip()[:80]
+        message_folded = _re.sub(r"\s+", " ", str(message or "")).casefold()
+        if kind not in {"game", "software"} or not name:
+            return None
+        if _re.sub(r"\s+", " ", name).casefold() not in message_folded:
+            return None
+        return {"kind": kind, "name": name}
+    except Exception as exc:
+        logger.info("workload entity repair unavailable: %s", repr(exc)[:120])
+        return None
+    finally:
+        repair_metrics = dict(getattr(_ROUTER_CALL_STATE, "metrics", {}) or {})
+        primary_metrics.update({
+            "workload_entity_repair_attempted": True,
+            "workload_entity_repair_outcome": repair_metrics.get("outcome", "invalid"),
+            "workload_entity_repair_ms": repair_metrics.get("wall_ms", 0.0),
+        })
+        _ROUTER_CALL_STATE.metrics = primary_metrics
+
+
+def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
+                    timeout: float | None = None) -> TurnDecision:
     """One model judgment, four deterministic clamps, one grounded refusal gate.
     Never raises; every failure path is the deterministic default (SEARCH, ungated)."""
     _reset_router_call_metrics()
@@ -1736,7 +1863,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         from src.app.services.answer_quality import is_support_claim
 
         if is_support_claim(envelope.query):
-            return TurnDecision(
+            return _decision(
                 lane="SUPPORT_CLAIM",
                 confidence=1.0,
                 source="deterministic_post_purchase_claim",
@@ -1803,7 +1930,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 if scope == "total" and parsed is not None and parsed.budget_max is not None
                 else None
             )
-            return TurnDecision(
+            return _decision(
                 lane="PROCUREMENT",
                 node_handle=explicit_product_node.handle,
                 node_path=explicit_product_node.full_path,
@@ -1878,6 +2005,49 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             logger.warning("router read-savepoint reset failed: %s", repr(exc)[:120])
     if not isinstance(data, dict):
         return _bounded_fallback_decision(db, envelope, cands, reason="model_unavailable")
+
+    # Semantic coverage is a contract, not a game/application allowlist. If
+    # the main model recognized a run/play/compatibility relation but omitted
+    # its literal subject, make one small repair call rather than silently
+    # answering with a generic shelf. The repaired span remains a proposal and
+    # crosses the same exact-buyer-span clamp below.
+    raw_workloads = data.get("workload_entities")
+    raw_entity_frame = (
+        data.get("entity_frame") if isinstance(data.get("entity_frame"), dict) else {}
+    )
+    role_hint = str(
+        raw_entity_frame.get("turn_role") or data.get("subject_role") or ""
+    ).strip().upper()
+    if role_hint not in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"}:
+        try:
+            from src.app.services.subject_role import (
+                has_explicit_workload_relation,
+                propose_subject_role,
+            )
+
+            if (
+                has_explicit_workload_relation(envelope.query)
+                and not isinstance(data.get("semantic_proposal"), dict)
+            ):
+                role_hint = propose_subject_role(envelope.query).value
+        except Exception:
+            role_hint = "UNRESOLVED"
+    if (
+        not str(raw_entity_frame.get("identity") or "").strip()
+        and role_hint in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"}
+    ):
+        repaired_entity = _repair_missing_workload_entity(
+            fn, message=envelope.query, timeout=timeout,
+        )
+        if repaired_entity is not None:
+            data["workload_entities"] = [repaired_entity]
+            data["entity_frame"] = {
+                "identity": repaired_entity["name"],
+                "buyer_span": repaired_entity["name"],
+                "entity_category": "software",
+                "turn_role": role_hint,
+                "confidence": 0.5,
+            }
 
     # The full interpreter occasionally resolves the product/workload correctly but omits
     # its relation to an active material question. One narrow repair is safer than guessing
@@ -2149,11 +2319,31 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         entity = (kind, name)
         if entity not in workload_entities:
             workload_entities.append(entity)
-    workload_entities = recover_literal_workload_identity(
-        envelope.query, workload_entities, query_entity_tokens,
+    # A successful model turn is not supplemented by the legacy title regex.
+    # Missing semantic coverage is repaired through the bounded model call
+    # above. Keep only literal edition words that the buyer supplied for an
+    # already-proposed entity. The regex recovery remains available in the
+    # explicit model-unavailable fallback path.
+    workload_entities = restore_literal_edition_qualifiers(
+        workload_entities, query_entity_tokens,
     )
     if not (pending and str(data.get("clarification_relation") or "").strip().lower() == "answer"):
-        workload_entities = discard_covered_model_workload_echo(query=envelope.query, use_cases=use_cases, workload_entities=workload_entities, node_path=str(data.get("handle") or session.get("prior_node") or "") or None)
+        frame_identity = str(
+            (data.get("entity_frame") or {}).get("identity")
+            if isinstance(data.get("entity_frame"), dict) else ""
+        ).strip().casefold()
+        workload_entities = discard_covered_model_workload_echo(
+            query=envelope.query,
+            use_cases=use_cases,
+            workload_entities=workload_entities,
+            node_path=str(data.get("handle") or session.get("prior_node") or "") or None,
+            preserve_literal_entities=bool(
+                frame_identity and any(
+                    str(name or "").strip().casefold() == frame_identity
+                    for _kind, name in workload_entities
+                )
+            ),
+        )
     use_case_variants: Dict[str, str] = {}
     scalar_variant = str(data.get("use_case_variant") or "").strip()
     raw_variants = data.get("use_case_variants")
@@ -2632,9 +2822,48 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
 
     workloads: List[str] = []
     relationship = "buy"
+    from src.app.services.subject_role import (
+        SubjectRole,
+        is_explicit_software_procurement,
+        validate_entity_frame,
+        validate_subject_role,
+    )
+    entity_frame = validate_entity_frame(
+        envelope.buyer_query or envelope.query,
+        data.get("entity_frame") if isinstance(data.get("entity_frame"), dict) else {},
+        fallback_role=str(data.get("subject_role") or "UNRESOLVED"),
+    )
+    subject_role = validate_subject_role(
+        envelope.buyer_query or envelope.query,
+        node_handle=(node.handle if node else None),
+        sold_state=(sells_within(db, node.handle, tenant_id=envelope.tenant_id) if node else None),
+        model_proposal=entity_frame.turn_role,
+    )
+    # A licensed software purchase cannot be fulfilled from an unrelated
+    # hardware node merely because the model picked one. Resolve a literal
+    # software category when available, otherwise use generic Computer
+    # Software; the sold-set gate below then decides whether it is off-catalog.
+    if (
+        subject_role is SubjectRole.PROCURE_SUBJECT
+        and (
+            entity_frame.entity_category == "software"
+            or is_explicit_software_procurement(envelope.buyer_query or envelope.query)
+        )
+    ):
+        software_node = None
+        if entity_frame.entity_category == "software" and entity_frame.identity:
+            matches = [candidate for candidate in search_nodes(entity_frame.identity, limit=20)
+                       if candidate.handle.startswith("so")]
+            if matches:
+                software_node = max(matches, key=lambda candidate: candidate.depth)
+        software_node = software_node or get_node("so-1") or get_node("so")
+        if software_node is not None:
+            node = software_node
+            routing_source = f"{routing_source}+explicit_software_procurement"
+            if lane not in {"PROCUREMENT", "OFF_CATALOG"}:
+                lane = "SEARCH"
     if node is not None and _WORKLOAD_RE.match(node.handle):
-        capability = bool(requirements) or bool(use_cases) or _CAPABILITY_VERB_RE.search(envelope.query)
-        if capability:
+        if subject_role is SubjectRole.RUN_SUBJECT_ON_PRODUCT:
             workloads.append(node.handle)
             relationship = "run_on"
             host = _reroute_host_node(db, envelope, "run_on")
@@ -2742,6 +2971,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "quantity": quantity,
         "budget_scope": budget_scope,
         "subject_action": subject_action,
+        "subject_role": subject_role.value,
         "procurement_context": procurement_context,
         "secondary_lanes": list(secondary_lanes),
         "clarification_relation": clarification_relation,
@@ -2786,7 +3016,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if len(prior_skus) == 1:
             anchored_product_sku = prior_skus[0]
 
-    return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
+    return _decision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
                         operational_constraints=operational_constraints,
@@ -2799,6 +3029,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         exact_product_sku=anchored_product_sku,
                         request_scope=request_scope,
                         workloads=tuple(workloads), relationship=relationship,
+                        subject_role=subject_role.value,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
                         exclude_brand=exclude_brand, brand_action=brand_action,
@@ -2819,3 +3050,30 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         coverage_abstention_shadow=coverage_abstention_shadow,
                         authorization_changes=_authorization_changes(proposal, accepted_audit),
                         case_patches=case_patches)
+
+
+def route_turn_outcome(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
+                       timeout: float | None = None):
+    """Canonical router boundary returning the complete reduced turn outcome.
+
+    The raw router may have many bounded early exits.  Consumers never observe
+    those branch-local facts directly; this single finalizer reconciles buyer
+    budget, commercial terms and the validated open-vocabulary entity role.
+    """
+    from src.app.services.recommendation_core.turn_outcome import finalize_turn_decision
+
+    raw = _route_turn_raw(db, envelope, llm_fn=llm_fn, timeout=timeout)
+    return finalize_turn_decision(raw, envelope, db=db)
+
+
+def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
+               timeout: float | None = None) -> TurnDecision:
+    """Compatibility adapter for decision-level callers and historical tests.
+
+    New orchestration code must call :func:`route_turn_outcome`; keeping this
+    narrow adapter avoids a flag-day rewrite while ensuring both paths pass
+    through the same reducer.
+    """
+    return route_turn_outcome(
+        db, envelope, llm_fn=llm_fn, timeout=timeout,
+    ).decision

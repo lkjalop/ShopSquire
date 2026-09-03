@@ -218,7 +218,9 @@ class ShelfExclusion(BaseModel):
     scope_id: str
     identity_key: str
     sku: str
-    reason: Literal["verified_hard_failure"]
+    reason: Literal[
+        "verified_hard_failure", "zero_requirement_relevance", "freshly_unavailable",
+    ]
     decision_id: str | None = None
 
 
@@ -369,6 +371,8 @@ def build_product_shelves(
     scope_labels: Mapping[str, str] | None = None,
     budget_cents: int | None = None,
     requested_quantity: int | None = None,
+    suppress_zero_relevance: bool = False,
+    suppress_unavailable: bool = False,
 ) -> ProductShelfProjection:
     """Build shared and hypothesis shelves with deterministic 3+5 paging.
 
@@ -405,6 +409,20 @@ def build_product_shelves(
             decision = candidate.fit_by_scope[scope_id]
             status = _fit_status(decision)
             identity_key = configuration_identity_key(candidate.product)
+            if suppress_zero_relevance and candidate.relevance_score <= 0:
+                exclusions.append(ShelfExclusion(
+                    scope_id=scope_id, identity_key=identity_key,
+                    sku=candidate.product.sku, reason="zero_requirement_relevance",
+                    decision_id=decision.decision_id if decision else None,
+                ))
+                continue
+            if suppress_unavailable and decision and decision.availability_status == "unavailable":
+                exclusions.append(ShelfExclusion(
+                    scope_id=scope_id, identity_key=identity_key,
+                    sku=candidate.product.sku, reason="freshly_unavailable",
+                    decision_id=decision.decision_id,
+                ))
+                continue
             if status == "failed":
                 exclusions.append(
                     ShelfExclusion(

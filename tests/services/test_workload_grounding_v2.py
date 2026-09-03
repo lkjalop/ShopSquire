@@ -118,6 +118,183 @@ def test_identity_without_material_requirements_stays_unresolved(monkeypatch):
     assert result["evidence"][0]["compiled_requirements"] == []
 
 
+def test_cited_identity_is_requeried_through_structured_provider(monkeypatch):
+    """An unknown raw phrase must be retried with the cited canonical title."""
+
+    calls = []
+    monkeypatch.setattr(W, "live_steam_allowed", lambda consent: bool(consent))
+    monkeypatch.setattr(
+        "src.app.services.connectors.steam_requirements.get_game_requirements",
+        lambda title, allow_live=False: calls.append((title, allow_live)) or {
+            "title": "MIO: Memories in Orbit",
+            "appid": 1672810,
+            "publisher": "Focus Entertainment",
+            "release_state": "released",
+            "release_date": "20 Jan, 2026",
+            "requirements_completeness": "minimum_and_recommended",
+            "minimum": {"ram_gb": 8, "storage_gb": 15, "gpu": "GTX 960 4GB"},
+            "recommended": {"ram_gb": 16, "storage_gb": 15, "gpu": "RTX 2060 6GB"},
+            "source": "steam",
+            "source_url": "https://store.steampowered.com/app/1672810/",
+            "retrieved_at": "2026-09-02T00:00:00+00:00",
+            "cached": False,
+        },
+    )
+
+    result = W.resolve_canonical_workload_identity(
+        {
+            "status": "resolved",
+            "identity": {"canonical_title": "MIO: Memories in Orbit"},
+        },
+        workload_kind_hints=["game"],
+        consent=True,
+    )
+
+    assert calls == [("MIO: Memories in Orbit", True)]
+    assert result["status"] == "resolved"
+    assert result["evidence"][0]["app_id"] == "1672810"
+    assert result["evidence"][0]["requirements_completeness"] == "minimum_and_recommended"
+    assert result["requirements"]["ram_gb"] == (">=", 8.0)
+
+
+def test_canonical_retry_fans_out_enrolled_provider_kinds_when_router_omits_kind(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        W, "resolve_named_workloads",
+        lambda entities, consent: calls.append((list(entities), consent)) or {
+            "requirements": {}, "evidence": [], "live_allowed": False,
+        },
+    )
+
+    result = W.resolve_canonical_workload_identity(
+        {"status": "resolved", "identity": {"canonical_title": "Unknown Product"}},
+        workload_kind_hints=[],
+        consent=True,
+    )
+
+    assert calls == [([
+        ("game", "Unknown Product"), ("software", "Unknown Product"),
+    ], True)]
+    assert result["status"] == "not_resolved"
+    assert result["failure_code"] == "structured_provider_no_authoritative_result"
+
+
+def test_cited_steam_origin_supplies_provider_kind_after_identity(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        W,
+        "resolve_named_workloads",
+        lambda entities, consent: calls.append((list(entities), consent)) or {
+            "requirements": {"ram_gb": (">=", 16.0)},
+            "evidence": [{
+                "status": "resolved",
+                "compiled_requirements": [{"attribute_key": "ram_gb"}],
+            }],
+            "live_allowed": True,
+        },
+    )
+
+    result = W.resolve_canonical_workload_identity(
+        {
+            "status": "resolved",
+            "identity": {"canonical_title": "The Blood of Dawnwalker"},
+            "cited_rows": [{
+                "url": "https://store.steampowered.com/app/3751260/",
+                "registrable_domain": "store.steampowered.com",
+            }],
+        },
+        workload_kind_hints=[],
+        consent=True,
+    )
+
+    assert calls == [([("game", "The Blood of Dawnwalker")], True)]
+    assert result["status"] == "resolved"
+
+
+def test_router_repairs_omitted_named_workload_without_title_rules(db):
+    calls = []
+
+    def model(prompt, _timeout):
+        calls.append(prompt)
+        if prompt.startswith("NAMED WORKLOAD COVERAGE REPAIR"):
+            return json.dumps({
+                "workload_entity": {"kind": "game", "name": "PRAGMATA"},
+            })
+        return json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-11-2",
+            "use_cases": ["gaming"],
+            "subject_role": "RUN_SUBJECT_ON_PRODUCT",
+            "confidence": 0.9,
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="Could a laptop under AUD 2,500 run PRAGMATA at 1080p?",
+            uid="coverage-repair-user",
+        ),
+        llm_fn=model,
+    )
+
+    assert len(calls) == 2
+    assert decision.workload_entities == (("game", "PRAGMATA"),)
+    assert decision.model_proposal["entity_frame"]["identity"] == "PRAGMATA"
+
+
+def test_router_repairs_missing_entity_frame_for_literal_model_workload(db):
+    def model(prompt, _timeout):
+        if prompt.startswith("NAMED WORKLOAD COVERAGE REPAIR"):
+            return json.dumps({
+                "workload_entity": {"kind": "game", "name": "PRAGMATA"},
+            })
+        return json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-11-2",
+            "use_cases": ["gaming"],
+            "workload_entities": [{"kind": "software", "name": "PRAGMATA"}],
+            "confidence": 0.9,
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="Could a laptop under AUD 2,500 run PRAGMATA at 1080p?",
+            uid="coverage-frame-repair-user",
+        ),
+        llm_fn=model,
+    )
+
+    assert decision.workload_entities == (("game", "PRAGMATA"),)
+    assert decision.model_proposal["entity_frame"]["buyer_span"] == "PRAGMATA"
+
+
+def test_router_rejects_repaired_workload_not_copied_from_buyer(db):
+    def model(prompt, _timeout):
+        if prompt.startswith("NAMED WORKLOAD COVERAGE REPAIR"):
+            return json.dumps({
+                "workload_entity": {"kind": "game", "name": "Cyberpunk 2077"},
+            })
+        return json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-11-2",
+            "use_cases": ["gaming"],
+            "subject_role": "RUN_SUBJECT_ON_PRODUCT",
+            "confidence": 0.9,
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="Could a laptop run a newly announced game?",
+            uid="coverage-repair-reject-user",
+        ),
+        llm_fn=model,
+    )
+
+    assert decision.workload_entities == ()
+
+
 def test_router_accepts_only_literal_workload_entities(db):
     model = {
         "lane": "SEARCH",

@@ -1268,6 +1268,70 @@ def test_refusal_needs_the_sold_set_not_the_model(db):
     assert d3.lane == "SEARCH" and not d3.refusal_granted
 
 
+@pytest.mark.parametrize(
+    "query, identity",
+    [
+        ("ERP for the finance team, budget AUD 2M", "ERP"),
+        ("Buy 200 CRM seats under AUD 120k annually", "CRM"),
+        ("Antivirus for 500 endpoints at $45/device/year", "Antivirus"),
+        ("Buy Photoshop licences for 40 designers", "Photoshop"),
+    ],
+)
+def test_open_vocabulary_software_procurement_clamps_unrelated_hardware_model_choice(
+    db, query, identity,
+):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-6", "wanted_category": "laptops",
+        "requirements": {}, "confidence": 0.9,
+        "entity_frame": {
+            "identity": identity,
+            "buyer_span": identity,
+            "entity_category": "software",
+            "turn_role": "PROCURE_SUBJECT",
+            "confidence": 0.9,
+        },
+    })
+    decision = route_turn(db, _env(query), llm_fn=lambda _prompt, _timeout: raw)
+
+    assert decision.subject_role == "PROCURE_SUBJECT"
+    assert decision.node_handle is not None
+    assert decision.node_handle.startswith("so")
+    assert decision.lane == "OFF_CATALOG"
+    assert decision.refusal_granted is True
+    assert "explicit_software_procurement" in decision.source
+
+
+def test_open_vocabulary_software_procurement_survives_router_outage(db):
+    decision = route_turn(
+        db,
+        _env("Buy 200 CRM seats under AUD 120k annually"),
+        llm_fn=lambda _prompt, _timeout: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+
+    assert decision.subject_role == "PROCURE_SUBJECT"
+    assert decision.node_handle is not None and decision.node_handle.startswith("so")
+    assert decision.lane == "OFF_CATALOG"
+    assert decision.refusal_granted is True
+    assert decision.quantity == 200
+    # "annually" is billing cadence, not proof that the cap is per-seat or
+    # whole-contract.  The canonical amount survives while scope stays honest.
+    assert decision.budget_scope == "unknown"
+    assert decision.total_budget_cents is None
+
+
+def test_hardware_for_software_remains_host_product_not_software_procurement(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-6", "requirements": {}, "confidence": 0.9,
+    })
+    decision = route_turn(
+        db, _env("A workstation for Blender under AUD 5k"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    assert decision.subject_role == "RUN_SUBJECT_ON_PRODUCT"
+    assert decision.node_handle == "el-6-6"
+    assert decision.lane == "SEARCH"
+
+
 def test_off_catalog_null_handle_is_repaired_through_taxonomy_then_sellability(db, monkeypatch):
     """Candidate recall may miss an absent category, but the model still cannot authorize it."""
     monkeypatch.setattr(
@@ -2097,6 +2161,44 @@ def test_model_unavailable_bulk_search_keeps_quantity_while_scope_is_blocked(db)
     assert response.products == []
 
 
+def test_model_unavailable_bulk_search_keeps_canonical_order_economics(db):
+    response = recommend_turn(
+        db,
+        _env("I need 10 laptops with a total budget of $30,000"),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.extras["decision"]["subject_role"] == "PROCURE_SUBJECT"
+    assert response.extras["requested_quantity"] == 10
+    assert response.extras["bulk"] == {
+        **response.extras["bulk"],
+        "quantity": 10,
+        "quantity_unit": "laptop",
+        "budget_scope": "total",
+        "total_budget_cents": 3_000_000,
+    }
+    assert response.extras["bulk"]["required_total_cents"] == 1_699_000
+    assert response.extras["bulk"]["budget_shortfall_cents"] == 0
+    assert response.extras["bulk"]["verdict"] == "fits"
+
+
+def test_underfunded_bulk_order_reports_shortfall_when_in_budget_slate_is_empty(db):
+    response = recommend_turn(
+        db,
+        _env("I need 60 laptops with a total budget of $30,000"),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.products == []
+    assert response.extras["requested_quantity"] == 60
+    assert response.extras["bulk"]["quantity"] == 60
+    assert response.extras["bulk"]["total_budget_cents"] == 3_000_000
+    assert response.extras["bulk"]["required_total_cents"] == 10_194_000
+    assert response.extras["bulk"]["budget_shortfall_cents"] == 7_194_000
+    assert response.extras["bulk"]["max_affordable_quantity"] == 17
+    assert response.extras["bulk"]["verdict"] == "over_budget"
+
+
 def test_budget_scope_answer_preserves_explicit_bulk_quantity(db):
     session = {
         "prior_node": "el-6-6",
@@ -2205,7 +2307,7 @@ def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     assert legacy["requested_quantity"] == 10
     assert "bulk_budget" in legacy
     shown_floor = min(p.price_cents for p in resp.products if p.price_cents is not None)
-    assert legacy["bulk_budget"]["floor_cents"] == shown_floor
+    assert legacy["bulk_budget"]["qualified_unit_floor_cents"] == shown_floor
 
 
 def test_descriptive_continuation_surfaces_bulk_context_without_promoting_decision(db):

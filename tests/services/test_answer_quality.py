@@ -33,7 +33,12 @@ def test_no_match_template_for_under_budget():
     msg = str(out.get("assistant_message") or "").lower()
     templ = out.get("template_selected") or {}
     assert str(templ.get("template_id") or "") == "no_match_explain_template"
-    assert "not currently in-catalog under $1,100".lower() in msg
+    # Assert the governed meaning, not the retired Apple-specific copy. An
+    # empty result is an absence of qualification, not proof that no matching
+    # product exists anywhere.
+    assert "no qualified in-catalog match" in msg
+    assert "under $1,100" in msg
+    assert "constraint or evidence gap" in msg
 
 
 def test_budget_band_caps_at_buyer_ceiling_not_product_max():
@@ -80,8 +85,8 @@ def test_total_order_budget_uses_authorized_per_unit_cap_in_band():
         turn_intent="PROCUREMENT",
         products=[{"price": 1199}, {"price": 1699}, {"price": 1919}],
         image_cv_signals={}, has_image=False, buyer_persona=None, brand_name=None,
-        bulk_budget={"scope": "total", "total_budget": 55000, "quantity": 20,
-                     "per_unit_cap": 2750},
+        bulk_budget={"budget_scope": "total", "total_budget_cents": 5_500_000,
+                     "quantity": 20, "per_unit_cap_cents": 275_000},
     )
     msg = str(out.get("assistant_message") or "")
     assert "$1,199-$2,750" in msg
@@ -100,8 +105,8 @@ def test_total_order_budget_removes_narration_that_contradicts_authorized_math()
         turn_intent="FILTER",
         products=[{"price": 1919}],
         image_cv_signals={}, has_image=False, buyer_persona=None, brand_name=None,
-        bulk_budget={"scope": "total", "total": 41000, "quantity": 20,
-                     "per_unit_cap": 2050},
+        bulk_budget={"budget_scope": "total", "total_budget_cents": 4_100_000,
+                     "quantity": 20, "per_unit_cap_cents": 205_000},
     )
     msg = str(out.get("assistant_message") or "")
     assert "allows up to AUD 2,050" in msg
@@ -121,8 +126,8 @@ def test_total_order_budget_removes_inverse_affordability_claim():
         turn_intent="FILTER",
         products=[{"price": 1919}],
         image_cv_signals={}, has_image=False, buyer_persona=None, brand_name=None,
-        bulk_budget={"scope": "total", "total": 41000, "quantity": 20,
-                     "per_unit_cap": 2050},
+        bulk_budget={"budget_scope": "total", "total_budget_cents": 4_100_000,
+                     "quantity": 20, "per_unit_cap_cents": 205_000},
     )
     msg = str(out.get("assistant_message") or "")
     assert "allows up to AUD 2,050" in msg

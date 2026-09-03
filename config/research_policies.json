@@ -5,6 +5,7 @@
     "buyer-consent-v1": {
       "external_research_enabled": true,
       "auto_authorize_read_only": false,
+      "auto_fetch_resolved_official_origin": false,
       "pasted_url_policy": "reviewed_canonical_origin_only",
       "max_provider_fanout": 3,
       "commerce_authority": "none",
@@ -13,6 +14,7 @@
     "demo-safe-auto-v1": {
       "external_research_enabled": true,
       "auto_authorize_read_only": true,
+      "auto_fetch_resolved_official_origin": true,
       "pasted_url_policy": "reviewed_canonical_origin_only",
       "max_provider_fanout": 3,
       "commerce_authority": "none",
@@ -21,6 +23,7 @@
     "network-disabled-v1": {
       "external_research_enabled": false,
       "auto_authorize_read_only": false,
+      "auto_fetch_resolved_official_origin": false,
       "pasted_url_policy": "receipt_only_zero_fetch",
       "max_provider_fanout": 0,
       "commerce_authority": "none",

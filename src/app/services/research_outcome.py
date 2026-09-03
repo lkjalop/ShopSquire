@@ -75,10 +75,74 @@ def _first(rows: Iterable[Mapping[str, Any]], key: str) -> Any:
 
 
 def _identity(rows: list[Mapping[str, Any]]) -> ResearchIdentity | None:
+    # Prefer an explicitly resolved, cited identity over a ranked discovery
+    # page title. Candidate rows remain untrusted source metadata and grant no
+    # fetch authority merely by appearing earlier in a mapping.
+    # A structured provider row is the richest cited form: unlike the model's
+    # earlier snippet-clamped proposal it carries stable publisher/app/release
+    # identifiers. Reduce that row first so the terminal outcome cannot lose
+    # fields merely because identity resolution happened before provider lookup.
+    for row in rows:
+        if str(row.get("status") or "").lower() != "resolved":
+            continue
+        title = row.get("canonical_title") or row.get("resolved_name")
+        structured = bool(
+            row.get("app_id") or row.get("provider_id") or row.get("source_url")
+        )
+        if title and structured:
+            return ResearchIdentity(
+                title=str(title)[:300],
+                publisher=str(row.get("publisher") or "")[:300] or None,
+                app_id=str(row.get("app_id") or "")[:100] or None,
+                release_state=str(row.get("release_state") or "")[:100] or None,
+                release_date=str(row.get("release_date") or "")[:100] or None,
+            )
+    for row in rows:
+        if str(row.get("status") or "").lower() != "resolved":
+            continue
+        proposed = row.get("identity")
+        if not isinstance(proposed, Mapping):
+            continue
+        title = proposed.get("canonical_title") or proposed.get("title")
+        if title:
+            return ResearchIdentity(
+                title=str(title)[:300],
+                publisher=str(proposed.get("publisher") or "")[:300] or None,
+                app_id=str(proposed.get("app_id") or "")[:100] or None,
+                release_state=str(proposed.get("release_state") or "")[:100] or None,
+                release_date=str(proposed.get("release_date") or "")[:100] or None,
+            )
+    identity_attempts = [
+        row for row in rows
+        if "model_calls" in row
+        and "authority" in row
+        and ("identity" in row or str(row.get("failure_code") or "").startswith("identity_"))
+    ]
+    if identity_attempts:
+        # Once the governed resolver has attempted the task, its unresolved or
+        # rejected verdict is authoritative for identity status. Falling back
+        # to the first discovery-page title can mislabel an unrelated result as
+        # the buyer's product even though no commerce authority is granted.
+        # A later revision-bound workload projection may already contain the
+        # successfully cited identity even when the raw resolver receipt is
+        # not retained in the same subtree. Prefer that typed projection below
+        # before deciding the outcome is unresolved.
+        if not any(row.get("canonical_title") or row.get("resolved_name") for row in rows):
+            return None
+    for row in rows:
+        title = row.get("canonical_title") or row.get("resolved_name")
+        if not title:
+            continue
+        return ResearchIdentity(
+            title=str(title)[:300],
+            publisher=str(row.get("publisher") or "")[:300] or None,
+            app_id=str(row.get("app_id") or "")[:100] or None,
+            release_state=str(row.get("release_state") or "")[:100] or None,
+            release_date=str(row.get("release_date") or "")[:100] or None,
+        )
     for row in rows:
         title = (
-            row.get("canonical_title") or row.get("resolved_name")
-            or (row.get("title") if row.get("candidate_id") else None)
+            row.get("title") if row.get("candidate_id") else None
         )
         if not title:
             continue
@@ -179,7 +243,13 @@ def build_research_outcome(
         str(row.get("provider_status") or row.get("execution_status") or "").lower()
         for row in rows
     }
-    if provider_statuses & {"running", "in_progress", "pending"}:
+    if identity and compiled:
+        # A lower discovery tier may time out after an authoritative structured
+        # provider has already resolved the canonical identity and material
+        # requirements.  Preserve the diagnostic receipt, but do not downgrade
+        # the buyer's canonical outcome.
+        discovery_status = "completed"
+    elif provider_statuses & {"running", "in_progress", "pending"}:
         discovery_status = "running"
     elif provider_statuses & {"failed", "timeout", "disabled", "degraded"}:
         discovery_status = "degraded"

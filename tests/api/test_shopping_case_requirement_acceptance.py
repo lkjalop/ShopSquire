@@ -88,6 +88,14 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
     assert response.status_code == 200
     payload = response.json()
     assert payload["schema_version"] == "case-interpretation-v1"
+    assert payload["decision_trace_id"] == payload["trace_id"]
+    terminal = payload["terminal_outcome"]
+    assert terminal["schema_version"] == "turn-terminal-outcome-v1"
+    assert terminal["case_id"] == payload["case_id"]
+    assert terminal["decision_trace_id"] == payload["decision_trace_id"]
+    assert terminal["case_revision"] == payload["case_revision"]
+    assert terminal["product_shelves"] == payload["product_shelves"]
+    assert terminal["execution_evidence"]["operation_id"] == payload["operation_id"]
     assert payload["case_id"].startswith("sc-case-")
     assert payload["ambiguity_exploration"]["case_id"] == payload["case_id"]
     assert payload["ambiguity_exploration"]["research_plan_id"].startswith("crp-")
@@ -110,6 +118,41 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
     assert all(row["sku"] and row["sentence"] for row in narration["top_product_sentences"])
     assert payload["cart_mutation"] == "not_authorized"
     assert payload["supplier_send"] == "not_authorized"
+
+
+def test_auto_authorized_interpretation_returns_server_owned_research(monkeypatch):
+    from src.app.routers import shopping_cases
+
+    monkeypatch.setenv("EXTERNAL_RESEARCH_AUTO_AUTHORIZED", "1")
+
+    async def completed(case_id, body, x_tenant_id=None, db=None, cancellation_requested=None):
+        return {
+            "status": "research_completed",
+            "case_id": case_id,
+            "assistant_message": "Research completed without commerce authority.",
+            "ambiguity_exploration": {
+                "schema_version": "ambiguity-exploration-v1",
+                "case_id": case_id,
+                "status": "researched",
+            },
+            "product_shelves": {"schema_version": "product-shelves-v1", "shelves": []},
+            "cart_mutation": "not_authorized",
+        }
+
+    monkeypatch.setattr(shopping_cases, "_research_shopping_case_with_db", completed)
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-auto-research",
+        "retained_purpose": "I need CAD for very large 3D models and point-cloud work.",
+    })
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["research_orchestration_owner"] == "backend"
+    assert payload["server_research_failure"] is None
+    assert payload["server_research_result"]["status"] == "research_completed"
+    assert payload["ambiguity_exploration"]["status"] == "researched"
+    assert payload["cart_mutation"] == "not_authorized"
 
 
 def test_interpretation_retains_buyer_authored_quantity_for_case_followups():

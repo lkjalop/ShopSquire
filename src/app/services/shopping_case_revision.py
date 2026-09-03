@@ -105,16 +105,10 @@ def advance_material_case_revision(
             if int(changed or 0) != 1:
                 raise ValueError("case_revision_conflict")
 
-    if "shopping_case_interpretation_jobs" in tables:
-        db.execute(text(
-            "UPDATE shopping_case_interpretation_jobs "
-            "SET status='superseded',error_code='case_revision_superseded',updated_at=:stamp "
-            "WHERE tenant_id=:tenant AND case_id=:case_id AND case_revision=:expected "
-            "AND status IN ('queued','running','retry','enqueue_degraded')"
-        ), {
-            "stamp": stamp_iso, "tenant": tenant_id, "case_id": case_id,
-            "expected": prior,
-        })
+    # Do not cancel interpretation work merely because a source receipt,
+    # consent receipt, or other same-purpose observation advanced the case.
+    # The worker compares its retained buyer purpose with the current case and
+    # supersedes only a genuinely replaced objective.
 
     return new_revision
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -390,6 +391,18 @@ _PARSER_VERSION = "official-source-parser-v2"
 _HTML_CONTENT_TYPES = {"text/html", "text/plain", "application/xhtml+xml"}
 
 
+def model_extraction_timeout_s(parser_timeout_s: float) -> float:
+    """Reserve parser-stage time for deterministic validation and fallback."""
+    total = max(1.0, float(parser_timeout_s or 1.0))
+    try:
+        configured = float(os.getenv("REQUIREMENT_MODEL_TIMEOUT_S", "12") or 12)
+    except (TypeError, ValueError):
+        configured = 12.0
+    # At least one third of the stage remains for exact-span criticism and the
+    # deterministic heuristic. The proposal is advisory and may time out.
+    return round(max(1.0, min(configured, total * (2.0 / 3.0))), 3)
+
+
 def compile_source_claims(
     source_id: str, content: bytes, *, observed_at: str, citation_url: str,
     allow_generic: bool = False,
@@ -414,9 +427,30 @@ def compile_source_claims(
     observed = _parse_time(observed_at)
     if observed is None:
         return [], []
-    candidates = extract_generic_requirements(
-        source_text, citation_url=citation_url, observed_at=observed,
-    )
+    candidates = []
+    model_extraction_enabled = str(
+        os.getenv("REQUIREMENT_MODEL_EXTRACTION_ENABLED") or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    extraction_label = "provider_neutral_deterministic_heuristic_fallback"
+    if model_extraction_enabled:
+        from src.app.services.model_requirement_extractor import propose_typed_requirements
+
+        parser_timeout = float(
+            os.getenv("REQUIREMENT_EXTRACTION_TIMEOUT_S", "18") or 18
+        )
+        model_receipt = propose_typed_requirements(
+            source_text,
+            citation_url=citation_url,
+            observed_at=observed,
+            timeout_s=model_extraction_timeout_s(parser_timeout),
+        )
+        candidates = list(model_receipt.get("claims") or [])
+        if candidates:
+            extraction_label = "model_proposal_deterministic_critic"
+    if not candidates:
+        candidates = extract_generic_requirements(
+            source_text, citation_url=citation_url, observed_at=observed,
+        )
     critique = critique_extracted_requirements(
         candidates, source_text=source_text, accepted_url=citation_url,
     )
@@ -438,7 +472,7 @@ def compile_source_claims(
         )
         row["page_section"] = candidate.page_section
         row["quoted_evidence_span"] = candidate.quoted_evidence_span
-        row["extractor"] = "provider_neutral_deterministic"
+        row["extractor"] = extraction_label
         rows.append(row)
     return rows, []
 

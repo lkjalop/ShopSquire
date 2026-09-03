@@ -193,7 +193,7 @@ def unresolved_purpose_proposal(
 
 def discard_covered_model_workload_echo(
     *, query: str, use_cases: Sequence[str], workload_entities: list[tuple[str, str]],
-    node_path: str | None,
+    node_path: str | None, preserve_literal_entities: bool = False,
 ) -> list[tuple[str, str]]:
     """Drop a model-only workload title when enrolled semantics already cover the turn."""
     if not workload_entities:
@@ -201,12 +201,17 @@ def discard_covered_model_workload_echo(
     from src.app.services.recommendation_core.literal_workload_identity import (
         literal_workload_identity_candidate,
     )
-    # A title copied from the buyer's current turn is not a model echo.  This
-    # used to protect games only, so an equally literal software title such as
-    # ``Agisoft Metashape`` was recovered by the router and then silently
-    # discarded here.  The subsequent generic taxonomy match produced an
-    # OFF_CATALOG answer and left the previous case revision on screen.
-    if literal_workload_identity_candidate(query):
+    # A title copied verbatim from the buyer's current turn and independently
+    # represented by the validated entity frame is not a model echo. Exact
+    # span alone is insufficient: a weak model can copy a generic covered
+    # purpose ("university assignments and video calls") into this slot.
+    folded_query = re.sub(r"\s+", " ", str(query or "")).casefold()
+    framed_literal = preserve_literal_entities and any(
+        re.sub(r"\s+", " ", str(name or "")).casefold() in folded_query
+        for _kind, name in workload_entities
+        if str(name or "").strip()
+    )
+    if framed_literal or literal_workload_identity_candidate(query):
         return workload_entities
     unresolved = unresolved_purpose_proposal(
         query=query, use_cases=use_cases, workload_entities=(), node_path=node_path,

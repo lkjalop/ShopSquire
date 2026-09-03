@@ -28,9 +28,37 @@ def extract_submitted_source_url(value: str | None) -> str | None:
 
 
 def remove_submitted_source_urls(value: str | None) -> str:
-    """Remove raw URLs from model/catalog input while preserving the buyer's purpose."""
-    sanitized = _SUBMITTED_URL_RE.sub(" [submitted official source] ", str(value or ""))
+    """Remove URL paths/secrets while retaining the bounded origin identity hint."""
+    def replacement(match: re.Match[str]) -> str:
+        parsed = urlparse(match.group(0).rstrip("),.;]"))
+        host = str(parsed.hostname or "").lower().rstrip(".")
+        return f" [submitted source domain: {host}] " if host else " [submitted source] "
+
+    sanitized = _SUBMITTED_URL_RE.sub(replacement, str(value or ""))
     return re.sub(r"\s+", " ", sanitized).strip()
+
+
+def source_resolution_allows_discovery(
+    resolution: BuyerEvidenceSourceResolution | dict[str, Any] | None,
+) -> bool:
+    """Allow only zero-fetch, safe context receipts to seed governed discovery."""
+
+    if resolution is None:
+        return False
+    payload = (
+        resolution.model_dump(mode="json")
+        if isinstance(resolution, BuyerEvidenceSourceResolution)
+        else dict(resolution)
+    )
+    if str(payload.get("status") or "").lower() == "invalid":
+        return False
+    assessment = payload.get("link_assessment") or {}
+    if str(assessment.get("security_status") or "").lower() != "eligible_for_guarded_resolution":
+        return False
+    recommended_use = str(assessment.get("recommended_use") or "").lower()
+    return any(token in recommended_use for token in (
+        "find_official", "discovery_or_corroboration", "resolve_to_reviewed_canonical",
+    ))
 
 
 class BuyerEvidenceSourceCandidate(BaseModel):
@@ -234,5 +262,5 @@ def resolve_buyer_evidence_source(
 __all__ = [
     "BuyerEvidenceSourceCandidate", "BuyerEvidenceSourceResolution",
     "extract_submitted_source_url", "remove_submitted_source_urls",
-    "resolve_buyer_evidence_source",
+    "resolve_buyer_evidence_source", "source_resolution_allows_discovery",
 ]

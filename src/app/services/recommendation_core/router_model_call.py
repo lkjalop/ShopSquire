@@ -95,6 +95,23 @@ def execute_router_model(
     finally:
         if acquired:
             gate.release()
+        try:
+            from src.app.services.local_model_roles import last_local_model_schedule_metrics
+
+            schedule = last_local_model_schedule_metrics()
+            if schedule.get("role") == "recommendation_turn_router":
+                metrics.update({
+                    "scheduler_role": schedule.get("role"),
+                    "scheduler_priority": schedule.get("priority"),
+                    "scheduler_status": schedule.get("status"),
+                    "scheduler_failure_code": schedule.get("failure_code"),
+                    "scheduler_queue_ms": schedule.get("queue_ms"),
+                    "scheduler_execution_ms": schedule.get("execution_ms"),
+                    "scheduler_deadline_ms": schedule.get("deadline_ms"),
+                    "scheduler_cancelled": schedule.get("cancelled"),
+                })
+        except Exception:
+            pass
         metrics["wall_ms"] = round((time.monotonic() - started) * 1_000.0, 1)
         metrics["model_execution_ms"] = round(sum(float(metrics.get(key) or 0) for key in (
             "load_ms", "prompt_eval_ms", "decode_ms",

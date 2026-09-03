@@ -103,3 +103,40 @@ def test_disabled_router_model_returns_without_waiting(monkeypatch) -> None:
     assert turn_router._default_llm_fn("classify", 12.0) == ""
     assert __import__("time").monotonic() - started < 0.1
     assert turn_router.last_router_call_metrics()["outcome"] == "disabled"
+
+
+def test_router_receipt_includes_priority_scheduler_timing(monkeypatch) -> None:
+    import threading
+
+    from src.app.services.local_model_roles import _reset_local_model_scheduler_for_tests
+    from src.app.services.recommendation_core.router_model_call import execute_router_model
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "response": '{"lane":"SEARCH"}',
+                "total_duration": 2_000_000,
+                "prompt_eval_duration": 1_000_000,
+                "eval_duration": 500_000,
+            }
+
+    monkeypatch.setenv("ROUTER_MODEL_ENABLED", "1")
+    _reset_local_model_scheduler_for_tests()
+    rendered, metrics = execute_router_model(
+        "route this", 2.0, model="qwen3:14b",
+        http_post=lambda *_args, **_kwargs: Response(),
+        injected_transport=True,
+        gate=threading.BoundedSemaphore(1),
+        runtime_contract={"queue_timeout_s": 0.2},
+    )
+
+    assert rendered == '{"lane":"SEARCH"}'
+    assert metrics["scheduler_role"] == "recommendation_turn_router"
+    assert metrics["scheduler_priority"] == 0
+    assert metrics["scheduler_status"] == "completed"
+    assert metrics["scheduler_queue_ms"] >= 0
+    assert metrics["scheduler_execution_ms"] >= 0
+    assert metrics["scheduler_cancelled"] is False

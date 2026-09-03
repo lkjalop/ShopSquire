@@ -3,7 +3,7 @@ param(
     [switch]$NoMarketSignal,
     [switch]$LiveDemo,
     [string]$LiveModel = "qwen3:14b",
-    [string]$QueryModel = "granite4:micro",
+    [string]$QueryModel = "qwen3:14b",
     [ValidateRange(10, 120)]
     [int]$OllamaWarmupTimeoutSec = 60
 )
@@ -27,6 +27,7 @@ if ($redisExists -eq $redisContainer) {
 
 $env:APP_ENV = "development"
 $env:SHOPSQUIRE_RUNTIME_PROFILE = "demo_v2"
+$env:ENABLE_DEMO_ROUTES = "1"
 $env:USE_MOCK_LLM = "1"
 $env:USE_OLLAMA_INTENT = "0"
 $env:MODEL_WARMUP_ON_STARTUP = "0"
@@ -66,12 +67,17 @@ if ($LiveDemo) {
     $env:USE_MOCK_LLM = "0"
     $env:USE_OLLAMA_INTENT = "1"
     $env:MODEL_WARMUP_ON_STARTUP = "1"
+    $env:ROUTER_PREWARM_REQUIRED = "1"
     $env:ROUTER_MODEL_ENABLED = "1"
     $env:ROUTER_MODEL = $LiveModel
     $env:OLLAMA_DEFAULT_MODEL = $LiveModel
     $env:OLLAMA_MEDIUM_MODEL = $LiveModel
     $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
     $env:OPEN_WORLD_QUERY_MODEL = $QueryModel
+    $env:OPEN_WORLD_IDENTITY_RESOLVER_ENABLED = "1"
+    $env:OPEN_WORLD_IDENTITY_MODEL = $QueryModel
+    $env:REQUIREMENT_MODEL_EXTRACTION_ENABLED = "1"
+    $env:REQUIREMENT_EXTRACTION_MODEL = $QueryModel
     # The durable query-planning job runs through the app's Redis-stream
     # consumer, not the Celery worker. Isolate each recording so enabling that
     # consumer never replays another rehearsal's historical task backlog.
@@ -82,6 +88,9 @@ if ($LiveDemo) {
     $env:PORTFOLIO_NARRATION_TIMEOUT_SEC = "8"
     $env:EXTERNAL_RESEARCH_ENABLED = "1"
     $env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = "1"
+    $env:RESEARCH_POLICY_PROFILE = "demo-safe-auto-v1"
+    $env:AUTOMATIC_RESEARCH_TIMEOUT_SEC = "45"
+    $env:REQUIREMENT_EXTRACTION_TIMEOUT_S = "18"
     $env:STEAM_REQUIREMENTS_LIVE_ENABLED = "1"
     # A cold official-store identity + requirements lookup needs two bounded
     # network calls. The default 2s envelope is for fixtures, not live proof.
@@ -91,7 +100,10 @@ if ($LiveDemo) {
     # official-store lookup, and catalog projection. Keep it above the research
     # sub-budget so a successful late-in-envelope fetch is not discarded.
     $env:CHAT_UPSTREAM_TIMEOUT_SEC = "60"
-    $env:CHAT_REQUEST_TIMEOUT_SEC = "70"
+    # Return a revision-safe in-progress envelope promptly while the retained
+    # operation continues under its idempotency key. The UI polls that same
+    # operation; the complete research budget remains independently bounded.
+    $env:CHAT_REQUEST_TIMEOUT_SEC = "12"
     $env:VITE_EXTERNAL_RESEARCH_AUTO_ENABLED = "1"
     $env:EXTERNAL_RESEARCH_SEARCH_URL = "http://127.0.0.1:8888/search?q={query}&format=json"
     $env:EXTERNAL_RESEARCH_ALLOW_PRIVATE = "1"
@@ -148,8 +160,18 @@ if ($LiveDemo) {
             throw "Ollama did not report a verifiable manifest digest for '$QueryModel'."
         }
         $env:OPEN_WORLD_QUERY_MODEL_DIGEST = $queryDigest
+        $env:OPEN_WORLD_IDENTITY_MODEL_DIGEST = $queryDigest
+        $env:REQUIREMENT_EXTRACTION_MODEL_DIGEST = $queryDigest
+        # On laptops that can keep only one model resident, warming the query
+        # planner second evicts the buyer-facing router/narrator. Restore the
+        # live model last; query planning is bounded and has a deterministic
+        # fallback, while a cold primary router makes the first demo turn look
+        # hung or degraded.
+        Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11434/api/generate" `
+            -ContentType "application/json" -Body $warmupBody -TimeoutSec $OllamaWarmupTimeoutSec | Out-Null
         Write-Output "OLLAMA_PREWARMED=$LiveModel"
         Write-Output "QUERY_PLANNER_PREWARMED=$QueryModel"
+        Write-Output "ROUTER_RESIDENCY_RESTORED=$LiveModel"
         Write-Output "OLLAMA_MANIFEST_VERIFIED=$($liveDigest.Substring(0, 12))"
     } catch {
         throw "Live demo requested, but Ollama prewarm failed for '$LiveModel': $($_.Exception.Message)"
@@ -196,6 +218,7 @@ $recordingEnv = Join-Path $LogRoot "recording-env.ps1"
 `$env:VITE_API_KEY = 'local-merchant-key'
 `$env:PYTHON_EXECUTABLE = 'python'
 `$env:SHOPSQUIRE_RUNTIME_PROFILE = '$($env:SHOPSQUIRE_RUNTIME_PROFILE)'
+`$env:ENABLE_DEMO_ROUTES = '$($env:ENABLE_DEMO_ROUTES)'
 `$env:RECOMMEND_CORE_MODE = '$($env:RECOMMEND_CORE_MODE)'
 `$env:RECOMMEND_CART_SERVE = '$($env:RECOMMEND_CART_SERVE)'
 `$env:RECOMMEND_PROCUREMENT_ADVICE_MODE = '$($env:RECOMMEND_PROCUREMENT_ADVICE_MODE)'
@@ -218,6 +241,12 @@ if ($LiveDemo) {
 `$env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = '$($env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED)'
 `$env:OPEN_WORLD_QUERY_MODEL = '$($env:OPEN_WORLD_QUERY_MODEL)'
 `$env:OPEN_WORLD_QUERY_MODEL_DIGEST = '$($env:OPEN_WORLD_QUERY_MODEL_DIGEST)'
+`$env:OPEN_WORLD_IDENTITY_RESOLVER_ENABLED = '$($env:OPEN_WORLD_IDENTITY_RESOLVER_ENABLED)'
+`$env:OPEN_WORLD_IDENTITY_MODEL = '$($env:OPEN_WORLD_IDENTITY_MODEL)'
+`$env:OPEN_WORLD_IDENTITY_MODEL_DIGEST = '$($env:OPEN_WORLD_IDENTITY_MODEL_DIGEST)'
+`$env:REQUIREMENT_MODEL_EXTRACTION_ENABLED = '$($env:REQUIREMENT_MODEL_EXTRACTION_ENABLED)'
+`$env:REQUIREMENT_EXTRACTION_MODEL = '$($env:REQUIREMENT_EXTRACTION_MODEL)'
+`$env:REQUIREMENT_EXTRACTION_MODEL_DIGEST = '$($env:REQUIREMENT_EXTRACTION_MODEL_DIGEST)'
 `$env:TASK_CONSUMER_ENABLED = '$($env:TASK_CONSUMER_ENABLED)'
 `$env:TASK_STREAM_NAME = '$($env:TASK_STREAM_NAME)'
 `$env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED = '$($env:PORTFOLIO_LOCAL_NARRATION_PREVIEW_ENABLED)'
@@ -225,6 +254,9 @@ if ($LiveDemo) {
 `$env:PORTFOLIO_NARRATION_MODEL_DIGEST = '$($env:PORTFOLIO_NARRATION_MODEL_DIGEST)'
 `$env:EXTERNAL_RESEARCH_ENABLED = '$($env:EXTERNAL_RESEARCH_ENABLED)'
 `$env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = '$($env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED)'
+`$env:RESEARCH_POLICY_PROFILE = '$($env:RESEARCH_POLICY_PROFILE)'
+`$env:AUTOMATIC_RESEARCH_TIMEOUT_SEC = '$($env:AUTOMATIC_RESEARCH_TIMEOUT_SEC)'
+`$env:REQUIREMENT_EXTRACTION_TIMEOUT_S = '$($env:REQUIREMENT_EXTRACTION_TIMEOUT_S)'
 `$env:STEAM_REQUIREMENTS_LIVE_ENABLED = '$($env:STEAM_REQUIREMENTS_LIVE_ENABLED)'
 `$env:RESEARCH_LANE_TIMEOUT_MS = '$($env:RESEARCH_LANE_TIMEOUT_MS)'
 `$env:RESEARCH_TOTAL_TIMEOUT_MS = '$($env:RESEARCH_TOTAL_TIMEOUT_MS)'

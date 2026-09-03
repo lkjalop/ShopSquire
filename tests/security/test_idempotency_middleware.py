@@ -85,6 +85,23 @@ def test_chat_sse_bypasses_response_capture():
     assert middleware.cache == {}
 
 
+def test_chat_query_bypasses_generic_cache_so_terminal_poll_can_advance():
+    app = FastAPI()
+    app.add_middleware(IdempotencyMiddleware)
+    calls = {"count": 0}
+
+    @app.post("/api/v1/chat/query")
+    async def query():
+        calls["count"] += 1
+        return {"status": "in_progress" if calls["count"] == 1 else "completed"}
+
+    client = TestClient(app)
+    headers = {"Idempotency-Key": "one-logical-chat-turn"}
+    assert client.post("/api/v1/chat/query", headers=headers).json()["status"] == "in_progress"
+    assert client.post("/api/v1/chat/query", headers=headers).json()["status"] == "completed"
+    assert calls["count"] == 2
+
+
 def test_critical_path_fails_closed_when_store_unavailable(monkeypatch):
     # money path: a broken store must fail CLOSED (503) — never risk an un-deduped payment.
     monkeypatch.setattr(idem, "db_session", _broken_store)

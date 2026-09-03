@@ -2,6 +2,7 @@ from src.app.services.buyer_evidence_source_resolution import (
     extract_submitted_source_url,
     remove_submitted_source_urls,
     resolve_buyer_evidence_source,
+    source_resolution_allows_discovery,
 )
 
 
@@ -12,9 +13,28 @@ def test_chat_source_url_is_extracted_and_removed_before_semantic_routing():
     )
     assert extract_submitted_source_url(query).startswith("https://store.sim3d.com/")
     sanitized = remove_submitted_source_urls(query)
-    assert "store.sim3d.com" not in sanitized
+    assert "store.sim3d.com" in sanitized
     assert "token=secret" not in sanitized
-    assert "[submitted official source]" in sanitized
+    assert "[submitted source domain: store.sim3d.com]" in sanitized
+
+
+def test_safe_context_link_can_seed_discovery_without_fetching_submitted_path():
+    result = resolve_buyer_evidence_source(
+        source_url="https://www.cupix.com/home-1?utm_source=secret",
+        retained_purpose="I need hardware for CupixWorks",
+        sources=[],
+    )
+    assert result.status == "not_enrolled"
+    assert source_resolution_allows_discovery(result) is True
+
+
+def test_unsafe_link_cannot_seed_discovery():
+    result = resolve_buyer_evidence_source(
+        source_url="http://127.0.0.1/admin",
+        retained_purpose="I need hardware",
+        sources=[],
+    )
+    assert source_resolution_allows_discovery(result) is False
 
 
 def _sources():

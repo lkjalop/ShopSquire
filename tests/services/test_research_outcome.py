@@ -82,3 +82,164 @@ def test_resolved_connector_identity_and_requirements_are_complete() -> None:
     assert outcome.accepted_claim_count >= 1
     assert outcome.requirement_completeness == "complete"
     assert outcome.catalog_authority == "permitted"
+
+
+def test_cited_identity_precedes_untrusted_candidate_page_title() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-unseen",
+        case_revision=2,
+        operation_id="chat:unseen",
+        research={
+            "candidates": [{
+                "candidate_id": "candidate-1",
+                "title": "Where Winds Meet System Requirements: Can You Run It?",
+            }],
+            "identity_resolution": {
+                "status": "resolved",
+                "authority": "cited_candidate_rows_only",
+                "identity": {
+                    "canonical_title": "Where Winds Meet",
+                    "publisher": None,
+                    "publisher_domain": None,
+                    "release_state": "unknown",
+                    "supporting_row_ids": ["candidate-1"],
+                },
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    )
+
+    assert outcome.identity is not None
+    assert outcome.identity.title == "Where Winds Meet"
+    assert outcome.requirement_completeness == "identity_only"
+
+
+def test_structured_provider_enriches_earlier_identity_resolution_projection() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-rotating", case_revision=2, operation_id="chat:rotating",
+        research={
+            "identity_resolution": {
+                "status": "resolved", "authority": "cited_candidate_rows_only",
+                "identity": {
+                    "canonical_title": "Powers Downtown", "publisher": None,
+                    "release_state": "unknown", "supporting_row_ids": ["candidate-6"],
+                },
+            },
+            "structured_provider_resolution": {
+                "status": "resolved", "evidence": [{
+                    "status": "resolved", "provider_id": "steam",
+                    "canonical_title": "Powers Downtown", "publisher": "Masaharu Studio",
+                    "app_id": "4070390", "release_state": "unreleased",
+                    "release_date": "2 Sep, 2026", "source_url": "https://store.steampowered.com/app/4070390/",
+                    "requirements_completeness": "minimum_only",
+                    "compiled_requirements": [{"attribute_key": "ram_gb"}],
+                }],
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="permitted", commerce_authority="none",
+    )
+
+    assert outcome.identity is not None
+    assert outcome.identity.model_dump() == {
+        "title": "Powers Downtown", "publisher": "Masaharu Studio",
+        "app_id": "4070390", "release_state": "unreleased",
+        "release_date": "2 Sep, 2026",
+    }
+
+
+def test_failed_identity_attempt_does_not_promote_candidate_page_title() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-cupix",
+        case_revision=2,
+        operation_id="chat:cupix",
+        research={
+            "candidates": [{
+                "candidate_id": "candidate-1",
+                "title": "Unrelated Game System Requirements",
+            }],
+            "identity_resolution": {
+                "status": "unresolved",
+                "identity": None,
+                "model_calls": 2,
+                "authority": "none",
+                "failure_code": "identity_model_output_invalid",
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    )
+
+    assert outcome.identity is None
+    assert outcome.requirement_completeness == "none"
+
+
+def test_revision_bound_identity_projection_precedes_candidate_title() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-cupix",
+        case_revision=2,
+        operation_id="chat:cupix",
+        research={
+            "ambiguity_exploration": {
+                "publisher_candidates": [{
+                    "candidate_id": "candidate-1",
+                    "title": "Contact CupixWorks Support - Support Center",
+                }],
+            },
+            "workload_authorization": {
+                "status": "blocked",
+                "evidence": [{
+                    "status": "identity_resolved_requirements_pending",
+                    "canonical_title": "CupixWorks",
+                    "release_state": "unknown",
+                }],
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked",
+        commerce_authority="none",
+    )
+
+    assert outcome.identity is not None
+    assert outcome.identity.title == "CupixWorks"
+
+
+def test_authoritative_structured_evidence_wins_over_degraded_discovery_diagnostics() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-mio",
+        case_revision=2,
+        operation_id="chat:mio",
+        research={
+            "provider_status": "degraded",
+            "receipts": [{"provider_status": "timeout"}],
+            "structured_provider_resolution": {
+                "status": "resolved",
+                "evidence": [{
+                    "status": "resolved",
+                    "provider_id": "steam",
+                    "canonical_title": "MIO: Memories in Orbit",
+                    "app_id": "1672810",
+                    "release_state": "released",
+                    "release_date": "20 Jan, 2026",
+                    "requirements_completeness": "minimum_and_recommended",
+                    "compiled_requirements": [
+                        {"attribute_key": "ram_gb", "operator": ">=", "value": 8},
+                        {"attribute_key": "gpu_vram_gb", "operator": ">=", "value": 4},
+                    ],
+                }],
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="permitted",
+        commerce_authority="none",
+    )
+
+    assert outcome.discovery_status == "completed"
+    assert outcome.fetch_status == "completed"
+    assert outcome.identity is not None
+    assert outcome.identity.title == "MIO: Memories in Orbit"
+    assert outcome.requirement_completeness == "complete"
+    assert outcome.accepted_claim_count == 2

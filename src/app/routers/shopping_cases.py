@@ -1,6 +1,7 @@
 """Case-scoped buyer requirement review and acceptance API."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -16,6 +17,7 @@ from sqlalchemy import func, select, text
 
 from src.app.models.db import get_db
 from src.app.models.orm import (
+    ProductConfiguration,
     RequirementProposal,
     ShoppingCase,
     ShoppingCaseInterpretationJob,
@@ -44,6 +46,73 @@ logger = logging.getLogger("shopsquire.shopping_cases")
 
 
 router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"])
+
+
+def _case_budget_cents(db, *, tenant_id: str, case_id: str) -> int | None:
+    """Read the latest canonical case budget without reparsing buyer prose."""
+    try:
+        row = db.execute(text(
+            "SELECT state_json FROM conversation_case_state "
+            "WHERE tenant_id=:tenant_id AND case_id=:case_id "
+            "ORDER BY version DESC LIMIT 1"
+        ), {"tenant_id": tenant_id, "case_id": case_id}).first()
+        if not row:
+            return None
+        state = row[0]
+        if isinstance(state, str):
+            state = json.loads(state)
+        if not isinstance(state, dict):
+            return None
+        procurement_budget = (
+            (state.get("procurement_case_state") or {}).get("budget")
+            if isinstance(state.get("procurement_case_state"), dict) else None
+        )
+        if isinstance(procurement_budget, dict):
+            amount = procurement_budget.get("amount_minor")
+            if amount is not None:
+                return max(0, int(amount))
+        read_budget = (
+            (state.get("read_model") or {}).get("canonical_budget")
+            if isinstance(state.get("read_model"), dict) else None
+        )
+        if isinstance(read_budget, dict):
+            amount = read_budget.get("budget_max")
+            if amount is not None:
+                return max(0, int(amount) * 100)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        logger.warning("case budget projection was malformed", exc_info=True)
+    except Exception:
+        logger.warning("case budget projection unavailable", exc_info=True)
+    return None
+
+
+def _catalog_shortfall_alternative(
+    db, *, tenant_id: str, exclusion: dict[str, Any] | None,
+    budget_cents: int | None,
+) -> tuple[dict[str, Any], int | None]:
+    """Describe the nearest excluded SKU and its price gap, without qualifying it."""
+    if not isinstance(exclusion, dict) or not exclusion.get("sku"):
+        return {}, None
+    sku = str(exclusion["sku"])
+    row = db.execute(select(ProductConfiguration).where(
+        ProductConfiguration.tenant_id == tenant_id,
+        ProductConfiguration.sku == sku,
+    ).limit(1)).scalar_one_or_none()
+    alternative = {
+        "sku": sku,
+        "reason": exclusion.get("reason"),
+        "status": "not_qualified_or_unavailable",
+    }
+    gap = None
+    if row is not None:
+        alternative.update({
+            "title": row.title,
+            "price_cents": int(row.price_cents),
+            "currency": row.currency,
+        })
+        if budget_cents is not None:
+            gap = max(0, int(row.price_cents) - int(budget_cents))
+    return alternative, gap
 
 
 class CreateRequirementProposal(BaseModel):
@@ -105,6 +174,12 @@ class ResearchShoppingCaseRequest(BaseModel):
     authorization_basis: Literal["buyer_action", "tenant_policy"] = "buyer_action"
     refresh_authorized: bool = False
     execution_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{8,80}$")
+    decision_trace_id: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9_-]{8,200}$",
+    )
+    workload_kind_hints: list[Literal["game", "software"]] = Field(
+        default_factory=list, max_length=3,
+    )
 
 
 class CancelShoppingCaseResearchRequest(BaseModel):
@@ -332,14 +407,17 @@ def _payload_object(value: Any) -> dict[str, Any]:
 
 
 def _case_research_plan_from_trace(
-    db, *, case_id: str, tenant_id: str,
+    db, *, case_id: str, tenant_id: str, decision_trace_id: str | None = None,
 ):
     """Rebuild a plan only from the server-recorded ambiguity event."""
 
     from src.app.services.case_research_plan import build_case_research_plan
     from src.app.services.shopping_case_trace_reader import load_case_trace_events
 
-    events = load_case_trace_events(db, case_id=case_id, tenant_id=tenant_id)
+    events = load_case_trace_events(
+        db, case_id=case_id, tenant_id=tenant_id,
+        decision_trace_id=decision_trace_id,
+    )
     for event in reversed(events):
         if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
             continue
@@ -383,9 +461,17 @@ def _case_catalog_candidate_set_from_trace(
     )
 
 
-def _case_trace_has_event(db, *, case_id: str, tenant_id: str, event_type: str) -> bool:
+def _case_trace_has_event(
+    db, *, case_id: str, tenant_id: str, event_type: str,
+    decision_trace_id: str | None = None,
+) -> bool:
     from src.app.services.decision_log import get_cached_trace_events
 
+    if decision_trace_id and any(
+        str(row.get("event_type") or "") == event_type
+        for row in get_cached_trace_events(decision_trace_id)
+    ):
+        return True
     trace_id = case_id.removeprefix("sc-")
     if any(str(row.get("event_type") or "") == event_type for row in get_cached_trace_events(trace_id)):
         return True
@@ -401,15 +487,18 @@ def _case_trace_has_event(db, *, case_id: str, tenant_id: str, event_type: str) 
 
 
 @router.post("/interpretations")
-def create_case_interpretation(
+async def create_case_interpretation(
     body: CreateCaseInterpretationRequest,
     x_tenant_id: str | None = Header(default=None),
     db=Depends(get_db),
 ) -> dict[str, Any]:
-    """Create the zero-network provisional case before any narration provider runs.
+    """Create a provisional case, then apply its revision-bound research policy.
 
     An empty match is a normal local-persona outcome, represented by 204 so the
     existing chat route remains authoritative for covered catalogue requests.
+    Fail-closed profiles stop after local interpretation; an auto-authorized
+    profile executes governed research here so the browser is never the
+    orchestration owner.
     """
 
     from fastapi import Response
@@ -634,7 +723,7 @@ def create_case_interpretation(
             "catalog_candidate_set": candidate_set.model_dump(mode="json"),
         },
     )
-    return {
+    response = {
         "schema_version": "case-interpretation-v1",
         "case_id": case_id,
         "trace_id": trace_id,
@@ -655,7 +744,139 @@ def create_case_interpretation(
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
         "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized",
+        "research_orchestration_owner": "backend",
+        "server_research_result": None,
+        "server_research_failure": None,
     }
+    # In an auto-authorized demo/tenant policy, the fast interpretation lane is
+    # still one server-owned turn. Previously it returned before research and
+    # relied on a browser effect to POST /research; removing that race left this
+    # entire path permanently provisional. Keep fail-closed/consent profiles at
+    # zero network, but complete the governed operation here when policy grants
+    # read-only authority.
+    from src.app.services.research_policy import tenant_policy_auto_research_authorized
+
+    if tenant_policy_auto_research_authorized():
+        try:
+            research_request = ResearchShoppingCaseRequest(
+                uid=body.uid,
+                research_plan_id=plan.plan_id,
+                ambiguity_object_ids=[row.ambiguity_id for row in plan.ambiguities],
+                hypothesis_ids=[row.hypothesis_id for row in plan.hypotheses],
+                research_authorized=True,
+                authorization_basis="tenant_policy",
+                execution_id="auto-" + uuid.uuid4().hex[:24],
+            )
+            research_result = await asyncio.wait_for(
+                _research_shopping_case_with_db(
+                    case_id,
+                    research_request,
+                    x_tenant_id=tenant_id,
+                    db=db,
+                ),
+                timeout=20.0,
+            )
+            response["server_research_result"] = research_result
+            if isinstance(research_result.get("ambiguity_exploration"), dict):
+                response["ambiguity_exploration"] = research_result["ambiguity_exploration"]
+            if isinstance(research_result.get("product_shelves"), dict):
+                response["product_shelves"] = research_result["product_shelves"]
+            response["assistant_message"] = str(
+                research_result.get("assistant_message") or response["assistant_message"]
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            failure_code = (
+                str(detail.get("code"))
+                if isinstance(detail, dict) and detail.get("code") else
+                "research_deadline_exceeded"
+                if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) else
+                "server_research_failed"
+            )
+            response["server_research_failure"] = {
+                "status": "failed",
+                "failure_code": failure_code,
+                "catalog_authority": "blocked",
+                "commerce_authority": "none",
+            }
+            response["ambiguity_exploration"]["status"] = "research_failed"
+            response["ambiguity_exploration"]["research_failure"] = response[
+                "server_research_failure"
+            ]
+            logger.warning("server-owned interpretation research failed: %s", repr(exc)[:200])
+    case_revision = int(
+        (interpretation_job or {}).get("case_revision")
+        if isinstance(interpretation_job, dict)
+        and (interpretation_job or {}).get("case_revision") is not None
+        else 1
+    )
+    operation_id = f"interpretation:{case_id}:v{case_revision}"
+    server_research = (
+        response.get("server_research_result")
+        if isinstance(response.get("server_research_result"), dict) else {}
+    )
+    research_outcome = (
+        server_research.get("research_outcome")
+        if isinstance(server_research.get("research_outcome"), dict) else {}
+    )
+    research_run_id = str(
+        research_outcome.get("operation_id")
+        or server_research.get("research_run_id") or ""
+    ) or None
+    terminal_shelves = (
+        response.get("product_shelves")
+        if isinstance(response.get("product_shelves"), dict) else product_shelves
+    )
+    catalog_authority = str(
+        research_outcome.get("catalog_authority")
+        or terminal_shelves.get("catalog_authority") or "provisional"
+    )
+    response.update({
+        "operation_id": operation_id,
+        "decision_trace_id": trace_id,
+        "case_revision": case_revision,
+        "research_run_id": research_run_id,
+        "terminal_outcome": {
+            "schema_version": "turn-terminal-outcome-v1",
+            "operation_id": operation_id,
+            "decision_trace_id": trace_id,
+            "case_id": case_id,
+            "case_revision": case_revision,
+            "research_run_id": research_run_id,
+            "recommendation_status": "provisional",
+            "research_status": (
+                str(research_outcome.get("discovery_status") or "completed")
+                if server_research else
+                "not_executed"
+            ),
+            "canonical_facts": {
+                "buyer_query": body.retained_purpose,
+                "requested_quantity": requested_quantity,
+            },
+            "semantic_status": {
+                "status": "evaluated",
+                "source": "case_research_plan",
+            },
+            "catalog_authority": catalog_authority,
+            "commerce_authority": "none",
+            "product_shelves": terminal_shelves,
+            "assistant_message": response["assistant_message"],
+            "execution_evidence": {
+                "component": "shopping_case_interpretation",
+                "status": "completed",
+                "failure_code": (
+                    (response.get("server_research_failure") or {}).get("failure_code")
+                    if isinstance(response.get("server_research_failure"), dict) else None
+                ),
+                "elapsed_ms": int(total_ms),
+                "deadline_ms": 20_000,
+                "fallback_used": bool(response.get("server_research_failure")),
+                "core_invocation_count": 0,
+                "operation_id": operation_id,
+            },
+        },
+    })
+    return response
 
 
 @router.get("/{case_id}/interpretation-jobs/latest")
@@ -1005,6 +1226,51 @@ async def _accept_requirement_proposal_with_db(
         ),
         commerce_authority="none",
     ).model_dump(mode="json")
+    shelf_products = [
+        product
+        for shelf in result["product_shelves"].get("shelves") or []
+        for product in [*(shelf.get("initial") or []), *(shelf.get("next_page") or [])]
+    ]
+    if accepted and not shelf_products:
+        exclusions = list(result["product_shelves"].get("exclusions") or [])
+        case_budget_cents = _case_budget_cents(
+            db, tenant_id=tenant_id, case_id=case_id,
+        )
+        best_alternative, budget_gap_cents = _catalog_shortfall_alternative(
+            db,
+            tenant_id=tenant_id,
+            exclusion=exclusions[0] if exclusions else None,
+            budget_cents=case_budget_cents,
+        )
+        identity = dict(result["research_outcome"].get("identity") or {})
+        source_urls = list(dict.fromkeys(
+            str(item.get("citation_url") or item.get("source_reference") or "")
+            for item in accepted
+            if item.get("citation_url") or item.get("source_reference")
+        ))
+        result["catalog_shortfall"] = {
+            "status": "no_catalog_configuration_satisfies_accepted_requirements",
+            "canonical_identity": identity,
+            "accepted_claim_ids": [str(item["claim_id"]) for item in accepted],
+            "source_urls": source_urls,
+            "budget_gap_cents": budget_gap_cents,
+            "best_catalog_alternative": best_alternative,
+            "supplier_send": "human_only_not_authorized",
+        }
+        result["off_catalog"] = {
+            "label": identity.get("title") or case.retained_purpose or "required configuration",
+            "subject_label": identity.get("title") or case.retained_purpose or "required configuration",
+            "shopping_case_id": case_id,
+            "case_revision": case_revision,
+            "trace_id": result["trace_id"],
+            "canonical_identity": identity,
+            "accepted_claim_ids": result["catalog_shortfall"]["accepted_claim_ids"],
+            "source_urls": source_urls,
+            "budget_gap_cents": budget_gap_cents,
+            "best_catalog_alternative": best_alternative,
+            "constraints": {"catalog_shortfall": result["catalog_shortfall"]["status"]},
+            "commercial_terms": {},
+        }
     propagate_case_supersession(
         db, tenant_id=tenant_id, case_id=case_id,
         amendment_id=f"requirement:{proposal_id}:v{proposal.version + 1}",
@@ -1797,7 +2063,10 @@ async def _research_shopping_case_with_db(
             "code": "tenant_auto_research_not_authorized",
             "message": "This tenant has not enabled automatic public-source research.",
         })
-    plan = _case_research_plan_from_trace(db, case_id=case_id, tenant_id=tenant_id)
+    plan_lookup = {"case_id": case_id, "tenant_id": tenant_id}
+    if body.decision_trace_id:
+        plan_lookup["decision_trace_id"] = body.decision_trace_id
+    plan = _case_research_plan_from_trace(db, **plan_lookup)
     if plan is None:
         raise HTTPException(status_code=409, detail={
             "code": "case_research_plan_not_found",
@@ -1814,13 +2083,13 @@ async def _research_shopping_case_with_db(
             "code": "case_research_plan_mismatch",
             "message": "The submitted interpretation does not match the retained case plan.",
         })
-    if (
-        _case_trace_has_event(
-            db, case_id=case_id, tenant_id=tenant_id,
-            event_type="official_research_rerank_completed",
-        )
-        and not body.refresh_authorized
-    ):
+    completion_lookup = {
+        "case_id": case_id, "tenant_id": tenant_id,
+        "event_type": "official_research_rerank_completed",
+    }
+    if body.decision_trace_id:
+        completion_lookup["decision_trace_id"] = body.decision_trace_id
+    if _case_trace_has_event(db, **completion_lookup) and not body.refresh_authorized:
         raise HTTPException(status_code=409, detail={
             "code": "research_already_completed",
             "message": "Research already completed for this case. Explicitly authorize a refresh to run it again.",
@@ -1850,6 +2119,11 @@ async def _research_shopping_case_with_db(
             return True
         return bool(cancellation_requested and cancellation_requested())
 
+    # Seal ownership, consent-plan validation and any newly-created case before
+    # provider work. Provider executors may open a fresh read transaction for
+    # catalog projection, but never inherit an uncommitted operation start.
+    db.commit()
+
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_open_world_research import (
             OpenWorldResearchUnavailable,
@@ -1871,6 +2145,7 @@ async def _research_shopping_case_with_db(
                     db, case_id=case_id, tenant_id=tenant_id,
                 ).configuration_ids,
                 budget_cents=body.budget_cents,
+                workload_kind_hints=body.workload_kind_hints,
                 cancellation_requested=request_cancelled,
             )
             result["authorization"] = {

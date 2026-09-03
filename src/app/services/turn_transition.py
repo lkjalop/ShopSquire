@@ -58,6 +58,12 @@ class TurnCommit(BaseModel):
     preserved_fields: list[str] = Field(default_factory=list, max_length=40)
     cleared_fields: list[str] = Field(default_factory=list, max_length=40)
     shared_constraints: dict[str, Any] = Field(default_factory=dict)
+    canonical_budget: dict[str, Any] | None = None
+    commercial_terms: dict[str, Any] = Field(default_factory=dict)
+    subject_role: Literal[
+        "PROCURE_SUBJECT", "RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK",
+        "ADJACENT_PRODUCT", "UNRESOLVED",
+    ] = "UNRESOLVED"
     case_patches: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     pending_clarification: PendingClarificationCommit = Field(
         default_factory=PendingClarificationCommit,
@@ -87,6 +93,12 @@ class RevisionBoundTurnReadModel(BaseModel):
     preserved_fields: list[str] = Field(default_factory=list)
     cleared_fields: list[str] = Field(default_factory=list)
     shared_constraints: dict[str, Any] = Field(default_factory=dict)
+    canonical_budget: dict[str, Any] | None = None
+    commercial_terms: dict[str, Any] = Field(default_factory=dict)
+    subject_role: Literal[
+        "PROCURE_SUBJECT", "RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK",
+        "ADJACENT_PRODUCT", "UNRESOLVED",
+    ] = "UNRESOLVED"
     pending_clarification: PendingClarificationCommit
     external_research_authorized: bool
     research: dict[str, Any] = Field(default_factory=dict)
@@ -118,10 +130,15 @@ def derive_turn_transition(
     subject = str(subject_action or "").strip().lower()
     if new_category:
         return TurnTransition.NEW_CATEGORY
-    if subject == "switch" or relation == "supersede":
-        return TurnTransition.REPLACE_WORKLOAD
+    # A case-bound additive receipt is stronger continuity evidence than a
+    # model's generic ``switch`` proposal. The receipt is created only after a
+    # literal additive operation and bounded workload identity were validated.
+    # Explicit replacement turns never create it and still fall through to the
+    # replacement branch below.
     if additive_workload:
         return TurnTransition.ADD_WORKLOAD
+    if subject == "switch" or relation == "supersede":
+        return TurnTransition.REPLACE_WORKLOAD
     if commercial_amendment:
         return TurnTransition.COMMERCIAL_AMENDMENT
     if pending_clarification and relation == "answer":
@@ -141,6 +158,10 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         catalog_authority=commit.catalog_authority,
         commerce_authority=commit.commerce_authority,
     )
+    right_panel = dict(commit.right_panel or {})
+    right_panel["canonical_budget"] = commit.canonical_budget
+    right_panel["commercial_terms"] = dict(commit.commercial_terms)
+    right_panel["subject_role"] = commit.subject_role
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         case_revision=revision,
@@ -150,6 +171,9 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         preserved_fields=list(commit.preserved_fields),
         cleared_fields=list(commit.cleared_fields),
         shared_constraints=dict(commit.shared_constraints),
+        canonical_budget=(dict(commit.canonical_budget) if commit.canonical_budget else None),
+        commercial_terms=dict(commit.commercial_terms),
+        subject_role=commit.subject_role,
         pending_clarification=commit.pending_clarification,
         external_research_authorized=commit.external_research_authorized,
         research=dict(commit.research),
@@ -159,7 +183,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         catalog_authority=commit.catalog_authority,
         commerce_authority=commit.commerce_authority,
         assistant_message=commit.assistant_message,
-        right_panel=commit.right_panel,
+        right_panel=right_panel,
         products=list(commit.products),
         trace_id=commit.trace_id,
     )

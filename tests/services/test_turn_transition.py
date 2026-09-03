@@ -12,6 +12,9 @@ def test_transition_priority_is_explicit_and_bounded():
         active_case=True, additive_workload=True, subject_action="continue",
     ) == TurnTransition.ADD_WORKLOAD
     assert derive_turn_transition(
+        active_case=True, additive_workload=True, subject_action="switch",
+    ) == TurnTransition.ADD_WORKLOAD
+    assert derive_turn_transition(
         active_case=True, pending_clarification={"question_id": "locality"},
         clarification_relation="answer",
     ) == TurnTransition.ANSWER_PENDING
@@ -34,6 +37,9 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
         objective="Gaming plus Emulate3D",
         workloads=["Baldur's Gate 3", "Rockwell Emulate3D"],
         preserved_fields=["budget"],
+        canonical_budget={"budget_min": None, "budget_max": 3000, "mode": "ceiling", "source_span": [0, 8]},
+        commercial_terms={"currency": "AUD", "budget_scope": "unknown"},
+        subject_role="RUN_SUBJECT_ON_PRODUCT",
         pending_clarification={"action": "consume", "prior_question_id": "locality"},
         external_research_authorized=True,
         operation_id="chat:idem-1",
@@ -64,3 +70,10 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert projection.research_outcome.case_revision == 5
     assert projection.research_outcome.operation_id == "chat:idem-1"
     assert projection.research_outcome.held_claim_count == 9
+    assert projection.canonical_budget == {
+        "budget_min": None, "budget_max": 3000, "mode": "ceiling", "source_span": [0, 8],
+    }
+    assert projection.subject_role == "RUN_SUBJECT_ON_PRODUCT"
+    assert projection.right_panel["canonical_budget"] == projection.canonical_budget
+    assert projection.right_panel["commercial_terms"] == projection.commercial_terms
+    assert projection.right_panel["subject_role"] == projection.subject_role

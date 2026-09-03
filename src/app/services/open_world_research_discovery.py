@@ -218,7 +218,16 @@ def discover_open_world_publishers(
                 "query_ids": [],
                 "subject_overlap_count": 0,
                 "publisher_host_overlap_count": 0,
+                # Search text is retained only as bounded, explicitly
+                # untrusted identity context. It never enters requirement
+                # compilation or product-fit authorization.
+                "untrusted_discovery_text": [],
             })
+            snippet = " ".join(str(row.get("snippet") or "").split())[:400]
+            if snippet and snippet not in candidate["untrusted_discovery_text"]:
+                candidate["untrusted_discovery_text"] = [
+                    *candidate["untrusted_discovery_text"], snippet,
+                ][:3]
             candidate["query_axes"] = sorted({*candidate["query_axes"], item.axis})
             candidate["query_ids"] = sorted({*candidate["query_ids"], item.query_id})
             result_terms = _terms(f"{candidate['domain']} {candidate['title']} {urlparse(url).path}")
@@ -245,12 +254,16 @@ def discover_open_world_publishers(
             # publishers. Keep only a direct-looking subject origin or a
             # corroborated documentation surface; returning no candidate is an
             # honest and actionable result.
+            strong_identity_candidate = bool(
+                int(row.get("subject_overlap_count") or 0) >= 2
+                and not ownership["signals"]["excluded_intermediary"]
+            )
+            fetchable_origin_candidate = ownership["status"] in {
+                "plausible_direct_origin", "plausible_documentation_origin",
+            }
             if (
-                int(row.get("subject_overlap_count") or 0) > 0
-                and _quality_score(row) >= 3
-                and ownership["status"] in {
-                    "plausible_direct_origin", "plausible_documentation_origin",
-                }
+                _quality_score(row) >= 3
+                and (strong_identity_candidate or fetchable_origin_candidate)
             ):
                 eligible.append(row)
     ranked = sorted(eligible, key=_quality)[:12]

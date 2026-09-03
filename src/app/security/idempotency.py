@@ -30,7 +30,15 @@ _CRITICAL_PREFIXES = tuple(
 
 # These endpoints own stream-aware replay/single-flight semantics. Capturing their body iterator
 # here would buffer the entire response before headers reach the client, defeating SSE heartbeats.
-_STREAM_PASSTHROUGH_PATHS = frozenset({"/api/v1/chat/stream"})
+# Chat owns a Redis-backed, revision-aware single-flight across BOTH entry
+# endpoints.  The generic HTTP middleware must not cache an interim
+# ``in_progress`` query response; doing so prevented every later poll from
+# observing the completed terminal envelope (and its replay response also sat
+# outside CORS, making the browser report a false CORS failure).
+_STREAM_PASSTHROUGH_PATHS = frozenset({
+    "/api/v1/chat/stream",
+    "/api/v1/chat/query",
+})
 
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):

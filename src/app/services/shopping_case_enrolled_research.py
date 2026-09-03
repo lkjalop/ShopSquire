@@ -145,6 +145,10 @@ async def execute_enrolled_official_research(
         tenant_id=tenant_id,
         candidate_configuration_ids=candidate_configuration_ids,
     ).model_dump(mode="json")
+    case_revision = int(case.revision or 1)
+    # Catalog projection is complete. Release its read transaction before the
+    # governed HTTP fetch; persistence resumes only after a bounded result exists.
+    db.rollback()
     research = await await_provider_result(official_workload_research.research_official_sources(
         plan.retained_purpose,
         search_url_template=search_url,
@@ -169,7 +173,7 @@ async def execute_enrolled_official_research(
 
     synthesis = build_evidence_synthesis_ledger(
         case_id=case_id,
-        case_revision=int(case.revision or 1),
+        case_revision=case_revision,
         query=plan.retained_purpose,
         purpose=plan.retained_purpose,
         consent_receipt=consent_receipt,
@@ -349,7 +353,7 @@ async def execute_enrolled_official_research(
 
     result["research_outcome"] = build_research_outcome(
         case_id=case_id,
-        case_revision=int(case.revision or 1),
+        case_revision=case_revision,
         operation_id=str(consent_receipt.get("execution_id") or "") or None,
         research={**research, "evidence_outcome": outcome},
         requirements={"accepted": research.get("claims") or [], "rejected": []},
@@ -370,7 +374,7 @@ async def execute_enrolled_official_research(
         db,
         tenant_id=tenant_id,
         case_id=case_id,
-        case_revision=int(case.revision or 1),
+        case_revision=case_revision,
         retained_purpose=plan.retained_purpose,
         proposal_id=plan.plan_id,
         proposal_version=int(case.revision or 1),
@@ -381,7 +385,7 @@ async def execute_enrolled_official_research(
             "requirements" if outcome == "product_requirements" else "none"
         ),
         observed_at=case.updated_at,
-        idempotency_key=f"research:{plan.plan_id}:case-revision:{int(case.revision or 1)}",
+        idempotency_key=f"research:{plan.plan_id}:case-revision:{case_revision}",
     )
     db.commit()
     log_trace_event(

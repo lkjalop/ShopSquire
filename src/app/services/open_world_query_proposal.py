@@ -27,6 +27,7 @@ from src.app.services.model_execution_gateway import (
 )
 from src.app.services.model_transports import make_ollama_generate_transport
 from src.app.services.ollama_artifact_verification import verify_ollama_artifact
+from src.app.services.model_runtime_profile import observed_model_latency_ms
 
 
 Axis = Literal[
@@ -57,7 +58,9 @@ def _submit_shadow(
     executor = ThreadPoolExecutor(
         max_workers=1, thread_name_prefix="open-world-query-shadow",
     )
-    future = executor.submit(propose_open_world_queries, plan, timeout_s=6.0)
+    future = executor.submit(
+        propose_open_world_queries, plan, timeout_s=open_world_query_timeout_s(),
+    )
     future.add_done_callback(lambda _completed: executor.shutdown(wait=False))
     return future
 
@@ -73,8 +76,10 @@ class OpenWorldQueryProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["open-world-query-proposal-v1"] = "open-world-query-proposal-v1"
-    interpretations: list[str] = Field(min_length=1, max_length=3)
-    shared_concepts: list[str] = Field(min_length=1, max_length=8)
+    # Compatibility fields remain optional for older fixtures. The active
+    # model contract asks only for the hints and queries the planner consumes.
+    interpretations: list[str] = Field(default_factory=list, max_length=3)
+    shared_concepts: list[str] = Field(default_factory=list, max_length=8)
     divergent_axes: list[str] = Field(default_factory=list, max_length=4)
     publisher_domain_hypotheses: list[str] = Field(default_factory=list, max_length=2)
     queries: list[ProposedDiscoveryQuery] = Field(min_length=2, max_length=3)
@@ -90,19 +95,13 @@ def _terms(value: str) -> set[str]:
 
 def _prompt(purpose: str) -> str:
     return (
-        "Return strict JSON only. Interpret an unfamiliar buyer workload for web discovery, "
-        "without recommending hardware or inventing requirements. Produce 1-3 plausible "
-        "interpretations, shared_concepts, divergent_axes, and 2-3 search queries. Every one of "
-        "interpretations, shared_concepts, and divergent_axes must be a JSON array of strings. Queries must "
-        "cover distinct axes selected from concept_and_software, requirements_and_compatibility, "
-        "support_and_constraints. Expand acronyms and domain terminology when useful. Do not name "
-        "a vendor unless the buyer named it. If the buyer named a publisher or product, include up "
-        "to two likely registrable publisher domains in publisher_domain_hypotheses; otherwise use [] . "
-        "Domains are untrusted discovery hints only. Do not include URLs, site: filters, prices, hardware "
-        "numbers, products, or claims. Search is discovery only and establishes no authority.\n"
+        "Return strict JSON only for web discovery. Produce 2-3 short search queries on distinct "
+        "axes: concept_and_software, requirements_and_compatibility, support_and_constraints. "
+        "If the buyer names a publisher or product, propose up to two registrable publisher domains; "
+        "otherwise use []. Domains are untrusted hints. Do not include URLs, site filters, prices, "
+        "hardware numbers, product recommendations, or factual claims.\n"
         f"Buyer outcome: {purpose!r}\n"
-        "JSON schema: {interpretations:[string],shared_concepts:[string],divergent_axes:[string],"
-        "publisher_domain_hypotheses:[string],"
+        "JSON schema: {publisher_domain_hypotheses:[string],"
         "queries:[{axis:string,query:string}]}"
     )
 
@@ -136,9 +135,10 @@ def _ollama_call(prompt: str, timeout_s: float) -> str:
         prompt_id="open-world-query-proposal", prompt_version="v1",
         prompt_hash=sha256_text(prompt), context_hash=sha256_text("open-world-research"),
         data_classes={"buyer_workload"}, timeout_ms=round(timeout_s * 1_000),
-        # This is a three-query routing artifact, not narration. A compact cap
-        # keeps a prewarmed 14B local model inside the six-second worker budget.
-        max_output_tokens=420,
+        # This is a bounded routing artifact, not narration. Keep the decode
+        # small; model output is validated and the deterministic plan remains
+        # available on every failure.
+        max_output_tokens=180,
     )
     transport = make_ollama_generate_transport(
         response_format="json", keep_alive="30m", think=False,
@@ -170,7 +170,7 @@ def propose_open_world_queries(
     )
     if not enabled and model_fn is None:
         return plan, {"status": "disabled", "model_calls": 0}
-    budget = max(1.0, min(float(timeout_s or 6.0), 10.0))
+    budget = max(1.0, float(timeout_s or open_world_query_timeout_s()))
     started = time.monotonic()
     try:
         raw = (model_fn or _ollama_call)(_prompt(plan.retained_purpose), budget)
@@ -217,14 +217,10 @@ def propose_open_world_queries(
             )
             for index, row in enumerate(normalized_rows)
         ]
-        if domain_hypotheses:
-            subject = " ".join(sorted(buyer_terms, key=lambda token: (-len(token), token))[:4])
-            origin_query = CaseDiscoveryQuery(
-                query_id="model_origin", axis="support_and_constraints",
-                query=f"site:{domain_hypotheses[0]} {subject} documentation requirements",
-            )
-            queries = [row for row in queries if row.axis != "support_and_constraints"][:2]
-            queries.append(origin_query)
+        # Domain strings proposed before retrieval are hypotheses, not ownership
+        # evidence. They stay in the receipt for later comparison but must not
+        # constrain discovery. Only the post-search identity resolver can bind
+        # an origin, and only to a cited result row.
         proposal = proposal.model_copy(update={
             "queries": normalized_rows,
             "publisher_domain_hypotheses": domain_hypotheses,
@@ -246,13 +242,56 @@ def propose_open_world_queries(
         RuntimeError,
         TimeoutError,
     ) as exc:
+        failure_code = _proposal_failure_code(exc)
         return plan, {
             "status": "rejected_or_unavailable",
             "model_calls": 1,
             "latency_ms": round((time.monotonic() - started) * 1000),
-            "reason": type(exc).__name__,
+            "failure_code": failure_code,
+            "reason": failure_code,
             "authority": "none",
         }
+
+
+def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(os.getenv(name, default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def open_world_query_timeout_s() -> float:
+    """Derive the proposer deadline from observed router latency and turn policy."""
+
+    floor_ms = _bounded_int_env("OPEN_WORLD_QUERY_MIN_TIMEOUT_MS", 8_000, 1_000, 60_000)
+    total_ms = _bounded_int_env("RESEARCH_TOTAL_TIMEOUT_MS", 12_000, floor_ms, 120_000)
+    observed_ms = observed_model_latency_ms(prompt_id="recommend-router-v2")
+    if observed_ms is None:
+        observed_ms = floor_ms
+    try:
+        multiplier = float(os.getenv("OPEN_WORLD_QUERY_LATENCY_MULTIPLIER", "1.5"))
+    except (TypeError, ValueError):
+        multiplier = 1.5
+    multiplier = max(1.0, min(multiplier, 3.0))
+    return round(min(total_ms, max(floor_ms, observed_ms * multiplier)) / 1_000.0, 3)
+
+
+def _proposal_failure_code(exc: BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return "model_execution_timeout"
+    raw = str(exc or "").strip().lower()
+    if "timeout" in raw or "deadline" in raw:
+        return "model_execution_timeout"
+    if raw.startswith("model_execution_"):
+        return raw[:120]
+    if raw.startswith("model_artifact_"):
+        return "model_execution_unavailable"
+    if raw.startswith("transport_failed"):
+        return "model_execution_transport_failed"
+    if isinstance(exc, (json.JSONDecodeError, ValidationError, ValueError)):
+        return "model_output_invalid"
+    return "model_execution_unavailable"
 
 
 def schedule_open_world_query_proposal(plan: CaseResearchPlan) -> dict[str, Any]:
@@ -315,16 +354,19 @@ def consume_open_world_query_proposal(
     try:
         proposed, receipt = future.result(timeout=0)
     except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        failure_code = _proposal_failure_code(exc)
         return plan, {
             "status": "rejected_or_unavailable",
             "model_calls": 1,
             "authority": "none",
-            "reason": type(exc).__name__,
+            "failure_code": failure_code,
+            "reason": failure_code,
         }
     return proposed, {**receipt, "status": f"{receipt['status']}_shadow"}
 
 
 __all__ = [
     "OpenWorldQueryProposal", "consume_open_world_query_proposal",
+    "open_world_query_timeout_s",
     "propose_open_world_queries", "schedule_open_world_query_proposal",
 ]

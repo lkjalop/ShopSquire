@@ -28,6 +28,38 @@ _RESEARCH_RUNTIME_OBSERVATION: dict[str, Any] = {
 }
 
 
+def catalog_grounding_readiness(
+    db: Any,
+    *,
+    tenant_id: str,
+    grounding_fn: Any | None = None,
+    sold_nodes_fn: Any | None = None,
+) -> Dict[str, Any]:
+    """Report whether the exact storefront tenant has usable catalog authority."""
+
+    if grounding_fn is None or sold_nodes_fn is None:
+        from src.app.services.taxonomy_registry import grounding_status, sold_nodes
+
+        grounding_fn = grounding_fn or grounding_status
+        sold_nodes_fn = sold_nodes_fn or sold_nodes
+    tenant = str(tenant_id or "default").strip() or "default"
+    try:
+        status = str(grounding_fn(db, tenant_id=tenant) or "error")
+        nodes = sold_nodes_fn(db, tenant_id=tenant) if status == "grounded" else None
+        count = len(nodes or ())
+    except Exception:
+        status, count = "error", 0
+    ready = status == "grounded" and count > 0
+    return {
+        "feature": "catalog_grounding",
+        "tenant_id": tenant,
+        "status": status,
+        "sold_taxonomy_count": count,
+        "ready": ready,
+        "reason": "ready" if ready else f"storefront_tenant_{status}",
+    }
+
+
 def reset_external_research_runtime_observation() -> None:
     """Reset process-local observations; intended for isolated tests/startup."""
 
@@ -261,10 +293,33 @@ def external_search_readiness(
     advisory_live = bool(
         enabled and configured and policy_ready and reachability_allows_attempt and not degraded
     )
-    requirement_authority_ready = bool(
+    try:
+        from src.app.services.official_source_governance import source_governance_readiness
+        governance = source_governance_readiness()
+    except Exception:
+        governance = {
+            "operationally_enrolled": False,
+            "valid_source_count": 0,
+            "approved_source_count": 0,
+        }
+    requirements_provider_authority_ready = bool(
         advisory_live and requirements_endpoint and bool(requirements_domains)
         and tenant_enrollment and source_policy_reviewed and requirements_credential
         and publisher_policy and freshness_sla_hours > 0
+    )
+    canonical_source_authority_ready = bool(
+        advisory_live
+        and tenant_enrollment
+        and source_policy_reviewed
+        and governance.get("operationally_enrolled") is True
+        and int(governance.get("operational_source_count") or 0) > 0
+    )
+    # Official direct origins and a credentialed requirements provider are two
+    # separate evidence lanes. Either can establish requirement authority, but
+    # only for sources/claims admitted by its own policy. Pending registry rows
+    # are excluded by ``operational_source_count``.
+    requirement_authority_ready = bool(
+        requirements_provider_authority_ready or canonical_source_authority_ready
     )
     live = bool(advisory_live or requirement_authority_ready)
     if not enabled:
@@ -302,11 +357,6 @@ def external_search_readiness(
             "allowlists, and a positive freshness SLA are required before claims can authorize requirements"
         )
     )
-    try:
-        from src.app.services.official_source_governance import source_governance_readiness
-        governance = source_governance_readiness()
-    except Exception:
-        governance = {"operationally_enrolled": False, "valid_source_count": 0, "approved_source_count": 0}
     return {
         "feature": "external_search",
         "enabled": enabled,
@@ -330,6 +380,8 @@ def external_search_readiness(
         "error_code": error_code,
         "advisory_live": advisory_live,
         "requirement_authority_ready": requirement_authority_ready,
+        "canonical_source_authority_ready": canonical_source_authority_ready,
+        "requirements_provider_authority_ready": requirements_provider_authority_ready,
         "endpoint_configured": endpoint,
         "requirements_endpoint_configured": requirements_endpoint,
         "requirements_domain_allowlist_size": len(requirements_domains),

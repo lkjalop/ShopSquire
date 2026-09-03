@@ -23,10 +23,14 @@ class StubFetcher:
             "http_status": 200,
         }
         return [
-            {"url": "https://vendor.example/blog/opinion", "title": "Opinion"},
+            {
+                "url": "https://vendor.example/blog/opinion", "title": "Opinion",
+                "snippet": "An unrelated opinion article.",
+            },
             {
                 "url": "https://vendor.example/docs/scientific-solver-system-requirements/",
                 "title": "Scientific solver system requirements",
+                "snippet": "Vendor publishes the Scientific Solver requirements here.",
             },
         ]
 
@@ -50,6 +54,9 @@ def test_novel_plan_runs_bounded_discovery_without_fetching_or_claiming_authorit
     }
     assert result["claims"] == []
     assert all(item["authority"] == "not_accepted" for item in result["candidates"])
+    assert result["candidates"][0]["untrusted_discovery_text"] == [
+        "Vendor publishes the Scientific Solver requirements here."
+    ]
     ladder = {row["tier"]: row for row in result["evidence_ladder"]}
     assert ladder[4]["execution_status"] == "completed"
     assert ladder[4]["dispatch_count"] == 3
@@ -148,8 +155,9 @@ def test_open_world_queries_lead_with_named_software_not_buyer_filler():
         for row in plan.discovery_queries[1:]
     )
     assert all("process" not in row.query.lower() for row in plan.discovery_queries)
-    assert plan.discovery_queries[2].query == "Agisoft Metashape system requirements compatibility"
-    assert plan.discovery_queries[0].query.startswith("site:agisoft.com Agisoft Metashape")
+    assert plan.discovery_queries[2].query == "Agisoft Metashape official system requirements"
+    assert plan.discovery_queries[0].query.startswith("Agisoft Metashape")
+    assert "site:" not in plan.discovery_queries[0].query
 
 
 class PublisherHostFetcher(StubFetcher):
@@ -217,6 +225,39 @@ def test_completed_search_with_no_credible_publisher_remains_unresolved():
     assert result["candidates"] == []
     assert result["provider_accounting"]["discovery_calls"] == 3
     assert result["next_action"] == "approve_publisher_origin_or_upload_requirements"
+
+
+class StoreIdentityFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"store-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed",
+            "http_status": 200,
+        }
+        return [{
+            "title": "Where Winds Meet on Steam",
+            "url": "https://store.steampowered.com/app/3564740/Where_Winds_Meet/",
+            "snippet": "Where Winds Meet is published by NetEase Games.",
+        }]
+
+
+def test_exact_store_title_is_retained_for_identity_but_not_promoted_to_origin():
+    plan = build_case_research_plan(
+        "What about Where Winds Meet? Has it been released?", allow_open_world=True,
+    )
+    assert plan is not None
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}",
+        fetcher=StoreIdentityFetcher(),
+    )
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["domain"] == "store.steampowered.com"
+    assert candidate["authority"] == "not_accepted"
+    assert candidate["publisher_ownership_evaluation"]["status"] == (
+        "publisher_ownership_unresolved"
+    )
 
 
 class IntermediaryRequirementsFetcher(StubFetcher):

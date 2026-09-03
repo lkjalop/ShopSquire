@@ -285,20 +285,13 @@ def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnInten
 
 # ── primitives ────────────────────────────────────────────────────────────────
 def _extract_budget(ql: str) -> Tuple[Optional[int], Optional[int], Optional[Tuple[int, int]]]:
-    """(min, max, span) — a range, a ceiling ('under/for 1200'), or a bare '$1200'. span is the char range of
-    the matched budget so callers can exclude those digits from quantity parsing."""
-    rng = re.search(r"[\$€£]?\s*" + _NUM + r"\s*(?:to|-|–|and)\s*[\$€£]?\s*" + _NUM + r"\b", ql)
-    if rng:
-        lo, hi = _to_int(rng.group(1)), _to_int(rng.group(2))
-        if lo is not None and hi is not None and lo < hi:
-            return lo, hi, rng.span()
-    m = re.search(r"\b(?:budget(?:\s+(?:of|is|for))?|under|below|up\s*to|for|around|about|max(?:imum)?)\s*"
-                  r"[\$€£]?\s*" + _NUM + r"\b", ql) or re.search(r"[\$€£]\s*" + _NUM + r"\b", ql)
-    if m:
-        v = _to_int(m.group(1))
-        if v is not None and v >= 50:   # 50+ is a price, not a quantity
-            return None, v, m.span()
-    return None, None, None
+    """Adapt the canonical budget result for quantity-span exclusion."""
+    from src.app.services.budget_grammar import parse_budget
+
+    parsed = parse_budget(ql)
+    if parsed is None:
+        return None, None, None
+    return parsed.budget_min, parsed.budget_max, parsed.source_span
 
 
 def _has_scope_cue_near(ql: str, budget_span: Tuple[int, int]) -> bool:

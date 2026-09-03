@@ -217,7 +217,23 @@ def _source_terms(source: Mapping[str, Any]) -> set[str]:
 
 def _normalized_phrase(value: str) -> str:
     tokens = _TOKEN.findall(_lexical_boundaries(str(value or "").replace("_", " ")).lower())
-    return " ".join(token[:-1] if len(token) > 4 and token.endswith("s") else token for token in tokens)
+    normalized: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if len(tokens[index]) == 1 and tokens[index].isalpha():
+            end = index
+            letters: list[str] = []
+            while end < len(tokens) and len(tokens[end]) == 1 and tokens[end].isalpha():
+                letters.append(tokens[end])
+                end += 1
+            if len(letters) > 1:
+                normalized.append("".join(letters))
+                index = end
+                continue
+        token = tokens[index]
+        normalized.append(token[:-1] if len(token) > 4 and token.endswith("s") else token)
+        index += 1
+    return " ".join(normalized)
 
 
 def _source_phrases(source: Mapping[str, Any]) -> set[str]:
@@ -379,14 +395,25 @@ def build_case_research_plan(
         )]
         material = f"{purpose}|open-world-v1"
         discovery_subject = _discovery_subject(purpose)
-        proper_names, _ = _proper_names(_NEGATED_CLAUSE.sub(" ", purpose))
-        requirements_subject = proper_names[0] if proper_names else discovery_subject
-        publisher_domain_hint = _publisher_domain_hypothesis(proper_names)
-        support_query = (
-            f"site:{publisher_domain_hint} {requirements_subject} documentation requirements"
-            if publisher_domain_hint
-            else f"{requirements_subject} vendor support certification security"
+        sanitized_positive = _NEGATED_CLAUSE.sub(" ", _sanitize_discovery_input(purpose))
+        proper_names, proper_tokens = _proper_names(sanitized_positive)
+        adjacent_acronyms = [
+            item.strip("+.-") for item in _ACRONYM.findall(sanitized_positive)
+            if item.strip("+.-").casefold() not in proper_tokens
+        ]
+        # Keep the named span concise, but do not drop an adjacent acronym or
+        # version token (Factory IO). Broad workload descriptors remain on the
+        # separate concept query instead of diluting the identity query.
+        requirements_subject = (
+            " ".join([proper_names[0], *adjacent_acronyms[:2]])
+            if proper_names else discovery_subject
         )
+        # A product title is not publisher ownership evidence. Inventing
+        # ``<first-word>.com`` here constrained valid unseen-title searches to
+        # unrelated domains (for example Where Winds Meet -> where.com). Keep
+        # deterministic discovery broad; the post-search identity resolver may
+        # only select an origin cited by retrieved candidate rows.
+        support_query = f"{requirements_subject} vendor support certification security"
         return CaseResearchPlan(
             plan_id="crp-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             retained_purpose=purpose,
@@ -409,7 +436,7 @@ def build_case_research_plan(
                 # spending it on broad contextual results.
                 CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=support_query),
                 CaseDiscoveryQuery(query_id="concept", axis="concept_and_software", query=f"{discovery_subject} official documentation"),
-                CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{requirements_subject} system requirements compatibility"),
+                CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{requirements_subject} official system requirements"),
             ],
             obligations=[
                 CaseResearchObligation(

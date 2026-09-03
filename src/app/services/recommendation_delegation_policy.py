@@ -27,9 +27,32 @@ def v2_only_unavailable_response(
     trace_id: str,
     query: str = "",
     external_research_authorized: bool = False,
+    facts: Optional[Dict[str, Any]] = None,
+    semantic_status: Optional[Dict[str, Any]] = None,
+    execution_evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return an honest no-action response; never fabricate products or execution."""
-    if status == "degraded":
+    evidence = dict(execution_evidence or {})
+    normalized_reason = str(reason or status or "recommendation_unavailable").strip()
+    evidence_failure = str(evidence.get("failure_code") or "").strip()
+    terminal_failure = (
+        evidence_failure
+        if evidence_failure.startswith("model_execution_")
+        else normalized_reason
+        if normalized_reason.startswith("model_execution_")
+        else "recommendation_core_unavailable"
+    )
+    if terminal_failure == "model_execution_timeout":
+        message = (
+            "The interpretation model timed out inside this turn's governed deadline. "
+            "I did not qualify products or change anything; the deterministic evidence path remains available."
+        )
+    elif terminal_failure.startswith("model_execution_"):
+        message = (
+            "The interpretation model was unavailable for this turn. I did not qualify products "
+            "or change anything; the deterministic evidence path remains available."
+        )
+    elif status == "degraded":
         message = (
             "I could not verify a recommendation from the catalog on this turn. "
             "Nothing was changed or submitted; please retry."
@@ -44,7 +67,6 @@ def v2_only_unavailable_response(
             "This pilot could not safely complete that request. "
             "Nothing was changed or submitted."
         )
-    normalized_reason = str(reason or status or "recommendation_unavailable").strip()
     lowered_reason = normalized_reason.lower()
     model_status = (
         "timeout"
@@ -91,6 +113,7 @@ def v2_only_unavailable_response(
             ),
         ),
     )
+    operation_id = str(evidence.get("operation_id") or trace_id or "") or None
     return {
         "assistant_message": message,
         "products": [],
@@ -98,19 +121,26 @@ def v2_only_unavailable_response(
         "next_questions": [],
         "decision_trace_id": trace_id or None,
         "trace_id": trace_id or None,
+        "operation_id": operation_id,
+        "case_id": None,
+        "case_revision": None,
+        "research_run_id": None,
         "execution_mode": "v2_unavailable",
         "execution_lane": lane,
         "delegation_reason": normalized_reason,
         "degraded": status in {"degraded", "error"},
         "action_executed": False,
+        "canonical_facts": dict(facts or {}),
+        "semantic_status": dict(semantic_status or {"status": "not_evaluated"}),
+        "execution_evidence": evidence,
         "semantic_resolution": {
             "outcome": "unresolved",
             "catalog_authority": "blocked",
-            "reason": "recommendation_core_unavailable",
+            "reason": terminal_failure,
         },
         "workload_authorization": {
             "status": "blocked",
-            "reason": "recommendation_core_unavailable",
+            "reason": terminal_failure,
             "state_prevented": [
                 "catalog_qualification",
                 "buyer_commitment",

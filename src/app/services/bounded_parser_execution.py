@@ -29,7 +29,10 @@ class ParserBudget:
     def normalized(self) -> "ParserBudget":
         return ParserBudget(
             max_input_bytes=max(1, min(int(self.max_input_bytes), 8 * 1024 * 1024)),
-            timeout_ms=max(10, min(int(self.timeout_ms), 10_000)),
+            # Typed model extraction is a parser implementation too. Keep the
+            # default short, but permit a caller to budget the measured model
+            # stage without a hidden 10-second clamp silently overriding it.
+            timeout_ms=max(10, min(int(self.timeout_ms), 30_000)),
             max_claims=max(1, min(int(self.max_claims), 1_024)),
         )
 

@@ -33,6 +33,7 @@ from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
+from src.app.services.infrastructure_alternative_projection import project_for_unresolved_form_factor
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +64,24 @@ def _request_tenant_id(request: Request | None) -> str:
     return str(current_tenant_id() or "default")
 
 
-def _chat_in_progress(*, idempotency_key: str = "") -> Dict[str, Any]:
+def _chat_in_progress(
+    *, idempotency_key: str = "", execution_progress: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     operation_key = str(idempotency_key or "")[:128] or None
     return {
         "status": "in_progress",
         "schema_version": "completed-turn-envelope.v1",
         "retryable": True,
-        "retry_after_ms": 750,
+        "retry_after_ms": 2000,
         "idempotency_key": operation_key,
         "operation_id": f"chat:{operation_key}" if operation_key else None,
+        "recommendation_status": "pending",
+        "research_status": "pending",
+        "catalog_authority": "blocked_pending_completion",
+        "commerce_authority": "none",
+        "products": [],
+        "action_executed": False,
+        "execution_progress": dict(execution_progress or {}),
         "retrieval": {
             "method": "POST",
             "path": "/api/v1/chat/query",
@@ -81,6 +91,48 @@ def _chat_in_progress(*, idempotency_key: str = "") -> Dict[str, Any]:
             "I’m still working on that request. Retrying with the same "
             "request key will return the completed result without running it twice."
         ),
+    }
+
+
+def _chat_operation_failed(
+    *, idempotency_key: str = "", exc: Exception | None = None,
+) -> Dict[str, Any]:
+    """Fail closed when a retained operation dies after its initial ACK."""
+    operation_key = str(idempotency_key or "")[:128] or None
+    operation_id = f"chat:{operation_key}" if operation_key else None
+    failure_code = (
+        "chat_operation_deadline_exceeded"
+        if isinstance(exc, asyncio.TimeoutError) else "chat_operation_failed"
+    )
+    terminal = {
+        "operation_id": operation_id,
+        "case_id": None,
+        "case_revision": None,
+        "recommendation_status": "failed",
+        "research_status": "failed",
+        "catalog_authority": "blocked",
+        "commerce_authority": "none",
+        "product_shelves": [],
+        "failure_code": failure_code,
+    }
+    return {
+        "status": "failed",
+        "schema_version": "completed-turn-envelope.v1",
+        "assistant_message": (
+            "This request could not complete within its governed execution path. "
+            "No recommendation or commercial action was authorized."
+        ),
+        **terminal,
+        "products": [],
+        "action_executed": False,
+        "execution_evidence": {
+            "component": "chat_operation",
+            "status": "failed",
+            "failure_code": failure_code,
+            "fallback_used": False,
+            "operation_id": operation_id,
+        },
+        "terminal_outcome": terminal,
     }
 
 
@@ -101,6 +153,22 @@ def _chat_request_timeout_seconds() -> float:
     except (TypeError, ValueError):
         configured = 30.0
     return max(0.1, min(configured, 120.0))
+
+
+def _automatic_research_timeout_seconds() -> float:
+    """Return the deadline for the complete governed research pipeline.
+
+    Discovery, identity resolution, official-origin fetch and typed extraction
+    each have smaller internal limits. The former hard-coded 20 second wrapper
+    was shorter than their valid serial critical path and cancelled successful
+    work after the official page had already been fetched.
+    """
+
+    try:
+        configured = float(os.getenv("AUTOMATIC_RESEARCH_TIMEOUT_SEC", "45") or 45)
+    except (TypeError, ValueError):
+        configured = 45.0
+    return max(10.0, min(configured, 120.0))
 
 
 def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
@@ -911,6 +979,9 @@ async def _idem_single_flight(
     return await idempotent_single_flight(
         redis, key, producer, wait_timeout_seconds=wait_timeout_seconds,
         in_progress_factory=lambda idem_key: _chat_in_progress(idempotency_key=idem_key),
+        error_factory=lambda idem_key, exc: _chat_operation_failed(
+            idempotency_key=idem_key, exc=exc,
+        ),
         logger=logger,
     )
 
@@ -952,29 +1023,60 @@ async def chat_query(
     async def _run() -> Dict[str, Any]:
         if not idem or redis is None:
             return await _chat_query_impl(request, payload, redis, db, role)
+        # The retrievable producer outlives the initiating HTTP request, so it
+        # must own its database session.  Using the dependency-scoped session
+        # here allowed teardown to race the abandoned worker thread.
+        from src.app.models.db import get_db_for_request
+        operation_db_context = get_db_for_request(request)
+        operation_db = next(operation_db_context)
         try:
-            configured_wait = float(
-                os.getenv("CHAT_SINGLE_FLIGHT_WAIT_SEC", "2") or 2,
+            try:
+                configured_wait = float(
+                    os.getenv("CHAT_SINGLE_FLIGHT_WAIT_SEC", "2") or 2,
+                )
+            except (TypeError, ValueError):
+                configured_wait = 2.0
+            wait_budget = min(
+                max(0.05, _chat_request_timeout_seconds() - 0.1),
+                max(0.05, configured_wait),
             )
-        except (TypeError, ValueError):
-            configured_wait = 2.0
-        wait_budget = min(
-            max(0.05, _chat_request_timeout_seconds() - 0.1),
-            max(0.05, configured_wait),
-        )
-        return await _idem_single_flight(
-            redis,
-            _chat_idempotency_cache_key(
+            return await _idem_single_flight(
+                redis,
+                _chat_idempotency_cache_key(
+                    tenant_id=transport_tenant,
+                    uid=transport_uid,
+                    session_id=transport_session,
+                    idempotency_key=str(idem),
+                ),
+                lambda: _chat_query_impl(request, payload, redis, operation_db, role),
+                wait_timeout_seconds=wait_budget,
+            )
+        finally:
+            operation_db_context.close()
+
+    try:
+        if idem and redis is not None:
+            from src.app.services.chat_transport import retained_operation_task
+            operation_key = _chat_idempotency_cache_key(
                 tenant_id=transport_tenant,
                 uid=transport_uid,
                 session_id=transport_session,
                 idempotency_key=str(idem),
-            ),
-            lambda: _chat_query_impl(request, payload, redis, db, role),
-            wait_timeout_seconds=wait_budget,
-        )
-
-    try:
+            )
+            operation, created = retained_operation_task(operation_key, _run)
+            if not created:
+                # Pollers must receive a quick operation receipt. Waiting on the
+                # same task here can exceed the browser's per-poll transport
+                # deadline even though the producer itself is healthy.
+                from src.app.services.chat_transport import retained_operation_progress
+                return _chat_in_progress(
+                    idempotency_key=str(idem),
+                    execution_progress=retained_operation_progress(operation_key),
+                )
+            return await asyncio.wait_for(
+                asyncio.shield(operation),
+                timeout=_chat_request_timeout_seconds(),
+            )
         return await asyncio.wait_for(
             _run(),
             timeout=_chat_request_timeout_seconds(),
@@ -2906,6 +3008,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             buyer_persona=data.get("buyer_persona"),
             brand_name=None,
             bulk_budget=data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
+            canonical_budget=data.get("canonical_budget") if isinstance(data.get("canonical_budget"), dict) else None,
         )
     assistant_message = aq_out.get("assistant_message")
     # N6 prose citations, re-applied on the /chat path: recommend.suggest appends a "_Sources:_" line,
@@ -3166,6 +3269,47 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         use_case_analysis=use_case_analysis,
         anchor_sections=anchor_sections,
     )
+    if isinstance(_right_panel_contract, dict):
+        # The panel is a projection of the completed turn, including an empty
+        # or held slate. Never make commercial truth conditional on products
+        # being present: that hid role/budget exactly on over-budget shortfalls.
+        _right_panel_contract["canonical_budget"] = (
+            data.get("canonical_budget")
+            if isinstance(data.get("canonical_budget"), dict) else None
+        )
+        _right_panel_contract["commercial_terms"] = (
+            data.get("commercial_terms")
+            if isinstance(data.get("commercial_terms"), dict) else {}
+        )
+        _right_panel_contract["subject_role"] = data.get("subject_role")
+        _right_panel_contract["subject_role_status"] = (
+            (data.get("semantic_status") or {}).get("status")
+            if isinstance(data.get("semantic_status"), dict) else "not_evaluated"
+        )
+        _right_panel_contract["bulk_budget"] = (
+            data.get("bulk_budget")
+            if isinstance(data.get("bulk_budget"), dict) else None
+        )
+    _architecture_projection = project_for_unresolved_form_factor(
+        subject_role=(str(data.get("subject_role") or "") or None),
+        desired_outcome=str(
+            ((data.get("canonical_facts") or {}).get("desired_outcome")
+             if isinstance(data.get("canonical_facts"), dict) else "")
+            or q
+        ),
+        constraints=constraints_used,
+        unresolved_inputs=list(data.get("next_questions") or [])[:8],
+        workload_context=bool(
+            data.get("workload_authorization")
+            or data.get("workload_fit")
+        ),
+    )
+    _architecture_alternatives = (
+        _architecture_projection.model_dump(mode="json")
+        if _architecture_projection is not None else None
+    )
+    if isinstance(_right_panel_contract, dict) and _architecture_alternatives is not None:
+        _right_panel_contract["architecture_alternatives"] = _architecture_alternatives
     try:
         if isinstance(_right_panel_contract, dict):
             _right_panel_contract["image_untrusted"] = bool(image_security_posture.get("image_untrusted"))
@@ -3314,6 +3458,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     subject_switch_receipt: Dict[str, Any] | None = None
     active_case_subject_replaced = bool(
         active_shopping_case_id
+        and not additive_workload_receipt
         and (
             named_workload_replacement
             or deterministic_workload_replacement
@@ -3392,10 +3537,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         semantic_catalog_blocked
         and data.get("requested_quantity") is None
         and not same_case_commercial_interruption
+        and not active_case_subject_replaced
     ):
-        # Accepted commercial state belongs to the suspended prior subject. Do not project
-        # its quantity/budget into a new unresolved subject: the storefront uses these fields
-        # to pin procurement panels and trace identity to the current turn.
+        # An unresolved continuation cannot silently inherit commercial state.
+        # A confirmed subject replacement is different: budget, currency and
+        # quantity are genuine shared procurement constraints and the subject
+        # boundary already cleared only workload evidence and authority.
         for key in (
             "order_quantity", "budget_scope", "total_budget_cents",
             "budget_min", "budget_max",
@@ -3909,7 +4056,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # subsequent quantity, deadline, selection, swap, or supplier turns amend
     # this purpose instead of floating as unrelated chat prose. Ambiguity and
     # research projections remain separate and retain their stricter contract.
-    if not active_shopping_case_id and products:
+    if not active_shopping_case_id and (products or bool(data.get("off_catalog"))):
         try:
             from datetime import datetime, timezone
             import uuid as _uuid
@@ -4133,6 +4280,130 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             products = []
             ambiguous_product_shelves = None
 
+    # Automatic research is a server-owned turn operation.  The browser may
+    # render progress and explicit retry controls, but it must not decide
+    # whether a case is researched or race a second request against case
+    # creation.  Run only after the revision-bound case and plan receipt exist.
+    server_research_result: Dict[str, Any] | None = None
+    server_research_failure: Dict[str, Any] | None = None
+    source_allows_followup_discovery = not submitted_source_url
+    if submitted_source_url and source_intake_result:
+        from src.app.services.buyer_evidence_source_resolution import (
+            source_resolution_allows_discovery,
+        )
+
+        source_allows_followup_discovery = source_resolution_allows_discovery(
+            source_intake_result.get("resolution") or source_intake_result,
+        )
+    if (
+        source_allows_followup_discovery
+        and turn_policy_research_authorized
+        and ambiguity_exploration is not None
+        and active_shopping_case_id
+        and _case_research_plan is not None
+        and str(ambiguity_exploration.get("status") or "") == "provisional"
+    ):
+        try:
+            import uuid as _uuid
+            from src.app.routers.shopping_cases import (
+                ResearchShoppingCaseRequest,
+                _research_shopping_case_with_db,
+            )
+
+            operation_id = "auto-" + _uuid.uuid4().hex[:24]
+            research_request = ResearchShoppingCaseRequest(
+                uid=str(uid or "guest")[:200],
+                budget_cents=(
+                    int(float(response_confirmed_slots.get("budget_max")) * 100)
+                    if response_confirmed_slots.get("budget_max") is not None else None
+                ),
+                research_plan_id=_case_research_plan.plan_id,
+                ambiguity_object_ids=[
+                    row.ambiguity_id for row in _case_research_plan.ambiguities
+                ],
+                hypothesis_ids=[
+                    row.hypothesis_id for row in _case_research_plan.hypotheses
+                ],
+                research_authorized=True,
+                authorization_basis="tenant_policy",
+                execution_id=operation_id,
+                decision_trace_id=decision_trace_id,
+                workload_kind_hints=list(dict.fromkeys(
+                    str(item.get("kind") or "").strip().lower()
+                    for item in list(
+                        (
+                            data.get("decision", {}).get("workload_entities")
+                            if isinstance(data.get("decision"), dict) else []
+                        ) or []
+                    )[:3]
+                    if isinstance(item, dict)
+                    and str(item.get("kind") or "").strip().lower()
+                    in {"game", "software"}
+                )),
+            )
+            server_research_result = await asyncio.wait_for(
+                _research_shopping_case_with_db(
+                    active_shopping_case_id,
+                    research_request,
+                    x_tenant_id=tenant_id,
+                    db=db,
+                ),
+                timeout=_automatic_research_timeout_seconds(),
+            )
+            if isinstance(server_research_result.get("ambiguity_exploration"), dict):
+                ambiguity_exploration = server_research_result["ambiguity_exploration"]
+                ambiguity_exploration["case_id"] = active_shopping_case_id
+                ambiguity_exploration["trace_id"] = decision_trace_id
+            if isinstance(server_research_result.get("product_shelves"), dict):
+                ambiguous_product_shelves = server_research_result["product_shelves"]
+            if isinstance(server_research_result.get("workload_authorization"), dict):
+                # Discovery may resolve a cited identity after the core has
+                # already blocked missing requirements. Preserve that newer
+                # identity while retaining the fail-closed authorization.
+                data["workload_authorization"] = dict(
+                    server_research_result["workload_authorization"]
+                )
+                _workload_authorization = data["workload_authorization"]
+                if str(_workload_authorization.get("status") or "").lower() == "resolved":
+                    _workload_requirements_established = True
+                    _workload_material_blocked = False
+                    semantic_catalog_blocked = False
+            research_status = str(server_research_result.get("status") or "completed")
+            candidate_count = len(
+                list((server_research_result.get("research") or {}).get("candidates") or [])
+            )
+            assistant_message = (
+                f"Approved external research completed for this case and found {candidate_count} "
+                "candidate publisher source(s). Review the ranked ownership evidence before "
+                "approving a source; no product, cart, RFQ, or supplier action was authorized."
+                if research_status == "publisher_resolution_required"
+                else str(server_research_result.get("assistant_message") or assistant_message)
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            code = (
+                str(detail.get("code"))
+                if isinstance(detail, dict) and detail.get("code")
+                else "research_deadline_exceeded"
+                if exc.__class__.__name__ == "TimeoutError"
+                else "server_research_failed"
+            )
+            server_research_failure = {
+                "status": "failed",
+                "failure_code": code,
+                "message": (
+                    str(detail.get("message"))
+                    if isinstance(detail, dict) and detail.get("message")
+                    else "Automatic external research did not complete within its governed boundary."
+                ),
+                "catalog_authority": "blocked",
+                "commerce_authority": "none",
+                "deadline_ms": round(_automatic_research_timeout_seconds() * 1000),
+            }
+            ambiguity_exploration["status"] = "research_failed"
+            ambiguity_exploration["research_failure"] = server_research_failure
+            logger.warning("server-owned automatic research failed: %s", repr(exc)[:200])
+
     # Provider-grounded workload evidence must shape the buyer-facing answer,
     # not merely the hidden fit predicates.  Keep this source-neutral: any
     # enrolled provider can supply the same identity/release/requirements
@@ -4231,6 +4502,33 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 f"\n\nIntent interpreted by {_model_name}; answer grounded by provider evidence and deterministic policy."
             )
 
+    active_case_revision = None
+    if active_shopping_case_id:
+        try:
+            from src.app.services.shopping_case_revision import canonical_case_revision
+            active_case_revision = canonical_case_revision(
+                db, tenant_id=tenant_id, case_id=active_shopping_case_id, fallback=1,
+            )
+        except Exception:
+            active_case_revision = 1
+
+    if _architecture_alternatives is None and server_research_result:
+        _late_architecture_projection = project_for_unresolved_form_factor(
+            subject_role=(str(data.get("subject_role") or "") or None),
+            desired_outcome=str(
+                ((data.get("canonical_facts") or {}).get("desired_outcome")
+                 if isinstance(data.get("canonical_facts"), dict) else "")
+                or q
+            ),
+            constraints=constraints_used,
+            unresolved_inputs=list(data.get("next_questions") or [])[:8],
+            workload_context=True,
+        )
+        if _late_architecture_projection is not None:
+            _architecture_alternatives = _late_architecture_projection.model_dump(mode="json")
+            if isinstance(_right_panel_contract, dict):
+                _right_panel_contract["architecture_alternatives"] = _architecture_alternatives
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -4248,7 +4546,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "case_additive_workload": additive_workload_receipt,
         "shopping_case_revision": (
             durable_interpretation_job.get("case_revision")
-            if durable_interpretation_job else None
+            if durable_interpretation_job else active_case_revision
         ),
         "interpretation_job": durable_interpretation_job,
         "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
@@ -4258,6 +4556,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "confirmed_slots": response_slots_for_output,
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
+        "model_invocation": (
+            data.get("model_invocation")
+            if isinstance(data.get("model_invocation"), dict) else None
+        ),
+        "router_outcome": (
+            data.get("router_outcome")
+            if isinstance(data.get("router_outcome"), dict) else None
+        ),
         "response_provenance": (
             data.get("response_provenance")
             if isinstance(data.get("response_provenance"), dict) else None
@@ -4266,6 +4572,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
         "decision": routed_decision,
+        # One typed truth shared by chat, the revision-bound panel and Decision
+        # Trace. These values came from the canonical turn envelope; the chat
+        # edge must not reparse the buyer's words.
+        "canonical_budget": (
+            data.get("canonical_budget")
+            if isinstance(data.get("canonical_budget"), dict) else None
+        ),
+        "commercial_terms": (
+            data.get("commercial_terms")
+            if isinstance(data.get("commercial_terms"), dict) else {}
+        ),
+        "subject_role": data.get("subject_role"),
+        "subject_role_status": (
+            (data.get("semantic_status") or {}).get("status")
+            if isinstance(data.get("semantic_status"), dict) else "not_evaluated"
+        ),
         "clarification_relation": routed_clarification_relation,
         # Preserve typed facade ownership at the HTTP/SSE edge. Without these fields the
         # browser and trace cannot prove whether V2 served, legacy delegated, or the request
@@ -4319,7 +4641,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # W3/W4 forward-through (2026-07-08): the off-catalog verdict and workload fit verdicts
         # are computed in recommend.suggest — without forwarding, the frontend (which hits
         # /chat/query, not /suggest) loses the comparison AGAIN.
-        "off_catalog": data.get("off_catalog"),
+        "off_catalog": (
+            {
+                **data.get("off_catalog"),
+                "shopping_case_id": active_shopping_case_id,
+                "case_revision": active_case_revision,
+                "trace_id": decision_trace_id,
+                "subject_role": data.get("subject_role"),
+                "commercial_terms": data.get("commercial_terms") or {},
+            }
+            if isinstance(data.get("off_catalog"), dict) else None
+        ),
         "workload_fit": data.get("workload_fit"),
         "semantic_resolution": (
             data.get("semantic_resolution")
@@ -4396,6 +4728,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("sourcing_intent") if isinstance(data.get("sourcing_intent"), dict) else None
         ),
         "right_panel": _right_panel_contract,
+        "architecture_alternatives": _architecture_alternatives,
         "copywriting": copy_meta,
         "security_risk": bool(image_security_posture.get("security_risk")),
         "analysis_degraded": bool(image_security_posture.get("analysis_degraded")),
@@ -4419,6 +4752,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "subject_switch_boundary": subject_switch_receipt,
         "buyer_evidence_source_resolution": source_intake_result,
         "research_policy": turn_research_policy,
+        "research_orchestration_owner": "backend",
+        "server_research_result": server_research_result,
+        "server_research_failure": server_research_failure,
     }
     # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
     # disabled is part of the API contract; emitting null makes clients and audits infer an
@@ -4786,7 +5122,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             material_blocked=bool(
                                 semantic_catalog_blocked or additive_workload_receipt
                             ),
-                            has_products=bool(products),
+                            has_products=bool(products) or any(
+                                bool((shelf or {}).get("initial"))
+                                for shelf in list(
+                                    (ambiguous_product_shelves or {}).get("shelves") or []
+                                )
+                                if isinstance(shelf, dict)
+                            ),
                             requirements_established=_workload_requirements_established,
                         )
                         shared_constraints: dict[str, Any] = {}
@@ -4834,6 +5176,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     (subject_switch_receipt or {}).get("cleared_fields") or []
                                 ),
                                 shared_constraints=shared_constraints,
+                                canonical_budget=(
+                                    out.get("canonical_budget")
+                                    if isinstance(out.get("canonical_budget"), dict) else None
+                                ),
+                                commercial_terms=(
+                                    out.get("commercial_terms")
+                                    if isinstance(out.get("commercial_terms"), dict) else {}
+                                ),
+                                subject_role=(
+                                    str(out.get("subject_role"))
+                                    if str(out.get("subject_role") or "") in {
+                                        "PROCURE_SUBJECT", "RUN_SUBJECT_ON_PRODUCT",
+                                        "COMPATIBILITY_CHECK", "ADJACENT_PRODUCT", "UNRESOLVED",
+                                    }
+                                    else "UNRESOLVED"
+                                ),
                                 case_patches=(
                                     list(case_patches)
                                     if preflight_application is None and isinstance(case_patches, list)
@@ -4853,6 +5211,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     "ambiguity_exploration": ambiguity_exploration,
                                     "source_resolution": source_intake_result,
                                     "workload_authorization": out.get("workload_authorization"),
+                                    # Every acquisition path is rebound into
+                                    # this one revision-bound research tree.
+                                    # The read-model reducer, panel, and trace
+                                    # consume it instead of rebuilding local
+                                    # versions of research truth.
+                                    "case_research": (
+                                        server_research_result
+                                        if isinstance(server_research_result, dict)
+                                        else None
+                                    ),
                                 },
                                 source_intake_receipts=source_receipts,
                                 requirements=RequirementCommit(
@@ -4881,6 +5249,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             )
                         out["case_revision"] = out["case_memory"].get("version")
                         out["shopping_case_revision"] = out["case_memory"].get("version")
+                        if isinstance(out.get("off_catalog"), dict):
+                            # The commercial action is revision-bound. The
+                            # atomic turn commit advances the case once, so the
+                            # proposal created earlier in this function must be
+                            # rebound to the committed revision before it is
+                            # exposed to the buyer.
+                            out["off_catalog"]["case_revision"] = out["case_memory"].get("version")
                         turn_commit_succeeded = True
                 except Exception as case_state_exc:
                     logger.error(
@@ -4932,6 +5307,114 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             db.rollback()
         except Exception:
             pass
+    # Publish one revision-bound terminal read model for every chat exit.  The
+    # browser may render progress while this turn runs, but it must install
+    # research shelves and trace identity only from this completed contract.
+    # Prefer the outcome rebuilt by the atomic case commit.  The research
+    # service result is bound to the revision on which network work started;
+    # exposing it after the terminal commit produced a nested stale revision.
+    # The committed read model contains the same receipts rebound to the one
+    # buyer-visible terminal revision.  Only non-persisted turns fall back to
+    # the service projection.
+    _research_outcome = (
+        out.get("research_outcome")
+        if isinstance(out.get("research_outcome"), dict) else None
+    )
+    if not isinstance(_research_outcome, dict):
+        _research_outcome = (
+            (server_research_result or {}).get("research_outcome")
+            if isinstance(server_research_result, dict) else {}
+        )
+    if isinstance(out.get("server_research_result"), dict) and _research_outcome:
+        out["server_research_result"] = {
+            **out["server_research_result"],
+            "research_outcome": dict(_research_outcome),
+        }
+    _research_run = (
+        (server_research_result or {}).get("research")
+        if isinstance(server_research_result, dict) else None
+    )
+    _research_run_id = (
+        str((_research_run or {}).get("run_id") or "").strip() or None
+        if isinstance(_research_run, dict) else None
+    )
+    _operation_id = f"chat:{params_case_patch_idempotency_key}"
+    _case_revision = int(out.get("shopping_case_revision") or 1)
+    out.update({
+        "operation_id": _operation_id,
+        "case_id": active_shopping_case_id or None,
+        "case_revision": _case_revision,
+        "research_run_id": _research_run_id,
+    })
+    _terminal_shelf_count = sum(
+        len(list(shelf.get("initial") or []))
+        for shelf in list((out.get("product_shelves") or {}).get("shelves") or [])
+        if isinstance(shelf, dict)
+    ) if isinstance(out.get("product_shelves"), dict) else 0
+    _terminal_research_resolved = str(
+        (server_research_result or {}).get("status") or ""
+    ) == "requirements_resolved"
+    out["terminal_outcome"] = {
+        "schema_version": "turn-terminal-outcome-v1",
+        "operation_id": _operation_id,
+        "decision_trace_id": decision_trace_id,
+        "case_id": active_shopping_case_id or None,
+        "case_revision": _case_revision,
+        "research_run_id": _research_run_id,
+        "recommendation_status": (
+            "qualified" if products or _terminal_shelf_count else
+            "blocked" if server_research_failure else
+            "held" if _research_outcome else "completed"
+        ),
+        "research_status": (
+            str((server_research_result or {}).get("status") or "") or
+            str((ambiguity_exploration or {}).get("status") or "not_applicable")
+        ),
+        "canonical_facts": (
+            data.get("canonical_facts")
+            if isinstance(data.get("canonical_facts"), dict) else {}
+        ),
+        "semantic_status": (
+            data.get("semantic_status")
+            if isinstance(data.get("semantic_status"), dict)
+            else {"status": "not_evaluated"}
+        ),
+        "catalog_authority": str(
+            _research_outcome.get("catalog_authority")
+            or ((out.get("turn_read_model") or {}).get("catalog_authority")
+                if isinstance(out.get("turn_read_model"), dict) else "")
+            or "unknown"
+        ),
+        "commerce_authority": str(
+            _research_outcome.get("commerce_authority") or "none"
+        ),
+        "research_outcome": _research_outcome or None,
+        "products": list(products or []),
+        "right_panel": out.get("right_panel"),
+        "architecture_alternatives": out.get("architecture_alternatives"),
+        "slate_disposition": (
+            "clear" if (
+                server_research_failure
+                or str(_research_outcome.get("catalog_authority") or "") == "blocked"
+                or (ambiguity_exploration is not None and not _terminal_research_resolved)
+            ) else str(out.get("slate_disposition") or "replace")
+        ),
+        "next_questions": (
+            [ambiguity_exploration.get("next_question")]
+            if isinstance(ambiguity_exploration, dict)
+            and isinstance(ambiguity_exploration.get("next_question"), dict)
+            else list(out.get("next_questions") or [])
+        ),
+        "product_shelves": (
+            out.get("product_shelves")
+            if isinstance(out.get("product_shelves"), dict) else None
+        ),
+        "assistant_message": str(out.get("assistant_message") or ""),
+        "execution_evidence": (
+            data.get("execution_evidence")
+            if isinstance(data.get("execution_evidence"), dict) else {}
+        ),
+    }
     if persist_conversation:
         from src.app.services.chat_persistence import persist_chat_result
 

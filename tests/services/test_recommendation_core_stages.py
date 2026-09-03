@@ -137,7 +137,7 @@ def test_bulk_economics_never_prices_an_unknown_candidate_as_capable(db):
     )
 
     assert response.fit_summary["meets"] == 0
-    assert response.extras["bulk"]["floor_cents"] == 209_900
+    assert response.extras["bulk"]["qualified_unit_floor_cents"] == 209_900
     assert response.extras["bulk"]["verdict"] == "over_budget"
 
 

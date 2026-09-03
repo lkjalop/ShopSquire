@@ -41,7 +41,7 @@ from src.app.services.recommendation_core.turn_router import (
     TurnDecision,
     active_router_model,
     last_router_call_metrics,
-    route_turn,
+    route_turn_outcome,
 )
 from src.app.services.taxonomy_registry import (
     ancestors,
@@ -317,12 +317,13 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             0.05,
             min(router_timeout, envelope.cancellation.remaining_seconds),
         )
-    decision = route_turn(
+    turn_outcome = route_turn_outcome(
         db,
         envelope,
         llm_fn=llm_fn,
         timeout=router_timeout,
     )
+    decision = turn_outcome.decision
     if envelope.cancellation is not None:
         envelope.cancellation.raise_if_cancelled()
     # Monetary changes require buyer-supplied evidence. A BYO router may propose a number
@@ -765,7 +766,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             key: model_metrics.get(key)
             for key in (
                 "provider", "model", "model_version", "prompt_version", "policy_version",
-                "outcome", "wall_ms", "queue_ms",
+                "outcome", "wall_ms", "queue_ms", "scheduler_role", "scheduler_priority",
+                "scheduler_status", "scheduler_failure_code", "scheduler_queue_ms",
+                "scheduler_execution_ms", "scheduler_deadline_ms", "scheduler_cancelled",
             )
             if model_metrics.get(key) is not None
         }
@@ -2131,15 +2134,17 @@ def _bundle_floor(db, envelope: TurnEnvelope, decision: TurnDecision, vertical: 
 
 
 def _bulk_message(econ: Dict[str, Any], decision: TurnDecision) -> str:
-    q, floor, total = econ["quantity"], econ["floor_cents"], econ.get("total_cents")
+    q = econ["quantity"]
+    floor = econ["qualified_unit_floor_cents"]
+    total = econ.get("total_budget_cents")
     uc = (list(getattr(decision, "use_cases", None) or ["your use case"]))[0].replace("_", " ")
     if econ["verdict"] == "unsized":
         return (f"For {q} units for {uc}, the per-unit floor is ${floor / 100:,.0f} — about "
-                f"${econ['needed_cents'] / 100:,.0f} total. Tell me your budget and I'll size it.")
+                f"${econ['required_total_cents'] / 100:,.0f} total. Tell me your budget and I'll size it.")
     if econ["verdict"] == "fits":
         return (f"Good news — {q} units for {uc} fit your ${total / 100:,.0f}: about "
-                f"${econ['needed_cents'] / 100:,.0f} total at ${floor / 100:,.0f} each.")
-    parts = [f"{q} units for {uc} need about ${econ['needed_cents'] / 100:,.0f} "
+                f"${econ['required_total_cents'] / 100:,.0f} total at ${floor / 100:,.0f} each.")
+    parts = [f"{q} units for {uc} need about ${econ['required_total_cents'] / 100:,.0f} "
              f"(${floor / 100:,.0f} each), over your ${total / 100:,.0f}. Options:"]
     parts += ["• " + t["label"] for t in econ["tradeoffs"]]
     return " ".join(parts)
@@ -2172,7 +2177,12 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     plan), reusing the capability floor and the complement bundle. Strips `count` from the fit
     requirements (a quantity signal, not a per-product predicate). Never blocks; degrades silently
     if it can't size. Fires whenever a quantity ≥ 2 is detected (bulk), any lane."""
-    if resp.off_catalog or resp.degraded or not decision.node_handle:
+    # Router-model degradation does not invalidate deterministic catalog facts.
+    # A bounded fallback can still establish an explicit sold product category,
+    # quantity, budget scope and prices.  Suppressing economics merely because
+    # the optional semantic proposal failed caused live bulk turns to lose their
+    # shortfall math even while ten products were displayed.
+    if resp.off_catalog or not decision.node_handle:
         return
     quantity = resp.extras.get("requested_quantity")   # count stripped upstream (never in fit reqs)
     if not quantity or quantity < 2:
@@ -2186,8 +2196,6 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     if not variants:
         return
     floor = build_cards(variants, reqs or None, limit=1)[1].get("capability_floor_cents")
-    if not floor:
-        return
     # Buyer-facing order math must price something the buyer can actually select.  The
     # capability floor may come from an unshown product outside a stated lower budget bound
     # (for example $629 while the visible slate starts at $1,599), which made the total both
@@ -2200,10 +2208,30 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
         # Unknown means the catalog lacks enough evidence to authorize this workload. It may
         # appear in a clearly labeled nearest-fit tier, but must never become the financial
         # capability floor or turn an unsuitable bulk order into a false "fits" verdict.
-        and str((card.fit or {}).get("overall") or "unknown") == "meets"
+        and (
+            str((card.fit or {}).get("overall") or "unknown") == "meets"
+            # With no workload/fit claim, a displayed catalog price is still
+            # authoritative order arithmetic. It is not a verified workload
+            # capability floor and must never be labelled as one.
+            or (not reqs and not decision.workload_entities)
+        )
     ]
     if shown_prices:
         floor = min(shown_prices)
+    if not floor and not reqs and not decision.workload_entities:
+        # An underfunded order can legitimately produce an empty in-budget
+        # slate.  Shortfall math must still use exact prices from the same
+        # tenant/catalog scope gathered above, otherwise the most important
+        # commercial outcome disappears precisely when nothing fits.
+        catalog_prices = [
+            int(getattr(item, "price_cents", 0) or 0)
+            for item in variants
+            if int(getattr(item, "price_cents", 0) or 0) > 0
+        ]
+        if catalog_prices:
+            floor = min(catalog_prices)
+    if not floor:
+        return
     vertical = _vertical_name(decision.node_handle)
     total, scope_ambiguous = _resolve_bulk_total(decision, envelope, quantity)   # P0: scope-safe
     # Bundle discovery is an optional upsell leg.  Missing companion/supplier tables must not
@@ -2216,11 +2244,18 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     econ = assess_bulk(quantity, total, floor, bundle_floor_cents=bundle_floor)
     if not econ:
         return
-    resp.extras["bulk"] = econ
+    from src.app.services.order_economics import OrderEconomics
+
+    canonical_econ = OrderEconomics.from_assessment(
+        econ,
+        budget_scope=("unknown" if scope_ambiguous else decision.budget_scope),
+        quantity_unit=(envelope.commercial_terms.quantity_unit or "unit"),
+    ).to_dict()
+    resp.extras["bulk"] = canonical_econ
     if scope_ambiguous:
         # a budget was stated but we can't tell per-unit vs total — ASK, never guess the arithmetic
         per = f"${(envelope.budget_max_cents or 0) / 100:,.0f}"
-        econ["scope_ambiguous"] = True
+        canonical_econ["scope_ambiguous"] = True
         resp.set_message((f"For {quantity} units — is {per} your budget PER LAPTOP, or the TOTAL for "
                           f"all {quantity}? That changes the math."), MsgPriority.BULK_SCOPE_CLARIFY)
         if not resp.clarify:
@@ -2229,7 +2264,7 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
                                  "options": [{"id": "per_unit", "label": f"{per} per laptop"},
                                              {"id": "total", "label": f"{per} total for all {quantity}"}]})
     else:
-        resp.set_message(_bulk_message(econ, decision), MsgPriority.BULK_VERDICT)
+        resp.set_message(_bulk_message(canonical_econ, decision), MsgPriority.BULK_VERDICT)
 
 
 def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,

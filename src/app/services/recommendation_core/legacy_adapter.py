@@ -134,6 +134,18 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "assistant_message": core.message,
         "message": core.message,          # branch-duplicate field, kept for consumers
         "currency": core.envelope.currency,
+        "canonical_budget": (
+            core.envelope.budget_parse.to_dict()
+            if core.envelope.budget_parse is not None
+            else {
+                "budget_min": (core.envelope.budget_min_cents / 100 if core.envelope.budget_min_cents is not None else None),
+                "budget_max": (core.envelope.budget_max_cents / 100 if core.envelope.budget_max_cents is not None else None),
+                "mode": "structured",
+                "source_span": None,
+            }
+        ),
+        "commercial_terms": core.envelope.commercial_terms.to_dict(),
+        "subject_role": str((core.extras.get("decision") or {}).get("subject_role") or "UNRESOLVED"),
         "products": products,
         "slate_disposition": slate_disposition,
         "results": products,              # recorded duplication — preserved at the edge

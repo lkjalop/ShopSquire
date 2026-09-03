@@ -173,6 +173,46 @@ def test_degraded_semantic_authorization_hold_cannot_delegate_to_less_strict_leg
     assert outcome.payload["slate_disposition"] == "clear"
 
 
+def test_degraded_facade_preserves_facts_and_safe_failure_evidence(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+
+    def timed_out_core(_db, envelope):
+        response = CoreResponse(
+            envelope=envelope, lane="SEARCH", grounding="error",
+            degraded=True, message="I could not finish the governed interpretation.",
+        )
+        response.extras["router_outcome"] = {
+            "status": "timed_out", "source": "fallback:model_unavailable",
+            "late_results_accepted": False,
+        }
+        response.extras["model_invocation"] = {"wall_ms": 750, "outcome": "timeout"}
+        response.extras["execution_budgets"] = {"router": {"total_deadline_ms": 700}}
+        return response.finalize()
+
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", timed_out_core)
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(),
+        query="Buy 200 CRM seats with a total annual budget of AUD 120,000", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=None, trace_id="op-1",
+        with_trace=_wt, record_failure=lambda *args, **kwargs: None,
+    )
+
+    assert outcome.status == "degraded"
+    assert outcome.facts["quantity"] == 200
+    assert outcome.facts["total_budget_cents"] == 12_000_000
+    assert outcome.semantic_status["status"] == "fallback"
+    assert outcome.execution_evidence == {
+        "component": "recommendation_turn_router",
+        "status": "timed_out",
+        "failure_code": "model_execution_timeout",
+        "elapsed_ms": 750,
+        "deadline_ms": 700,
+        "fallback_used": True,
+        "core_invocation_count": 1,
+        "operation_id": "op-1",
+    }
+
+
 def test_procurement_advice_requires_its_own_serve_flag(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.delenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", raising=False)

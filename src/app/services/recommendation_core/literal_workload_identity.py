@@ -22,7 +22,14 @@ _LITERAL_GAME_PATTERNS = (
     ),
     re.compile(r"\bplay\s+(?:the\s+)?(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
     re.compile(r"\bwhat\s+about\s+(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
-    re.compile(r"\b(?:can|could|will)\s+(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)\s+(?:run|play)\s+(.+?)(?=[?.!]|$)", re.I),
+    re.compile(
+        r"\b(?:can|could|will)\s+"
+        r"(?:it|this(?:\s+laptop)?|that(?:\s+laptop)?|a\s+laptop|the\s+laptop)"
+        r"(?:\s+(?:under|below|up\s+to|around|about)\s+"
+        r"(?:(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\s*)?\$?[\d,]+(?:\.\d+)?)?"
+        r"\s+(?:run|play)\s+(.+?)(?=[?.!]|$)",
+        re.I,
+    ),
     re.compile(r"\bi\s+want\s+(?:a\s+laptop\s+)?(?:that\s+can|to)\s+(?:run|play)\s+(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
     re.compile(r"\b(?:laptop|computer|pc)\s+for\s+(.+?)(?=\?\s*is\b|\bis\s+(?:aud\s*)?\$?\d|[.!]|$)", re.I),
 )
@@ -95,7 +102,7 @@ def literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
     match = matched[1] if matched else None
     if not match:
         return ()
-    candidate = re.sub(r"\s+", " ", match.group(1)).strip(" ,;:-")[:80]
+    candidate = re.sub(r"\s+", " ", match.group(1)).strip(" ,;:-?")[:80]
     candidate = re.sub(
         r"\s+(?:under|below|up to|around|about|budget(?:\s+is)?)\s+(?:aud\s*)?\$?[\d,]+\s*$",
         "",
@@ -115,7 +122,17 @@ def literal_game_identity_candidate(query: str) -> Tuple[Tuple[str, str], ...]:
         title_words = re.findall(r"\b[A-Z][A-Za-z']+\b", candidate)
         if not re.search(r"\d", candidate) and len(title_words) < 2:
             return ()
-    return (("game", candidate),) if len(significant) >= 2 else ()
+    # Explicit play/run/suitability grammar supplies the semantic boundary, so
+    # a single coined title token is still a valid buyer-authored identity
+    # proposal (many real games have one-word names).  The loose "laptop for"
+    # form above keeps its stronger multi-token/capitalization guard.
+    explicit_title_grammar = bool(matched and matched[0] < len(_LITERAL_GAME_PATTERNS) - 1)
+    single_coined_title = bool(
+        explicit_title_grammar
+        and len(significant) == 1
+        and len(significant[0]) >= 4
+    )
+    return (("game", candidate),) if len(significant) >= 2 or single_coined_title else ()
 
 
 def deterministic_additive_workload_continuation(query: str) -> bool:

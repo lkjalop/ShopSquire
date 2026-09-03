@@ -32,40 +32,13 @@ _NEGATED_OVER_RE = re.compile(r"\b(?:nothing|not|no|none|never|under|below|max|a
 
 
 def _extract_budget_threshold(query: str) -> int | None:
-    """A genuine 'is it over $X?' binary question. Returns None when 'over/above' is NEGATED
-    ('nothing over $1,900', 'not above $2000') — those are CAPS, not over-thresholds (GPT-5.6 #4,
-    2026-07-10: the negated form produced a nonsensical 'Usually no.' binary answer)."""
+    from src.app.services.budget_grammar import parse_budget
+
     q = str(query or "").lower()
     if _NEGATED_OVER_RE.search(q):
         return None
-    m = re.search(r"(?:over|above|more than|greater than)\s*\$?\s*([\d,]{3,6})", q)
-    if m:
-        return _to_int(m.group(1))
-    return None
-
-
-def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
-    q = str(query or "").lower()
-    # A cue-anchored OR $-anchored range so bare bulk phrasings parse too: "budget 1500 to 1900",
-    # "price 1500-1900", "$1500-$1900 each". Without an anchor a bare "1500 to 1900" is too ambiguous
-    # (spec ranges, counts) — the anchor (between/from/budget/price/a leading $) keeps it a BUDGET range.
-    for pat in (
-        r"(?:between|from|budget(?:\s+(?:is|of))?|price(?:\s+range)?)\s*\$?\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
-        r"\$\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
-    ):
-        m_range = re.search(pat, q)
-        if m_range:
-            lo = _to_int(m_range.group(1))
-            hi = _to_int(m_range.group(2))
-            if lo is not None and hi is not None:
-                return (min(lo, hi), max(lo, hi))
-    m_under = re.search(r"(?:under|below|less than|<)\s*\$?\s*([\d,]{2,6})", q)
-    if m_under:
-        return (None, _to_int(m_under.group(1)))
-    m_over = re.search(r"(?:over|above|more than|>)\s*\$?\s*([\d,]{2,6})", q)
-    if m_over:
-        return (_to_int(m_over.group(1)), None)
-    return (None, None)
+    parsed = parse_budget(q)
+    return parsed.budget_min if parsed is not None and parsed.mode == "floor" else None
 
 
 _DAMAGE_RE = re.compile(
@@ -74,6 +47,13 @@ _DAMAGE_RE = re.compile(
 _POLICY_WORD_RE = re.compile(r"\b(warranty|returns?|refunds?|support)\b")
 _POST_PURCHASE_RE = re.compile(
     r"\b(my|i bought|i purchased|i got|i received|i ordered|arrived|came with|send (it )?back)\b")
+
+
+def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
+    from src.app.services.budget_grammar import parse_budget
+
+    parsed = parse_budget(query)
+    return (parsed.budget_min, parsed.budget_max) if parsed is not None else (None, None)
 
 
 def is_support_claim(query: str) -> bool:
@@ -237,22 +217,20 @@ def score_answer_coverage(*, query: str, message: str, required_answers: List[st
 
 
 def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str,
-                            bulk_budget: Dict[str, Any] | None = None) -> str:
+                            bulk_budget: Dict[str, Any] | None = None,
+                            canonical_budget: Dict[str, Any] | None = None) -> str:
     # Prefer stated user budget over any price range found in the LLM message text
-    q_lo, q_hi = _extract_query_budget_bounds(query)
+    if isinstance(canonical_budget, dict):
+        q_lo, q_hi = canonical_budget.get("budget_min"), canonical_budget.get("budget_max")
+    else:
+        q_lo, q_hi = _extract_query_budget_bounds(query)
     # A whole-order cap cannot be compared directly with unit prices. The recommendation
     # pipeline already authorizes and emits the derived per-unit cap; reuse that structured
     # decision instead of reparsing the total as though it were a single-product budget.
-    if isinstance(bulk_budget, dict) and str(bulk_budget.get("scope") or "").lower() == "total":
-        per_unit = bulk_budget.get("per_unit_cap")
+    if isinstance(bulk_budget, dict) and str(bulk_budget.get("budget_scope") or "").lower() == "total":
+        per_unit = bulk_budget.get("per_unit_cap_cents")
         if isinstance(per_unit, (int, float)) and per_unit > 0:
-            q_lo, q_hi = None, int(per_unit)
-    # Also try "around $N" / "budget $N" / "about $N" patterns
-    _around = re.search(r"(?:around|about|roughly|approx\.?|budget\s+(?:of\s+)?)\$?\s*([\d,]{3,6})", str(query or ""), re.I)
-    if _around and q_hi is None:
-        _v = _to_int(_around.group(1))
-        if _v:
-            q_hi = _v
+            q_lo, q_hi = None, int(per_unit) // 100
     lo_msg, hi_msg = _extract_price_range_from_message(base_message)
     prices = [int(float(p.get("price") or 0)) for p in (products or []) if p.get("price") is not None]
     if prices and (lo_msg is None or hi_msg is None):
@@ -282,14 +260,13 @@ def _clamp_bulk_budget_prose(
     *, message: str, products: List[Dict[str, Any]], bulk_budget: Dict[str, Any] | None,
 ) -> str:
     """Remove model prose that contradicts an authorized whole-order calculation."""
-    if not isinstance(bulk_budget, dict) or str(bulk_budget.get("scope") or "").lower() != "total":
+    if not isinstance(bulk_budget, dict) or str(bulk_budget.get("budget_scope") or "").lower() != "total":
         return message
-    total = bulk_budget.get("total")
-    if not isinstance(total, (int, float)):
-        total = bulk_budget.get("total_budget")
+    total_cents = bulk_budget.get("total_budget_cents")
     quantity = bulk_budget.get("quantity")
-    if not isinstance(total, (int, float)) or not isinstance(quantity, (int, float)) or quantity <= 0:
+    if not isinstance(total_cents, (int, float)) or not isinstance(quantity, (int, float)) or quantity <= 0:
         return message
+    total = float(total_cents) / 100.0
     prices = []
     for product in products or []:
         try:
@@ -316,8 +293,9 @@ def _render_no_match(*, query: str, products: List[Dict[str, Any]]) -> str:
     lo, hi = _extract_query_budget_bounds(query)
     if hi is not None and lo is None:
         return (
-            f"No, not currently in-catalog under ${hi:,}. "
-            "Closest alternatives are above that range. I can show best-value non-Apple options or set an Apple-only stock alert."
+            f"No qualified in-catalog match is established under ${hi:,}. "
+            "The limiting constraint or evidence gap remains visible; I can show the nearest "
+            "in-stock options after you choose whether to relax it."
         )
     if lo is not None and hi is not None:
         return (
@@ -368,6 +346,7 @@ def apply_answer_quality(
     buyer_persona: str | None,
     brand_name: str | None,
     bulk_budget: Dict[str, Any] | None = None,
+    canonical_budget: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     msg = _clamp_bulk_budget_prose(
         message=str(assistant_message or "").strip(), products=products,
@@ -390,7 +369,7 @@ def apply_answer_quality(
     rewritten = msg
     if template_id == "budget_decision_template":
         rewritten = _render_budget_decision(query=query, products=products, base_message=msg,
-                                             bulk_budget=bulk_budget)
+                                             bulk_budget=bulk_budget, canonical_budget=canonical_budget)
     elif template_id == "no_match_explain_template":
         rewritten = _render_no_match(query=query, products=products)
     elif template_id == "cv_reupload_with_text_fallback_template":
@@ -406,7 +385,7 @@ def apply_answer_quality(
     if not bool(cov.get("ok")) and "direct_answer_first_sentence" in (cov.get("missing") or []):
         if template_id == "budget_decision_template":
             rewritten = _render_budget_decision(query=query, products=products, base_message=rewritten,
-                                                 bulk_budget=bulk_budget)
+                                                 bulk_budget=bulk_budget, canonical_budget=canonical_budget)
         elif template_id == "no_match_explain_template":
             rewritten = _render_no_match(query=query, products=products)
 

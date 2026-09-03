@@ -7,7 +7,7 @@ or grants catalog/commercial authority. Evidence and buyer constraints must do t
 
 from __future__ import annotations
 
-from typing import Literal, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -137,4 +137,47 @@ def project_infrastructure_alternatives(
         ],
         unresolved_inputs=bounded_unknowns,
         alternatives=list(_ALTERNATIVES),
+    )
+
+
+def project_for_unresolved_form_factor(
+    *,
+    subject_role: str | None,
+    desired_outcome: str = "",
+    constraints: Mapping[str, Any] | None = None,
+    unresolved_inputs: Sequence[str] = (),
+    workload_context: bool = False,
+) -> InfrastructureAlternativeProjection | None:
+    """Project architecture choices for a workload turn that has not selected one form.
+
+    The semantic router decides whether the buyer is qualifying a workload.  This
+    function deliberately does not parse product or application names from prose.
+    An explicitly selected form factor suppresses the hedge; otherwise the five
+    non-authoritative architecture classes remain visible even when no SKU can be
+    qualified yet.
+    """
+    role = str(subject_role or "").strip().upper()
+    # An adjacent merchandise turn is never a workload architecture question.
+    # A degraded semantic proposal may, however, label a researched workload as
+    # PROCURE_SUBJECT.  In that case the revision-bound research record is
+    # stronger evidence than the degraded role and it is safe to show a
+    # non-authoritative architecture hedge.  Without recorded workload context,
+    # a genuine procured subject remains suppressed.
+    if role == "ADJACENT_PRODUCT":
+        return None
+    if role == "PROCURE_SUBJECT" and not workload_context:
+        return None
+    if role not in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"} and not workload_context:
+        return None
+    material = dict(constraints or {})
+    selected = str(
+        material.get("selected_form_factor")
+        or material.get("form_factor")
+        or ""
+    ).strip().lower()
+    if selected and selected not in {"unknown", "unresolved", "any", "either"}:
+        return None
+    return project_infrastructure_alternatives(
+        desired_outcome=desired_outcome,
+        unresolved_inputs=unresolved_inputs,
     )
