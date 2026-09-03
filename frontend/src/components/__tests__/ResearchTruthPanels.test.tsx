@@ -286,6 +286,10 @@ describe('research truth panels', () => {
       }],
     }} onNarrationPreview={preview} />);
 
+    expect(preview).not.toHaveBeenCalled();
+    expect(screen.getByTestId('deterministic-shelf-narration'))
+      .toHaveTextContent('Deterministic summary.');
+    fireEvent.click(screen.getByRole('button', { name: 'AI explanation preview' }));
     await waitFor(() => expect(screen.getByTestId('deterministic-shelf-narration'))
       .toHaveTextContent('Critic-accepted local preview.'));
     expect(preview).toHaveBeenCalledTimes(1);

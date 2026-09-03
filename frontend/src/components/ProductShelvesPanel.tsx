@@ -113,20 +113,12 @@ export default function ProductShelvesPanel({ projection, onPropose, onNarration
   const [previewBusy, setPreviewBusy] = React.useState(false);
   const narration = projection?.narration_projection;
   React.useEffect(() => {
-    if (!narration || !onNarrationPreview) {
-      setPreview(null);
-      setPreviewBusy(false);
-      return;
-    }
-    let current = true;
+    // Preview generation is explicitly buyer-triggered. Automatically calling
+    // the model here made every shelf/revision render start another request;
+    // stale browser views could therefore leave long-running background work.
     setPreview(null);
-    setPreviewBusy(true);
-    void onNarrationPreview(narration)
-      .then((result) => { if (current) setPreview(result); })
-      .catch(() => undefined)
-      .finally(() => { if (current) setPreviewBusy(false); });
-    return () => { current = false; };
-  }, [narration, onNarrationPreview]);
+    setPreviewBusy(false);
+  }, [narration]);
   if (!projection?.shelves?.length) return null;
   return (
     <section data-testid="product-shelves" aria-label="Provisional product shelves" style={{ padding: 12 }}>

@@ -6,14 +6,23 @@ async function send(page: Page, text: string) {
   const responsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST'
       && /\/api\/v1\/(?:chat\/stream|shopping-cases\/interpretations)(?:\?|$)/.test(response.url())
-  ), { timeout: 20_000 });
+  ), { timeout: 90_000 });
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(text);
   await input.press('Enter');
   const response = await responsePromise;
   expect(response.ok()).toBeTruthy();
-  await expect(page.getByTestId('stream-acknowledgement')).toBeHidden({ timeout: 20_000 });
-  return response.text();
+  await expect(page.getByTestId('stream-acknowledgement')).toBeHidden({ timeout: 90_000 });
+  const body = await response.text();
+  if (!body.includes('data:')) return JSON.parse(body);
+  const frames = body.replaceAll('\r\n', '\n').split('\n\n').reverse();
+  for (const frame of frames) {
+    if (!frame.includes('event: answer')) continue;
+    const raw = frame.split('\n').filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trim()).join('\n');
+    if (raw) return JSON.parse(raw);
+  }
+  throw new Error(`No completed answer frame returned: ${body.slice(0, 1200)}`);
 }
 
 test('live OT research stays in one case and exposes real provider receipts', async ({ page }, testInfo) => {
@@ -44,32 +53,32 @@ test('live OT research stays in one case and exposes real provider receipts', as
     contentType: 'application/json',
   });
   const uid = `live-ot-${Date.now()}-${Math.random()}`;
+  const unsolicitedNarrationRequests: string[] = [];
+  page.on('request', (request) => {
+    if (/\/narration-preview(?:\?|$)/.test(request.url())) {
+      unsolicitedNarrationRequests.push(request.url());
+    }
+  });
   await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
-  // The named demo policy may authorize bounded, read-only research
-  // automatically. Start observing before the turn so the certificate can
-  // validate that response instead of racing a consent button that disappears
-  // once auto-research completes.
-  const researchResponsePromise = page.waitForResponse((response) => (
-    response.request().method() === 'POST'
-      && /\/api\/v1\/shopping-cases\/[^/]+\/research(?:\?|$)/.test(response.url())
-  ), { timeout: 180_000 });
-  await send(page, 'I need to simulate a PLC-controlled factory and cyberattacks against the OT network.');
+  // Research is a server-owned portion of the atomic turn. The browser must
+  // not launch or race a second /research request after case creation.
+  const answer = await send(
+    page,
+    'I need to simulate a PLC-controlled factory and cyberattacks against the OT network.',
+  );
+  expect(answer.research_orchestration_owner).toBe('backend');
+  expect(answer.server_research_failure || null).toBeNull();
+  const result = answer.server_research_result;
+  expect(result, 'completed turn did not contain its server-owned research result').toBeTruthy();
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toBeVisible();
   await expect(panel).not.toContainText(/isaac|physics/i);
 
   const manualResearchButton = panel.getByRole('button', { name: /Research approved sources/i });
-  if (await manualResearchButton.isVisible().catch(() => false)) {
-    await expect(panel).toContainText(/external calls: 0/i);
-    await expect(panel).toContainText(/paid calls: 0/i);
-    await manualResearchButton.click();
-  }
-  const response = await researchResponsePromise;
-  expect(response.ok(), `research request failed: ${response.status()}`).toBeTruthy();
-  const result = await response.json();
+  await expect(manualResearchButton).toHaveCount(0);
   expect(result.status).toBe('research_completed');
   expect(['live_network', 'evidence_cache']).toContain(result.research.execution_mode);
   if (result.research.execution_mode === 'live_network') {
@@ -97,6 +106,10 @@ test('live OT research stays in one case and exposes real provider receipts', as
 
   await expect(page.getByTestId('product-shelves')).toBeVisible();
   await expect(page.getByTestId('research-reranking-delta')).toBeVisible();
+  expect(
+    unsolicitedNarrationRequests,
+    'shelf rendering must not silently start optional model narration',
+  ).toEqual([]);
   await expect(panel).toContainText(/research status:\s*(?:researched|official requirements compiled)/i);
   await expect(panel).toContainText(/paid calls: 0/i);
 

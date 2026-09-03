@@ -6,6 +6,7 @@ import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money'
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
+import OffCatalogSourcingCard from './components/OffCatalogSourcingCard';
 import MultiIntentCard from './components/MultiIntentCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
@@ -17,7 +18,7 @@ import { useHumanEscalation } from './hooks/useHumanEscalation';
 import { useShoppingCaseResearch } from './hooks/useShoppingCaseResearch';
 import { useShoppingCaseActions } from './hooks/useShoppingCaseActions';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
-import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
 import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -418,7 +419,6 @@ export default function App() {
     resolveEvidenceSource: executeEvidenceSourceResolution,
     approvePublisherCandidate: executePublisherApproval,
   } = useShoppingCaseResearch();
-  const autoResearchAttemptedRef = useRef<Set<string>>(new Set());
   const dispatchPresentationEvent = useMemo(() => createPresentationEventDispatcher({
     setMessages,
     setProductShelves,
@@ -431,6 +431,7 @@ export default function App() {
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
   const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
+  const [offCatalogSourcingOffer, setOffCatalogSourcingOffer] = useState<OffCatalogSourcingOffer | null>(null);
   // Operational amendments can arrive after a buyer selected a cart item even
   // when the original recommendation did not emit a sourcing preview. Keep
   // these bounded backend facts independently so CartPanel sends them at the
@@ -1822,8 +1823,15 @@ export default function App() {
       // trace without waiting for an LLM/provider. A 204 means the request belongs to the normal
       // local catalogue/chat path below. The browser supplies only the buyer's words; research
       // hypotheses and publisher scope are server-owned.
+      // The interpretation endpoint remains an explicit case-creation API for
+      // governed workflows, but it must not independently terminate a normal
+      // storefront message. Every chat composer turn now reaches the canonical
+      // chat terminal reducer exactly once; this prevents a provisional
+      // interpretation shelf from replacing the final research outcome.
+      const useInterpretationShortcut = false;
       if (
-        !activeShoppingCase?.case_id
+        useInterpretationShortcut
+        && !activeShoppingCase?.case_id
         && !hasImages
         && !complaintIntent
         && !hasNamedGameWorkload(q)
@@ -1849,7 +1857,11 @@ export default function App() {
               || interpretation?.detail?.code
               || interpretation?.detail
               || `case_interpretation_failed (${interpretationAction.status})`,
-            ));
+              ));
+          }
+          const terminal = interpretation?.terminal_outcome;
+          if (terminal?.schema_version !== 'turn-terminal-outcome-v1') {
+            throw new Error('case_interpretation_missing_terminal_outcome');
           }
           if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
             // A new case owns the right panel. Do not leave the prior turn's
@@ -1879,8 +1891,8 @@ export default function App() {
             setAmbiguityExploration(null);
             setActiveShoppingCase(null);
           }
-          if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {
-            setProductShelves(interpretation.product_shelves as ProductShelfProjection);
+          if (terminal?.product_shelves?.schema_version === 'product-shelves-v1') {
+            setProductShelves(terminal.product_shelves as ProductShelfProjection);
           }
           if (Number.isInteger(interpretation?.requested_quantity)) {
             setConfirmedSlots((previous) => ({
@@ -1888,10 +1900,10 @@ export default function App() {
               order_quantity: Number(interpretation.requested_quantity),
             }));
           }
-          setTraceId(normalizeTraceId(interpretation.trace_id || interpretation.case_id || null));
+          setTraceId(normalizeTraceId(terminal.decision_trace_id || null));
           setMessages(prev => [...prev, {
             role: 'assistant',
-            content: String(interpretation.assistant_message || 'I opened a provisional research case.'),
+            content: String(terminal.assistant_message || 'I opened a provisional research case.'),
             timestamp: new Date(),
           }]);
           switchRightPanelMode('grid');
@@ -2355,11 +2367,26 @@ export default function App() {
         // backend single-flight continues safely under the same idempotency key. Poll
         // that exact key for its cached completion; never resubmit with a new key.
         if (data?.status === 'in_progress') {
-          const completionDeadline = Date.now() + 60_000;
+          // Open-world identity + governed evidence extraction can legitimately
+          // outlive the initial HTTP budget on a local model.  Keep retrieving
+          // the same operation instead of abandoning it at 60s (which left a
+          // completed result stranded in Redis and made the UI look hung).
+          const configuredCompletionMs = Number(import.meta.env.VITE_CHAT_COMPLETION_TIMEOUT_MS);
+          const completionTimeoutMs = Number.isFinite(configuredCompletionMs)
+            ? Math.max(15_000, Math.min(configuredCompletionMs, 300_000))
+            : 180_000;
+          const completionDeadline = Date.now() + completionTimeoutMs;
           while (data?.status === 'in_progress' && Date.now() < completionDeadline) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            const retryAfterMs = Number(data?.retry_after_ms);
+            await new Promise(resolve => setTimeout(
+              resolve,
+              Number.isFinite(retryAfterMs) ? Math.max(750, Math.min(retryAfterMs, 5_000)) : 2_000,
+            ));
             const qctl = new AbortController();
-            const qTimer = setTimeout(() => qctl.abort(), 10_000);
+            // Retrieval still traverses auth, policy and observability middleware.
+            // A 10s client abort turned a healthy retained operation into a
+            // misleading browser CORS/network error under local load.
+            const qTimer = setTimeout(() => qctl.abort(), 30_000);
             let completionResponse: Response;
             try {
               completionResponse = await fetch(apiUrl('/api/v1/chat/query'), {
@@ -2377,6 +2404,11 @@ export default function App() {
               throw new Error(`chat_completion_poll_failed (${completionResponse.status})`);
             }
             data = completion;
+            if (data?.status === 'in_progress') {
+              const elapsedMs = Number(data?.execution_progress?.elapsed_ms);
+              const elapsed = Number.isFinite(elapsedMs) ? ` · ${Math.max(1, Math.round(elapsedMs / 1000))}s` : '';
+              setStreamAcknowledgement(`Research and fit checks are still running${elapsed}.`);
+            }
           }
           if (data?.status === 'in_progress') {
             throw new Error('chat_completion_poll_timeout');
@@ -2403,6 +2435,43 @@ export default function App() {
               : null,
           );
         }
+        const terminalOutcome = data?.terminal_outcome?.schema_version === 'turn-terminal-outcome-v1'
+          ? data.terminal_outcome : null;
+        if (terminalOutcome) {
+          data = {
+            ...data,
+            assistant_message: terminalOutcome.assistant_message ?? data.assistant_message,
+            right_panel: terminalOutcome.right_panel ?? data.right_panel,
+            products: Array.isArray(terminalOutcome.products)
+              ? terminalOutcome.products : data.products,
+            slate_disposition: terminalOutcome.slate_disposition ?? data.slate_disposition,
+            next_questions: Array.isArray(terminalOutcome.next_questions)
+              ? terminalOutcome.next_questions : data.next_questions,
+            decision_trace_id: terminalOutcome.decision_trace_id,
+            case_revision: terminalOutcome.case_revision,
+            shopping_case_revision: terminalOutcome.case_revision,
+          };
+          setResearchOutcome(
+            terminalOutcome.research_outcome?.schema_version === 'research-outcome-v1'
+              ? terminalOutcome.research_outcome as ResearchOutcome
+              : null,
+          );
+        }
+        // Off-catalog refusal is only a proposal.  Bind the explicit sourcing
+        // action to this exact case revision and trace; a later unrelated turn
+        // clears it instead of leaving a stale commercial action visible.
+        const rawOffCatalog = data?.off_catalog;
+        const nextOffCatalogOffer = (
+          rawOffCatalog
+          && typeof rawOffCatalog === 'object'
+          && String(rawOffCatalog.shopping_case_id || '').trim()
+          && Number(rawOffCatalog.case_revision) > 0
+          && String(rawOffCatalog.trace_id || '').trim()
+            ? rawOffCatalog as OffCatalogSourcingOffer
+            : null
+        );
+        setOffCatalogSourcingOffer(nextOffCatalogOffer);
+        if (nextOffCatalogOffer) switchRightPanelMode('cart');
         mergeTrustEvidence(data);
         const governedOutcome = nonRecommendationOutcome(data);
         if (governedOutcome) {
@@ -2682,9 +2751,10 @@ export default function App() {
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
           if (!continuesActiveCase || revisionAdvanced || materiallyAmendsActiveCase) {
+            const terminalShelves = data?.terminal_outcome?.product_shelves;
             setProductShelves(
-              data?.product_shelves?.schema_version === 'product-shelves-v1'
-                ? data.product_shelves as ProductShelfProjection
+              terminalShelves?.schema_version === 'product-shelves-v1'
+                ? terminalShelves as ProductShelfProjection
                 : null,
             );
           }
@@ -2706,7 +2776,10 @@ export default function App() {
           ...(data.evidence && typeof data.evidence === 'object' ? data.evidence : {}),
           ...(turnReadModel ? { turn_read_model: turnReadModel } : {}),
         });
-        const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
+        const nextTraceId = normalizeTraceId(
+          data?.terminal_outcome?.decision_trace_id
+          || data.decision_trace_id || data.trace_id || data.decision_id || null,
+        );
         // Pin the sourcing trace to THIS turn when it produced a sourcing preview. If the turn carries NO
         // procurement context at all (no sourcing preview, no open case, no bulk options/quantity), RELEASE
         // the sticky pin — otherwise a later single-unit query would still resolve the prior bulk turn's
@@ -2722,6 +2795,11 @@ export default function App() {
           || (Number((data as any).requested_quantity) > 1);
         if (turnHasSourcingPreview || turnHasFulfillmentOptions) {
           switchRightPanelMode('cart');
+        } else if (data.bulk_budget && typeof data.bulk_budget === 'object') {
+          // A computed whole-order result is useful even when no unit can be
+          // shown under the requested total. Keep the revision-bound truth
+          // visible instead of making an empty product slate close the panel.
+          switchRightPanelMode('grid');
         }
         setSourcingTraceId((current) => nextSourcingTraceId(
           current,
@@ -2827,6 +2905,7 @@ export default function App() {
             setRecommendationShelf(null);
             if (
               !data?.ambiguity_exploration
+              && !(data.bulk_budget && typeof data.bulk_budget === 'object')
               && ['grid', 'list', 'visual_search'].includes(rightPanelMode)
             ) {
               switchRightPanelMode('none');
@@ -3075,40 +3154,6 @@ export default function App() {
       setIsThinking(false);
     }
   }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId, dispatchPresentationEvent]);
-
-  useEffect(() => {
-    if (!autoPublicResearchEnabled || researchState === 'running') return;
-    const exploration = ambiguityExploration;
-    const sourceResolutionStatus = String(
-      exploration?.source_intake_certificate?.resolution?.status || '',
-    ).trim().toLowerCase();
-    const sourceLinkAssessment = exploration?.source_intake_certificate?.security?.link_assessment;
-    const sourceLinkSecurity = String(sourceLinkAssessment?.security_status || '').toLowerCase();
-    const sourceLinkRelevance = String(sourceLinkAssessment?.relevance || '').toLowerCase();
-    const safeContextDiscovery = sourceResolutionStatus === 'not_enrolled'
-      && sourceLinkSecurity === 'eligible_for_guarded_resolution'
-      && sourceLinkRelevance !== 'irrelevant_to_retained_purpose';
-    if (
-      !exploration?.case_id
-      || !exploration.research_plan_id
-      || exploration.status !== 'provisional'
-      // A rejected, invalid, or ambiguous buyer URL is itself the outcome for
-      // this turn.  Do not silently launch a different discovery workflow
-      // after issuing that security receipt.
-      || (sourceResolutionStatus
-        && sourceResolutionStatus !== 'resolved'
-        && !safeContextDiscovery)
-    ) return;
-    const attemptKey = `${exploration.case_id}:${exploration.research_plan_id}`;
-    if (autoResearchAttemptedRef.current.has(attemptKey)) return;
-    autoResearchAttemptedRef.current.add(attemptKey);
-    void researchAmbiguousShoppingCase(false, 'tenant_policy', exploration);
-  }, [
-    ambiguityExploration,
-    autoPublicResearchEnabled,
-    researchAmbiguousShoppingCase,
-    researchState,
-  ]);
 
   const resolveBuyerEvidenceSource = useCallback(async (
     hint: { source_url?: string; vendor_name?: string },
@@ -3685,6 +3730,30 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {rightPanelContract && (
+                    ((rightPanelContract as any).canonical_budget
+                      || (rightPanelContract as any).subject_role)
+                  ) && (
+                    <div
+                      data-testid="turn-commercial-truth"
+                      style={{ marginBottom: 10, padding: '8px 12px', border: '1px solid #dbe4ef', borderRadius: 8, fontSize: 13 }}
+                    >
+                      <strong>Current turn:</strong>{' '}
+                      role <span data-testid="right-panel-subject-role">{String(
+                        (rightPanelContract as any).subject_role
+                        || ((rightPanelContract as any).subject_role_status === 'not_evaluated'
+                          ? 'not evaluated' : 'unresolved'),
+                      )}</span>
+                      {(rightPanelContract as any).canonical_budget?.budget_max != null && (
+                        <>
+                          {' · '}budget <span data-testid="right-panel-budget">
+                            {String((rightPanelContract as any).commercial_terms?.currency || 'AUD')}{' '}
+                            {Number((rightPanelContract as any).canonical_budget.budget_max).toLocaleString()}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
                   {ambiguityExploration && (
                     <AmbiguityExplorationPanel
@@ -3769,6 +3838,11 @@ export default function App() {
                       <SourcingIntentCard intent={sourcingIntent} uid={uid}
                                           orderId={sourcingIntent.pr_id || `cart-${uid}`}
                                           traceId={sourcingTraceId || traceId || undefined} />
+                    </div>
+                  )}
+                  {offCatalogSourcingOffer && (
+                    <div className={styles.procurementPanelSlot}>
+                      <OffCatalogSourcingCard offer={offCatalogSourcingOffer} uid={uid} />
                     </div>
                   )}
                   {rightPanelContract?.image_untrusted && (

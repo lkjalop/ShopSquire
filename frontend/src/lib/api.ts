@@ -290,6 +290,73 @@ export interface ConfirmCartResult {
   created?: { case_count: number; cases?: Array<{ case_id: string }> } | null;
 }
 
+export interface OffCatalogSourcingOffer {
+  shopping_case_id: string;
+  case_revision: number;
+  trace_id: string;
+  label?: string;
+  subject_label?: string;
+  quantity?: number;
+  constraints?: Record<string, any>;
+  commercial_terms?: Record<string, any>;
+  canonical_identity?: Record<string, any>;
+  accepted_claim_ids?: string[];
+  source_urls?: string[];
+  budget_gap_cents?: number | null;
+  best_catalog_alternative?: Record<string, any>;
+}
+
+export interface OffCatalogSourcingResult {
+  case_id: string;
+  state: string;
+  idempotent: boolean;
+  shopping_case_id: string;
+  case_revision: number;
+  supplier_contacted: false;
+  draft: {
+    status: 'internal_sourcing_brief';
+    content_hash?: string;
+    requires_operator_supplier_resolution: true;
+    rfq_preview_path?: string;
+  };
+}
+
+/** Explicit buyer gate for an off-catalog sourcing draft.  This creates an
+ * internal governed case only; it cannot select or contact a supplier. */
+export async function confirmOffCatalogSourcing(
+  uid: string,
+  offer: OffCatalogSourcingOffer,
+): Promise<OffCatalogSourcingResult> {
+  const timeout = (typeof AbortSignal !== 'undefined' && (AbortSignal as any).timeout)
+    ? (AbortSignal as any).timeout(8000) : undefined;
+  const response = await fetch(apiUrl('/api/v1/fulfillment/cases/from-off-catalog'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: authHeaders({}, true),
+    signal: timeout,
+    body: JSON.stringify({
+      uid: uid || 'demo-user',
+      shopping_case_id: offer.shopping_case_id,
+      expected_case_revision: offer.case_revision,
+      trace_id: offer.trace_id,
+      subject_label: offer.subject_label || offer.label || 'off-catalog item',
+      quantity: Math.max(1, Number(offer.quantity || 1)),
+      constraints: offer.constraints || {},
+      commercial_terms: offer.commercial_terms || {},
+      canonical_identity: offer.canonical_identity || {},
+      accepted_claim_ids: offer.accepted_claim_ids || [],
+      source_urls: offer.source_urls || [],
+      budget_gap_cents: offer.budget_gap_cents ?? null,
+      best_catalog_alternative: offer.best_catalog_alternative || {},
+    }),
+  });
+  const payload = await safeJson(response);
+  if (!response.ok || !payload) {
+    throw new Error((payload && payload.detail) ? payload.detail : `off_catalog_sourcing_failed (${response.status})`);
+  }
+  return payload as OffCatalogSourcingResult;
+}
+
 // GATE 1 at the buyer's cart-confirmation: materialize the previewed shortfall lines into durable
 // procurement cases, IDEMPOTENTLY keyed on order_id (re-clicking returns the same cases). No supplier
 // is contacted. supersede=true → the buyer is amending a confirmed order: retire the old pre-send cases +

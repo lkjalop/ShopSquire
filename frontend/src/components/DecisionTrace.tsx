@@ -2117,6 +2117,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 {' · '}catalog authority <strong>
                   {currentResearchOutcome?.catalog_authority || localTurnProjection?.catalog_authority}
                 </strong>
+                {localTurnProjection?.subject_role ? <>
+                  {' · '}role <strong data-testid="trace-subject-role">{localTurnProjection.subject_role}</strong>
+                </> : null}
+                {localTurnProjection?.canonical_budget?.budget_max != null ? <>
+                  {' · '}budget <strong data-testid="trace-budget">
+                    {String(localTurnProjection?.commercial_terms?.currency || 'AUD')}{' '}
+                    {Number(localTurnProjection.canonical_budget.budget_max).toLocaleString()}
+                  </strong>
+                </> : null}
               </div>
             )}
             {/* Tabs */}

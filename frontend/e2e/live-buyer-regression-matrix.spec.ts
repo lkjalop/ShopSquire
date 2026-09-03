@@ -189,10 +189,6 @@ test('BG3 affordability plus Emulate3D additive workload retains budget and rese
     requirements_completeness: 'minimum_and_recommended',
   });
 
-  const researchRequest = page.waitForRequest(
-    request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
-    { timeout: 60_000 },
-  );
   const combined = await send(page, 'It must run Rockwell Emulate3D locally as well');
   expect(combined.shopping_case_id).toBe(bg3.shopping_case_id);
   expect(combined.confirmed_slots?.budget_max).toBe(3000);
@@ -205,25 +201,55 @@ test('BG3 affordability plus Emulate3D additive workload retains budget and rese
   );
   expect(combined.products || []).toHaveLength(0);
   expect(combined.ambiguity_exploration).toMatchObject({
-    status: 'provisional',
-    evidence: 'partial_identity_material_gap',
+    status: 'unresolved',
+    evidence: 'no_accepted_claims',
   });
+  expect(combined.ambiguity_exploration?.research_failure).toBeFalsy();
 
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toContainText(/Baldur's Gate 3/i);
   await expect(panel).toContainText(/Rockwell Emulate3D/i);
   await expect(page.getByTestId('product-shelves')).toHaveCount(0);
-  const explicitResearchButton = panel.getByRole('button', { name: /Research approved sources/i });
-  if (await explicitResearchButton.count()) await explicitResearchButton.click();
-  const dispatched = await researchRequest;
-  expect(dispatched.postDataJSON()).toMatchObject({
-    research_authorized: true,
-    research_plan_id: combined.ambiguity_exploration.research_plan_id,
+  expect(combined.server_research_result).toMatchObject({
+    status: 'research_completed',
+    authorization: { authorized: true, basis: 'tenant_policy' },
+    research_outcome: {
+      operation_id: expect.stringMatching(/^auto-/),
+      catalog_authority: 'blocked',
+      commerce_authority: 'none',
+    },
   });
-  expect(dispatched.postDataJSON().authorization_basis).toMatch(/buyer_action|tenant_policy/);
-  await expect(page.getByText(
-    /Approved-source research (?:completed|could not complete)/i,
-  )).toBeVisible({ timeout: 40_000 });
+  expect(combined.terminal_outcome).toMatchObject({
+    schema_version: 'turn-terminal-outcome-v1',
+    decision_trace_id: combined.decision_trace_id,
+    case_id: combined.shopping_case_id,
+    case_revision: combined.case_revision,
+    research_status: 'research_completed',
+    catalog_authority: 'blocked',
+    commerce_authority: 'none',
+    execution_evidence: { core_invocation_count: 1 },
+  });
+  expect(combined.terminal_outcome.operation_id).not.toBe(
+    combined.terminal_outcome.decision_trace_id,
+  );
+  const heldCount = Number(
+    combined.server_research_result?.research_outcome?.held_claim_count || 0,
+  );
+  expect(heldCount).toBeGreaterThan(0);
+  const outcome = page.getByTestId('research-outcome-summary');
+  await expect(outcome).toContainText(/Held for review/i);
+  await expect(outcome).toContainText(`Held: ${heldCount}`);
+  await expect(page.getByText(/Found 0 products|Holding recommendations/i).first()).toBeVisible();
+  await page.getByTitle('Decision Trace').click();
+  const trace = page.getByTestId('decision-trace-modal');
+  for (const tab of [
+    'Decision', 'Research & Fit', 'Reasoning', 'Evidence & Risk',
+    'Commercial Journey', 'Advanced technical details',
+  ]) {
+    await trace.getByRole('button', { name: new RegExp(`^${tab}`) }).click();
+    await expect(trace).toBeVisible();
+    await expect(trace).not.toContainText(/404|not found/i);
+  }
   await context.close();
 });
 
@@ -329,6 +355,35 @@ test('natural workload replacements advance one revision and never project the p
   expect(cupix.buyer_evidence_source_resolution?.resolution?.link_assessment
     ?.tracking_parameters_removed).toBe(3);
   expect(JSON.stringify(cupix)).not.toContain('demo-secret');
+  expect(cupix.server_research_result).toMatchObject({
+    status: 'publisher_resolution_required',
+    research_outcome: {
+      case_id: cupix.shopping_case_id,
+      catalog_authority: 'blocked',
+      commerce_authority: 'none',
+    },
+  });
+  expect(cupix.server_research_result?.research?.candidates?.length || 0)
+    .toBeGreaterThan(0);
+  expect(String(cupix.assistant_message || '')).not.toMatch(
+    /I did not fetch its arbitrary path.*The source-safety receipt/is,
+  );
+  expect(cupix.terminal_outcome).toMatchObject({
+    case_id: cupix.shopping_case_id,
+    case_revision: cupix.case_revision,
+    decision_trace_id: cupix.decision_trace_id,
+    catalog_authority: 'blocked',
+    commerce_authority: 'none',
+  });
+  await page.getByTitle('Decision Trace').click();
+  const trace = page.getByTestId('decision-trace-modal');
+  for (const tab of [
+    'Decision', 'Research & Fit', 'Reasoning', 'Evidence & Risk',
+    'Commercial Journey', 'Advanced technical details',
+  ]) {
+    await trace.getByRole('button', { name: new RegExp(`^${tab}`) }).click();
+    await expect(trace).not.toContainText(/404|not found/i);
+  }
   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
   await context.close();
 });
