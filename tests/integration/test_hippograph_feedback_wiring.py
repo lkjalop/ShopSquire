@@ -123,7 +123,9 @@ def test_feedback_reaches_response_without_becoming_v2_ranking_authority(feedbac
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body.get("hippograph_insights") == _SENTINEL
+    assert body.get("hippograph_insights") == _SENTINEL, {
+        key: body.get(key) for key in ("reason", "diagnostics", "execution_evidence", "core_status")
+    }
     assert not body.get("ranking_experiment")
     assert all(
         "_nudge_delta" not in row
