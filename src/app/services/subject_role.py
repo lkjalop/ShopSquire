@@ -140,6 +140,15 @@ def validate_subject_role(
         proposed = SubjectRole(str(model_proposal or "").upper())
     except ValueError:
         proposed = SubjectRole.UNRESOLVED
+    # Buying the host does not mean buying its workload. Preserve the typed
+    # relationship when both the device and execution relation are buyer-authored.
+    # This grants no catalog or commerce authority.
+    if (
+        proposed is SubjectRole.RUN_SUBJECT_ON_PRODUCT
+        and _DEVICE.search(str(query or ""))
+        and _RUN.search(str(query or ""))
+    ):
+        return proposed
     if _COMMERCIAL.search(str(query or "")):
         return SubjectRole.PROCURE_SUBJECT
     if proposed in {

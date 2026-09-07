@@ -78,3 +78,14 @@ def test_entity_identity_must_be_a_literal_buyer_span():
         {"identity": "Invented Suite", "entity_category": "software", "turn_role": "PROCURE_SUBJECT"},
     )
     assert frame.identity is None
+
+
+@pytest.mark.parametrize("query", [
+    "Buy a workstation that can run Blender",
+    "Purchase laptops that run Photoshop for 40 designers",
+])
+def test_purchase_verb_does_not_erase_typed_host_workload_relationship(query):
+    assert validate_subject_role(
+        query, node_handle="el-6-6", sold_state=True,
+        model_proposal="RUN_SUBJECT_ON_PRODUCT",
+    ) is SubjectRole.RUN_SUBJECT_ON_PRODUCT

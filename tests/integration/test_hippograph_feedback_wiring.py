@@ -32,10 +32,11 @@ client = TestClient(app, headers=default_headers())
 
 @pytest.fixture()
 def feedback_on(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
     monkeypatch.setattr(
         "src.app.services.recommendation_core.turn_router._default_llm_fn",
-        lambda _prompt, _timeout: "",
+        lambda _prompt, _timeout: '{"lane":"SEARCH","handle":"el-6-6","confidence":0.9}',
     )
     orig = RecommendationService.retrieve_candidates
     RecommendationService.retrieve_candidates = lambda self, q, limit=10: []
