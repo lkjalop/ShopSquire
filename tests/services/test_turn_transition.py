@@ -89,3 +89,6 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert projection.right_panel["subject_role"] == projection.subject_role
     assert projection.catalog_scope["selected_taxonomy_root"] == "el-6-6"
     assert projection.right_panel["catalog_scope"] == projection.catalog_scope
+    assert projection.catalog_scope["case_id"] == "sc-demo"
+    assert projection.catalog_scope["case_revision"] == 5
+    assert "case_revision" not in commit.catalog_scope

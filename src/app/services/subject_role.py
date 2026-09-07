@@ -33,7 +33,7 @@ _HARDWARE_PRODUCT = re.compile(
 )
 _RUN = re.compile(
     r"\b(?:play|playing|run|running|render|rendering|edit|editing|stream|streaming|"
-    r"develop|development|train|training|process|processing|simulate|simulation)\b", re.I,
+    r"develop|development|process|processing|simulate|simulation)\b", re.I,
 )
 _COMPAT = re.compile(
     r"\b(?:compatible|compatibility|compare|versus|vs\.?|requirements?|"
@@ -59,7 +59,7 @@ def propose_subject_role(query: str) -> SubjectRole:
         r"\b(?:need|want|order|obtain|get|looking\s+for)\b", q, re.I,
     ):
         return SubjectRole.PROCURE_SUBJECT
-    if device and (run or re.search(r"\b(?:for|to)\b", q, re.I)):
+    if device and run:
         return SubjectRole.RUN_SUBJECT_ON_PRODUCT
     if run:
         return SubjectRole.RUN_SUBJECT_ON_PRODUCT
@@ -140,8 +140,8 @@ def validate_subject_role(
         proposed = SubjectRole(str(model_proposal or "").upper())
     except ValueError:
         proposed = SubjectRole.UNRESOLVED
-    if deterministic is not SubjectRole.UNRESOLVED:
-        return deterministic
+    if _COMMERCIAL.search(str(query or "")):
+        return SubjectRole.PROCURE_SUBJECT
     if proposed in {
         SubjectRole.PROCURE_SUBJECT,
         SubjectRole.RUN_SUBJECT_ON_PRODUCT,
@@ -149,4 +149,4 @@ def validate_subject_role(
         SubjectRole.ADJACENT_PRODUCT,
     }:
         return proposed
-    return SubjectRole.UNRESOLVED
+    return deterministic

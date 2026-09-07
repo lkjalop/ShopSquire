@@ -362,6 +362,7 @@ def test_bulk_shortfall_preview_reuses_governed_stage_without_creating_case(monk
     response.products = [ProductCard(sku="AUD-1", title="Laptop", price_cents=289900,
                                      currency="AUD", stock=15)]
     response.extras["requested_quantity"] = 20
+    response.extras["bulk"] = {"quantity": 20, "budget_shortfall_cents": 0, "verdict": "fits"}
 
     _maybe_fulfillment_preview(
         envelope,
@@ -374,3 +375,7 @@ def test_bulk_shortfall_preview_reuses_governed_stage_without_creating_case(monk
     assert payload["availability"]["shortfall"] == 5
     assert payload["fulfillment_options"][0]["quantity"] == 5
     assert payload["sourcing_intent"]["mode"] == "deferred_to_cart"
+    assert response.extras["bulk"]["local_stock"] == 15
+    assert response.extras["bulk"]["stock_shortfall"] == 5
+    assert response.extras["bulk"]["budget_shortfall_cents"] == 0
+    assert response.extras["bulk"]["supplier_shortfall"] is None

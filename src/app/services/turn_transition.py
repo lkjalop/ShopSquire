@@ -151,6 +151,8 @@ def derive_turn_transition(
 
 
 def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBoundTurnReadModel:
+    scope = ({**commit.catalog_scope, "case_id": commit.case_id, "case_revision": revision}
+             if commit.catalog_scope else None)
     outcome = build_research_outcome(
         case_id=commit.case_id,
         case_revision=revision,
@@ -164,9 +166,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
     right_panel["canonical_budget"] = commit.canonical_budget
     right_panel["commercial_terms"] = dict(commit.commercial_terms)
     right_panel["subject_role"] = commit.subject_role
-    right_panel["catalog_scope"] = (
-        dict(commit.catalog_scope) if commit.catalog_scope else None
-    )
+    right_panel["catalog_scope"] = scope
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         case_revision=revision,
@@ -185,7 +185,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         research_outcome=outcome,
         source_intake_receipts=list(commit.source_intake_receipts),
         requirements=commit.requirements,
-        catalog_scope=(dict(commit.catalog_scope) if commit.catalog_scope else None),
+        catalog_scope=scope,
         catalog_authority=commit.catalog_authority,
         commerce_authority=commit.commerce_authority,
         assistant_message=commit.assistant_message,

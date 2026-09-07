@@ -173,11 +173,14 @@ def unresolved_purpose_proposal(
     *, query: str, use_cases: Sequence[str] = (),
     workload_entities: Sequence[Sequence[str]] = (), node_path: str | None = None,
     existing_semantic: Mapping[str, Any] | None = None,
+    subject_role: str | None = None,
 ) -> dict[str, Any]:
     """Return an abstention proposal when a material stated purpose lacks coverage."""
     existing = dict(existing_semantic or {})
     if existing.get("validation") == "valid":
         return existing
+    if subject_role == "PROCURE_SUBJECT" and not workload_entities:
+        return existing  # An audience/purchase purpose is not a named workload.
     spans = _purpose_spans(query)
     if not spans:
         return existing

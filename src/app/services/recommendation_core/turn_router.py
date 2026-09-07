@@ -231,6 +231,13 @@ def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
     return bool(_query_named_sold_handles(db, envelope))
 
 
+def _query_names_category(query: str, node: Any) -> bool:
+    """A resolved category's head outranks a sold noun used as its modifier."""
+    from src.app.services.catalog_classifier import _plural_expand, _tokens
+    head = list(_tokens(node.name)) if node is not None else []
+    return bool(head and _plural_expand({head[-1]}) & _plural_expand(set(_tokens(query))))
+
+
 def _query_named_sold_handles(db, envelope: TurnEnvelope) -> Tuple[str, ...]:
     """Sold categories whose product head is explicitly present in the query."""
     try:
@@ -1156,6 +1163,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         semantic = unresolved_purpose_proposal(
             query=envelope.query,
             use_cases=compatible_use_cases,
+            subject_role=fallback_subject_role.value,
             node_path=node.full_path,
             existing_semantic=semantic,
         )
@@ -1613,7 +1621,7 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "PROCUREMENT, not POLICY_QUESTION.\n\n"
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"wanted_category": "<short product category when handle is null, else null>", '
-        '"request_scope": "product|service_or_place|uncertain", '
+        '"request_scope": "product|service_or_place|informational|uncertain", '
         '"use_cases": ["<key>", ...], '
         '"workload_entities": [{"kind": "game|software", "name": "<literal name>"}], '
         '"unresolved_entities": ["<exact buyer span whose product-fit requirements need identity resolution>"], '
@@ -2805,7 +2813,7 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     wanted_category = str(data.get("wanted_category") or "").strip()[:120]
     raw_request_scope = str(data.get("request_scope") or "").strip().lower()
     request_scope = (raw_request_scope
-                     if raw_request_scope in ("product", "service_or_place", "uncertain")
+                     if raw_request_scope in ("product", "service_or_place", "informational", "uncertain")
                      else "uncertain")
     if node is None and wanted_category:
         # Some compatible model adapters put a real registry handle in the descriptive
@@ -3047,7 +3055,8 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     # category). The sold set that GRANTS refusals also VETOES them: a query naming a sold
     # category's own name-token can never be refused, whatever the model mapped. Symmetric,
     # deterministic, grounded — no model opinion involved.
-    if refusal_granted and _query_names_sold_category(db, envelope):
+    if (refusal_granted and _query_names_sold_category(db, envelope)
+            and not _query_names_category(envelope.buyer_query or envelope.query, node)):
         refusal_granted = False
     if refusal_granted:
         lane = "OFF_CATALOG"
@@ -3118,6 +3127,7 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
 
     coverage_abstention_shadow = unresolved_purpose_proposal(
         query=semantic_query,
+        subject_role=subject_role.value,
         use_cases=use_cases,
         workload_entities=workload_entities,
         node_path=(node.full_path if node else None),

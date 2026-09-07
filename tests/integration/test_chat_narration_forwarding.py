@@ -6,6 +6,24 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
+def test_empty_search_without_a_material_concept_does_not_launch_publisher_discovery(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    async def empty_search(*args, **kwargs):
+        return 200, {"results": [], "assistant_message": "Please clarify your shopping request.",
+                     "decision_trace_id": "no-workload", "next_questions": [],
+                     "semantic_resolution": {"concepts": [], "material_unknowns": []},
+                     "turn_intent": "SEARCH"}
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", empty_search)
+    response = TestClient(create_app()).post('/api/v1/chat/query',
+        json={"uid": "non-workload-empty", "query": "Why does the moon have phases?", "memory_mode": "temporary"},
+        headers={"x-api-key": "local-merchant-key"})
+    assert response.status_code == 200
+    assert not response.json().get("ambiguity_exploration")
+    assert not response.json().get("server_research_result")
+
+
 async def _fake_recommend(*args, **kwargs):
     """Recommend returned the deterministic answer plus an async narration job."""
     return 200, {

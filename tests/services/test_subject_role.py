@@ -13,7 +13,7 @@ from src.app.services.subject_role import SubjectRole, propose_subject_role, val
         ("Buy Jira licences for 40 developers", SubjectRole.PROCURE_SUBJECT),
         ("Jira Software subscription for 200 users, budget AUD 90k", SubjectRole.PROCURE_SUBJECT),
         ("A laptop that can run Jira and Confluence smoothly", SubjectRole.RUN_SUBJECT_ON_PRODUCT),
-        ("A workstation for Blender under AUD 5k", SubjectRole.RUN_SUBJECT_ON_PRODUCT),
+        ("A workstation for Blender under AUD 5k", SubjectRole.UNRESOLVED),
         ("Laptops that can run Photoshop for 40 designers", SubjectRole.RUN_SUBJECT_ON_PRODUCT),
         ("Is Baldur's Gate 3 compatible with this laptop?", SubjectRole.COMPATIBILITY_CHECK),
         ("I process surveys in Agisoft Metashape; what hardware do I need?", SubjectRole.RUN_SUBJECT_ON_PRODUCT),
@@ -31,6 +31,13 @@ def test_for_is_not_itself_workload_authority_without_a_semantic_proposal():
         sold_state=False,
         model_proposal=None,
     ) is SubjectRole.UNRESOLVED
+
+
+def test_audience_is_not_a_workload_and_validated_role_is_not_overridden_by_for():
+    assert propose_subject_role('I need 25 gaming laptops for a training lab') is SubjectRole.PROCURE_SUBJECT
+    assert validate_subject_role('A computer chair for my laptop', node_handle=None,
+        sold_state=False, model_proposal='PROCURE_SUBJECT') is SubjectRole.PROCURE_SUBJECT
+    assert propose_subject_role('A workstation for a design team') is SubjectRole.UNRESOLVED
 
 
 @pytest.mark.parametrize(

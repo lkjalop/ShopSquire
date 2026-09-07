@@ -34,6 +34,7 @@ from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
 from src.app.services.infrastructure_alternative_projection import project_for_unresolved_form_factor
+from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
 
 logger = logging.getLogger(__name__)
 
@@ -791,7 +792,7 @@ def _assess_image_compromise_breach(
     try:
         geo = ((details.get("network") or {}).get("geo")) or {}
         signals = details.get("signals") or {}
-    except Exception:
+    except (AttributeError, TypeError):
         geo, signals = {}, {}
 
     # Known-bad-actor determination via ASN / GeoIP risk.
@@ -2470,7 +2471,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 from src.app.models.db import get_db_for_request
                 from src.app.models.orm import ShoppingCase
                 from src.app.services.accepted_catalog_projection import project_accepted_catalog
-                from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
                 from src.app.services.case_research_plan import build_case_research_plan
 
                 _purpose = " ".join(str(q or "").split())[:500]
@@ -3000,8 +3000,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
                     ],
                 }] + list(next_questions)
-    except Exception:
-        pass
+    except (TypeError, ValueError, OverflowError):
+        logger.debug("budget refinement received an invalid numeric value", exc_info=True)
     if not assistant_message and not products and next_questions:
         prompts = [f"- {q.get('text')}" for q in next_questions if isinstance(q, dict) and q.get("text")]
         assistant_message = "I could not find a confident in-catalog match yet. Try one of these refinements:\n" + "\n".join(prompts)
@@ -3141,7 +3141,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # Use top normalized score as confidence proxy if present
         if results and isinstance(results[0].get("score_norm"), (int, float)):
             confidence = float(results[0]["score_norm"]) / 100.0
-    except Exception:
+    except (AttributeError, TypeError, ValueError, OverflowError):
         confidence = None
 
     # Persist search event for chat route (UI-friendly shape)
@@ -3334,15 +3334,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     )
     if isinstance(_right_panel_contract, dict) and _architecture_alternatives is not None:
         _right_panel_contract["architecture_alternatives"] = _architecture_alternatives
-    try:
-        if isinstance(_right_panel_contract, dict):
-            _right_panel_contract["image_untrusted"] = bool(image_security_posture.get("image_untrusted"))
-            _right_panel_contract["image_degraded_mode"] = bool(image_security_posture.get("image_degraded_mode"))
-            _right_panel_contract["security_route"] = str(image_security_posture.get("route") or "allow")
-            if image_security_posture.get("warning_message"):
-                _right_panel_contract["security_summary"] = str(image_security_posture.get("warning_message"))
-    except Exception:
-        pass
+    if isinstance(_right_panel_contract, dict) and isinstance(image_security_posture, dict):
+        _right_panel_contract["image_untrusted"] = bool(image_security_posture.get("image_untrusted"))
+        _right_panel_contract["image_degraded_mode"] = bool(image_security_posture.get("image_degraded_mode"))
+        _right_panel_contract["security_route"] = str(image_security_posture.get("route") or "allow")
+        if image_security_posture.get("warning_message"):
+            _right_panel_contract["security_summary"] = str(image_security_posture.get("warning_message"))
     try:
         if decision_trace_id:
             log_trace_event(
@@ -3854,11 +3851,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # boundary without rerunning the complete turn.
         or (_workload_requirements_established and not products)
         or (
-            turn_intent == "SEARCH"
-            and not products
-            and not bool(data.get("off_catalog"))
-        )
-        or (
             _case_research_plan is not None
             and not _workload_requirements_established
             and turn_intent not in {
@@ -3879,9 +3871,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     ):
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
-            from src.app.services.case_catalog_candidates import (
-                build_case_catalog_candidate_set,
-            )
 
             _identity_candidates = []
             for item in list(_workload_authorization.get("evidence") or [])[:3]:
@@ -5484,7 +5473,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     ((ambiguity_exploration.get("catalog_candidate_set") or {}).get("catalog_scope"))
                                     if isinstance(ambiguity_exploration, dict)
                                     and isinstance(ambiguity_exploration.get("catalog_candidate_set"), dict)
-                                    else None
+                                    else build_case_catalog_candidate_set(
+                                        case_db, retained_purpose=active_shopping_case_purpose or q,
+                                        tenant_id=tenant_id, storefront_taxonomy_handle=storefront_taxonomy_handle,
+                                    ).catalog_scope.model_dump(mode="json")
                                 ),
                                 catalog_authority=catalog_authority,
                                 assistant_message=str(out.get("assistant_message") or ""),

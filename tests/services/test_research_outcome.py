@@ -1,6 +1,17 @@
 from src.app.services.research_outcome import build_research_outcome
 
 
+def test_complete_publisher_document_does_not_hide_partial_claim_compilation():
+    outcome = build_research_outcome(case_id="sc-partial", case_revision=2,
+        operation_id="op-partial", catalog_authority="permitted", commerce_authority="none",
+        research={"workload_authorization": {"evidence": [{
+            "requirements_completeness": "minimum_and_recommended",
+            "compiled_requirements": [{"attribute_key": "ram_gb", "value": 8}],
+            "claim_rejections": [{"attribute_key": "storage_gb", "reason": "attribute_not_registry_authorized"}],
+        }]}}, requirements={"accepted": [{"claim_id": "ram-1"}]})
+    assert outcome.requirement_completeness == "partial"
+
+
 def test_held_claims_are_not_reported_as_no_evidence_or_verified() -> None:
     outcome = build_research_outcome(
         case_id="sc-rockwell",

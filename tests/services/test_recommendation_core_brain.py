@@ -1038,6 +1038,25 @@ def test_non_product_service_scope_gets_bounded_explanation(db):
     assert "catalog match" not in resp.message.lower()
 
 
+def test_informational_scope_does_not_offer_local_services_or_product_requirements(db):
+    raw = json.dumps({"lane": "SEARCH", "handle": None, "wanted_category": None,
+                      "request_scope": "informational", "requirements": {}, "confidence": 0.0})
+    resp = recommend_turn(db, _env("Why does the moon have phases?"), llm_fn=lambda p, t: raw)
+    assert resp.products == []
+    assert resp.extras["unsupported_scope"]["kind"] == "informational"
+    assert "map service" not in resp.message
+
+
+def test_unsold_purchase_object_is_not_hidden_by_a_sold_modifier(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6", tenant_id="default")
+    db.commit()
+    decision = route_turn(db, _env("I need an ergonomic computer chair under AUD 500."),
+                          llm_fn=_route_stub("OFF_CATALOG", "fr-7"))
+    assert decision.refusal_granted
+    assert decision.lane == "OFF_CATALOG"
+
+
 def test_service_scope_cannot_hide_a_grounded_product(db):
     raw = json.dumps({
         "lane": "SEARCH", "handle": "el-6-6", "wanted_category": None,
@@ -1322,6 +1341,8 @@ def test_open_vocabulary_software_procurement_survives_router_outage(db):
 def test_hardware_for_software_remains_host_product_not_software_procurement(db):
     raw = json.dumps({
         "lane": "SEARCH", "handle": "el-6-6", "requirements": {}, "confidence": 0.9,
+        "entity_frame": {"identity": "Blender", "buyer_span": "Blender",
+                         "entity_category": "software", "turn_role": "RUN_SUBJECT_ON_PRODUCT", "confidence": 0.9},
     })
     decision = route_turn(
         db, _env("A workstation for Blender under AUD 5k"),
@@ -3396,14 +3417,15 @@ def test_explicit_gaming_laptop_phrase_uses_enrolled_profile_for_local_explorati
     )
 
     assert decision.use_cases == ("gaming",)
-    assert decision.semantic_proposal["proposal_origin"] == "coverage_abstention"
+    assert not decision.semantic_proposal.get("material_unknowns")
 
     response = recommend_turn(
         db,
         _env("I need gaming laptops for a studio."),
         llm_fn=lambda _prompt, _timeout: "",
     )
-    assert response.extras["provisional_catalog_authority"]["covered_profiles"] == ["gaming"]
+    assert response.products
+    assert response.extras["decision"]["use_cases"] == ["gaming"]
     assert all(
         "needs current external requirements" not in item["text"].lower()
         for item in response.clarify

@@ -13,6 +13,18 @@ import {
 } from '../DecisionTrace';
 
 describe('Decision Trace component ontology', () => {
+  it('projects completed canonical research even when legacy events are absent', () => {
+    const strip = deriveTraceTrustStrip({ researchOutcome: {
+      schema_version: 'research-outcome-v1', case_revision: 3,
+      discovery_status: 'completed', fetch_status: 'completed',
+      requirement_completeness: 'partial', accepted_claim_count: 2,
+      held_claim_count: 1, catalog_authority: 'provisional', commerce_authority: 'none',
+    } });
+    expect(strip.execution.label).toBe('Completed');
+    expect(strip.completeness.label).toBe('Partial');
+    expect(strip.authority.label).toBe('Provisional');
+    expect(strip.uncertainty.label).toBe('Material');
+  });
   it('keeps all 15 leaves reachable through six sections', () => {
     const leaves = TRACE_SECTIONS.flatMap((section) => [...section.leaves]);
     expect(TRACE_SECTIONS).toHaveLength(6);

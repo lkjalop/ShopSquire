@@ -291,6 +291,7 @@ function containsFlag(value: any, names: Set<string>, depth = 0): boolean {
 }
 
 export function deriveTraceTrustStrip({
+  researchOutcome = null,
   nowMs = Date.now(),
   events = [],
   executionSteps = [],
@@ -298,6 +299,7 @@ export function deriveTraceTrustStrip({
   marketProjections = [],
   hippographInsights = [],
 }: {
+  researchOutcome?: any;
   nowMs?: number;
   events?: any[];
   executionSteps?: any[];
@@ -466,7 +468,29 @@ export function deriveTraceTrustStrip({
     ? { label: 'Simulation only', detail: 'This evidence cannot increase autonomous authority.', status: 'warn' }
     : { label: 'Operational trace', detail: 'No simulation-only flag was recorded.', status: 'good' };
 
-  return { execution, authority, freshness, completeness, uncertainty, simulation };
+  const strip = { execution, authority, freshness, completeness, uncertainty, simulation };
+  if (researchOutcome?.schema_version === 'research-outcome-v1') {
+    const outcome = researchOutcome;
+    const fetch = String(outcome.fetch_status || 'not_attempted');
+    const discovery = String(outcome.discovery_status || 'not_attempted');
+    strip.execution = {
+      label: fetch === 'completed' ? 'Completed' : discovery === 'completed' ? 'Discovery completed'
+        : [fetch, discovery].includes('running') ? 'Running'
+        : [fetch, discovery].some(s => ['failed', 'degraded', 'partial'].includes(s)) ? 'Incomplete' : 'Not executed',
+      detail: `Canonical research: discovery ${discovery}; fetch ${fetch}.`,
+      status: fetch === 'completed' ? 'good' : 'neutral',
+    };
+    const complete = outcome.requirement_completeness === 'complete';
+    strip.completeness = { label: humanizeKey(outcome.requirement_completeness || 'unknown'),
+      detail: 'Requirement coverage from the committed research outcome.', status: complete ? 'good' : 'warn' };
+    strip.authority = { label: humanizeKey(outcome.catalog_authority || 'unknown'),
+      detail: `Catalog authority only; commerce authority: ${outcome.commerce_authority || 'none'}.`,
+      status: outcome.catalog_authority === 'permitted' ? 'good' : 'warn' };
+    strip.uncertainty = { label: !complete || outcome.held_claim_count > 0 ? 'Material' : 'No recorded requirement gap',
+      detail: `${outcome.accepted_claim_count || 0} accepted; ${outcome.held_claim_count || 0} held claims. Availability and fulfillment remain separate.`,
+      status: complete && !outcome.held_claim_count ? 'good' : 'warn' };
+  }
+  return strip;
 }
 
 export type CompactTimelineItem = {
@@ -1338,6 +1362,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     commercial: journeyConcernCount,
   };
   const trustStrip = deriveTraceTrustStrip({
+    researchOutcome: currentResearchOutcome,
     events: allDisplayEvents,
     executionSteps: typedExecutionSteps,
     evidence,

@@ -232,7 +232,9 @@ def build_research_outcome(
 
     completeness_value = str(_first(rows, "requirements_completeness") or "").lower()
     evidence_outcome = str(_first(rows, "evidence_outcome") or "").lower()
-    if completeness_value in {"minimum_and_recommended", "complete", "accepted_complete"}:
+    if any(row.get("claim_rejections") for row in rows):
+        completeness = "partial"
+    elif completeness_value in {"minimum_and_recommended", "complete", "accepted_complete"}:
         completeness = "complete"
     elif held or accepted or compiled or "partial" in completeness_value:
         completeness = "partial"

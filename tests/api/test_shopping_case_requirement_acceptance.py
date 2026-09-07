@@ -8,14 +8,21 @@ from src.app.models.db import get_db
 from src.app.models.orm import Base, Product
 from src.app.routers.shopping_cases import router
 from src.app.services.buyer_requirement_evidence import extract_buyer_requirement_claims
+from src.app.services.taxonomy_registry import add_sold_node
 
 
-def _client() -> TestClient:
+def _client(*, catalog_grounded: bool = True) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:", future=True,
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    if catalog_grounded:
+        # Interpretation routing uses the tenant's sold taxonomy, not the
+        # browser's category hint. Model the laptop storefront explicitly.
+        with Session(engine) as db:
+            add_sold_node(db, node_handle="el-6-6", tenant_id="default")
+            db.commit()
     with engine.begin() as connection:
         connection.execute(text(
             "CREATE TABLE conversation_case_state ("
@@ -44,6 +51,21 @@ def _enrol_local_research(monkeypatch, *, tenant_id: str = "default") -> None:
     )
     monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", tenant_id)
     monkeypatch.setenv("EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED", "1")
+
+
+def test_interpretation_does_not_infer_sold_taxonomy_for_an_ungrounded_tenant():
+    client = _client(catalog_grounded=False)
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-ungrounded",
+        "retained_purpose": "I need a laptop under AUD 3000",
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["schema_version"] == "catalog-boundary-v1"
+    assert payload["provider_accounting"]["external_calls"] == 0
+    assert payload["cart_mutation"] == "not_authorized"
+    assert payload["supplier_send"] == "not_authorized"
 
 
 def test_manual_specifications_create_same_case_review_proposal():

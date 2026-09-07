@@ -102,10 +102,50 @@ test('evidence delivery preserves distinct official values in the rendered revie
     expect(answer.terminal_outcome.operation_id).toBe(answer.operation_id);
     expect(answer.terminal_outcome.catalog_authority).toBe('permitted');
     const terminal = answer.terminal_outcome;
+    expect(terminal.catalog_scope.case_id).toBe(terminal.case_id);
+    expect(terminal.catalog_scope.case_revision).toBe(terminal.case_revision);
     const products = [...(terminal.products || []), ...(terminal.product_shelves?.shelves || []).flatMap((s: any) => s.initial || [])];
     expect(products.length).toBeGreaterThan(0);
     await expect(page.getByText(/These came from your upload/)).toHaveCount(0);
+    await page.getByTitle('Decision Trace', { exact: true }).click();
+    await expect(page.getByTestId('trace-trust-strip')).toContainText('Completed');
+    await expect(page.getByTestId('trace-trust-strip')).not.toContainText('Not executed');
   } finally { await context.close(); }
+});
+
+test('scope and stock: purchase object, unrelated question and bulk remain distinct', async ({ browser }, testInfo) => {
+  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live demo');
+  test.setTimeout(300_000);
+  for (const [name, query] of [
+    ['chair', 'I need an ergonomic computer chair under AUD 500.'],
+    ['unrelated', 'Why does the moon have phases?'],
+    ['bulk', 'I need 25 gaming laptops under AUD 2000 each for a training lab.'],
+  ]) {
+    const { context, page } = await openBuyer(browser, name);
+    try {
+      const answer = await send(page, query);
+      await testInfo.attach(`${name}.json`, { body: Buffer.from(JSON.stringify(answer)), contentType: 'application/json' });
+      if (name === 'chair') {
+        expect(answer.assistant_message).toMatch(/don't stock|do not stock|outside.*catalog/i);
+        expect(answer.assistant_message).toMatch(/chair/i);
+        await expect(page.getByText(/what will you mainly use it for/i)).toHaveCount(0);
+      } else if (name === 'unrelated') {
+        expect(answer.terminal_outcome.research_status).toBe('not_applicable');
+        expect(answer.assistant_message).not.toMatch(/publisher|map service|local director/i);
+      } else {
+        const economics = answer.bulk_budget;
+        const snapshot = answer.availability.inventory_snapshot;
+        expect(economics.quantity).toBe(25);
+        expect(economics.total_budget_cents).toBe(5000000);
+        expect(economics.budget_shortfall_cents).toBe(0);
+        expect(economics.local_stock).toBe(snapshot.local_atp);
+        expect(economics.network_transferable).toBe(snapshot.transferable);
+        expect(economics.supplier_shortfall).toBe(snapshot.unconfirmed_shortfall);
+        expect(economics.stock_evidence_status).toBe(snapshot.status);
+        await expect(page.getByText(/which.*software.*version|what will you mainly use it for/i)).toHaveCount(0);
+      }
+    } finally { await context.close(); }
+  }
 });
 
 test('evidence delivery never binds FreeCAD to AutoCAD requirements', async ({ browser }, testInfo) => {

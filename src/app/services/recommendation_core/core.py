@@ -1459,12 +1459,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # Closed, model-interpreted scope with a deterministic authorization clamp in the router.
     # This is intentionally generic: the core does not learn pizza, restaurants, plumbers, or
     # other domain phrases. It explains the platform boundary without pretending a catalog miss.
-    if decision.request_scope == "service_or_place" and not resp.products:
+    if decision.request_scope in {"service_or_place", "informational"} and not resp.products:
         resp.extras["unsupported_scope"] = {
-            "kind": "service_or_place",
+            "kind": decision.request_scope,
             "can_help_with": "products_sold_by_store",
         }
         resp.set_message(
+            "I can help with product selection, compatibility and shopping budgets. That question is outside this store assistant's scope."
+            if decision.request_scope == "informational" else
             "I can help compare and source products sold by this store, but I can't recommend "
             "local services or places. Try a local directory or map service for that request.",
             MsgPriority.REFUSAL,
@@ -2333,6 +2335,9 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
     for key, value in projection.items():
         if value is not None and value != []:
             resp.extras[key] = value
+    if isinstance(resp.extras.get("bulk"), dict):
+        from src.app.services.order_economics import project_stock_economics
+        resp.extras["bulk"] = project_stock_economics(resp.extras["bulk"], fulfillment.availability)
     if horizon_days is not None and fulfillment.availability:
         deadline = _deadline_feasibility_from_preview(
             quantity=int(quantity),

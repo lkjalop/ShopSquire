@@ -531,7 +531,7 @@ def _case_trace_has_event(
 
 
 @router.post("/interpretations")
-async def create_case_interpretation(
+def create_case_interpretation(
     body: CreateCaseInterpretationRequest,
     x_tenant_id: str | None = Header(default=None),
     db=Depends(get_db),
@@ -811,7 +811,9 @@ async def create_case_interpretation(
                 authorization_basis="tenant_policy",
                 execution_id="auto-" + uuid.uuid4().hex[:24],
             )
-            research_result = await asyncio.wait_for(
+            # This sync route owns synchronous DB work in FastAPI's worker pool.
+            # Bounded provider orchestration must not run DB calls on the ASGI loop.
+            research_result = asyncio.run(asyncio.wait_for(
                 _research_shopping_case_with_db(
                     case_id,
                     research_request,
@@ -819,7 +821,7 @@ async def create_case_interpretation(
                     db=db,
                 ),
                 timeout=20.0,
-            )
+            ))
             response["server_research_result"] = research_result
             if isinstance(research_result.get("ambiguity_exploration"), dict):
                 response["ambiguity_exploration"] = research_result["ambiguity_exploration"]
