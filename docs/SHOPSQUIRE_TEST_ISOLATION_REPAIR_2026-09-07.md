@@ -57,3 +57,37 @@ Logs are outside the repository under the checkpoint directory above:
 
 No live model/browser run, server restart, remote push or legacy archival was
 performed for this checkpoint. All changes remain uncommitted.
+
+## Subsequent execution — checkpoint and live gate
+
+The statement above records the earlier run. The repairs are now committed as
+`b85d16bd`; `5c41f513` additionally preserves a model-proposed host/workload
+relationship when both device and execution relation are literal buyer facts,
+and makes the feedback fixture's model response explicit. `b1c7f073` adds safe
+failure diagnostics. Nothing was pushed.
+
+Two new purchase-verb/host-workload tests failed before the role correction.
+The local subject-role plus feedback test run then passed 21 tests.
+
+Clean detached checkout verification is NOT green: the feedback projection
+integration test still fails without the demo worktree environment, even after
+an explicit primary core mode and valid router fixture. The dependency remains
+unresolved; do not call this clean-machine or PostgreSQL certification.
+
+Restarted the demo stack and prewarmed qwen3:14b. Browser certification used
+one worker, GPU-disabled Chromium and zero retries:
+
+- Unrelated question: passed.
+- Bulk stock accounting: passed.
+- Computer chair: failed; terminal message is now truthfully router-output-invalid.
+  The independent scope fix does not eliminate this model-result failure.
+- PRAGMATA positive delivery: failed; identity/research worked and two claims
+  were accepted, but narration omitted the title and coverage remained partial.
+  This is not a qualified-product success.
+
+Browser traces/screenshots and logs are in the external checkpoint directory:
+`browser-results`, `delivery-results`, `browser.log`, `delivery.log`, and
+`clean-final.log`. Full tab-content, supplier-send absence, mixed/negated roles,
+and complete-evidence positive delivery are not sealed by this run.
+
+Large extraction and legacy retirement remain deferred until those gates pass.
