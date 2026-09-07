@@ -1,6 +1,25 @@
 from src.app.services.terminal_research_narration import terminal_research_narration
 
 
+def test_missing_research_plan_cannot_leave_a_budget_success_sentence():
+    message = terminal_research_narration(
+        research_outcome={"catalog_authority": "blocked", "failure_code": "case_research_plan_not_found"},
+        execution_evidence={}, existing_message="Yes, the best fit starts at $1,919.",
+    )
+    assert "$1,919" not in message
+    assert "could not complete" in message
+
+
+def test_partial_evidence_replaces_an_earlier_budget_fit_claim():
+    message = terminal_research_narration(
+        research_outcome={"failure_code": "requirements_incomplete", "accepted_claim_count": 2},
+        execution_evidence={}, existing_message="Yes, this laptop fully qualifies.",
+    )
+    assert "2 requirement claims" in message
+    assert "partial" in message
+    assert "fully qualifies" not in message
+
+
 def test_held_claims_replace_false_no_evidence_narration() -> None:
     message = terminal_research_narration(
         research_outcome={

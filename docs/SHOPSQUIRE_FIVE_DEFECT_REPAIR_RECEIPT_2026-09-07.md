@@ -56,3 +56,62 @@ Do not minify code, delete useful tests/comments, or raise limits to hide growth
 Then audit early terminal scope exits and measure slow research roles separately.
 Hosted clean-machine/PostgreSQL certification and independent source reviews are
 still outstanding. This local run does not substitute for them.
+
+## Follow-up: scope enforcement and live-discovered trace corruption
+
+The preceding receipt describes checkpoint `d754f220`. It was verified from a
+separate clean worktree: 70 focused tests passed using the existing Python
+environment (not a clean-machine certificate).
+
+Subsequent TDD repairs:
+
+- Missing candidate IDs in `project_accepted_catalog` now yield no candidates,
+  never the entire tenant catalog. Isolated projection tests explicitly supply
+  their seed universe; no production unbounded-preview bypass was added.
+- Explicitly partial requirements cannot produce full catalog qualification.
+  Accepted claims remain accepted; the canonical outcome records
+  `requirements_incomplete` and narration explains the remaining gap.
+- Terminal scope metadata distinguishes bound, unavailable and not-applicable.
+  Progress and retained-operation failures record pending/unavailable scope.
+  This does **not** certify every early router return or legacy candidate path.
+- Degraded chat responses preserve the facade's timing receipt instead of
+  silently dropping it. Research-stage accounting remains incomplete.
+- A real browser trace exposed UUID corruption: privacy scrubbing converted
+  `sc-48504246-2713-44b7-9a2c-5de1cabe3977` into a phone-redacted string, making a
+  recorded research plan unreachable. Only syntactically valid UUIDs in named
+  trace-reference fields now bypass PII scrubbing. Phone-valued ID fields and
+  ordinary text remain scrubbed. No corrupted historical record was rewritten.
+- Failed research no longer preserves a prior budget-success sentence.
+- A provider call marked successful followed by an unusable router result is
+  labelled `router_output_invalid`, not a transport outage. This improves the
+  failure evidence; it does not fix every invalid model response.
+
+Owned-boundary extraction moved timing to `observability/stage_timer`, router
+contracts to `turn_outcome`, case-patch validation to `case_patch_grounding`, and
+admin DB diagnostics to `timescale_admin`. The unused private legacy prompt
+builder had no source/test callers and was removed (recoverable in Git).
+Import compatibility was retained. **admin, core and turn_router now pass their
+existing size ceilings.** Chat, shopping_cases and fulfillment_cases remain over
+their ceilings; no ceiling was changed.
+
+Follow-up evidence (same external artifact directory):
+
+- `scope-final-focused.log`: 101 passed.
+- `scope-final-validation.log`: 235 passed; overlaps prior runs, not additive.
+- `live-failure-regressions-green.log`: 37 privacy/narration/transport tests passed.
+- `scope-live-browser.log`: first zero-retry run, one passed/two failed.
+- `scope-live-after-reference-fix.log`: after the UUID repair, two passed/one
+  failed. The game partial-evidence and FreeCAD checks passed; the chair response
+  still degraded instead of producing the expected off-catalog answer.
+- The combined scope/stock browser test was split into independent cases so a
+  chair failure cannot skip unrelated-question and bulk verification.
+- `scope-independent-browser.log`: unrelated-question and bulk tests both passed
+  with zero retries. These are separate executions, not a green full-matrix run.
+
+Remaining work is not just file size: complete the early-exit/candidate-enforcement
+audit, diagnose the live router validation failure, expand negation/mixed-role and
+subject-switch tests, measure end-to-end research latency, then run the entire
+independent zero-retry matrix. A positive complete-requirements/matching-stock
+live certificate remains necessary; passing the new partial-evidence refusal
+test is not a substitute. Human source review and hosted/PostgreSQL release gates
+remain separate and were not approved by this work.

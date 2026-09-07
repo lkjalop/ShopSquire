@@ -441,19 +441,12 @@ def project_accepted_catalog(
         ProductConfiguration.tenant_id == tenant_id,
         ProductConfiguration.active.is_(True),
     )
-    # ``None`` is retained for isolated administrative/legacy projections. Buyer-facing
-    # shopping-case callers pass an explicit case-bound list; an empty list therefore
-    # means no eligible candidates and must never fall back to the whole catalog.
-    if candidate_configuration_ids is not None:
-        bounded_ids = [str(value) for value in candidate_configuration_ids if str(value)]
-        if not bounded_ids:
-            rows = []
-        else:
-            rows = db.execute(candidate_query.where(
-                ProductConfiguration.id.in_(bounded_ids),
-            )).scalars().all()
-    else:
-        rows = db.execute(candidate_query).scalars().all()
+    # Missing scope is not authority to enumerate the tenant catalog. Every
+    # caller, including administrative previews, must supply its candidate set.
+    bounded_ids = [str(value) for value in (candidate_configuration_ids or ()) if str(value)]
+    rows = db.execute(candidate_query.where(
+        ProductConfiguration.id.in_(bounded_ids),
+    )).scalars().all() if bounded_ids else []
     configuration_ids = [row.id for row in rows]
     evidence_by_configuration: dict[str, list[ProductEvidenceObservation]] = defaultdict(list)
     availability_by_configuration: dict[str, list[ProductAvailabilityObservation]] = defaultdict(list)

@@ -79,6 +79,8 @@ def _chat_in_progress(
         "recommendation_status": "pending",
         "research_status": "pending",
         "catalog_authority": "blocked_pending_completion",
+        "catalog_scope": None,
+        "catalog_scope_status": "pending",
         "commerce_authority": "none",
         "products": [],
         "action_executed": False,
@@ -112,6 +114,8 @@ def _chat_operation_failed(
         "recommendation_status": "failed",
         "research_status": "failed",
         "catalog_authority": "blocked",
+        "catalog_scope": None,
+        "catalog_scope_status": "unavailable",
         "commerce_authority": "none",
         "product_shelves": [],
         "failure_code": failure_code,
@@ -5610,6 +5614,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     _terminal_catalog = gate_terminal_catalog_projection(
         research_status=(server_research_result or {}).get("status"),
         products=products, product_shelves=out.get("product_shelves"),
+        requirement_completeness=_research_outcome.get("requirement_completeness"),
         catalog_authority=("blocked" if server_research_failure else
             _research_outcome.get("catalog_authority")
             or (out.get("turn_read_model") or {}).get("catalog_authority")),
@@ -5690,6 +5695,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             if isinstance(data.get("execution_evidence"), dict) else {}
         ),
     }
+    from src.app.services.chat_turn_projection import terminal_scope_contract
+    scope_contract = terminal_scope_contract(
+        scope=out["terminal_outcome"].get("catalog_scope"),
+        case_id=out.get("case_id"), case_revision=out.get("case_revision"),
+        applicable=(data.get("semantic_status") or {}).get("request_scope")
+        not in {"informational", "service_or_place"},
+    )
+    out.update(scope_contract)
+    out["terminal_outcome"].update(scope_contract)
+    if isinstance(out.get("right_panel"), dict):
+        out["right_panel"].update(scope_contract)
     if persist_conversation:
         from src.app.services.chat_persistence import persist_chat_result
 

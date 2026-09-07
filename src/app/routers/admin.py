@@ -52,54 +52,8 @@ def platform_regions_readiness(role: str = Depends(require_role([ROLE_OWNER, ROL
 
 @router.get("/db/readiness")
 def db_readiness(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
-    """Report DB connectivity, migrations/tables, and Timescale extension readiness."""
-    from sqlalchemy import text as _text
-    from src.app.models.db import get_engine, db_session
-    try:
-        eng = get_engine()
-        url = str(getattr(eng, "url", ""))
-        dialect = getattr(getattr(eng, "dialect", None), "name", "") or ("sqlite" if url.startswith("sqlite") else "")
-    except Exception:
-        url = ""
-        dialect = ""
-    db_ok = False
-    mig_ok = False
-    ts_ready = False
-    err = None
-    try:
-        with db_session() as db:
-            db.execute(_text("SELECT 1"))
-            db_ok = True
-            if dialect == "sqlite":
-                row = db.execute(_text("SELECT name FROM sqlite_master WHERE type='table' AND name='decision_logs'")).fetchone()
-                mig_ok = bool(row)
-            else:
-                row = db.execute(_text("SELECT to_regclass('public.decision_logs')")).fetchone()
-                mig_ok = bool(row and row[0])
-            if url.startswith("postgres"):
-                try:
-                    ts = db.execute(_text("SELECT extname FROM pg_catalog.pg_extension WHERE extname='timescaledb'")).fetchone()
-                    ts_ready = bool(ts)
-                except Exception:
-                    ts_ready = False
-    except Exception as e:
-        err = str(e)
-    timescale = {}
-    if db_ok:
-        try:
-            with db_session() as db:
-                timescale = detect_timescale_state(db)
-        except Exception:
-            timescale = {}
-    return {
-        "engine": url,
-        "dialect": dialect,
-        "connected": db_ok,
-        "migrations_ok": mig_ok,
-        "timescale_ready": ts_ready,
-        "timescale": timescale,
-        "error": err,
-    }
+    from src.app.services.timescale_admin import database_readiness
+    return database_readiness()
 
 
 @router.post("/db/ensure-timescale")

@@ -1083,6 +1083,7 @@ def dispatch_recommendation_core_typed(
             facts=facts,
             semantic_status={
                 "status": semantic_evaluation,
+                "request_scope": decision.get("request_scope"),
                 "subject_role": subject_role,
                 "source": decision_source or (
                     "deterministic_fallback" if semantic_evaluation == "fallback" else None
@@ -1094,6 +1095,7 @@ def dispatch_recommendation_core_typed(
                 "bulk_budget": extras.get("bulk") if isinstance(extras.get("bulk"), dict) else None,
                 "router_outcome": router or None,
                 "model_invocation": model or None,
+                "timing_breakdown": extras.get("timing_breakdown") if isinstance(extras.get("timing_breakdown"), dict) else None,
             },
         )
 

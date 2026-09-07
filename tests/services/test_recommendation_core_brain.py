@@ -2182,6 +2182,14 @@ def test_model_unavailable_bulk_search_keeps_quantity_while_scope_is_blocked(db)
     assert response.products == []
 
 
+def test_completed_provider_with_invalid_output_is_not_a_transport_outage(db, monkeypatch):
+    from src.app.services.recommendation_core import core
+    monkeypatch.setattr(core, "last_router_call_metrics", lambda: {"outcome": "ok", "wall_ms": 2000})
+    response = recommend_turn(db, _env("I need a computer chair"), llm_fn=lambda *_: "not JSON")
+    assert response.extras["router_outcome"]["status"] == "output_invalid"
+    assert response.extras["router_outcome"]["failure_code"] == "router_output_invalid"
+
+
 def test_model_unavailable_bulk_search_keeps_canonical_order_economics(db):
     response = recommend_turn(
         db,

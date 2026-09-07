@@ -7,6 +7,21 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+
+def terminal_scope_contract(*, scope, case_id, case_revision, applicable=True):
+    """Describe binding truth without inventing scope for an early/degraded exit."""
+    if not applicable:
+        return {"catalog_scope": None, "catalog_scope_status": "not_applicable"}
+    bound = bool(
+        isinstance(scope, dict) and case_id and case_revision
+        and scope.get("case_id") == case_id
+        and scope.get("case_revision") == case_revision
+    )
+    return {
+        "catalog_scope": dict(scope) if bound else None,
+        "catalog_scope_status": "bound" if bound else "unavailable",
+    }
+
 def _compute_widened_budget(bounds: Dict[str, int | None], widen_delta: int) -> Dict[str, int]:
     bmin = bounds.get("budget_min")
     bmax = bounds.get("budget_max")

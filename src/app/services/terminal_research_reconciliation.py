@@ -68,10 +68,13 @@ def gate_terminal_catalog_projection(
     products: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
     product_shelves: Mapping[str, Any] | None,
     catalog_authority: object,
+    requirement_completeness: object = None,
 ) -> TerminalCatalogGate:
     status = str(research_status or "").strip().lower()
     authority = str(catalog_authority or "unknown").strip().lower() or "unknown"
-    if status == "identity_confirmation_required" or authority == "blocked":
+    if (status == "identity_confirmation_required" or authority == "blocked"
+            or (authority == "permitted"
+                and str(requirement_completeness or "").lower() == "partial")):
         return TerminalCatalogGate(
             products=(),
             product_shelves=None,

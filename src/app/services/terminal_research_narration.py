@@ -10,6 +10,10 @@ from typing import Any
 
 
 _MODEL_FAILURE_MESSAGES = {
+    "router_output_invalid": (
+        "The workload interpreter returned output that could not be validated. "
+        "Product fit was not established; no cart or supplier action was authorized."
+    ),
     "router_output_truncated": (
         "I could not complete the workload interpretation because the model response was "
         "truncated. Research and product fit were not concluded; no product or commerce "
@@ -35,6 +39,13 @@ def terminal_research_narration(
     """Return canonical failure/held narration, otherwise preserve the answer."""
 
     outcome = dict(research_outcome or {})
+    if outcome.get("failure_code") == "requirements_incomplete":
+        return (
+            f"Research accepted {int(outcome.get('accepted_claim_count') or 0)} requirement claims, "
+            "but requirements coverage remains partial. I cannot confirm full compatibility "
+            "or qualify a product until the missing requirements are established. "
+            "No cart or supplier action was authorized."
+        )
     evidence = dict(execution_evidence or {})
     failure_code = str(evidence.get("failure_code") or "").strip()
     research_concluded = bool(
@@ -55,6 +66,14 @@ def terminal_research_narration(
         ).strip()
 
     held = int(outcome.get("held_claim_count") or 0)
+    research_failure = str(outcome.get("failure_code") or "")
+    if (outcome.get("catalog_authority") == "blocked" and research_failure
+            and not research_failure.startswith("low_confidence_identity_")
+            and not held and not int(outcome.get("accepted_claim_count") or 0)):
+        return (
+            "I could not complete the required research. I cannot establish product "
+            "compatibility or budget fit yet. No cart or supplier action was authorized."
+        )
     if held <= 0:
         return str(existing_message or "")
 

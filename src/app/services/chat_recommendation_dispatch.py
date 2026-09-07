@@ -176,6 +176,7 @@ async def dispatch_chat_recommendation(
         diagnostics = facade.diagnostics if isinstance(facade.diagnostics, dict) else {}
         for key in (
             "requested_quantity", "bulk_budget", "router_outcome", "model_invocation",
+            "timing_breakdown",
         ):
             if diagnostics.get(key) is not None:
                 terminal[key] = diagnostics[key]

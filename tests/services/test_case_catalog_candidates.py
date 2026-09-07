@@ -17,6 +17,14 @@ def _database():
     return engine
 
 
+def test_missing_candidate_boundary_does_not_expand_to_tenant_catalog():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(db, accepted_claims=[])
+    assert all(not shelf.initial and not shelf.next_page for shelf in projection.shelves)
+
+
 def test_laptop_storefront_context_bounds_shared_shelf_to_portable_configurations():
     engine = _database()
     with Session(engine) as db:

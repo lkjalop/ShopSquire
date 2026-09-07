@@ -133,85 +133,7 @@ def _run_stage(
     run_guarded_stage(resp, name, fn, cancellation=cancellation, logger=logger)
 
 
-def build_timing_breakdown(
-    core: CoreResponse, *, total_ms: float, router_metrics: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Project one request-scoped timing contract from typed stage results.
-
-    ``retrieval_ms`` is diagnostic and contained within ``plan_ms``. Keeping that relationship
-    explicit prevents operators from adding overlapping phases and inventing a larger total.
-    """
-    stages = [item.as_dict() for item in core.stage_results]
-    route_ms = sum(
-        float(item.get("latency_ms") or 0.0)
-        for item in stages if item.get("stage") == "route+intent"
-    )
-    plan_ms = sum(
-        float(item.get("latency_ms") or 0.0)
-        for item in stages if str(item.get("stage") or "").startswith("plan:")
-    )
-    post_stages = [
-        item for item in stages
-        if item.get("stage") != "route+intent"
-        and not str(item.get("stage") or "").startswith("plan:")
-    ]
-    post_ms = sum(float(item.get("latency_ms") or 0.0) for item in post_stages)
-    fulfillment_ms = sum(
-        float(item.get("latency_ms") or 0.0)
-        for item in post_stages if item.get("stage") == "fulfillment_preview"
-    )
-    retrieval_ms = float((core.extras.get("evidence") or {}).get("latency_ms") or 0.0)
-    model = dict(router_metrics or {})
-    router_queue_ms = float(model.get("queue_ms") or 0.0)
-    router_load_ms = float(model.get("load_ms") or 0.0)
-    router_prefill_ms = float(model.get("prompt_eval_ms") or 0.0)
-    router_decode_ms = float(model.get("decode_ms") or 0.0)
-    router_wall_ms = float(model.get("wall_ms") or 0.0)
-    router_model_execution_ms = float(model.get("model_execution_ms") or (
-        router_load_ms + router_prefill_ms + router_decode_ms
-    ))
-    router_provider_total_ms = float(model.get("provider_total_ms") or 0.0)
-    router_provider_internal_overhead_ms = float(
-        model.get("provider_internal_overhead_ms") or max(
-            0.0, router_provider_total_ms - router_model_execution_ms,
-        )
-    )
-    router_transport_overhead_ms = float(
-        model.get("transport_overhead_ms") or (
-            max(0.0, router_wall_ms - router_queue_ms - router_provider_total_ms)
-            if router_provider_total_ms else 0.0
-        )
-    )
-    router_provider_overhead_ms = max(
-        0.0,
-        router_wall_ms
-        - router_queue_ms
-        - router_load_ms
-        - router_prefill_ms
-        - router_decode_ms,
-    )
-    return {
-        "recommendation_total_ms": round(float(total_ms), 1),
-        "route_total_ms": round(route_ms, 1),
-        "plan_ms": round(plan_ms, 1),
-        "retrieval_ms": round(retrieval_ms, 1),
-        "post_stage_ms": round(post_ms, 1),
-        "fulfillment_preview_ms": round(fulfillment_ms, 1),
-        "router_queue_ms": round(router_queue_ms, 1),
-        "router_load_ms": round(router_load_ms, 1),
-        "router_prefill_ms": round(router_prefill_ms, 1),
-        "router_decode_ms": round(router_decode_ms, 1),
-        "router_model_execution_ms": round(router_model_execution_ms, 1),
-        "router_provider_total_ms": round(router_provider_total_ms, 1),
-        "router_provider_internal_overhead_ms": round(router_provider_internal_overhead_ms, 1),
-        "router_transport_overhead_ms": round(router_transport_overhead_ms, 1),
-        "router_provider_overhead_ms": round(router_provider_overhead_ms, 1),
-        "router_wall_ms": round(router_wall_ms, 1),
-        "router_outcome": str(model.get("outcome") or "not_called"),
-        "router_model": str(model.get("model") or "not_called"),
-        "retrieval_contained_in_plan": True,
-        "stages": stages,
-    }
+from src.app.observability.stage_timer import build_timing_breakdown
 
 
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -778,6 +700,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             "timed_out"
             if model_outcome in {"timeout", "queue_timeout"}
             else "truncated" if model_outcome == "truncated"
+            else "output_invalid" if model_outcome == "ok"
             else "source_unavailable"
         )
         resp.degraded = True
@@ -786,6 +709,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             "source": decision.source,
             "provider_outcome": model_outcome,
             "failure_code": str(
+                "router_output_invalid" if typed_outcome == "output_invalid" else
                 model_metrics.get("failure_code") or decision.source.removeprefix("fallback:")
             ),
             "late_results_accepted": False,

@@ -1,11 +1,18 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.app.models.orm import Base
-from src.app.services.accepted_catalog_projection import project_accepted_catalog
+from src.app.models.orm import Base, ProductConfiguration
+from src.app.services.accepted_catalog_projection import project_accepted_catalog as _project_accepted_catalog
 from src.app.services.catalog_evidence_seed import ingest_reviewed_configurations
+
+
+def project_accepted_catalog(db, **kwargs):
+    # These reducer tests explicitly exercise every configuration in their
+    # isolated seed. Buyer/tenant boundary tests live in test_case_catalog_candidates.
+    kwargs.setdefault("candidate_configuration_ids", list(db.scalars(select(ProductConfiguration.id))))
+    return _project_accepted_catalog(db, **kwargs)
 
 
 def test_accepted_claims_build_shared_conditional_and_budget_shelves_without_false_qualification():

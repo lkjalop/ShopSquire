@@ -91,6 +91,7 @@ def test_degraded_chat_does_not_redispatch_the_complete_core(monkeypatch):
             facts={"quantity": 200, "total_budget_cents": 12_000_000},
             semantic_status={"status": "fallback", "subject_role": "PROCURE_SUBJECT"},
             execution_evidence={"core_invocation_count": 1, "operation_id": "trace-1"},
+            diagnostics={"timing_breakdown": {"router_queue_ms": 30, "router_wall_ms": 12000}},
         )
 
     def forbidden_compatibility(*args, **kwargs):
@@ -111,6 +112,7 @@ def test_degraded_chat_does_not_redispatch_the_complete_core(monkeypatch):
     assert status == 200
     assert calls == {"facade": 1, "compatibility": 0}
     assert body["execution_mode"] == "v2_unavailable"
+    assert body["timing_breakdown"] == {"router_queue_ms": 30, "router_wall_ms": 12000}
     assert body["canonical_facts"]["quantity"] == 200
     assert body["execution_evidence"]["core_invocation_count"] == 1
     assert body["semantic_resolution"]["reason"] == "model_execution_timeout"

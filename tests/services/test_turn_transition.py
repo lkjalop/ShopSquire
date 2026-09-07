@@ -92,3 +92,20 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert projection.catalog_scope["case_id"] == "sc-demo"
     assert projection.catalog_scope["case_revision"] == 5
     assert "case_revision" not in commit.catalog_scope
+
+
+def test_partial_requirements_replace_stale_read_model_fit_narration():
+    commit = TurnCommit(
+        case_id="partial", expected_revision=1, source_message_id="m", idempotency_key="i",
+        transition=TurnTransition.REFINE_WORKLOAD, catalog_authority="permitted",
+        assistant_message="This computer fully qualifies.", products=[{"sku": "ram-only"}],
+        research={"workload_authorization": {"evidence": [{
+            "compiled_requirements": [{"attribute_key": "ram_gb", "value": 8}],
+            "claim_rejections": [{"attribute_key": "cpu_model"}],
+        }]}},
+    )
+    result = build_turn_read_model(commit, revision=2)
+    assert result.catalog_authority == result.research_outcome.catalog_authority == "blocked"
+    assert result.products == []
+    assert "fully qualifies" not in result.assistant_message
+    assert "partial" in result.assistant_message

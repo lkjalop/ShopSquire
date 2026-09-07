@@ -80,7 +80,7 @@ async function send(page: Page, query: string) {
   });
 }
 
-test('evidence delivery preserves distinct official values in the rendered review card', async ({ browser }, testInfo) => {
+test('evidence delivery preserves official values without qualifying partial requirements', async ({ browser }, testInfo) => {
   test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live search and Ollama');
   test.setTimeout(240_000);
   const { context, page } = await openBuyer(browser, 'claim-values');
@@ -100,12 +100,14 @@ test('evidence delivery preserves distinct official values in the rendered revie
     }
     expect(answer.terminal_outcome.case_revision).toBe(answer.case_revision);
     expect(answer.terminal_outcome.operation_id).toBe(answer.operation_id);
-    expect(answer.terminal_outcome.catalog_authority).toBe('permitted');
+    expect(answer.terminal_outcome.research_outcome.requirement_completeness).toBe('partial');
+    expect(answer.terminal_outcome.catalog_authority).toBe('blocked');
     const terminal = answer.terminal_outcome;
     expect(terminal.catalog_scope.case_id).toBe(terminal.case_id);
     expect(terminal.catalog_scope.case_revision).toBe(terminal.case_revision);
     const products = [...(terminal.products || []), ...(terminal.product_shelves?.shelves || []).flatMap((s: any) => s.initial || [])];
-    expect(products.length).toBeGreaterThan(0);
+    expect(products).toEqual([]);
+    expect(terminal.assistant_message).toMatch(/partial/i);
     await expect(page.getByText(/These came from your upload/)).toHaveCount(0);
     await page.getByTitle('Decision Trace', { exact: true }).click();
     await expect(page.getByTestId('trace-trust-strip')).toContainText('Completed');
@@ -113,14 +115,14 @@ test('evidence delivery preserves distinct official values in the rendered revie
   } finally { await context.close(); }
 });
 
-test('scope and stock: purchase object, unrelated question and bulk remain distinct', async ({ browser }, testInfo) => {
-  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live demo');
-  test.setTimeout(300_000);
-  for (const [name, query] of [
+for (const [name, query] of [
     ['chair', 'I need an ergonomic computer chair under AUD 500.'],
     ['unrelated', 'Why does the moon have phases?'],
     ['bulk', 'I need 25 gaming laptops under AUD 2000 each for a training lab.'],
-  ]) {
+]) {
+  test(`scope and stock: ${name}`, async ({ browser }, testInfo) => {
+    test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live demo');
+    test.setTimeout(300_000);
     const { context, page } = await openBuyer(browser, name);
     try {
       const answer = await send(page, query);
@@ -130,6 +132,7 @@ test('scope and stock: purchase object, unrelated question and bulk remain disti
         expect(answer.assistant_message).toMatch(/chair/i);
         await expect(page.getByText(/what will you mainly use it for/i)).toHaveCount(0);
       } else if (name === 'unrelated') {
+        expect(answer.terminal_outcome.catalog_scope_status).toBe('not_applicable');
         expect(answer.terminal_outcome.research_status).toBe('not_applicable');
         expect(answer.assistant_message).not.toMatch(/publisher|map service|local director/i);
       } else {
@@ -145,8 +148,8 @@ test('scope and stock: purchase object, unrelated question and bulk remain disti
         await expect(page.getByText(/which.*software.*version|what will you mainly use it for/i)).toHaveCount(0);
       }
     } finally { await context.close(); }
-  }
-});
+  });
+}
 
 test('evidence delivery never binds FreeCAD to AutoCAD requirements', async ({ browser }, testInfo) => {
   test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live search and Ollama');

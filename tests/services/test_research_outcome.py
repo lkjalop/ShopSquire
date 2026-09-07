@@ -10,6 +10,8 @@ def test_complete_publisher_document_does_not_hide_partial_claim_compilation():
             "claim_rejections": [{"attribute_key": "storage_gb", "reason": "attribute_not_registry_authorized"}],
         }]}}, requirements={"accepted": [{"claim_id": "ram-1"}]})
     assert outcome.requirement_completeness == "partial"
+    assert outcome.catalog_authority == "blocked"
+    assert outcome.failure_code == "requirements_incomplete"
 
 
 def test_held_claims_are_not_reported_as_no_evidence_or_verified() -> None:

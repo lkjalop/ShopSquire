@@ -170,6 +170,16 @@ def test_permitted_authority_without_matches_is_not_a_qualified_result() -> None
     assert result.recommendation_status == "no_qualified_products"
 
 
+def test_partial_requirements_cannot_qualify_a_populated_catalog():
+    result = gate_terminal_catalog_projection(
+        research_status="requirements_resolved", products=[{"sku": "RAM-ONLY"}],
+        product_shelves=None, catalog_authority="permitted",
+        requirement_completeness="partial",
+    )
+    assert result.recommendation_status != "qualified"
+    assert result.catalog_authority != "permitted"
+
+
 def test_structured_provider_recovers_router_empty_semantics_from_literal_buyer_identity() -> None:
     result = reconcile_semantic_resolution(
         {"catalog_authority": "blocked", "concepts": [], "material_unknowns": []},

@@ -339,6 +339,10 @@ def build_research_outcome(
         bounded_catalog = "unknown"
     if identity_confirmation is not None:
         bounded_catalog = "blocked"
+    if bounded_catalog == "permitted" and completeness == "partial":
+        bounded_catalog = "blocked"
+        failure = "requirements_incomplete"
+        next_action = "complete_requirement_evidence"
     bounded_commerce = str(commerce_authority or "none").lower()
     if bounded_commerce not in {"none", "proposal_only", "approved"}:
         bounded_commerce = "none"

@@ -167,6 +167,13 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
     right_panel["commercial_terms"] = dict(commit.commercial_terms)
     right_panel["subject_role"] = commit.subject_role
     right_panel["catalog_scope"] = scope
+    effective_authority = outcome.catalog_authority if outcome.catalog_authority == "blocked" else commit.catalog_authority
+    right_panel["catalog_authority"] = effective_authority
+    from src.app.services.terminal_research_narration import terminal_research_narration
+    message = terminal_research_narration(
+        research_outcome=outcome.model_dump(mode="json"), execution_evidence={},
+        existing_message=commit.assistant_message,
+    ) if outcome.failure_code == "requirements_incomplete" else commit.assistant_message
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         case_revision=revision,
@@ -186,11 +193,11 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         source_intake_receipts=list(commit.source_intake_receipts),
         requirements=commit.requirements,
         catalog_scope=scope,
-        catalog_authority=commit.catalog_authority,
+        catalog_authority=effective_authority,
         commerce_authority=commit.commerce_authority,
-        assistant_message=commit.assistant_message,
+        assistant_message=message,
         right_panel=right_panel,
-        products=list(commit.products),
+        products=[] if effective_authority == "blocked" else list(commit.products),
         trace_id=commit.trace_id,
     )
 

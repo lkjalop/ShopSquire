@@ -901,7 +901,10 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     assert payload["supplier_send"] == "not_authorized"
     assert payload["research_outcome"]["case_revision"] == 1
     assert payload["research_outcome"]["accepted_claim_count"] == 1
-    assert payload["research_outcome"]["catalog_authority"] == "permitted"
+    # A single OS claim is accepted evidence, not complete workload coverage.
+    assert payload["research_outcome"]["catalog_authority"] == "blocked"
+    assert payload["research_outcome"]["requirement_completeness"] == "partial"
+    assert payload["research_outcome"]["failure_code"] == "requirements_incomplete"
 
     with Session(client.app.state.test_engine) as db:
         db.add(Product(
