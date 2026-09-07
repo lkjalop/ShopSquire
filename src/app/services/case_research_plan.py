@@ -274,15 +274,8 @@ def _requires_named_application(source: Mapping[str, Any]) -> bool:
 
 
 def _named_application_hit(source: Mapping[str, Any], normalized_purpose: str) -> bool:
-    activation = source.get("activation_policy") or {}
-    if activation.get("scope_aliases_are_proposal_grade") is True:
-        aliases = {
-            _normalized_phrase(value)
-            for value in activation.get("provisional_scope_aliases") or []
-            if _normalized_phrase(value)
-        }
-        if any(f" {alias} " in normalized_purpose for alias in aliases):
-            return True
+    # Proposal-grade workload aliases remain discovery hints, not proof that
+    # the buyer named the application for which this source grants authority.
     generic = {
         "system requirement", "requirement", "large dataset", "point cloud",
         "large complex model", "bim", "driver", "windows", "manufacturing",

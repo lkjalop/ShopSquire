@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+import hashlib
+import json
 
 
 def project_structured_requirement_claims(
@@ -16,19 +18,31 @@ def project_structured_requirement_claims(
         for compiled in list(evidence.get("compiled_requirements") or []):
             if not isinstance(compiled, Mapping) or not compiled.get("attribute_key"):
                 continue
+            # A provider record can establish many predicates. Its identifier is
+            # provenance, never the identity of an editable requirement claim.
+            identity = {
+                "provider": evidence.get("provider_id") or evidence.get("source"),
+                "record": evidence.get("app_id") or evidence.get("source_record_id"),
+                "origin": evidence.get("source_url"),
+                "source_claim_ids": sorted(str(v) for v in compiled.get("source_claim_ids") or []),
+                **{key: compiled.get(key) for key in (
+                    "attribute_key", "operator", "value", "unit", "requirement_class",
+                    "scope_caveat", "source_revision", "artefact_name", "artefact_version",
+                )},
+            }
+            claim_id = "req-" + hashlib.sha256(json.dumps(
+                identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")).hexdigest()
             claims.append({
-                "claim_id": str(
-                    (compiled.get("source_claim_ids") or [
-                        f"{evidence.get('provider_id') or 'provider'}:"
-                        f"{evidence.get('app_id') or evidence.get('source_record_id') or 'record'}:"
-                        f"{compiled.get('attribute_key')}"
-                    ])[0]
-                )[:240],
+                "claim_id": claim_id,
+                "source_claim_ids": identity["source_claim_ids"],
                 "attribute": compiled.get("attribute_key"),
                 "operator": compiled.get("operator"),
                 "value": compiled.get("value"),
                 "unit": compiled.get("unit"),
                 "requirement_class": compiled.get("requirement_class") or "minimum",
+                "constraint_tier": "required",
+                "condition": compiled.get("scope_caveat"),
                 "authority_status": "verified_official",
                 "source_id": evidence.get("provider_id") or evidence.get("source"),
                 "source_url": evidence.get("source_url"),

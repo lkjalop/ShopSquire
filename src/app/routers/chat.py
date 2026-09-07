@@ -5373,6 +5373,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             ),
                             requirements_established=_workload_requirements_established,
                         )
+                        from src.app.services.terminal_research_reconciliation import gate_terminal_catalog_projection
+                        _committed_catalog = gate_terminal_catalog_projection(
+                            research_status=(server_research_result or {}).get("status"),
+                            products=products, product_shelves=ambiguous_product_shelves,
+                            catalog_authority="blocked" if server_research_failure else catalog_authority,
+                        )
+                        catalog_authority = _committed_catalog.catalog_authority
+                        products = list(_committed_catalog.products)
+                        ambiguous_product_shelves = _committed_catalog.product_shelves
+                        out.update(products=products, product_shelves=ambiguous_product_shelves)
                         shared_constraints: dict[str, Any] = {}
                         if out.get("requested_quantity") is not None:
                             shared_constraints["requested_quantity"] = out.get("requested_quantity")
@@ -5604,11 +5614,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "case_revision": _case_revision,
         "research_run_id": _research_run_id,
     })
-    _terminal_shelf_count = sum(
-        len(list(shelf.get("initial") or []))
-        for shelf in list((out.get("product_shelves") or {}).get("shelves") or [])
-        if isinstance(shelf, dict)
-    ) if isinstance(out.get("product_shelves"), dict) else 0
+    from src.app.services.terminal_research_reconciliation import gate_terminal_catalog_projection
+    _terminal_catalog = gate_terminal_catalog_projection(
+        research_status=(server_research_result or {}).get("status"),
+        products=products, product_shelves=out.get("product_shelves"),
+        catalog_authority=("blocked" if server_research_failure else
+            _research_outcome.get("catalog_authority")
+            or (out.get("turn_read_model") or {}).get("catalog_authority")),
+    )
+    products = list(_terminal_catalog.products)
+    out.update(products=products, product_shelves=_terminal_catalog.product_shelves)
     _terminal_research_resolved = str(
         (server_research_result or {}).get("status") or ""
     ) == "requirements_resolved"
@@ -5635,11 +5650,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "case_id": active_shopping_case_id or None,
         "case_revision": _case_revision,
         "research_run_id": _research_run_id,
-        "recommendation_status": (
-            "qualified" if products or _terminal_shelf_count else
-            "blocked" if server_research_failure else
-            "held" if _research_outcome else "completed"
-        ),
+        "recommendation_status": _terminal_catalog.recommendation_status,
         "research_status": _terminal_research_status or str(
             (ambiguity_exploration or {}).get("status") or "not_applicable"
         ),
@@ -5652,12 +5663,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             if isinstance(data.get("semantic_status"), dict)
             else {"status": "not_evaluated"}
         ),
-        "catalog_authority": str(
-            _research_outcome.get("catalog_authority")
-            or ((out.get("turn_read_model") or {}).get("catalog_authority")
-                if isinstance(out.get("turn_read_model"), dict) else "")
-            or "unknown"
-        ),
+        "catalog_authority": _terminal_catalog.catalog_authority,
         "catalog_scope": (
             (out.get("turn_read_model") or {}).get("catalog_scope")
             if isinstance(out.get("turn_read_model"), dict) else None

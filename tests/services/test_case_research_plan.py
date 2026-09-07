@@ -32,6 +32,17 @@ def test_named_application_keeps_its_enrolled_publisher_scope():
     assert "blender_official_requirements" in plan.source_candidate_ids
 
 
+def test_proposal_grade_workload_alias_never_binds_another_product_identity():
+    for purpose in (
+        "I work in FreeCAD on large assemblies. What computer would suit under AUD 3500?",
+        "A laptop for AnotherCAD and point cloud datasets",
+        "A computer for CAD; I have not chosen an application yet",
+    ):
+        plan = build_case_research_plan(purpose, allow_open_world=True)
+        assert plan.publisher_status == "unresolved"
+        assert plan.source_candidate_ids == []
+
+
 def test_emulate3d_uses_its_publisher_and_never_borrows_factory_io_requirements():
     plan = build_case_research_plan(
         "I need a laptop for Rockwell Emulate3D PLC digital twin simulation.",
@@ -43,7 +54,7 @@ def test_emulate3d_uses_its_publisher_and_never_borrows_factory_io_requirements(
     assert "factory_io_official_docs" not in plan.source_candidate_ids
 
 
-def test_real_manifest_preserves_governed_scope_hypotheses_for_six_prompt_matrix():
+def test_generic_workloads_do_not_authorize_adjacent_application_sources():
     expected = {
         "I do CGI; I don't want renders taking all night.": {"blender_official_requirements"},
         "I need CAD for very large 3D models and point-cloud work.": {"autodesk_autocad_requirements"},
@@ -55,11 +66,12 @@ def test_real_manifest_preserves_governed_scope_hypotheses_for_six_prompt_matrix
     for prompt, required_sources in expected.items():
         plan = build_case_research_plan(prompt)
         assert plan is not None
-        assert plan.publisher_status == "resolved_enrolled"
-        assert required_sources <= set(plan.source_candidate_ids)
+        assert not (required_sources - {"mitre_attack_ics"}) & set(plan.source_candidate_ids)
+        if "mitre_attack_ics" not in required_sources:
+            assert plan.publisher_status == "unresolved"
 
 
-def test_scope_aliases_are_manifest_governed_and_paraphrase_stable():
+def test_scope_aliases_remain_discovery_only_across_paraphrases():
     prompts = (
         "Recommend portable hardware for computer-generated imagery and 3D rendering.",
         "I work on point cloud datasets in CAD and need a mobile computer.",
@@ -73,7 +85,8 @@ def test_scope_aliases_are_manifest_governed_and_paraphrase_stable():
     for prompt, source_id in zip(prompts, expected, strict=True):
         plan = build_case_research_plan(prompt)
         assert plan is not None
-        assert source_id in plan.source_candidate_ids
+        assert plan.publisher_status == "unresolved"
+        assert source_id not in plan.source_candidate_ids
 
 
 def _source(source_id, workloads, artefacts, *, approved=True):

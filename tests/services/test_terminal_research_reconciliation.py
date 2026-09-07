@@ -137,6 +137,37 @@ def test_resolved_research_preserves_catalog_projection() -> None:
     assert result.products == ({"sku": "FIT-1"},)
     assert result.product_shelves is not None
     assert result.catalog_authority == "permitted"
+    assert result.recommendation_status == "qualified"
+
+
+def test_blocked_authority_cannot_be_overridden_by_populated_shelves() -> None:
+    result = gate_terminal_catalog_projection(
+        research_status="requirements_resolved",
+        products=[{"sku": "UNQUALIFIED"}],
+        product_shelves={"shelves": [{"initial": [{"sku": "UNQUALIFIED"}]}]},
+        catalog_authority="blocked",
+    )
+    assert result.products == ()
+    assert result.product_shelves is None
+    assert result.recommendation_status == "blocked"
+
+
+def test_provisional_and_unknown_candidates_are_not_qualified() -> None:
+    for authority in ("provisional", "unknown", None):
+        result = gate_terminal_catalog_projection(
+            research_status="claims_pending_policy_review",
+            products=[{"sku": "EXPLORATION"}], product_shelves=None,
+            catalog_authority=authority,
+        )
+        assert result.recommendation_status == "held"
+
+
+def test_permitted_authority_without_matches_is_not_a_qualified_result() -> None:
+    result = gate_terminal_catalog_projection(
+        research_status="requirements_resolved", products=[], product_shelves=None,
+        catalog_authority="permitted",
+    )
+    assert result.recommendation_status == "no_qualified_products"
 
 
 def test_structured_provider_recovers_router_empty_semantics_from_literal_buyer_identity() -> None:

@@ -48,6 +48,19 @@ class TerminalCatalogGate:
     product_shelves: dict[str, Any] | None
     catalog_authority: str
 
+    @property
+    def recommendation_status(self) -> str:
+        if self.catalog_authority == "blocked":
+            return "blocked"
+        if self.catalog_authority != "permitted":
+            return "held"
+        has_matches = bool(self.products) or any(
+            bool(shelf.get("initial"))
+            for shelf in (self.product_shelves or {}).get("shelves", [])
+            if isinstance(shelf, Mapping)
+        )
+        return "qualified" if has_matches else "no_qualified_products"
+
 
 def gate_terminal_catalog_projection(
     *,
@@ -57,7 +70,8 @@ def gate_terminal_catalog_projection(
     catalog_authority: object,
 ) -> TerminalCatalogGate:
     status = str(research_status or "").strip().lower()
-    if status == "identity_confirmation_required":
+    authority = str(catalog_authority or "unknown").strip().lower() or "unknown"
+    if status == "identity_confirmation_required" or authority == "blocked":
         return TerminalCatalogGate(
             products=(),
             product_shelves=None,
@@ -66,7 +80,7 @@ def gate_terminal_catalog_projection(
     return TerminalCatalogGate(
         products=tuple(dict(row) for row in list(products or []) if isinstance(row, Mapping)),
         product_shelves=(dict(product_shelves) if isinstance(product_shelves, Mapping) else None),
-        catalog_authority=str(catalog_authority or "unknown").strip().lower() or "unknown",
+        catalog_authority=authority,
     )
 
 

@@ -80,6 +80,58 @@ async function send(page: Page, query: string) {
   });
 }
 
+test('evidence delivery preserves distinct official values in the rendered review card', async ({ browser }, testInfo) => {
+  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live search and Ollama');
+  test.setTimeout(240_000);
+  const { context, page } = await openBuyer(browser, 'claim-values');
+  try {
+    const answer = await send(page, 'Would AUD 2500 be enough for a laptop for shapez 2?');
+    await testInfo.attach('terminal.json', { body: Buffer.from(JSON.stringify(answer)), contentType: 'application/json' });
+    const claims = answer.buyer_requirement_claims || [];
+    expect(claims.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(claims.map((claim: any) => claim.claim_id)).size).toBe(claims.length);
+    for (const attribute of ['ram_gb', 'gpu_vram_gb']) {
+      const claim = claims.find((item: any) => item.attribute === attribute);
+      expect(claim).toBeDefined();
+      expect(claim.authority_status).toBe('verified_official');
+      const value = page.getByRole('textbox', { name: `Correct ${attribute.replaceAll('_', ' ')} value`, exact: true });
+      await expect(value).toHaveValue(String(claim.value));
+      await expect(value).toHaveAttribute('readonly', '');
+    }
+    expect(answer.terminal_outcome.case_revision).toBe(answer.case_revision);
+    expect(answer.terminal_outcome.operation_id).toBe(answer.operation_id);
+    expect(answer.terminal_outcome.catalog_authority).toBe('permitted');
+    const terminal = answer.terminal_outcome;
+    const products = [...(terminal.products || []), ...(terminal.product_shelves?.shelves || []).flatMap((s: any) => s.initial || [])];
+    expect(products.length).toBeGreaterThan(0);
+    await expect(page.getByText(/These came from your upload/)).toHaveCount(0);
+  } finally { await context.close(); }
+});
+
+test('evidence delivery never binds FreeCAD to AutoCAD requirements', async ({ browser }, testInfo) => {
+  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires live search and Ollama');
+  test.setTimeout(240_000);
+  const { context, page } = await openBuyer(browser, 'source-applicability');
+  try {
+    const answer = await send(page, 'I work in FreeCAD on large assemblies. What computer would suit under AUD 3500?');
+    await testInfo.attach('terminal.json', { body: Buffer.from(JSON.stringify(answer)), contentType: 'application/json' });
+    const applied = JSON.stringify({
+      claims: answer.buyer_requirement_claims,
+      identity: answer.terminal_outcome?.research_outcome?.identity,
+      requirements: answer.workload_authorization?.evidence,
+    });
+    expect(applied).not.toMatch(/autocad|autodesk_autocad_requirements/i);
+    expect(answer.terminal_outcome.case_revision).toBe(answer.case_revision);
+    expect(answer.assistant_message).not.toMatch(/AutoCAD/i);
+    const terminal = answer.terminal_outcome;
+    if (terminal.catalog_authority === 'blocked') {
+      expect(terminal.recommendation_status).toBe('blocked');
+      expect(terminal.products).toEqual([]);
+      expect(terminal.product_shelves).toBeNull();
+    }
+  } finally { await context.close(); }
+});
+
 for (const scenario of cases) {
   test(`unseen title ${scenario.name} resolves without an application alias`, async ({ browser }, testInfo) => {
     test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires demo-live search and Ollama');

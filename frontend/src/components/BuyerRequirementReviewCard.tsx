@@ -29,15 +29,18 @@ type Props = {
 };
 
 const label = (value: unknown) => String(value || 'not recorded').replaceAll('_', ' ');
+const isVerified = (claim: BuyerRequirementClaim) => ['verified', 'verified_official'].includes(claim.authority_status);
 
 export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) {
+  const verifiedEvidence = claims.some(isVerified);
+  const editableClaims = claims.filter((claim) => !isVerified(claim));
   const caseOriginEvidence = claims.some(
     (claim) => claim.authority_status === 'case_origin_critic_accepted',
   );
   const policyPendingSourceEvidence = claims.some(
     (claim) => claim.authority_status === 'pending_independent_policy_review',
   );
-  const [selected, setSelected] = React.useState(() => new Set(claims.map((claim) => claim.claim_id)));
+  const [selected, setSelected] = React.useState(() => new Set(editableClaims.map((claim) => claim.claim_id)));
   const [draftValues, setDraftValues] = React.useState<Record<string, string>>(() => Object.fromEntries(
     claims.map((claim) => [
       claim.claim_id,
@@ -53,7 +56,7 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
     setBusy(true);
     setStatus('');
     try {
-      const corrections = claims.flatMap((claim) => {
+      const corrections = editableClaims.flatMap((claim) => {
         if (!selected.has(claim.claim_id)) return [];
         const original = Array.isArray(claim.value) ? claim.value.join(', ') : String(claim.value);
         const draft = String(draftValues[claim.claim_id] ?? original).trim();
@@ -114,7 +117,9 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
     >
       <strong>Review {claims.length} extracted requirements</strong>
       <div style={{ marginTop: 4, fontSize: 12 }}>
-        {caseOriginEvidence
+        {verifiedEvidence
+          ? 'Verified official requirements are shown read-only. Product fit and commerce authority are evaluated separately; no cart action was authorized. Any remaining unverified claims retain their own authority labels.'
+          : caseOriginEvidence
           ? 'These cited claims came from the exact publisher origin you approved for this case. Review, correct, or reject them before they affect product fit. No cart action was authorized.'
           : policyPendingSourceEvidence
             ? 'These cited claims were extracted from the reviewed canonical publisher page. They may be used only as provisional buyer constraints until the independent source-policy review is signed off; no product or cart action was authorized.'
@@ -132,6 +137,7 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
           <li key={claim.claim_id} style={{ listStyle: 'none', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 7px', background: '#fff' }}>
             <input
               type="checkbox"
+              disabled={isVerified(claim)}
               checked={selected.has(claim.claim_id)}
               aria-label={`Use ${label(claim.attribute)} requirement`}
               onChange={(event) => setSelected((current) => {
@@ -144,25 +150,28 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
             {claim.operator}{' '}
             <input
               aria-label={`Correct ${label(claim.attribute)} value`}
-              value={draftValues[claim.claim_id] ?? ''}
+              readOnly={isVerified(claim)}
+              value={isVerified(claim) ? String(claim.value) : draftValues[claim.claim_id] ?? ''}
               onChange={(event) => setDraftValues((current) => ({
                 ...current, [claim.claim_id]: event.target.value,
               }))}
               style={{ width: Array.isArray(claim.value) ? 180 : 78 }}
             />
             {claim.unit ? ` ${claim.unit}` : ''}
-            {' '}· {label(claim.requirement_class)} · {label(claim.constraint_tier)}
+            {' '}· {label(claim.requirement_class)} · {label(claim.authority_status)}
           </li>
         ))}
       </ul>
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        {caseOriginEvidence
+        {verifiedEvidence
+          ? 'Verified evidence is not re-approved by buyer acceptance. Only unverified claims may be selected for provisional use.'
+          : caseOriginEvidence
           ? 'Unedited cited claims retain case-only evidence authority. Edited claims become provisional buyer evidence.'
           : policyPendingSourceEvidence
             ? 'Accepting these records your provisional constraints; it does not turn pending source evidence into authoritative requirements.'
             : 'Select the claims to use. Buyer acceptance keeps them provisional until corroborated.'}
       </div>
-      {onAccept && (
+      {onAccept && editableClaims.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
             {caseOriginEvidence ? 'Accept selected case evidence' : 'Use selected provisionally'}

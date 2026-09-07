@@ -4,6 +4,20 @@ import { describe, expect, it, vi } from 'vitest';
 import BuyerRequirementReviewCard from '../BuyerRequirementReviewCard';
 
 describe('BuyerRequirementReviewCard', () => {
+  it('renders verified official values as evidence, not editable uploaded claims', () => {
+    render(<BuyerRequirementReviewCard claims={[
+      { claim_id: 'steam-ram', attribute: 'ram_gb', operator: '>=', value: 8,
+        unit: 'GB', requirement_class: 'minimum', constraint_tier: 'required', authority_status: 'verified_official' },
+      { claim_id: 'steam-vram', attribute: 'gpu_vram_gb', operator: '>=', value: 2,
+        unit: 'GB', requirement_class: 'minimum', constraint_tier: 'required', authority_status: 'verified_official' },
+    ]} onAccept={vi.fn()} />);
+    expect(screen.queryByText(/came from your upload/i)).toBeNull();
+    expect(screen.queryByText(/no product has been qualified/i)).toBeNull();
+    expect(screen.getByLabelText(/Correct ram gb value/i)).toHaveValue('8');
+    expect(screen.getByLabelText(/Correct gpu vram gb value/i)).toHaveValue('2');
+    expect(screen.getByLabelText(/Correct ram gb value/i)).toHaveAttribute('readonly');
+    expect(screen.queryByRole('button', {name:'Use selected provisionally'})).toBeNull();
+  });
   it('labels uploaded claims as provisional and non-authoritative', () => {
     render(<BuyerRequirementReviewCard claims={[{
       claim_id: 'claim-ram',
