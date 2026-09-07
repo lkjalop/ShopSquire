@@ -32,6 +32,17 @@ client = TestClient(app, headers=default_headers())
 
 @pytest.fixture()
 def feedback_on(monkeypatch):
+    from src.app.models.db import get_db, get_engine
+    from sqlalchemy.orm import Session
+
+    seed_engine = get_engine()
+
+    def fixture_database():
+        with Session(seed_engine) as db:
+            yield db
+
+    # Route and seed must use the same database, not a collection-time app engine.
+    monkeypatch.setitem(app.dependency_overrides, get_db, fixture_database)
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
     monkeypatch.setattr(
@@ -124,7 +135,7 @@ def test_feedback_reaches_response_without_becoming_v2_ranking_authority(feedbac
     assert r.status_code == 200, r.text
     body = r.json()
     assert body.get("hippograph_insights") == _SENTINEL, {
-        key: body.get(key) for key in ("reason", "diagnostics", "execution_evidence", "core_status")
+        key: body.get(key) for key in ("delegation_reason", "diagnostics", "execution_evidence", "core_status")
     }
     assert not body.get("ranking_experiment")
     assert all(

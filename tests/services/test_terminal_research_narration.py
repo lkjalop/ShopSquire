@@ -1,6 +1,19 @@
 from src.app.services.terminal_research_narration import terminal_research_narration
 
 
+def test_partial_evidence_keeps_the_canonical_subject():
+    message = terminal_research_narration(
+        research_outcome={
+            "failure_code": "requirements_incomplete", "accepted_claim_count": 2,
+            "identity": {"title": "PRAGMATA"},
+        },
+        execution_evidence={}, existing_message="Fully qualified",
+    )
+    assert "PRAGMATA" in message
+    assert "partial" in message
+    assert "Fully qualified" not in message
+
+
 def test_missing_research_plan_cannot_leave_a_budget_success_sentence():
     message = terminal_research_narration(
         research_outcome={"catalog_authority": "blocked", "failure_code": "case_research_plan_not_found"},

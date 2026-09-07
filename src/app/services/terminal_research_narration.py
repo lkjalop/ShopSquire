@@ -40,8 +40,11 @@ def terminal_research_narration(
 
     outcome = dict(research_outcome or {})
     if outcome.get("failure_code") == "requirements_incomplete":
+        identity = outcome.get("identity")
+        title = str(identity.get("title") or "").strip() if isinstance(identity, Mapping) else ""
+        subject = f"For {title}, research" if title else "Research"
         return (
-            f"Research accepted {int(outcome.get('accepted_claim_count') or 0)} requirement claims, "
+            f"{subject} accepted {int(outcome.get('accepted_claim_count') or 0)} requirement claims, "
             "but requirements coverage remains partial. I cannot confirm full compatibility "
             "or qualify a product until the missing requirements are established. "
             "No cart or supplier action was authorized."

@@ -184,6 +184,9 @@ def test_router_uses_capacity_for_full_contract_and_records_completion_reason(mo
 
     assert rendered == '{"lane":"SEARCH"}'
     assert captured["options"]["num_predict"] >= 768
+    from src.app.services.recommendation_core.envelope import LANES
+    assert captured["format"]["properties"]["lane"]["enum"] == list(LANES)
+    assert captured["format"]["required"] == ["lane"]
     assert metrics["done_reason"] == "stop"
 
 

@@ -67,8 +67,20 @@ def execute_router_model(
         metrics["artifact_verification_requested"] = bool(digest)
 
         def transport(model_prompt, deployment, request):
+            from src.app.services.recommendation_core.envelope import LANES
+
+            # Constrain the model to the existing contract instead of accepting
+            # invented lanes or maintaining a growing alias-repair table.
+            output_format: Any = "json"
+            if prompt_id == "recommend-router-v2":
+                output_format = {
+                    "type": "object",
+                    "properties": {"lane": {"type": "string", "enum": list(LANES)}},
+                    "required": ["lane"],
+                    "additionalProperties": True,
+                }
             payload: dict[str, Any] = {
-                "model": model, "prompt": model_prompt, "stream": False, "format": "json",
+                "model": model, "prompt": model_prompt, "stream": False, "format": output_format,
                 "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                 "options": {"temperature": 0, "num_predict": request.max_output_tokens},
             }
