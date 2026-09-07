@@ -213,6 +213,17 @@ def hash_value(value: str) -> str:
     return hashlib.sha256((value or "").encode("utf-8")).hexdigest()[:16]
 
 
+def _canonical_trace_reference(key: object, value: object) -> bool:
+    """Keep typed UUID references joinable; arbitrary ID strings remain untrusted."""
+    return bool(
+        key in {"case_id", "trace_id", "decision_trace_id", "source_trace_id", "operation_id", "research_run_id"}
+        and isinstance(value, str)
+        and re.fullmatch(
+            r"(?:sc-|chat:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value,
+        )
+    )
+
+
 def security_sanitize(payload: Dict) -> Dict:
     # Recursively sanitize Python objects to avoid JSON serialization edge-cases
     def _sanitize_value(v):
@@ -221,7 +232,7 @@ def security_sanitize(payload: Dict) -> Dict:
             v2 = scrub_pii(v2)
             return v2
         if isinstance(v, dict):
-            return {k: _sanitize_value(vv) for k, vv in v.items()}
+            return {k: vv if _canonical_trace_reference(k, vv) else _sanitize_value(vv) for k, vv in v.items()}
         if isinstance(v, list):
             return [_sanitize_value(x) for x in v]
         return v
@@ -277,6 +288,9 @@ def redact_for_trace(payload: Any) -> Any:
             out = {}
             for k, vv in v.items():
                 key = str(k).lower()
+                if _canonical_trace_reference(k, vv):
+                    out[k] = vv
+                    continue
                 if key in safe_media_scalars and (
                     vv is None or isinstance(vv, (bool, int, float))
                 ):
