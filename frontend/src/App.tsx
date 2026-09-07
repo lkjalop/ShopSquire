@@ -50,6 +50,7 @@ import ProductShelvesPanel, { type ProductShelfProjection } from './components/P
 import SupplierContinuationCard from './components/SupplierContinuationCard';
 import AmbiguityExplorationPanel, { type AmbiguityExploration } from './components/AmbiguityExplorationPanel';
 import ResearchOutcomeSummary, { type ResearchOutcome } from './components/ResearchOutcomeSummary';
+import ArchitectureAlternativesPanel, { type ArchitectureAlternatives } from './components/ArchitectureAlternativesPanel';
 import {
   detectCVIssueType,
   detectPanelMode,
@@ -455,6 +456,7 @@ export default function App() {
   const [traceInitialTab] = useState<string | undefined>(traceDeepLink.tab);
   const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
   const [researchOutcome, setResearchOutcome] = useState<ResearchOutcome | null>(null);
+  const [architectureAlternatives, setArchitectureAlternatives] = useState<ArchitectureAlternatives | null>(null);
   // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
   // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
   const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
@@ -2148,6 +2150,10 @@ export default function App() {
           query: q,
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
+          // This is catalog context, not fit authority. The backend validates
+          // the handle and records the resulting bounded candidate set before
+          // later research is allowed to project requirements onto products.
+          storefront_taxonomy_handle: 'el-6-6',
         };
         if (pastedOfficialUrl) chatPayload.buyer_source_url = pastedOfficialUrl;
         if (activeShoppingCase?.case_id || ambiguityExploration?.case_id) {
@@ -2454,6 +2460,19 @@ export default function App() {
           setResearchOutcome(
             terminalOutcome.research_outcome?.schema_version === 'research-outcome-v1'
               ? terminalOutcome.research_outcome as ResearchOutcome
+              : null,
+          );
+          setArchitectureAlternatives(
+            terminalOutcome.architecture_alternatives
+            && Array.isArray(terminalOutcome.architecture_alternatives.alternatives)
+              ? terminalOutcome.architecture_alternatives as ArchitectureAlternatives
+              : null,
+          );
+        } else {
+          setArchitectureAlternatives(
+            data?.architecture_alternatives
+            && Array.isArray(data.architecture_alternatives.alternatives)
+              ? data.architecture_alternatives as ArchitectureAlternatives
               : null,
           );
         }
@@ -3755,6 +3774,9 @@ export default function App() {
                     </div>
                   )}
                   {researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
+                  {architectureAlternatives && (
+                    <ArchitectureAlternativesPanel projection={architectureAlternatives} />
+                  )}
                   {ambiguityExploration && (
                     <AmbiguityExplorationPanel
                       exploration={ambiguityExploration}
@@ -3762,6 +3784,17 @@ export default function App() {
                       onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
                       onResolveEvidenceSource={resolveBuyerEvidenceSource}
                       onApprovePublisherCandidate={approvePublisherCandidate}
+                      onConfirmIdentity={(choice, label) => {
+                        void handleSend({
+                          queryOverride: choice,
+                          nqeSelection: {
+                            question_id: 'confirm_canonical_identity',
+                            option_id: choice,
+                            option_label: label,
+                            option_value: choice,
+                          },
+                        });
+                      }}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
                       onSubmitSpecifications={submitManualSpecifications}
                       autoResearchEnabled={autoPublicResearchEnabled}

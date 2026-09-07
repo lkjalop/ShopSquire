@@ -89,7 +89,8 @@ def test_bg3_budget_then_emulate3d_as_well_retains_shared_budget_and_combines_ca
     assert first.status_code == 200
     first_body = first.json()
     assert first_body["confirmed_slots"]["budget_max"] == 3200
-    assert first_body["ambiguity_exploration"]["status"] == "context_only"
+    assert first_body["ambiguity_exploration"]["status"] == "resolved"
+    assert first_body["ambiguity_exploration"]["next_question"] is None
     assert first_body["ambiguity_exploration"]["identity_candidates"][0]["canonical_title"] == "Baldur's Gate 3"
     case_id = first_body["shopping_case_id"]
 

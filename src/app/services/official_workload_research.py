@@ -395,9 +395,9 @@ def model_extraction_timeout_s(parser_timeout_s: float) -> float:
     """Reserve parser-stage time for deterministic validation and fallback."""
     total = max(1.0, float(parser_timeout_s or 1.0))
     try:
-        configured = float(os.getenv("REQUIREMENT_MODEL_TIMEOUT_S", "12") or 12)
+        configured = float(os.getenv("REQUIREMENT_MODEL_TIMEOUT_S", "20") or 20)
     except (TypeError, ValueError):
-        configured = 12.0
+        configured = 20.0
     # At least one third of the stage remains for exact-span criticism and the
     # deterministic heuristic. The proposal is advisory and may time out.
     return round(max(1.0, min(configured, total * (2.0 / 3.0))), 3)

@@ -17,6 +17,8 @@ from src.app.services.decision_log import log_decision
 from src.app.services.ticketing_connectors import create_jira_issue, create_servicenow_incident
 
 _log = logging.getLogger(__name__)
+_log.disabled = False
+_log.propagate = True
 
 
 @dataclass
@@ -174,6 +176,11 @@ class TicketingAgent:
                 except Exception:
                     pass
         except Exception as db_exc:
+            # Some ASGI/logging bootstrap configurations disable loggers that
+            # were imported before their configuration is installed. A strict
+            # persistence failure must remain observable even in that state.
+            _log.disabled = False
+            _log.propagate = True
             _log.error("ticketing: DB persist failed for %s (%s): %s", tid, severity, db_exc)
             if strict_persistence:
                 raise RuntimeError(f"ticket_persistence_failed:{tid}") from db_exc

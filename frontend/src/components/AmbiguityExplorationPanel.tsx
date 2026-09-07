@@ -11,9 +11,12 @@ export type AmbiguityExploration = {
   case_id?: string;
   trace_id?: string;
   retained_purpose: string;
-  status: 'provisional' | 'researched' | 'context_only' | 'unresolved';
+  status: 'provisional' | 'researched' | 'context_only' | 'unresolved' | 'resolved' | 'identity_confirmation_required' | 'research_failed';
   interpretations: { hypothesis_id?: string; label?: string; confidence?: number }[];
-  next_question?: { text?: string; question?: string } | null;
+  next_question?: {
+    id?: string; text?: string; question?: string;
+    options?: { id: string; label?: string; value?: string }[];
+  } | null;
   execution: string;
   evidence: string;
   decision: string;
@@ -66,6 +69,7 @@ type Props = {
   onApprovePublisherCandidate?: (
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => Promise<void>;
+  onConfirmIdentity?: (choice: 'yes' | 'no', label: string) => void;
   autoResearchEnabled?: boolean;
   researchState?: ShoppingCaseResearchState;
   researchStartedAt?: number | null;
@@ -74,7 +78,7 @@ type Props = {
 export default function AmbiguityExplorationPanel({
   exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
   onSubmitSpecifications, onApprovePublisherCandidate, autoResearchEnabled = false,
-  researchState = 'idle', researchStartedAt = null,
+  onConfirmIdentity, researchState = 'idle', researchStartedAt = null,
 }: Props) {
   const [showSourceResolver, setShowSourceResolver] = useState(false);
   const [sourceHint, setSourceHint] = useState('');
@@ -152,6 +156,27 @@ export default function AmbiguityExplorationPanel({
         </div>
       ) : null}
       {question && <div data-testid="high-information-question" style={{ marginTop: 10, padding: 9, borderRadius: 7, background: '#fff' }}><strong>To narrow it down:</strong> {question}</div>}
+      {exploration.status === 'identity_confirmation_required'
+        && exploration.next_question?.id === 'confirm_canonical_identity'
+        && onConfirmIdentity && (
+        <div data-testid="canonical-identity-confirmation" style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+          {(exploration.next_question.options || [
+            { id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' },
+          ]).filter((option) => option.id === 'yes' || option.id === 'no').map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              data-testid={`confirm-canonical-identity-${option.id}`}
+              onClick={() => onConfirmIdentity(option.id as 'yes' | 'no', option.label || option.id)}
+              style={option.id === 'yes'
+                ? { background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }
+                : secondaryActionStyle}
+            >
+              {option.label || option.id}
+            </button>
+          ))}
+        </div>
+      )}
       {exploration.publisher_candidates && exploration.publisher_candidates.length > 0 && (
         <div data-testid="publisher-candidates" style={{ marginTop: 9, padding: 9, border: '1px solid #fdba74', borderRadius: 8 }}>
           <strong>Possible publisher sources — ownership not yet verified</strong>

@@ -101,6 +101,8 @@ class ModelExecutionRequest(BaseModel):
     timeout_ms: int = Field(default=8_000, ge=50, le=120_000)
     max_output_tokens: int = Field(default=512, ge=1, le=8_192)
     fallback_policy: Literal["no_fallback"] = "no_fallback"
+    scheduler_queue_ms: float = Field(default=0.0, ge=0, le=120_000)
+    scheduler_deadline_ms: int | None = Field(default=None, ge=50, le=120_000)
 
 
 class AgentRunEvent(BaseModel):
@@ -305,7 +307,13 @@ def execute_model(
         append_event("blocked", failure_code=failure)
         return finish("blocked", failure=failure)
 
-    if not append_event("accepted", dlp_hits=dlp_hits):
+    if not append_event(
+        "accepted",
+        dlp_hits=dlp_hits,
+        queue_ms=request.scheduler_queue_ms,
+        deadline_ms=request.scheduler_deadline_ms or request.timeout_ms,
+        max_output_tokens=request.max_output_tokens,
+    ):
         _EXECUTION_SLOTS.release()
         return finish("blocked", failure="agent_ledger_persistence_failed")
     result: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
@@ -351,11 +359,21 @@ def execute_model(
                               late=worker.is_alive(), dlp_hits=dlp_hits)
             continue
         if status == "failed":
-            append_event("failed", error_type=type(value).__name__)
-            return finish("failed", failure=f"transport_failed:{type(value).__name__}",
+            failure_code = str(
+                getattr(value, "failure_code", None)
+                or f"transport_failed:{type(value).__name__}"
+            )
+            append_event(
+                "failed", error_type=type(value).__name__, failure_code=failure_code,
+                **dict(getattr(value, "execution_details", {}) or {}),
+            )
+            return finish("failed", failure=failure_code,
                           dlp_hits=dlp_hits)
         text = str(value or "")
-        if not append_event("completed", output_hash=sha256_text(text)):
+        if not append_event(
+            "completed", output_hash=sha256_text(text),
+            **dict(getattr(value, "execution_details", {}) or {}),
+        ):
             return finish("failed", failure="agent_ledger_persistence_failed", dlp_hits=dlp_hits)
         return finish("completed", text=text, dlp_hits=dlp_hits)
 

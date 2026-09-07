@@ -224,6 +224,28 @@ def build_pending_clarification(
         "currency": _short(commercial.get("currency"), 8).upper() or None,
         "selected_sku": _short(commercial.get("selected_sku"), 120) or None,
     }
+    confirmation = (
+        question.get("confirmation_payload")
+        if isinstance(question.get("confirmation_payload"), Mapping) else {}
+    )
+    bounded_confirmation = None
+    if confirmation and _short(question.get("id") or question.get("question_id"), 80).lower() == "confirm_canonical_identity":
+        bounded_confirmation = {
+            "canonical_title": _short(confirmation.get("canonical_title"), 300) or None,
+            "publisher": _short(confirmation.get("publisher"), 200) or None,
+            "publisher_domain": _short(confirmation.get("publisher_domain"), 200) or None,
+            "supporting_row_ids": [
+                _short(item, 120) for item in list(confirmation.get("supporting_row_ids") or [])[:8]
+                if _short(item, 120)
+            ],
+            "match_reason": (
+                dict(confirmation.get("match_reason"))
+                if isinstance(confirmation.get("match_reason"), Mapping) else None
+            ),
+            "confidence": confirmation.get("confidence"),
+            "case_id": _short(confirmation.get("case_id"), 200) or None,
+            "case_revision": confirmation.get("case_revision"),
+        }
     return {
         "version": 2,
         "state": "active",
@@ -242,6 +264,7 @@ def build_pending_clarification(
         "semantic_context": semantic_context,
         "external_research_consent": bool(external_research_consent),
         "commercial_context": bounded_commercial,
+        "confirmation_payload": bounded_confirmation,
         "created_at": now,
         "expires_at": now + ttl,
     }
@@ -329,6 +352,23 @@ def reduce_clarification_turn(
     answer = _option_answer(selection, state)
     if answer:
         selected_oid = _short(selection.get("option_id"), 80).lower()
+        if question_id == "confirm_canonical_identity":
+            confirmation = (
+                state.get("confirmation_payload")
+                if isinstance(state.get("confirmation_payload"), Mapping) else {}
+            )
+            title = _short(confirmation.get("canonical_title"), 300)
+            accepted = selected_oid in {"approve", "confirmed", "yes"}
+            effective = (
+                f"I need hardware that can run {title}. The buyer confirmed this canonical identity."
+                if accepted and title else
+                f"The buyer rejected the proposed identity {title}. Ask for the exact product title."
+            )
+            return ClarificationTurnResult(
+                effective, "answer", consume_pending=True,
+                answer="confirmed" if accepted else "rejected",
+                question_id=question_id,
+            )
         if question_id == "external_research_consent":
             granted = selected_oid in {"approve", "approved", "allow", "yes"}
             return ClarificationTurnResult(
@@ -366,6 +406,27 @@ def reduce_clarification_turn(
         )
     if selection:
         return ClarificationTurnResult(current, "ambiguous", question_id=question_id)
+
+    if question_id == "confirm_canonical_identity":
+        confirmation = (
+            state.get("confirmation_payload")
+            if isinstance(state.get("confirmation_payload"), Mapping) else {}
+        )
+        title = _short(confirmation.get("canonical_title"), 300)
+        if re.fullmatch(r"\s*(?:yes|yes please|correct|confirmed|that(?:'s| is) it)\s*[.!]?\s*", current, re.I):
+            return ClarificationTurnResult(
+                f"I need hardware that can run {title}. The buyer confirmed this canonical identity.",
+                "answer", consume_pending=True, answer="confirmed", question_id=question_id,
+            )
+        if re.fullmatch(
+            r"\s*(?:no(?:\s+thanks)?|no[, ]+that(?:'s| is) not it|incorrect|wrong|that(?:'s| is) not it)\s*[.!]?\s*",
+            current,
+            re.I,
+        ):
+            return ClarificationTurnResult(
+                f"The buyer rejected the proposed identity {title}. Ask for the exact product title.",
+                "answer", consume_pending=True, answer="rejected", question_id=question_id,
+            )
 
     if question_id == "external_research_consent" and external_research_consent_granted(current):
         return ClarificationTurnResult(

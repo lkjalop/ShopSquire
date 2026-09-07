@@ -51,6 +51,9 @@ def verify_ollama_artifact(
     timeout_s: float = 2.0,
     fetch_tags: FetchTags | None = None,
 ) -> OllamaArtifactVerification:
+    from src.app.services.ollama_endpoint import normalize_ollama_url
+
+    base_url = normalize_ollama_url(base_url)
     parsed = urlsplit(base_url)
     endpoint_identity = str(parsed.hostname or "")
     observed_at = datetime.now(UTC).isoformat()

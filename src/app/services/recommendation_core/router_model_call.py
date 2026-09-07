@@ -6,6 +6,14 @@ import time
 from typing import Any, Callable
 
 
+class RouterOutputTruncated(RuntimeError):
+    failure_code = "router_output_truncated"
+
+    def __init__(self, execution_details: dict[str, Any]):
+        super().__init__(self.failure_code)
+        self.execution_details = dict(execution_details)
+
+
 def execute_router_model(
     prompt: str,
     timeout: float,
@@ -15,12 +23,14 @@ def execute_router_model(
     injected_transport: bool,
     gate: Any,
     runtime_contract: dict[str, Any],
+    prompt_id: str = "recommend-router-v2",
+    role: str = "recommendation_turn_router",
 ) -> tuple[str, dict[str, Any]]:
     started = time.monotonic()
     metrics: dict[str, Any] = {
         "provider": "ollama", "model": model,
         "model_version": os.getenv("ROUTER_MODEL_VERSION") or model,
-        "prompt_version": "recommend-router-v2", "policy_version": "semantic-authority-v1",
+        "prompt_version": prompt_id, "policy_version": "semantic-authority-v1",
         "outcome": "error", "queue_ms": 0.0, "wall_ms": 0.0,
     }
     acquired = False
@@ -44,9 +54,9 @@ def execute_router_model(
             metrics["outcome"] = "queue_timeout"
             return "", metrics
         try:
-            max_tokens = int(os.getenv("ROUTER_NUM_PREDICT", "320") or 320)
+            max_tokens = int(os.getenv("ROUTER_NUM_PREDICT", "768") or 768)
         except (TypeError, ValueError):
-            max_tokens = 320
+            max_tokens = 768
         remaining = max(2.0, float(timeout or 20.0) - metrics["queue_ms"] / 1_000.0)
         from src.app.services.local_model_roles import configured_digest, execute_local_model_role
 
@@ -76,20 +86,44 @@ def execute_router_model(
                 "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000, 1),
                 "prompt_tokens": int(data.get("prompt_eval_count") or 0),
                 "output_tokens": int(data.get("eval_count") or 0),
+                "done_reason": str(data.get("done_reason") or "unknown"),
             })
             if response.status_code != 200 or data.get("error"):
                 raise RuntimeError("router_model_http_error")
-            return str(data.get("response") or "")
+            if data.get("done_reason") == "length":
+                raise RouterOutputTruncated({
+                    key: metrics.get(key) for key in (
+                        "done_reason", "prompt_tokens", "output_tokens",
+                        "provider_total_ms", "prompt_eval_ms", "decode_ms",
+                    )
+                })
+            from src.app.services.model_transports import ModelTransportText
+
+            return ModelTransportText(
+                str(data.get("response") or ""),
+                {key: metrics.get(key) for key in (
+                    "done_reason", "prompt_tokens", "output_tokens",
+                    "provider_total_ms", "prompt_eval_ms", "decode_ms",
+                )},
+            )
 
         rendered = execute_local_model_role(
-            prompt, role="recommendation_turn_router", purpose="route_buyer_recommendation_turn",
-            prompt_id="recommend-router-v2", model=model, digest=digest, timeout_s=remaining,
+            prompt, role=role, purpose="route_buyer_recommendation_turn",
+            prompt_id=prompt_id, model=model, digest=digest, timeout_s=remaining,
             max_output_tokens=max_tokens, transport=transport,
         )
         metrics["outcome"] = "ok"
         return rendered, metrics
     except Exception as exc:
-        metrics["outcome"] = "timeout" if "timeout" in type(exc).__name__.lower() else "error"
+        if metrics.get("done_reason") == "length" or isinstance(exc, RouterOutputTruncated):
+            metrics["outcome"] = "truncated"
+            metrics["failure_code"] = "router_output_truncated"
+        else:
+            metrics["outcome"] = "timeout" if "timeout" in type(exc).__name__.lower() else "error"
+            metrics["failure_code"] = (
+                "model_execution_timeout" if metrics["outcome"] == "timeout"
+                else "model_execution_failed"
+            )
         metrics["error_type"] = type(exc).__name__
         return "", metrics
     finally:
@@ -99,7 +133,7 @@ def execute_router_model(
             from src.app.services.local_model_roles import last_local_model_schedule_metrics
 
             schedule = last_local_model_schedule_metrics()
-            if schedule.get("role") == "recommendation_turn_router":
+            if schedule.get("role") == role:
                 metrics.update({
                     "scheduler_role": schedule.get("role"),
                     "scheduler_priority": schedule.get("priority"),

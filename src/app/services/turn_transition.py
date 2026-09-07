@@ -72,6 +72,7 @@ class TurnCommit(BaseModel):
     research: dict[str, Any] = Field(default_factory=dict)
     source_intake_receipts: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     requirements: RequirementCommit = Field(default_factory=RequirementCommit)
+    catalog_scope: dict[str, Any] | None = None
     catalog_authority: Literal["permitted", "blocked", "unknown"] = "unknown"
     commerce_authority: Literal["none"] = "none"
     assistant_message: str = Field(default="", max_length=8_000)
@@ -105,6 +106,7 @@ class RevisionBoundTurnReadModel(BaseModel):
     research_outcome: ResearchOutcome
     source_intake_receipts: list[dict[str, Any]] = Field(default_factory=list)
     requirements: RequirementCommit
+    catalog_scope: dict[str, Any] | None = None
     catalog_authority: Literal["permitted", "blocked", "unknown"]
     commerce_authority: Literal["none"] = "none"
     assistant_message: str = ""
@@ -162,6 +164,9 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
     right_panel["canonical_budget"] = commit.canonical_budget
     right_panel["commercial_terms"] = dict(commit.commercial_terms)
     right_panel["subject_role"] = commit.subject_role
+    right_panel["catalog_scope"] = (
+        dict(commit.catalog_scope) if commit.catalog_scope else None
+    )
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         case_revision=revision,
@@ -180,6 +185,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         research_outcome=outcome,
         source_intake_receipts=list(commit.source_intake_receipts),
         requirements=commit.requirements,
+        catalog_scope=(dict(commit.catalog_scope) if commit.catalog_scope else None),
         catalog_authority=commit.catalog_authority,
         commerce_authority=commit.commerce_authority,
         assistant_message=commit.assistant_message,

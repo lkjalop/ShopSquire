@@ -15,6 +15,13 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
     headless: true,
+    launchOptions: {
+      // Live Ollama certification already exercises the discrete GPU heavily.
+      // Allow the browser to use software compositing so a UI trace cannot
+      // contend with model inference in the display driver's DPC path.
+      args: process.env.PLAYWRIGHT_DISABLE_GPU === '1'
+        ? ['--disable-gpu', '--disable-gpu-compositing'] : [],
+    },
     actionTimeout: 20_000,
     trace: 'on',            // full Playwright trace (npx playwright show-trace ...) for every run
     video: 'on',            // record a .webm of every run → test-results/**/video.webm (screen-recordable proof)

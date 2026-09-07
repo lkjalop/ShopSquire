@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
@@ -25,9 +26,10 @@ class DiscoveryFetcher(Protocol):
 _WORD = re.compile(r"[a-z0-9]+")
 _NAMED_SUBJECT = re.compile(r"\b[A-Z][A-Za-z0-9+.-]*(?:\s+[A-Z][A-Za-z0-9+.-]*)*\b")
 _QUALITY_STOP = {
-    "a", "and", "are", "for", "from", "hardware", "in", "is", "of", "official",
-    "only", "or", "requirements", "software", "support", "system", "the", "to",
-    "vendor", "with",
+    "a", "and", "are", "aud", "budget", "buy", "cad", "can", "computer", "could",
+    "eur", "for", "from", "gbp", "hardware", "in", "is", "laptop", "need", "new",
+    "nzd", "of", "official", "only", "or", "pc", "requirements", "run", "software",
+    "support", "system", "the", "to", "under", "usd", "vendor", "want", "what", "with",
 }
 _COMPOUND_PUBLIC_SUFFIXES = {
     "com.au", "net.au", "org.au", "co.nz", "co.uk", "org.uk", "ac.uk",
@@ -61,12 +63,36 @@ def _terms(value: str) -> set[str]:
 
 
 def _named_subject_terms(value: str) -> set[str]:
-    return {
+    capitalized = {
         token
         for phrase in _NAMED_SUBJECT.findall(str(value or ""))
         for token in _terms(phrase)
         if token not in {"can", "could", "exclude", "only", "this", "we", "which", "will"}
     }
+    # Buyer-entered titles are commonly lowercase. Capitalization is useful
+    # evidence when present, but must not be an eligibility gate. The fallback
+    # removes commerce and hardware framing and is used only to retain cited
+    # rows for later model/citation adjudication.
+    return capitalized or _terms(value)
+
+
+def _subject_match_count(subject_terms: set[str], result_terms: set[str]) -> tuple[int, float]:
+    """Return exact overlap plus the strongest bounded spelling similarity.
+
+    Search may recover a misspelled identity only by retaining a retrieved row
+    for the later model-and-citation clamp. No product aliases live here.
+    """
+
+    exact = len(subject_terms & result_terms)
+    strongest = 0.0
+    for subject in subject_terms:
+        if len(subject) < 5:
+            continue
+        for result in result_terms:
+            if len(result) < 5 or abs(len(subject) - len(result)) > 2:
+                continue
+            strongest = max(strongest, SequenceMatcher(None, subject, result).ratio())
+    return exact, round(strongest, 4)
 
 
 def _quality_score(row: dict[str, Any]) -> int:
@@ -240,6 +266,15 @@ def discover_open_world_publishers(
                 int(candidate["publisher_host_overlap_count"]),
                 len(host_terms & named_subject_terms),
             )
+            exact_subject, fuzzy_subject = _subject_match_count(
+                named_subject_terms, result_terms,
+            )
+            candidate["named_subject_overlap_count"] = max(
+                int(candidate.get("named_subject_overlap_count") or 0), exact_subject,
+            )
+            candidate["named_subject_similarity"] = max(
+                float(candidate.get("named_subject_similarity") or 0.0), fuzzy_subject,
+            )
     # Do not present arbitrary search results as possible authorities.  A row
     # must at least look like requirements, documentation, a manual, or a
     # publisher support surface. Publisher ownership is still unresolved and
@@ -255,7 +290,10 @@ def discover_open_world_publishers(
             # corroborated documentation surface; returning no candidate is an
             # honest and actionable result.
             strong_identity_candidate = bool(
-                int(row.get("subject_overlap_count") or 0) >= 2
+                (
+                    int(row.get("named_subject_overlap_count") or 0) >= 1
+                    or float(row.get("named_subject_similarity") or 0.0) >= 0.65
+                )
                 and not ownership["signals"]["excluded_intermediary"]
             )
             fetchable_origin_candidate = ownership["status"] in {

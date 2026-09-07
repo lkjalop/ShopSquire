@@ -147,6 +147,14 @@ def resolve_named_workloads(
                 "kind": kind,
                 "requested_name": name,
                 "resolved_name": result.get("resolved_name") or result.get("title"),
+                "canonical_title": result.get("canonical_title") or result.get("resolved_name"),
+                "publisher": result.get("publisher"),
+                "app_id": result.get("app_id") or result.get("source_record_id"),
+                "release_state": result.get("release_state"),
+                "release_date": result.get("release_date"),
+                "requirements_completeness": (
+                    result.get("requirements_completeness") or "identity_only"
+                ),
                 "status": "identity_resolved_requirements_incomplete",
                 "live_allowed": allow_live,
                 "source": result.get("source"),
@@ -275,11 +283,83 @@ def resolve_canonical_workload_identity(
         for item in result.get("evidence") or []
         if isinstance(item, dict)
     )
+    # A language model's entity kind is a proposal, not provider authority.
+    # If the cited canonical identity misses the proposed provider class, try
+    # the remaining enrolled class once. This is a bounded capability lookup,
+    # not an application alias or a title-specific correction.
+    remaining_kinds = [kind for kind in ("game", "software") if kind not in kinds]
+    if not resolved and remaining_kinds:
+        fallback = resolve_named_workloads(
+            [(kind, canonical_title) for kind in remaining_kinds],
+            consent=consent,
+        )
+        merged_requirements = dict(result.get("requirements") or {})
+        merged_requirements.update(dict(fallback.get("requirements") or {}))
+        result = {
+            **result,
+            "requirements": merged_requirements,
+            "evidence": [
+                *list(result.get("evidence") or []),
+                *list(fallback.get("evidence") or []),
+            ],
+            "live_allowed": bool(
+                result.get("live_allowed") or fallback.get("live_allowed")
+            ),
+            "provider_kind_fallback_used": True,
+        }
+        resolved = any(
+            str(item.get("status") or "").strip().lower() == "resolved"
+            and bool(item.get("compiled_requirements"))
+            for item in result.get("evidence") or []
+            if isinstance(item, dict)
+        )
     return {
         **result,
         "status": "resolved" if resolved else "not_resolved",
         "canonical_title": canonical_title,
         "lookup_basis": "cited_canonical_identity",
+        "failure_code": None if resolved else "structured_provider_no_authoritative_result",
+    }
+
+
+def resolve_unresolved_concepts(
+    concepts: Iterable[str], *, workload_kind_hints: Iterable[str], consent: bool,
+) -> Dict[str, Any]:
+    """Try the cheapest enrolled identity+requirements providers before open web.
+
+    Concepts are buyer-authored or coverage-clamped spans. Trying a provider
+    grants no authority unless that provider independently resolves the exact
+    identity and compiles its official requirements.
+    """
+
+    kinds = [
+        str(value).strip().lower() for value in workload_kind_hints
+        if str(value).strip().lower() in {"game", "software"}
+    ]
+    if not kinds:
+        kinds = ["game", "software"]
+    entities: list[tuple[str, str]] = []
+    for raw in list(concepts)[:3]:
+        concept = " ".join(str(raw or "").split()).strip()[:160]
+        if not concept:
+            continue
+        entities.extend((kind, concept) for kind in kinds[:2])
+    if not entities:
+        return {
+            "status": "not_attempted", "failure_code": "no_bounded_identity_concept",
+            "requirements": {}, "evidence": [],
+        }
+    result = resolve_named_workloads(entities, consent=consent)
+    resolved = any(
+        isinstance(item, dict)
+        and item.get("status") == "resolved"
+        and bool(item.get("compiled_requirements"))
+        for item in result.get("evidence") or []
+    )
+    return {
+        **result,
+        "status": "resolved" if resolved else "not_resolved",
+        "lookup_basis": "buyer_concept_enrolled_provider_first",
         "failure_code": None if resolved else "structured_provider_no_authoritative_result",
     }
 

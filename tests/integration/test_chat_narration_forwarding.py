@@ -64,7 +64,10 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     client = TestClient(app)
     resp = client.post(
         "/api/v1/chat/query",
-        json={"uid": "u-chat-narr-1", "query": "10 work laptops $1300-$1500"},
+        json={
+            "uid": "u-chat-narr-1", "query": "10 work laptops $1300-$1500",
+            "memory_mode": "temporary",
+        },
         headers={"x-api-key": "local-merchant-key"},
     )
     assert resp.status_code == 200
@@ -118,6 +121,7 @@ def test_unresolved_subject_does_not_republish_prior_commercial_slots(monkeypatc
         json={
             "uid": "u-chat-unresolved-subject",
             "query": "I need a laptop for an unfamiliar simulation workflow",
+            "memory_mode": "temporary",
             "confirmed_slots": {
                 "order_quantity": 30,
                 "budget_scope": "total",
@@ -134,6 +138,48 @@ def test_unresolved_subject_does_not_republish_prior_commercial_slots(monkeypatc
     assert body.get("requested_quantity") is None
     assert "order_quantity" not in body.get("confirmed_slots", {})
     assert "total_budget_cents" not in body.get("confirmed_slots", {})
+
+
+async def _fake_nested_unresolved_workload(*args, **kwargs):
+    semantic = {
+        "catalog_authority": "blocked",
+        "reasons": ["unresolved_material_concept"],
+        "concepts": [{
+            "text": "tarae", "query_span": "tarae",
+            "status": "unresolved", "material": True,
+        }],
+    }
+    return 200, {
+        "results": [],
+        "assistant_message": "Evidence is required.",
+        "decision_trace_id": "trace-nested-semantic",
+        "right_panel": {"semantic_resolution": semantic},
+        "slate_disposition": "clear",
+    }
+
+
+def test_nested_semantic_resolution_is_rebound_to_the_terminal_contract(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_nested_unresolved_workload)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "uid": "u-chat-nested-semantic",
+            "query": "tarae recommended specs, what laptop do I need?",
+            "memory_mode": "temporary",
+        },
+        headers={"x-api-key": "local-merchant-key"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["semantic_resolution"]["concepts"][0]["query_span"] == "tarae"
+    assert (
+        body["terminal_outcome"]["right_panel"]["semantic_resolution"]
+        == body["semantic_resolution"]
+    )
 
 
 async def _fake_no_match_with_brand_exclusion(*args, **kwargs):
@@ -155,7 +201,10 @@ def test_no_match_followups_do_not_contradict_brand_exclusion(monkeypatch):
     client = TestClient(create_app())
     response = client.post(
         "/api/v1/chat/query",
-        json={"uid": "u-chat-no-apple", "query": "game development laptops, no Apple"},
+        json={
+            "uid": "u-chat-no-apple", "query": "game development laptops, no Apple",
+            "memory_mode": "temporary",
+        },
         headers={"x-api-key": "local-merchant-key"},
     )
 

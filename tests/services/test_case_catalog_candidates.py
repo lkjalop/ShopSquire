@@ -5,11 +5,15 @@ from src.app.models.orm import Base
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
 from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
 from src.app.services.catalog_evidence_seed import ingest_reviewed_configurations
+from src.app.services.taxonomy_registry import add_sold_node
 
 
 def _database():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        add_sold_node(db, node_handle="el-6-6")
+        db.commit()
     return engine
 
 
@@ -130,3 +134,89 @@ def test_constraint_word_does_not_override_storefront_purchase_category():
     assert candidate_set.status == "eligible"
     assert candidate_set.taxonomy_handle == "el-6-6"
     assert candidate_set.taxonomy_source == "storefront_context"
+
+
+def test_server_derives_primary_catalog_scope_without_client_handle():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        candidate_set = build_case_catalog_candidate_set(
+            db,
+            retained_purpose="Can I run PRAGMATA under AUD 3000?",
+            tenant_id="default",
+            storefront_taxonomy_handle=None,
+            case_id="case-1",
+            case_revision=3,
+        )
+
+    assert candidate_set.status == "eligible"
+    assert candidate_set.taxonomy_handle == "el-6-6"
+    assert candidate_set.catalog_scope.source == "tenant_primary"
+    assert candidate_set.catalog_scope.client_context_disposition == "not_supplied"
+    assert candidate_set.catalog_scope.case_id == "case-1"
+    assert candidate_set.catalog_scope.case_revision == 3
+    assert candidate_set.configuration_ids
+
+
+def test_unsold_or_forged_client_handle_is_rejected_and_tenant_scope_wins():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        candidate_set = build_case_catalog_candidate_set(
+            db,
+            retained_purpose="Can I run this game?",
+            tenant_id="default",
+            storefront_taxonomy_handle="el-6-4",
+        )
+
+    assert candidate_set.status == "eligible"
+    assert candidate_set.taxonomy_handle == "el-6-6"
+    assert candidate_set.catalog_scope.source == "tenant_primary"
+    assert candidate_set.catalog_scope.client_context_disposition == "rejected"
+
+
+def test_explicit_sellable_desktop_overrides_laptop_client_context():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        add_sold_node(db, node_handle="el-6-3")
+        candidate_set = build_case_catalog_candidate_set(
+            db,
+            retained_purpose="I need a desktop for rendering",
+            tenant_id="default",
+            storefront_taxonomy_handle="el-6-6",
+        )
+
+    assert candidate_set.status == "eligible"
+    assert candidate_set.taxonomy_handle == "el-6-3"
+    assert candidate_set.catalog_scope.source == "buyer_explicit"
+    assert candidate_set.catalog_scope.client_context_disposition == "overridden"
+    assert candidate_set.configuration_ids
+
+
+def test_server_form_factor_maps_to_computer_servers_not_handhelds():
+    from src.app.models.orm import ProductConfiguration
+    from src.app.services.case_catalog_candidates import _derived_configuration_handle
+
+    row = ProductConfiguration(
+        tenant_id="default", sku="SERVER-1", product_id="product-1",
+        configuration_hash="server-hash", form_factor="server",
+    )
+    assert _derived_configuration_handle(row) == "el-6-2"
+
+
+def test_gaming_laptop_leaf_matches_coarse_laptop_configurations():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        add_sold_node(db, node_handle="el-6-11-2")
+        candidate_set = build_case_catalog_candidate_set(
+            db,
+            retained_purpose="I need a gaming laptop",
+            tenant_id="default",
+            storefront_taxonomy_handle="el-6-11-2",
+        )
+
+    assert candidate_set.status == "eligible"
+    assert candidate_set.taxonomy_handle == "el-6-11-2"
+    assert candidate_set.configuration_ids

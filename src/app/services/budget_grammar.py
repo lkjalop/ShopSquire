@@ -72,6 +72,44 @@ class BudgetParse:
         return parsed if parsed.found else None
 
 
+def canonical_budget_from_accepted_slots(
+    current: Dict[str, Any] | None,
+    accepted_slots: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """Preserve a previously accepted case budget without reparsing text.
+
+    The current turn's ``BudgetParse`` remains authoritative when present.
+    Replacement/refinement turns may carry a durable, structured budget in
+    confirmed slots; projecting it here keeps the new revision truthful while
+    leaving ingress fact extraction literal to the current buyer message.
+    """
+
+    parsed = BudgetParse.from_dict(current)
+    if parsed is not None:
+        return parsed.to_dict()
+    slots = accepted_slots if isinstance(accepted_slots, dict) else {}
+
+    def amount(key: str) -> Optional[int]:
+        value = slots.get(key)
+        if isinstance(value, bool) or value is None:
+            return None
+        try:
+            bounded = int(float(value))
+        except (TypeError, ValueError):
+            return None
+        return bounded if bounded > 0 else None
+
+    lo = amount("budget_min")
+    hi = amount("budget_max")
+    if lo is None and hi is None:
+        total_cents = amount("total_budget_cents")
+        hi = total_cents // 100 if total_cents is not None else None
+    if lo is None and hi is None:
+        return None
+    mode = "range" if lo is not None and hi is not None else "floor" if lo is not None else "ceiling"
+    return BudgetParse(lo, hi, mode, None).to_dict()
+
+
 @dataclass(frozen=True)
 class PriceIntent:
     """Buyer-facing meaning of a parsed price, separate from authorization."""
@@ -345,7 +383,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     # not permission to ignore the amount and start at the cheapest item. The
     # singular article separates it from quantities such as "need 100 laptops".
     m = re.search(
-        rf"\b(?:need|want|looking\s+for)\s+(?:a|an|one)\s+"
+        rf"\b(?:need|want|looking\s+for|on|for)\s+(?:a|an|one)\s+"
         rf"{_CUR}?\s*{_NUM}{_UNIT_GUARD}\s+[a-z]",
         q,
     )

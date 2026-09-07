@@ -114,6 +114,8 @@ def test_identity_without_material_requirements_stays_unresolved(monkeypatch):
     assert result["requirements"] == {}
     assert result["evidence"][0]["status"] == "identity_resolved_requirements_incomplete"
     assert result["evidence"][0]["resolved_name"] == "Heroes of Might and Magic III Remake"
+    assert result["evidence"][0]["canonical_title"] == "Heroes of Might and Magic III Remake"
+    assert result["evidence"][0]["app_id"] == "3809850"
     assert result["evidence"][0]["identity_resolution"]["authority"] == "identity_candidate_only"
     assert result["evidence"][0]["compiled_requirements"] == []
 
@@ -209,6 +211,41 @@ def test_cited_steam_origin_supplies_provider_kind_after_identity(monkeypatch):
 
     assert calls == [([("game", "The Blood of Dawnwalker")], True)]
     assert result["status"] == "resolved"
+
+
+def test_canonical_retry_recovers_from_wrong_model_provider_kind(monkeypatch):
+    calls = []
+
+    def resolve(entities, consent):
+        bounded = list(entities)
+        calls.append((bounded, consent))
+        if bounded[0][0] == "game":
+            return {
+                "requirements": {"ram_gb": (">=", 16.0)},
+                "evidence": [{
+                    "kind": "game", "status": "resolved",
+                    "compiled_requirements": [{"attribute_key": "ram_gb"}],
+                }],
+                "live_allowed": True,
+            }
+        return {
+            "requirements": {},
+            "evidence": [{"kind": "software", "status": "not_resolved"}],
+            "live_allowed": False,
+        }
+
+    monkeypatch.setattr(W, "resolve_named_workloads", resolve)
+    result = W.resolve_canonical_workload_identity(
+        {"status": "resolved", "identity": {"canonical_title": "Novel Product"}},
+        workload_kind_hints=["software"], consent=True,
+    )
+
+    assert calls == [
+        ([("software", "Novel Product")], True),
+        ([("game", "Novel Product")], True),
+    ]
+    assert result["status"] == "resolved"
+    assert result["provider_kind_fallback_used"] is True
 
 
 def test_router_repairs_omitted_named_workload_without_title_rules(db):

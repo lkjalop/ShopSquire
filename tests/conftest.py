@@ -320,6 +320,16 @@ def pytest_sessionstart(session):
     os.environ["DATABASE_URL"] = session_db_url
     os.environ["DATABASE_URL_RO"] = session_db_url
 
+    # Exercise the canonical schema contract. Recent conversation/research
+    # services are migration-owned and intentionally do not create their own
+    # tables at request time; Base.metadata plus a hand-maintained subset can
+    # otherwise turn valid integration requests into misleading 503s.
+    if use_provided_database not in {"1", "true", "yes", "on"}:
+        from alembic import command as _alembic_command
+        from alembic.config import Config as _AlembicConfig
+
+        _alembic_command.upgrade(_AlembicConfig("alembic.ini"), "head")
+
     # ── Isolate tests from the DEMO .env's operational flags ────────────────
     # config.py calls load_dotenv() at import, so a demo-configured .env
     # (FULFILLMENT_DEMO_ENABLED=1) and the feature_flags baseline

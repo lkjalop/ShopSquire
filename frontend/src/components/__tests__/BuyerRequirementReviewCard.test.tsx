@@ -28,6 +28,15 @@ describe('BuyerRequirementReviewCard', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('does not crash when a degraded claim omits display labels', () => {
+    render(<BuyerRequirementReviewCard claims={[{
+      claim_id: 'partial', operator: '>=', value: 8,
+      authority_status: 'unverified',
+    } as any]} />);
+
+    expect(screen.getAllByText(/not recorded/i).length).toBeGreaterThan(0);
+  });
+
   it('submits an inline correction without granting authority', async () => {
     const onAccept = vi.fn().mockResolvedValue(undefined);
     render(<BuyerRequirementReviewCard claims={[{

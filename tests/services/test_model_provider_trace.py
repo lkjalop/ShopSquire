@@ -23,6 +23,18 @@ class _OllamaResponse:
         return {"response": '{"desired_outcome":"test"}'}
 
 
+class _TruncatedOllamaResponse:
+    status_code = 200
+
+    @staticmethod
+    def json():
+        return {
+            "response": '{"lane":"SEARCH"',
+            "done_reason": "length",
+            "eval_count": 320,
+        }
+
+
 def test_azure_foundry_adapter_emits_version_trace(monkeypatch) -> None:
     monkeypatch.setenv("AZURE_AI_FOUNDRY_ENDPOINT", "https://foundry.example")
     monkeypatch.setenv("AZURE_AI_FOUNDRY_DEPLOYMENT", "grounded-small")
@@ -140,3 +152,57 @@ def test_router_receipt_includes_priority_scheduler_timing(monkeypatch) -> None:
     assert metrics["scheduler_queue_ms"] >= 0
     assert metrics["scheduler_execution_ms"] >= 0
     assert metrics["scheduler_cancelled"] is False
+
+
+def test_router_uses_capacity_for_full_contract_and_records_completion_reason(monkeypatch) -> None:
+    import threading
+
+    from src.app.services.local_model_roles import _reset_local_model_scheduler_for_tests
+    from src.app.services.recommendation_core.router_model_call import execute_router_model
+
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"response": '{"lane":"SEARCH"}', "done_reason": "stop"}
+
+    def post(*_args, **kwargs):
+        captured.update(kwargs["json"])
+        return Response()
+
+    monkeypatch.delenv("ROUTER_NUM_PREDICT", raising=False)
+    monkeypatch.setenv("ROUTER_MODEL_ENABLED", "1")
+    _reset_local_model_scheduler_for_tests()
+    rendered, metrics = execute_router_model(
+        "route this", 2.0, model="qwen3:14b", http_post=post,
+        injected_transport=True, gate=threading.BoundedSemaphore(1),
+        runtime_contract={"queue_timeout_s": 0.2},
+    )
+
+    assert rendered == '{"lane":"SEARCH"}'
+    assert captured["options"]["num_predict"] >= 768
+    assert metrics["done_reason"] == "stop"
+
+
+def test_router_reports_output_truncation_instead_of_model_unavailable(monkeypatch) -> None:
+    import threading
+
+    from src.app.services.local_model_roles import _reset_local_model_scheduler_for_tests
+    from src.app.services.recommendation_core.router_model_call import execute_router_model
+
+    monkeypatch.setenv("ROUTER_MODEL_ENABLED", "1")
+    _reset_local_model_scheduler_for_tests()
+    rendered, metrics = execute_router_model(
+        "route this", 2.0, model="qwen3:14b",
+        http_post=lambda *_args, **_kwargs: _TruncatedOllamaResponse(),
+        injected_transport=True, gate=threading.BoundedSemaphore(1),
+        runtime_contract={"queue_timeout_s": 0.2},
+    )
+
+    assert rendered == ""
+    assert metrics["outcome"] == "truncated"
+    assert metrics["failure_code"] == "router_output_truncated"
+    assert metrics["done_reason"] == "length"

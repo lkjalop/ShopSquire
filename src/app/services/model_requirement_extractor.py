@@ -109,9 +109,10 @@ def _model_call(prompt: str, timeout_s: float) -> str:
         model=model,
         digest=digest,
         timeout_s=timeout_s,
-        max_output_tokens=520,
+        max_output_tokens=768,
         transport=make_ollama_generate_transport(
             response_format="json", keep_alive="30m", think=False,
+            options={"num_ctx": int(os.getenv("REQUIREMENT_EXTRACTION_NUM_CTX", "8192") or 8192)},
         ),
     )
 
@@ -122,7 +123,7 @@ def propose_typed_requirements(
     citation_url: str,
     observed_at: datetime,
     model_fn: Callable[[str, float], str] | None = None,
-    timeout_s: float = 12.0,
+    timeout_s: float = 20.0,
 ) -> dict[str, Any]:
     started = time.monotonic()
     try:

@@ -528,7 +528,7 @@ def test_router_default_generation_budget_fits_bulk_decision(monkeypatch):
     monkeypatch.setattr(turn_router, "_router_http_post", fake_post)
     turn_router._default_llm_fn("route this bulk request", 20)
 
-    assert seen["options"]["num_predict"] == 320
+    assert seen["options"]["num_predict"] == 768
 
 
 def test_router_call_records_server_phase_metrics(monkeypatch):

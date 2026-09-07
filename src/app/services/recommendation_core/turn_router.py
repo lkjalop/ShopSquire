@@ -188,8 +188,14 @@ _router_model = active_router_model
 
 
 
-def _default_llm_fn(prompt: str, timeout: float) -> str:
-    """Compatibility seam; execution ownership lives in router_model_call."""
+def _execute_default_router_role(
+    prompt: str,
+    timeout: float,
+    *,
+    prompt_id: str = "recommend-router-v2",
+    role: str = "recommendation_turn_router",
+) -> str:
+    """Execute one explicitly named router role and retain its typed receipt."""
     from src.app.services.recommendation_core.router_model_call import execute_router_model
 
     model = _router_model()
@@ -201,6 +207,8 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         injected_transport=_router_http_post is not _DEFAULT_ROUTER_HTTP_POST,
         gate=_ROUTER_GATE,
         runtime_contract=router_runtime_contract(),
+        prompt_id=prompt_id,
+        role=role,
     )
     _ROUTER_CALL_STATE.metrics = metrics
     if metrics.get("outcome") not in {"ok", "disabled", "mock_disabled", "queue_timeout"}:
@@ -209,6 +217,11 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
             metrics.get("outcome"), model, metrics.get("error_type"),
         )
     return rendered
+
+
+def _default_llm_fn(prompt: str, timeout: float) -> str:
+    """Compatibility seam; execution ownership lives in router_model_call."""
+    return _execute_default_router_role(prompt, timeout)
 
 
 def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
@@ -645,6 +658,9 @@ def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
         "workload_entities": [
             {"kind": short(v.get("kind")), "name": short(v.get("name"))}
             for v in list(data.get("workload_entities") or [])[:3] if isinstance(v, dict)
+        ],
+        "unresolved_entities": [
+            short(v) for v in list(data.get("unresolved_entities") or [])[:3] if short(v)
         ],
         "audience_contexts": [short(v) for v in list(data.get("audience_contexts") or [])[:8]
                               if short(v)],
@@ -1570,7 +1586,9 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "only NAME them.\n"
         "- WORKLOAD_ENTITIES: copy at most three explicitly named games or software applications "
         "from the message as {kind: game|software, name: literal title}. Never infer a title or "
-        "put a generic workload such as gaming, rendering, or development here.\n"
+        "put a generic workload such as gaming, rendering, or development here. If the buyer "
+        "asks for requirements/specs for a named concept but its kind is unknown, put the exact "
+        "buyer span in unresolved_entities rather than omitting it or calling the request general.\n"
         "- Extract NUMERIC requirements the message EXPLICITLY states "
         f"(keys ONLY from: {', '.join(sorted(req_keys))}; e.g. '144fps' → refresh_hz≥144). "
         "Do NOT invent workload specs — that is what use_cases are for.\n"
@@ -1598,6 +1616,7 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         '"request_scope": "product|service_or_place|uncertain", '
         '"use_cases": ["<key>", ...], '
         '"workload_entities": [{"kind": "game|software", "name": "<literal name>"}], '
+        '"unresolved_entities": ["<exact buyer span whose product-fit requirements need identity resolution>"], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"refine": {"brand": "<hard-filter brand or null>", '
         '"prefer_brand": "<soft-preference brand or null>", '
@@ -1802,32 +1821,59 @@ def _repair_missing_workload_entity(
     exact buyer-authored span and the closed ``game|software`` vocabulary, and
     the normal router clamp validates it again before any provider can run.
     """
-    prompt = (
-        "NAMED WORKLOAD COVERAGE REPAIR. The prior commerce interpretation "
-        "identified a run/play/compatibility relationship but omitted its named "
-        "game or software subject. Return JSON only. If BUYER MESSAGE explicitly "
-        "names a game or software application, copy the smallest complete literal "
-        "title as name and classify kind as game or software. Do not infer, "
-        "normalize, correct, or complete a title. Generic activities such as "
-        "gaming, simulation, rendering, editing, work, and school are not named "
-        "entities. Otherwise return {\"workload_entity\":null}. Schema: "
-        "{\"workload_entity\":{\"kind\":\"game|software\",\"name\":\"exact buyer span\"}|null}.\n"
-        "BUYER MESSAGE:" + json.dumps(str(message or "")[:1_000]) + "\nJSON:"
+    bounded_message = str(message or "")[:1_000]
+    requirement_relation = _re.search(
+        r"\b(?:recommended\s+)?(?:specs?|requirements?)\b",
+        bounded_message,
+        _re.IGNORECASE,
     )
+    if requirement_relation:
+        tail = bounded_message[requirement_relation.end():]
+        direction = "AFTER" if _re.match(r"\s+(?:for|of)\b", tail, _re.I) else "BEFORE"
+        prompt = (
+            "NAMED WORKLOAD COVERAGE REPAIR. "
+            f"The relation phrase is {json.dumps(requirement_relation.group(0))}. "
+            f"Copy only the named noun phrase immediately {direction} that relation phrase "
+            "from the buyer message. Remove question words but do not normalize, correct, or "
+            "complete the name. Unfamiliar or misspelled names are valid. Do not copy the "
+            "requested hardware, budget, or generic activity. Return JSON with name and kind; "
+            "kind is game, software, or unknown. Return name null when no named dependency exists.\n"
+            "BUYER MESSAGE:" + json.dumps(bounded_message) + "\nJSON:"
+        )
+    else:
+        prompt = (
+            "NAMED WORKLOAD COVERAGE REPAIR. Copy the exact named game or software dependency whose run/play/compatibility "
+            "determines hardware fit. Do not normalize or complete it. Unfamiliar names are "
+            "valid; generic activities are not. Return JSON with name and kind; kind is game, "
+            "software, or unknown. Return name null when none exists.\nBUYER MESSAGE:"
+            + json.dumps(bounded_message) + "\nJSON:"
+        )
     primary_metrics = dict(getattr(_ROUTER_CALL_STATE, "metrics", {}) or {})
     try:
-        raw = fn(prompt, min(max(float(timeout), 1.0), 8.0))
+        repair_timeout = min(max(float(timeout), 1.0), 8.0)
+        raw = (
+            _execute_default_router_role(
+                prompt,
+                repair_timeout,
+                prompt_id="recommend-router-entity-repair-v1",
+                role="recommendation_turn_router_repair",
+            )
+            if fn is _default_llm_fn
+            else fn(prompt, repair_timeout)
+        )
         from src.app.services.recommendation_core.router_parser import parse_router_payload
 
         payload = parse_router_payload(raw)
         item = (payload or {}).get("workload_entity")
+        if not isinstance(item, dict):
+            item = payload if isinstance(payload, dict) and payload.get("name") else None
         if not isinstance(item, dict):
             return None
         kind = str(item.get("kind") or "").strip().lower()
         name = _re.sub(r"[\x00-\x1f\x7f]+", " ", str(item.get("name") or ""))
         name = _re.sub(r"\s+", " ", name).strip()[:80]
         message_folded = _re.sub(r"\s+", " ", str(message or "")).casefold()
-        if kind not in {"game", "software"} or not name:
+        if kind not in {"game", "software", "unknown"} or not name:
             return None
         if _re.sub(r"\s+", " ", name).casefold() not in message_folded:
             return None
@@ -2004,13 +2050,61 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
         except Exception as exc:
             logger.warning("router read-savepoint reset failed: %s", repr(exc)[:120])
     if not isinstance(data, dict):
-        return _bounded_fallback_decision(db, envelope, cands, reason="model_unavailable")
+        call_metrics = last_router_call_metrics()
+        failure_reason = str(call_metrics.get("failure_code") or "model_unavailable")
+        return _bounded_fallback_decision(db, envelope, cands, reason=failure_reason)
+
+    # Unknown identity is a first-class model proposal.  The router does not
+    # need to know whether an unfamiliar name is a game or an application in
+    # order to preserve it for the governed identity ladder.  Clamp every row
+    # to an exact buyer-authored span, then express it through the existing
+    # semantic contract; this grants no identity, evidence, or catalog fit.
+    if not isinstance(data.get("semantic_proposal"), dict):
+        query_folded = _re.sub(r"\s+", " ", envelope.query).strip().casefold()
+        unresolved_entities: list[str] = []
+        raw_unknowns = data.get("unresolved_entities")
+        if isinstance(raw_unknowns, (list, tuple)):
+            for raw_unknown in list(raw_unknowns)[:3]:
+                unknown = _re.sub(
+                    r"[\x00-\x1f\x7f]+", " ", str(raw_unknown or "")
+                )
+                unknown = _re.sub(r"\s+", " ", unknown).strip()[:120]
+                if (
+                    len(unknown) >= 2
+                    and unknown.casefold() in query_folded
+                    and unknown not in unresolved_entities
+                ):
+                    unresolved_entities.append(unknown)
+        if unresolved_entities:
+            data["semantic_proposal"] = {
+                "desired_outcome": str(envelope.query or "")[:240],
+                "concepts": [
+                    {
+                        "text": unknown,
+                        "query_span": unknown,
+                        "status": "unresolved",
+                        "material": True,
+                    }
+                    for unknown in unresolved_entities
+                ],
+                "material_unknowns": [
+                    {
+                        "unknown_id": f"unknown-entity-{index + 1}",
+                        "description": f"Canonical identity and requirements for {unknown}",
+                        "resolution_source": "research",
+                        "material": True,
+                    }
+                    for index, unknown in enumerate(unresolved_entities)
+                ],
+                "proposed_action": "research",
+                "confidence": 0.5,
+            }
 
     # Semantic coverage is a contract, not a game/application allowlist. If
-    # the main model recognized a run/play/compatibility relation but omitted
-    # its literal subject, make one small repair call rather than silently
-    # answering with a generic shelf. The repaired span remains a proposal and
-    # crosses the same exact-buyer-span clamp below.
+    # the main model recognized a material unknown or a run/compatibility
+    # relation but omitted its literal subject, make one small repair call
+    # rather than silently answering with a generic shelf. The repaired span
+    # remains a proposal and crosses the same exact-buyer-span clamp below.
     raw_workloads = data.get("workload_entities")
     raw_entity_frame = (
         data.get("entity_frame") if isinstance(data.get("entity_frame"), dict) else {}
@@ -2018,6 +2112,29 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     role_hint = str(
         raw_entity_frame.get("turn_role") or data.get("subject_role") or ""
     ).strip().upper()
+    raw_semantic = (
+        data.get("semantic_proposal")
+        if isinstance(data.get("semantic_proposal"), dict) else {}
+    )
+    has_material_semantic_unknown = any(
+        isinstance(item, dict) and bool(item.get("material", True))
+        for item in list(raw_semantic.get("concepts") or [])
+    )
+    _buyer_text_folded = _re.sub(r"\s+", " ", str(envelope.query or "")).casefold()
+    has_named_semantic_concept = any(
+        isinstance(item, dict)
+        and str(item.get("text") or item.get("query_span") or "").strip()
+        and _re.sub(
+            r"\s+", " ", str(item.get("text") or item.get("query_span") or "").strip(),
+        ).casefold() in _buyer_text_folded
+        for item in list(raw_semantic.get("concepts") or [])
+    )
+    identity_probe_requested = bool(
+        envelope.external_research_consent
+        and str(data.get("lane") or "").strip().upper() in {"SEARCH", "FILTER"}
+        and str(data.get("handle") or "").strip()
+        and not isinstance(data.get("semantic_proposal"), dict)
+    )
     if role_hint not in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"}:
         try:
             from src.app.services.subject_role import (
@@ -2034,20 +2151,63 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
             role_hint = "UNRESOLVED"
     if (
         not str(raw_entity_frame.get("identity") or "").strip()
-        and role_hint in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"}
+        and not has_named_semantic_concept
+        and (
+            not (
+                isinstance(raw_workloads, list)
+                and any(
+                    isinstance(item, dict) and str(item.get("name") or "").strip()
+                    for item in raw_workloads
+                )
+            )
+            or not pending
+        )
+        and (
+            role_hint in {"RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"}
+            or has_material_semantic_unknown
+            or identity_probe_requested
+        )
     ):
         repaired_entity = _repair_missing_workload_entity(
             fn, message=envelope.query, timeout=timeout,
         )
         if repaired_entity is not None:
-            data["workload_entities"] = [repaired_entity]
-            data["entity_frame"] = {
-                "identity": repaired_entity["name"],
-                "buyer_span": repaired_entity["name"],
-                "entity_category": "software",
-                "turn_role": role_hint,
-                "confidence": 0.5,
-            }
+            if repaired_entity["kind"] == "unknown":
+                unknown = repaired_entity["name"]
+                data["unresolved_entities"] = [unknown]
+                data["semantic_proposal"] = {
+                    "desired_outcome": str(envelope.query or "")[:240],
+                    "concepts": [{
+                        "text": unknown,
+                        "query_span": unknown,
+                        "status": "unresolved",
+                        "material": True,
+                    }],
+                    "material_unknowns": [{
+                        "unknown_id": "unknown-entity-1",
+                        "description": f"Canonical identity and requirements for {unknown}",
+                        "resolution_source": "research",
+                        "material": True,
+                    }],
+                    "proposed_action": "research",
+                    "confidence": 0.5,
+                }
+                data["entity_frame"] = {
+                    "identity": unknown,
+                    "buyer_span": unknown,
+                    "entity_category": "unknown",
+                    "turn_role": role_hint or "UNRESOLVED",
+                    "confidence": 0.5,
+                }
+            else:
+                data["workload_entities"] = [repaired_entity]
+                data["entity_frame"] = {
+                    "identity": repaired_entity["name"],
+                    "buyer_span": repaired_entity["name"],
+                    "entity_category": "software",
+                    "turn_role": role_hint or "UNRESOLVED",
+                    "confidence": 0.5,
+                }
 
     # The full interpreter occasionally resolves the product/workload correctly but omits
     # its relation to an active material question. One narrow repair is safer than guessing
@@ -2946,6 +3106,12 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
             else {}
         ),
     )
+    from src.app.services.recommendation_core.semantic_coverage import (
+        sanitize_semantic_concept_spans,
+    )
+    semantic_proposal = sanitize_semantic_concept_spans(
+        semantic_query, semantic_proposal,
+    )
     # A category match is not workload authority. If the buyer's purpose is outside the
     # accepted data-owned use-case/evidence vocabulary, abstain before catalog retrieval.
     from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
@@ -2955,7 +3121,11 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
         use_cases=use_cases,
         workload_entities=workload_entities,
         node_path=(node.full_path if node else None),
-        existing_semantic={},
+        # The research hand-off consumes this bounded projection. Dropping a
+        # valid model-proposed unknown here meant the catalog path could call
+        # the turn "general" even though semantic validation had already held
+        # an unfamiliar buyer-authored identity for research.
+        existing_semantic=semantic_proposal,
     )
     accepted_audit = {
         "lane": lane,

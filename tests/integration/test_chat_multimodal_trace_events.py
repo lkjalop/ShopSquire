@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.app.main import create_app
+from src.app.models.db import db_session
+from src.app.services.catalog_evidence_seed import ingest_reviewed_configurations
+from src.app.services.taxonomy_registry import add_sold_node, ensure_tables
 
 
 def _compatibility_image_response(**_kwargs):
@@ -26,13 +30,16 @@ def _compatibility_image_response(**_kwargs):
 
 def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch):
     from src.app.routers import chat as chat_router
-    from src.app.services import recommendation_compatibility
 
-    # Chat dispatches through the typed facade and V2-only compatibility cutover.
+    async def fake_recommend(*_args, **_kwargs):
+        return 200, _compatibility_image_response()
+
+    # Patch the active typed chat-dispatch seam. The retired compatibility
+    # wrapper is intentionally no longer part of this request path.
     monkeypatch.setattr(
-        recommendation_compatibility,
-        "serve_v2_compatibility",
-        _compatibility_image_response,
+        chat_router,
+        "_call_recommend_in_process",
+        fake_recommend,
     )
     monkeypatch.setattr(
         chat_router,
@@ -46,30 +53,59 @@ def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch)
         },
     )
 
+    with db_session() as db:
+        ensure_tables(db)
+        sold_node_existed = bool(db.execute(text(
+            "SELECT 1 FROM sold_taxonomy WHERE tenant_id = 'default' "
+            "AND node_handle = 'el-6-6'"
+        )).first())
+        assert add_sold_node(db, node_handle="el-6-6", tenant_id="default")
+        ingest_reviewed_configurations(db)
+
     app = create_app()
     client = TestClient(app)
     headers = {"x-api-key": "local-merchant-key"}
-    resp = client.post(
-        "/api/v1/chat/query",
-        json={
-            "uid": "u-chat-mm-1",
-            "query": "find similar laptops to this photo",
-            "images": [
-                {
-                    "labels": ["laptop", "gaming"],
-                    "ocr_text": "Legion",
-                    "hash": "img-hash-1",
-                    "is_product_photo": True,
-                    "damage_score": 0.02,
-                }
-            ],
-        },
-        headers=headers,
-    )
+    try:
+        resp = client.post(
+            "/api/v1/chat/query",
+            json={
+                "uid": "u-chat-mm-1",
+                "query": "find similar laptops to this photo",
+                "images": [
+                    {
+                        "labels": ["laptop", "gaming"],
+                        "ocr_text": "Legion",
+                        "hash": "img-hash-1",
+                        "is_product_photo": True,
+                        "damage_score": 0.02,
+                    }
+                ],
+            },
+            headers=headers,
+        )
+    finally:
+        if not sold_node_existed:
+            with db_session() as db:
+                db.execute(text(
+                    "DELETE FROM sold_taxonomy WHERE tenant_id = 'default' "
+                    "AND node_handle = 'el-6-6'"
+                ))
+                db.commit()
     assert resp.status_code == 200
     body = resp.json()
     trace_id = body.get("decision_trace_id") or body.get("trace_id")
-    assert trace_id == "trace-chat-mm-1"
+    assert trace_id
+    assert body.get("decision_trace_id") == trace_id
+    terminal = body.get("terminal_outcome") or {}
+    assert terminal.get("decision_trace_id") == trace_id
+    assert body.get("products"), {
+        "message": body.get("assistant_message"),
+        "catalog_authority": (body.get("terminal_outcome") or {}).get("catalog_authority"),
+        "recommendation_status": (body.get("terminal_outcome") or {}).get("recommendation_status"),
+        "research_status": (body.get("terminal_outcome") or {}).get("research_status"),
+        "scope": ((body.get("terminal_outcome") or {}).get("catalog_scope") or {}),
+        "authorization": body.get("workload_authorization"),
+    }
     product = (body.get("products") or [])[0]
     assert product["price"] == 1499.0
     assert product["price_cents"] == 149900

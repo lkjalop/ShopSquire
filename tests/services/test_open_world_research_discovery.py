@@ -260,6 +260,70 @@ def test_exact_store_title_is_retained_for_identity_but_not_promoted_to_origin()
     )
 
 
+class TypoStoreIdentityFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"typo-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed",
+            "http_status": 200,
+        }
+        return [{
+            "title": "Pre-purchase WARDOGS on Steam",
+            "url": "https://store.steampowered.com/app/1867240/WARDOGS/",
+            "snippet": "WARDOGS is available on Steam.",
+        }]
+
+
+def test_typo_candidate_is_retained_by_generic_similarity_for_later_identity_clamp():
+    plan = build_case_research_plan("WAROGS", allow_open_world=True)
+    assert plan is not None
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}",
+        fetcher=TypoStoreIdentityFetcher(),
+    )
+
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["named_subject_overlap_count"] == 0
+    assert candidate["named_subject_similarity"] >= 0.86
+    assert candidate["authority"] == "not_accepted"
+
+
+class LowercaseDirtyTypoFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"dirty-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed",
+            "http_status": 200,
+        }
+        return [{
+            "title": "The Blood of Dawnwalker on Steam",
+            "url": "https://store.steampowered.com/app/3751260/The_Blood_of_Dawnwalker/",
+            "snippet": "An untrusted search snippet.",
+        }]
+
+
+def test_lowercase_dirty_typo_is_retained_for_confirmation_not_authority():
+    plan = build_case_research_plan(
+        "what laptop for bloodwalker the new witcher under AUD 3,000",
+        allow_open_world=True,
+    )
+    assert plan is not None
+
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}",
+        fetcher=LowercaseDirtyTypoFetcher(),
+    )
+
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["named_subject_overlap_count"] == 0
+    assert candidate["named_subject_similarity"] >= 0.65
+    assert candidate["authority"] == "not_accepted"
+
+
 class IntermediaryRequirementsFetcher(StubFetcher):
     def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
         self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
@@ -336,6 +400,25 @@ async def test_completed_durable_query_plan_is_consumed_without_waiting(monkeypa
     assert proposed == plan
     assert receipt["bounded_wait_ms"] == 600
     assert receipt["fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_retry_wait_has_a_separate_bounded_budget(monkeypatch):
+    plan = build_case_research_plan("novel scientific solver", allow_open_world=True)
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.services.shopping_case_open_world_research.consume_completed_case_interpretation",
+        lambda *_args, **_kwargs: (plan, {
+            "status": "completed_durable", "authority": "discovery_proposal_only",
+        }),
+    )
+
+    _, receipt = await _consume_interpretation_with_bounded_wait(
+        object(), tenant_id="default", case_id="sc-1", case_revision=1, plan=plan,
+        wait_ms_override=4000,
+    )
+
+    assert receipt["bounded_wait_ms"] == 4000
 
 
 def test_cooperative_cancellation_stops_remaining_query_dispatches():

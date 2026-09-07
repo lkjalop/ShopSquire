@@ -58,6 +58,16 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
                 },
             },
         },
+        catalog_scope={
+            "schema_version": "catalog-scope-v1",
+            "tenant_id": "default",
+            "allowed_taxonomy_roots": ["el-6-6"],
+            "selected_taxonomy_root": "el-6-6",
+            "source": "tenant_primary",
+            "confidence": 0.9,
+            "client_context_disposition": "not_supplied",
+            "reason": "tenant_grounded_primary_category",
+        },
         catalog_authority="blocked",
         assistant_message="I retained the budget and added Emulate3D.",
     )
@@ -77,3 +87,5 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert projection.right_panel["canonical_budget"] == projection.canonical_budget
     assert projection.right_panel["commercial_terms"] == projection.commercial_terms
     assert projection.right_panel["subject_role"] == projection.subject_role
+    assert projection.catalog_scope["selected_taxonomy_root"] == "el-6-6"
+    assert projection.right_panel["catalog_scope"] == projection.catalog_scope

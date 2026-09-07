@@ -86,14 +86,18 @@ async def _consume_interpretation_with_bounded_wait(
     case_id: str,
     case_revision: int,
     plan: CaseResearchPlan,
+    wait_ms_override: int | None = None,
 ) -> tuple[CaseResearchPlan, dict[str, Any]]:
     """Wait briefly for the durable advisory plan, then fall back honestly."""
 
-    try:
-        wait_ms = int(os.getenv("OPEN_WORLD_QUERY_PLAN_WAIT_MS", "600") or 600)
-    except (TypeError, ValueError):
-        wait_ms = 600
-    wait_ms = max(300, min(wait_ms, 800))
+    if wait_ms_override is None:
+        try:
+            wait_ms = int(os.getenv("OPEN_WORLD_QUERY_PLAN_WAIT_MS", "600") or 600)
+        except (TypeError, ValueError):
+            wait_ms = 600
+        wait_ms = max(300, min(wait_ms, 800))
+    else:
+        wait_ms = max(300, min(int(wait_ms_override), 5000))
     deadline = time.monotonic() + wait_ms / 1_000.0
     while True:
         proposed, receipt = consume_completed_case_interpretation(
@@ -198,33 +202,11 @@ def _catalog_claims_from_structured_resolution(
     resolution: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     """Project registry-compiled provider predicates into the shared fit ledger."""
+    from src.app.services.structured_requirement_claims import (
+        project_structured_requirement_claims,
+    )
 
-    claims: list[dict[str, Any]] = []
-    for evidence in list((resolution or {}).get("evidence") or []):
-        if not isinstance(evidence, dict) or str(evidence.get("status") or "") != "resolved":
-            continue
-        for compiled in list(evidence.get("compiled_requirements") or []):
-            if not isinstance(compiled, dict) or not compiled.get("attribute_key"):
-                continue
-            claims.append({
-                "claim_id": str(
-                    (compiled.get("source_claim_ids") or [
-                        f"{evidence.get('provider_id') or 'provider'}:"
-                        f"{evidence.get('app_id') or evidence.get('source_record_id') or 'record'}:"
-                        f"{compiled.get('attribute_key')}"
-                    ])[0]
-                )[:240],
-                "attribute": compiled.get("attribute_key"),
-                "operator": compiled.get("operator"),
-                "value": compiled.get("value"),
-                "unit": compiled.get("unit"),
-                "requirement_class": compiled.get("requirement_class") or "minimum",
-                "authority_status": "verified_official",
-                "source_id": evidence.get("provider_id") or evidence.get("source"),
-                "source_url": evidence.get("source_url"),
-                "observed_at": evidence.get("retrieved_at"),
-            })
-    return claims
+    return project_structured_requirement_claims(resolution)
 
 
 async def execute_open_world_publisher_discovery_async(
@@ -239,6 +221,7 @@ async def execute_open_world_publisher_discovery_async(
     candidate_configuration_ids: list[str],
     budget_cents: int | None,
     workload_kind_hints: list[str] | None = None,
+    unresolved_concepts: list[str] | None = None,
     cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Discover and persist publisher candidates for one durable shopping case."""
@@ -272,12 +255,6 @@ async def execute_open_world_publisher_discovery_async(
             "reason": "prior runtime failure; this operation may retry once",
             "retrying_after_observed_failure": True,
         }
-    if not readiness.get("effective"):
-        raise OpenWorldResearchUnavailable(
-            code=str(readiness.get("error_code") or "external_research_degraded"),
-            readiness=readiness,
-        )
-
     # Persist the hand-off before the first blocking provider call. Browser
     # disconnect certification waits for this event, then closes the buyer
     # transport so the request-scoped cancellation probe is deterministic.
@@ -324,23 +301,106 @@ async def execute_open_world_publisher_discovery_async(
     rollback = getattr(db, "rollback", None)
     if callable(rollback):
         rollback()
-    stage_started = time.monotonic()
-    discovery = await open_world_research_discovery.discover_open_world_publishers_async(
-        discovery_plan,
-        search_url_template=search_url_template,
-        cancellation_requested=cancellation_requested,
+    from src.app.services.recommendation_core.workload_grounding import (
+        resolve_unresolved_concepts,
     )
-    stage_timings["discovery_ms"] = round((time.monotonic() - stage_started) * 1000)
+
+    stage_started = time.monotonic()
+    concept_resolution = await asyncio.to_thread(
+        resolve_unresolved_concepts,
+        list(unresolved_concepts or []),
+        workload_kind_hints=list(workload_kind_hints or []),
+        consent=True,
+    )
+    stage_timings["structured_identity_first_ms"] = round(
+        (time.monotonic() - stage_started) * 1000
+    )
+    concept_resolved = concept_resolution.get("status") == "resolved"
+    identity_only_evidence = next((
+        item for item in concept_resolution.get("evidence") or []
+        if isinstance(item, dict)
+        and str(item.get("status") or "").startswith("identity_resolved")
+        and (item.get("canonical_title") or item.get("resolved_name"))
+    ), None)
+    # The router already isolated buyer-authored unresolved concepts. Build
+    # discovery queries from that typed subject instead of re-parsing the full
+    # conversational sentence. The original retained purpose still governs the
+    # case, identity clamp, budget and buyer narration.
+    if not concept_resolved and unresolved_concepts:
+        from src.app.services.case_research_plan import build_case_research_plan
+
+        subject_plan = build_case_research_plan(
+            str(unresolved_concepts[0])[:160], allow_open_world=True,
+        )
+        if subject_plan is not None and subject_plan.publisher_status == "unresolved":
+            discovery_plan = discovery_plan.model_copy(update={
+                "discovery_queries": subject_plan.discovery_queries,
+            })
+            query_proposal = {
+                **query_proposal,
+                "query_subject_source": "turn_unresolved_concept",
+                "query_subject": str(unresolved_concepts[0])[:160],
+            }
+    if concept_resolved or identity_only_evidence is not None:
+        resolved_evidence = (
+            next(
+                item for item in concept_resolution.get("evidence") or []
+                if isinstance(item, dict) and item.get("status") == "resolved"
+            )
+            if concept_resolved else identity_only_evidence
+        )
+        discovery = {
+            "schema_version": "open-world-discovery-v1",
+            "status": (
+                "structured_provider_resolved" if concept_resolved
+                else "structured_provider_identity_only"
+            ),
+            "publisher_status": "resolved_enrolled",
+            "candidates": [], "receipts": [], "claims": [],
+            "provider_accounting": {
+                "discovery_calls": 0, "external_calls": 1,
+                "official_origin_fetches": 1, "paid_calls": 0,
+            },
+            "identity_resolution": {
+                "status": "resolved", "authority": "enrolled_structured_provider",
+                "identity": {
+                    "canonical_title": resolved_evidence.get("canonical_title")
+                    or resolved_evidence.get("resolved_name"),
+                    "publisher": resolved_evidence.get("publisher"),
+                    "app_id": resolved_evidence.get("app_id"),
+                    "release_state": resolved_evidence.get("release_state"),
+                    "release_date": resolved_evidence.get("release_date"),
+                },
+                "cited_rows": [{"url": resolved_evidence.get("source_url")}],
+            },
+            "structured_provider_resolution": concept_resolution,
+        }
+    else:
+        if not readiness.get("effective"):
+            raise OpenWorldResearchUnavailable(
+                code=str(readiness.get("error_code") or "external_research_degraded"),
+                readiness=readiness,
+            )
+        stage_started = time.monotonic()
+        discovery = await open_world_research_discovery.discover_open_world_publishers_async(
+            discovery_plan,
+            search_url_template=search_url_template,
+            cancellation_requested=cancellation_requested,
+        )
+        stage_timings["discovery_ms"] = round((time.monotonic() - stage_started) * 1000)
     # If deterministic discovery found no credible origin, consume a planner
     # that may have completed while those calls were in flight. Dispatch only
     # its first distinct query: total provider fan-out is capped at four.
-    if not discovery.get("candidates") and not (discovery.get("cancellation") or {}).get("requested"):
+    if not concept_resolved and not discovery.get("candidates") and not (discovery.get("cancellation") or {}).get("requested"):
         retry_plan, retry_proposal = await _consume_interpretation_with_bounded_wait(
             db,
             tenant_id=tenant_id,
             case_id=case_id,
             case_revision=case_revision,
             plan=plan,
+            wait_ms_override=int(
+                os.getenv("OPEN_WORLD_QUERY_RETRY_WAIT_MS", "4000") or 4000
+            ),
         )
         original_queries = [row.query for row in discovery_plan.discovery_queries]
         retry_queries = [
@@ -371,7 +431,9 @@ async def execute_open_world_publisher_discovery_async(
     identity_enabled = str(
         os.getenv("OPEN_WORLD_IDENTITY_RESOLVER_ENABLED") or ""
     ).strip().lower() in {"1", "true", "yes", "on"}
-    if identity_enabled and discovery.get("candidates"):
+    if concept_resolved or identity_only_evidence is not None:
+        pass
+    elif identity_enabled and discovery.get("candidates"):
         from src.app.services.open_world_identity_resolution import (
             resolve_open_world_identity,
         )
@@ -398,22 +460,54 @@ async def execute_open_world_publisher_discovery_async(
     # only the buyer's raw phrase; after cited resolution, retry enrolled
     # providers exactly once with the canonical title and the router's typed
     # kind.  No application aliases or title-specific branches are involved.
-    from src.app.services.recommendation_core.workload_grounding import (
-        resolve_canonical_workload_identity,
-    )
+    from src.app.services.recommendation_core.workload_grounding import resolve_canonical_workload_identity
 
-    stage_started = time.monotonic()
-    discovery["structured_provider_resolution"] = await asyncio.to_thread(
-        resolve_canonical_workload_identity,
-        discovery.get("identity_resolution"),
-        workload_kind_hints=list(workload_kind_hints or []),
-        consent=True,
-    )
-    stage_timings["structured_provider_resolution_ms"] = round(
-        (time.monotonic() - stage_started) * 1000
-    )
+    if not concept_resolved:
+        stage_started = time.monotonic()
+        discovery["structured_provider_resolution"] = await asyncio.to_thread(
+            resolve_canonical_workload_identity,
+            discovery.get("identity_resolution"),
+            workload_kind_hints=list(workload_kind_hints or []),
+            consent=True,
+        )
+        stage_timings["structured_provider_resolution_ms"] = round(
+            (time.monotonic() - stage_started) * 1000
+        )
     structured_resolution = dict(discovery["structured_provider_resolution"] or {})
     structured_resolved = structured_resolution.get("status") == "resolved"
+    # A structured provider can establish richer identity/release metadata even
+    # when its requirements payload is temporarily absent or incomplete. Keep
+    # that cited identity in the one outward outcome; it still grants no fit.
+    structured_identity = next((
+        item for item in structured_resolution.get("evidence") or []
+        if isinstance(item, dict)
+        and str(item.get("status") or "").startswith(("resolved", "identity_resolved"))
+        and item.get("canonical_title")
+        and (item.get("app_id") or item.get("source_url"))
+    ), None)
+    if structured_identity is not None:
+        current_identity = dict(discovery.get("identity_resolution") or {})
+        current_fields = dict(current_identity.get("identity") or {})
+        discovery["identity_resolution"] = {
+            **current_identity,
+            "status": "resolved",
+            "identity": {
+                **current_fields,
+                **{
+                    key: value for key, value in {
+                        "canonical_title": structured_identity.get("canonical_title"),
+                        "publisher": structured_identity.get("publisher"),
+                        "app_id": structured_identity.get("app_id"),
+                        "release_state": structured_identity.get("release_state"),
+                        "release_date": structured_identity.get("release_date"),
+                    }.items() if value not in (None, "")
+                },
+            },
+            "cited_rows": [
+                *list(current_identity.get("cited_rows") or []),
+                {"url": structured_identity.get("source_url")},
+            ],
+        }
     if any(
         bool(attempt.get("allow_live"))
         for item in structured_resolution.get("evidence") or []
@@ -504,6 +598,17 @@ async def execute_open_world_publisher_discovery_async(
     structured_claims = _catalog_claims_from_structured_resolution(
         discovery.get("structured_provider_resolution")
     )
+    held_origin_claims = list(
+        (discovery.get("official_origin_auto_fetch") or {}).get("claims") or []
+    )
+    # One outward evidence ledger regardless of whether claims came from an
+    # enrolled structured connector or an approved official-page extractor.
+    # Authority status remains attached to every row; projection never upgrades
+    # held evidence to verified evidence.
+    projected_requirement_claims = [
+        *structured_claims,
+        *[dict(claim) for claim in held_origin_claims if isinstance(claim, dict)],
+    ]
     shelves = project_accepted_catalog(
         db,
         accepted_claims=structured_claims,
@@ -512,6 +617,22 @@ async def execute_open_world_publisher_discovery_async(
         tenant_id=tenant_id,
         candidate_configuration_ids=candidate_configuration_ids,
     ).model_dump(mode="json")
+    qualified_product_ids = {
+        str(
+            ((candidate.get("product") or {}).get("sku")
+             if isinstance(candidate.get("product"), dict) else "")
+            or candidate.get("sku") or candidate.get("id") or ""
+        )
+        for shelf in list(shelves.get("shelves") or [])
+        if isinstance(shelf, dict)
+        for candidate in [
+            *list(shelf.get("initial") or []),
+            *list(shelf.get("next_page") or []),
+        ]
+        if isinstance(candidate, dict)
+    }
+    qualified_product_ids.discard("")
+    qualified_product_count = len(qualified_product_ids)
     accounting = discovery["provider_accounting"]
     contract = project_research_execution_contract(plan).model_dump(mode="json")
     discovery["research_plan_id"] = plan.plan_id
@@ -548,6 +669,11 @@ async def execute_open_world_publisher_discovery_async(
         "status": (
             "requirements_resolved"
             if structured_claims
+            else "identity_confirmation_required"
+            if str((discovery.get("identity_resolution") or {}).get("status") or "")
+            == "confirmation_required"
+            else "identity_resolved_requirements_incomplete"
+            if identity_only_evidence is not None
             else
             "claims_pending_review"
             if (discovery.get("official_origin_auto_fetch") or {}).get("claims")
@@ -558,6 +684,7 @@ async def execute_open_world_publisher_discovery_async(
         "research_contract": contract,
         "research": discovery,
         "product_shelves": shelves,
+        "buyer_requirement_claims": projected_requirement_claims,
         "ambiguity_exploration": exploration,
         "evidence_outcome": (
             "verified_structured_requirements" if structured_claims else "unresolved"
@@ -592,11 +719,86 @@ async def execute_open_world_publisher_discovery_async(
         release_text = release_state + (f" ({release_date})" if release_date else "")
         result["assistant_message"] = (
             f"I resolved {title} through an enrolled structured source. It is {release_text}, "
-            "and its published minimum requirements were applied to the catalog. "
+            f"and its published minimum requirements qualified {qualified_product_count} "
+            f"catalog configuration{'s' if qualified_product_count != 1 else ''}. "
             "Recommendations remain non-transactional until you choose one."
+            if qualified_product_count
+            else
+            f"I resolved {title} through an enrolled structured source. It is {release_text}, "
+            "and established its published minimum requirements, but no configuration in the "
+            "case-bound catalog set qualified. No cart or supplier action was authorized."
         )
+        result["ambiguity_exploration"].update({
+            "status": "resolved",
+            "next_question": None,
+            "evidence": "verified_structured_requirements",
+            "decision": (
+                "catalog_qualified" if qualified_product_count
+                else "catalog_shortfall"
+            ),
+        })
+    elif str((discovery.get("identity_resolution") or {}).get("status") or "") == "confirmation_required":
+        proposed_identity = dict(
+            (discovery.get("identity_resolution") or {}).get("identity") or {}
+        )
+        proposed_title = str(
+            proposed_identity.get("canonical_title") or "the cited candidate"
+        ).strip()
+        result["assistant_message"] = (
+            f"Did you mean {proposed_title}? I found a close cited identity match, but it "
+            "does not match your wording closely enough to fetch requirements or qualify "
+            "products without confirmation."
+        )
+        result["ambiguity_exploration"].update({
+            "status": "identity_confirmation_required",
+            "next_question": {
+                "id": "confirm_canonical_identity",
+                "text": f"Did you mean {proposed_title}?",
+                "reason": "low_confidence_cited_identity",
+                "options": [
+                    {"id": "yes", "label": f"Yes — {proposed_title}", "value": "yes"},
+                    {"id": "no", "label": "No — that is not it", "value": "no"},
+                ],
+                "confirmation_payload": {
+                    "canonical_title": proposed_title,
+                    "publisher": proposed_identity.get("publisher"),
+                    "publisher_domain": proposed_identity.get("publisher_domain"),
+                    "supporting_row_ids": list(
+                        proposed_identity.get("supporting_row_ids") or []
+                    )[:8],
+                    "match_reason": proposed_identity.get("buyer_subject_match"),
+                    "confidence": (
+                        proposed_identity.get("confidence")
+                        or ((proposed_identity.get("buyer_subject_match") or {}).get("similarity")
+                            if isinstance(proposed_identity.get("buyer_subject_match"), dict)
+                            else None)
+                    ),
+                    "case_id": case_id,
+                    "case_revision": case_revision,
+                },
+            },
+            "evidence": "cited_identity_candidate_only",
+            "decision": "buyer_confirmation_required",
+        })
     elif identity_authorization is not None:
         result["workload_authorization"] = identity_authorization
+        _identity_title = str(
+            ((discovery.get("identity_resolution") or {}).get("identity") or {}).get(
+                "canonical_title"
+            )
+            or "the requested workload"
+        )
+        _identity_release = str(
+            ((discovery.get("identity_resolution") or {}).get("identity") or {}).get(
+                "release_state"
+            )
+            or "unknown"
+        ).replace("_", " ")
+        result["assistant_message"] = (
+            f"I resolved {_identity_title} through an enrolled structured source. "
+            f"Its release state is {_identity_release}, but material official hardware "
+            "requirements are incomplete, so I cannot judge the budget or qualify products yet."
+        )
     from src.app.services.research_outcome import build_research_outcome
 
     result["research_outcome"] = build_research_outcome(
@@ -604,7 +806,11 @@ async def execute_open_world_publisher_discovery_async(
         case_revision=case_revision,
         operation_id=str(discovery.get("run_id") or plan.plan_id),
         research=discovery,
-        requirements={"accepted": structured_claims, "rejected": []},
+        requirements={
+            "accepted": structured_claims,
+            "rejected": [],
+            "held": held_origin_claims,
+        },
         catalog_authority="permitted" if structured_claims else "blocked",
         commerce_authority="none",
     ).model_dump(mode="json")

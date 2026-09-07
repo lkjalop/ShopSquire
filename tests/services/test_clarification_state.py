@@ -425,3 +425,66 @@ def test_facade_reads_pending_question_without_fabricating_legacy_state():
     session = _read_session_slice(redis, "buyer-a", "tenant-a")
 
     assert session == {"pending_clarification": pending}
+
+
+def test_canonical_identity_confirmation_persists_cited_candidate_and_routes_title():
+    pending = build_pending_clarification(
+        {
+            "id": "confirm_canonical_identity",
+            "text": "Did you mean The Blood of Dawnwalker?",
+            "options": [
+                {"id": "yes", "label": "Yes", "value": "yes"},
+                {"id": "no", "label": "No", "value": "no"},
+            ],
+            "confirmation_payload": {
+                "canonical_title": "The Blood of Dawnwalker",
+                "publisher": "Rebel Wolves",
+                "publisher_domain": "rebel-wolves.com",
+                "supporting_row_ids": ["candidate-1"],
+                "match_reason": {"basis": "cited_spelling_correction"},
+                "confidence": 0.82,
+                "case_id": "sc-1",
+                "case_revision": 4,
+            },
+        },
+        original_query="Can my kid play bloodwalker the new witcher?",
+        trace_id="trace-1",
+        now_epoch=1_000,
+    )
+
+    assert pending["confirmation_payload"]["canonical_title"] == "The Blood of Dawnwalker"
+    assert pending["confirmation_payload"]["supporting_row_ids"] == ["candidate-1"]
+    result = reduce_clarification_turn(
+        query="yes",
+        nqe_selection={},
+        pending=pending,
+        now_epoch=1_001,
+    )
+    assert result.relation == "answer"
+    assert result.consume_pending is True
+    assert result.answer == "confirmed"
+    assert "The Blood of Dawnwalker" in result.effective_query
+    assert "bloodwalker the new witcher" not in result.effective_query.lower()
+
+
+def test_canonical_identity_rejection_does_not_route_candidate_as_confirmed():
+    pending = build_pending_clarification(
+        {
+            "id": "confirm_canonical_identity",
+            "text": "Did you mean The Blood of Dawnwalker?",
+            "options": [{"id": "no", "label": "No", "value": "no"}],
+            "confirmation_payload": {
+                "canonical_title": "The Blood of Dawnwalker",
+                "supporting_row_ids": ["candidate-1"],
+            },
+        },
+        original_query="bloodwalker laptop",
+        trace_id="trace-2",
+        now_epoch=1_000,
+    )
+    result = reduce_clarification_turn(
+        query="No, that is not it.", nqe_selection={}, pending=pending, now_epoch=1_001,
+    )
+    assert result.relation == "answer"
+    assert result.answer == "rejected"
+    assert "rejected" in result.effective_query

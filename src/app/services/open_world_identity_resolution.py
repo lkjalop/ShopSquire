@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+from difflib import SequenceMatcher
 from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -127,15 +128,53 @@ def _grounded(value: str | None, cited_text: str) -> bool:
     return bool(normalized) and normalized in _normal(cited_text)
 
 
-def _identity_matches_buyer_subject(title: str | None, purpose: str) -> bool:
+def _identity_subject_match(title: str | None, purpose: str) -> tuple[bool, dict[str, Any]]:
     title_terms = set(_normal(title or "").split())
     purpose_terms = set(_normal(purpose).split())
     if not title_terms:
-        return False
+        return False, {"basis": "no_title"}
     overlap = title_terms & purpose_terms
     if len(title_terms) == 1:
-        return bool(overlap)
-    return len(overlap) >= 2
+        if overlap:
+            return True, {"basis": "exact_buyer_span"}
+    elif len(overlap) >= 2:
+        return True, {"basis": "exact_buyer_span"}
+    best: tuple[float, str, str] = (0.0, "", "")
+    for title_term in title_terms:
+        if len(title_term) < 5:
+            continue
+        for purpose_term in purpose_terms:
+            if len(purpose_term) < 5 or abs(len(title_term) - len(purpose_term)) > 2:
+                continue
+            if title_term == purpose_term:
+                continue
+            score = SequenceMatcher(None, title_term, purpose_term).ratio()
+            if score > best[0]:
+                best = (score, purpose_term, title_term)
+    spelling_detail = {
+        "basis": "cited_spelling_correction",
+        "buyer_token": best[1],
+        "cited_title_token": best[2],
+        "similarity": round(best[0], 4),
+    }
+    if best[0] >= 0.86 and len(title_terms) == 1:
+        # A single fuzzy token is useful evidence for a confirmation prompt,
+        # but it is not enough authority to bind or fetch that identity.
+        return False, spelling_detail
+    if (
+        len(title_terms) > 1
+        and best[0] >= 0.86
+        and len(overlap) >= max(1, len(title_terms) - 1)
+    ):
+        return True, spelling_detail
+    detail: dict[str, Any] = {"basis": "no_buyer_subject_match"}
+    if best[0] > 0:
+        detail.update({
+            "buyer_token": best[1],
+            "cited_title_token": best[2],
+            "similarity": round(best[0], 4),
+        })
+    return False, detail
 
 
 def _parse_identity_proposal(raw: str) -> IdentityProposal:
@@ -295,13 +334,42 @@ def resolve_open_world_identity(
             "latency_ms": round((time.monotonic() - started) * 1000),
             "failure_code": "identity_not_grounded_in_cited_rows", "authority": "none",
         }
-    if not _identity_matches_buyer_subject(proposal.canonical_title, purpose):
+    buyer_subject_matches, buyer_match = _identity_subject_match(
+        proposal.canonical_title, purpose,
+    )
+    if not buyer_subject_matches:
+        if float(buyer_match.get("similarity") or 0) >= 0.65:
+            return {
+                "status": "confirmation_required",
+                "identity": {
+                    "canonical_title": proposal.canonical_title,
+                    "publisher": (
+                        proposal.publisher
+                        if _grounded(proposal.publisher, cited_text) else None
+                    ),
+                    "publisher_domain": (
+                        proposal.publisher_domain if domain_grounded else None
+                    ),
+                    "release_state": "unknown",
+                    "release_date": None,
+                    "nearest_equivalent": None,
+                    "supporting_row_ids": list(proposal.supporting_row_ids),
+                    "buyer_subject_match": buyer_match,
+                },
+                "cited_rows": cited,
+                "model_calls": model_calls,
+                "latency_ms": round((time.monotonic() - started) * 1000),
+                "failure_code": "low_confidence_identity_confirmation_required",
+                "authority": "cited_candidate_rows_only",
+                "fetch_authority": "none",
+            }
         return {
             "status": "rejected", "identity": None, "model_calls": model_calls,
             "latency_ms": round((time.monotonic() - started) * 1000),
             "failure_code": "identity_not_grounded_in_buyer_subject", "authority": "none",
         }
     identity = proposal.model_dump(mode="json")
+    identity["buyer_subject_match"] = buyer_match
     # Optional model fields are independently clamped. One embellished
     # publisher suffix or release guess must not discard a correctly cited
     # title/domain pair; it is removed and remains unknown instead.

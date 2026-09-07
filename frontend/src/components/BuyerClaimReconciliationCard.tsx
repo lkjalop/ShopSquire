@@ -28,11 +28,11 @@ export default function BuyerClaimReconciliationCard({ rows }: {
       <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
         {rows.map((row) => (
           <li key={row.buyer_claim_id} style={{ marginTop: 4, fontSize: 12 }}>
-            <strong>{row.attribute.replaceAll('_', ' ')}</strong>:{' '}
-            <span style={{ color: colour[row.status], fontWeight: 700 }}>
-              {row.status.replaceAll('_', ' ')}
+            <strong>{String(row.attribute || 'unknown attribute').replaceAll('_', ' ')}</strong>:{' '}
+            <span style={{ color: colour[row.status] || '#475569', fontWeight: 700 }}>
+              {String(row.status || 'unresolved').replaceAll('_', ' ')}
             </span>
-            {' — '}{row.reason}
+            {' — '}{row.reason || 'No reconciliation reason was recorded.'}
           </li>
         ))}
       </ul>

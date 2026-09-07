@@ -174,6 +174,34 @@ def test_grounded_title_survives_ungrounded_optional_publisher_domain():
     assert result["authority"] == "cited_candidate_rows_only"
 
 
+def test_single_token_cited_typo_requires_confirmation_without_an_alias_table():
+    candidates = [{
+        "url": "https://store.steampowered.com/app/1867240/WARDOGS/",
+        "registrable_domain": "steampowered.com",
+        "title": "Pre-purchase WARDOGS on Steam",
+        "untrusted_discovery_text": ["WARDOGS is available on Steam."],
+    }]
+    raw = json.dumps({
+        "canonical_title": "WARDOGS", "publisher": None,
+        "publisher_domain": "steampowered.com", "release_state": "unknown",
+        "release_date": None, "nearest_equivalent": None,
+        "supporting_row_ids": ["candidate-1"],
+    })
+
+    result = resolve_open_world_identity(
+        "Can a laptop run WAROGS?", candidates,
+        model_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert result["status"] == "confirmation_required"
+    assert result["identity"]["canonical_title"] == "WARDOGS"
+    assert result["identity"]["buyer_subject_match"] == {
+        "basis": "cited_spelling_correction", "buyer_token": "warogs",
+        "cited_title_token": "wardogs", "similarity": 0.9231,
+    }
+    assert result["fetch_authority"] == "none"
+
+
 def test_cited_sibling_product_cannot_replace_buyer_named_subject():
     candidates = [{
         "url": "https://factory.ai/quickstart",
@@ -195,6 +223,60 @@ def test_cited_sibling_product_cannot_replace_buyer_named_subject():
     assert result["failure_code"] == "identity_not_grounded_in_buyer_subject"
 
 
+def test_close_cited_identity_requires_confirmation_instead_of_confident_fetch():
+    candidates = [{
+        "url": "https://store.steampowered.com/app/2190250/",
+        "registrable_domain": "steampowered.com",
+        "title": "The Blood of Dawnwalker on Steam",
+        "untrusted_discovery_text": [
+            "The Blood of Dawnwalker is an action role-playing game."
+        ],
+    }]
+    raw = json.dumps({
+        "canonical_title": "The Blood of Dawnwalker",
+        "publisher": None,
+        "publisher_domain": "steampowered.com",
+        "release_state": "unknown",
+        "release_date": None,
+        "nearest_equivalent": None,
+        "supporting_row_ids": ["candidate-1"],
+    })
+
+    result = resolve_open_world_identity(
+        "can my kid play bloodwalker the new witcher",
+        candidates,
+        model_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert result["status"] == "confirmation_required"
+    assert result["identity"]["canonical_title"] == "The Blood of Dawnwalker"
+    assert result["failure_code"] == "low_confidence_identity_confirmation_required"
+    assert result["fetch_authority"] == "none"
+
+
+def test_single_token_typo_never_auto_accepts_without_confirmation():
+    candidates = [{
+        "url": "https://store.steampowered.com/app/2408100/",
+        "registrable_domain": "steampowered.com",
+        "title": "PRAGMATA on Steam",
+        "untrusted_discovery_text": ["PRAGMATA is an action adventure game."],
+    }]
+    raw = json.dumps({
+        "canonical_title": "PRAGMATA", "publisher": None,
+        "publisher_domain": "steampowered.com", "release_state": "unknown",
+        "release_date": None, "nearest_equivalent": None,
+        "supporting_row_ids": ["candidate-1"],
+    })
+
+    result = resolve_open_world_identity(
+        "pragmta laptop", candidates, model_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert result["status"] == "confirmation_required"
+    assert result["identity"]["canonical_title"] == "PRAGMATA"
+    assert result["fetch_authority"] == "none"
+
+
 def test_optional_model_embellishments_are_dropped_without_losing_grounded_identity():
     raw = json.dumps({
         "canonical_title": "Factory I/O",
@@ -214,6 +296,7 @@ def test_optional_model_embellishments_are_dropped_without_losing_grounded_ident
         "publisher_domain": "factoryio.com", "release_state": "unknown",
         "release_date": None, "nearest_equivalent": None,
         "supporting_row_ids": ["candidate-1"],
+        "buyer_subject_match": {"basis": "exact_buyer_span"},
     }
 
 

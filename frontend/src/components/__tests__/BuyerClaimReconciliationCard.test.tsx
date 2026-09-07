@@ -18,4 +18,14 @@ describe('BuyerClaimReconciliationCard', () => {
     expect(card).toHaveTextContent(/storage gb: unresolved/i);
     expect(card).toHaveTextContent(/gpu vram gb: preference only/i);
   });
+
+  it('fails visibly rather than crashing on an incomplete server row', () => {
+    render(<BuyerClaimReconciliationCard rows={[{
+      buyer_claim_id: 'incomplete', reason: '',
+    } as any]} />);
+
+    const card = screen.getByTestId('buyer-claim-reconciliation');
+    expect(card).toHaveTextContent(/unknown attribute: unresolved/i);
+    expect(card).toHaveTextContent(/no reconciliation reason was recorded/i);
+  });
 });

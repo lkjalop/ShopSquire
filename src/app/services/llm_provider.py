@@ -18,7 +18,11 @@ SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "qwen3-vl:8b")
 MEDIUM_DEFAULT = os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3.6:27b")
 BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "qwen3.6:27b")
 EXPERT_DEFAULT = os.getenv("OLLAMA_EXPERT_MODEL", "qwen3.6:27b")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+from src.app.services.ollama_endpoint import normalize_ollama_url
+
+OLLAMA_URL = normalize_ollama_url(
+    os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+)
 
 # Qwen3 thinking mode: pass /think in prompt or set think=True in options.
 # Activates chain-of-thought reasoning for complex multi-hop queries.

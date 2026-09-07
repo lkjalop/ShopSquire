@@ -10,6 +10,67 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+# A previous rehearsal can survive a laptop sleep/restart sequence even when
+# its PID manifest is gone.  Stop only listeners on the recording stack's
+# explicit ports whose command line identifies a ShopSquire component.  A
+# successful launcher must never print fresh PIDs while serving stale code.
+$recordingPorts = @(3001, 5173, 8080, 8099)
+$recordingCommandPatterns = @(
+    'src\.app\.main:create_app',
+    'security_handoff_test_receiver\.py',
+    [regex]::Escape((Join-Path $repo 'frontend')),
+    [regex]::Escape((Join-Path $repo 'src\frontend\admin-react'))
+)
+$cleanupPass = 0
+do {
+    $cleanupPass += 1
+    $listenersToStop = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $recordingPorts -contains $_.LocalPort }
+    foreach ($listener in $listenersToStop) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" `
+            -ErrorAction SilentlyContinue
+        $commandLine = [string]$process.CommandLine
+        $isRecordingProcess = $false
+        foreach ($pattern in $recordingCommandPatterns) {
+            if ($commandLine -match $pattern) {
+                $isRecordingProcess = $true
+                break
+            }
+        }
+        if ($process -and $isRecordingProcess) {
+            Write-Output "STOPPING_STALE_RECORDING_LISTENER=$($listener.LocalPort):$($process.ProcessId)"
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        } elseif ($process) {
+            throw "Port $($listener.LocalPort) is owned by an unrelated process $($process.ProcessId); refusing to replace it."
+        }
+    }
+    if ($listenersToStop) { Start-Sleep -Milliseconds 500 }
+} while ($listenersToStop -and $cleanupPass -lt 4)
+$remainingRecordingListeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $recordingPorts -contains $_.LocalPort }
+if ($remainingRecordingListeners) {
+    $occupied = ($remainingRecordingListeners | ForEach-Object {
+        "$($_.LocalPort):$($_.OwningProcess)"
+    }) -join ', '
+    throw "Recording ports are still occupied after cleanup: $occupied"
+}
+
+# Recording workers do not own a TCP listener, so port-based restart cleanup
+# cannot see them.  Stop only prior workers launched by this exact script;
+# otherwise each rehearsal leaves another consumer on the shared Celery queue
+# and old runtime profiles can steal current-turn work.
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -eq "python.exe" -and
+        $_.CommandLine -match '-m\s+celery\s+-A\s+src\.app\.workers\.celery_app:celery_app' -and
+        $_.CommandLine -match '--hostname=shopsquire-recording-'
+    } |
+    ForEach-Object {
+        Write-Output "STOPPING_STALE_RECORDING_WORKER=$($_.ProcessId)"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
 if (-not $LogRoot) {
     $LogRoot = Join-Path $env:TEMP ("shopsquire-recording-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
@@ -70,6 +131,10 @@ if ($LiveDemo) {
     $env:ROUTER_PREWARM_REQUIRED = "1"
     $env:ROUTER_MODEL_ENABLED = "1"
     $env:ROUTER_MODEL = $LiveModel
+    $env:OLLAMA_URL = "http://127.0.0.1:11434"
+    $env:OLLAMA_MAX_LOADED_MODELS = "1"
+    $env:OLLAMA_NUM_PARALLEL = "1"
+    $env:ROUTER_NUM_PREDICT = "768"
     $env:OLLAMA_DEFAULT_MODEL = $LiveModel
     $env:OLLAMA_MEDIUM_MODEL = $LiveModel
     $env:OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = "1"
@@ -90,7 +155,8 @@ if ($LiveDemo) {
     $env:EXTERNAL_RESEARCH_AUTO_AUTHORIZED = "1"
     $env:RESEARCH_POLICY_PROFILE = "demo-safe-auto-v1"
     $env:AUTOMATIC_RESEARCH_TIMEOUT_SEC = "45"
-    $env:REQUIREMENT_EXTRACTION_TIMEOUT_S = "18"
+    $env:REQUIREMENT_EXTRACTION_TIMEOUT_S = "30"
+    $env:REQUIREMENT_EXTRACTION_NUM_CTX = "8192"
     $env:STEAM_REQUIREMENTS_LIVE_ENABLED = "1"
     # A cold official-store identity + requirements lookup needs two bounded
     # network calls. The default 2s envelope is for fixtures, not live proof.
@@ -235,6 +301,10 @@ if ($LiveDemo) {
 `$env:MODEL_WARMUP_ON_STARTUP = '$($env:MODEL_WARMUP_ON_STARTUP)'
 `$env:ROUTER_MODEL_ENABLED = '$($env:ROUTER_MODEL_ENABLED)'
 `$env:ROUTER_MODEL = '$($env:ROUTER_MODEL)'
+`$env:OLLAMA_URL = '$($env:OLLAMA_URL)'
+`$env:OLLAMA_MAX_LOADED_MODELS = '$($env:OLLAMA_MAX_LOADED_MODELS)'
+`$env:OLLAMA_NUM_PARALLEL = '$($env:OLLAMA_NUM_PARALLEL)'
+`$env:ROUTER_NUM_PREDICT = '$($env:ROUTER_NUM_PREDICT)'
 `$env:ROUTER_MODEL_DIGEST = '$($env:ROUTER_MODEL_DIGEST)'
 `$env:OLLAMA_DEFAULT_MODEL = '$($env:OLLAMA_DEFAULT_MODEL)'
 `$env:OLLAMA_DEFAULT_MODEL_DIGEST = '$($env:OLLAMA_DEFAULT_MODEL_DIGEST)'
@@ -257,6 +327,7 @@ if ($LiveDemo) {
 `$env:RESEARCH_POLICY_PROFILE = '$($env:RESEARCH_POLICY_PROFILE)'
 `$env:AUTOMATIC_RESEARCH_TIMEOUT_SEC = '$($env:AUTOMATIC_RESEARCH_TIMEOUT_SEC)'
 `$env:REQUIREMENT_EXTRACTION_TIMEOUT_S = '$($env:REQUIREMENT_EXTRACTION_TIMEOUT_S)'
+`$env:REQUIREMENT_EXTRACTION_NUM_CTX = '$($env:REQUIREMENT_EXTRACTION_NUM_CTX)'
 `$env:STEAM_REQUIREMENTS_LIVE_ENABLED = '$($env:STEAM_REQUIREMENTS_LIVE_ENABLED)'
 `$env:RESEARCH_LANE_TIMEOUT_MS = '$($env:RESEARCH_LANE_TIMEOUT_MS)'
 `$env:RESEARCH_TOTAL_TIMEOUT_MS = '$($env:RESEARCH_TOTAL_TIMEOUT_MS)'

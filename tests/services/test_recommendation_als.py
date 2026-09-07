@@ -24,8 +24,9 @@ def test_train_recommend_als_writes_scores():
             db.execute(
                 text(
                     """
-                    INSERT INTO recommend_interactions (id, uid_hash, sku, action, surface, trace_id, context_json)
-                    VALUES (:id, :uid_hash, :sku, :action, 'test', '', '{}')
+                    INSERT INTO recommend_interactions
+                    (id, tenant_id, consent_state, uid_hash, sku, action, surface, trace_id, context_json)
+                    VALUES (:id, 'default', 'test_fixture', :uid_hash, :sku, :action, 'test', '', '{}')
                     """
                 ),
                 {"id": str(uuid.uuid4()), "uid_hash": uid, "sku": sku, "action": action},

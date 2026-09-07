@@ -35,7 +35,11 @@ _RUN = re.compile(
     r"\b(?:play|playing|run|running|render|rendering|edit|editing|stream|streaming|"
     r"develop|development|train|training|process|processing|simulate|simulation)\b", re.I,
 )
-_COMPAT = re.compile(r"\b(?:compatible|compatibility|compare|versus|vs\.?|requirements?)\b", re.I)
+_COMPAT = re.compile(
+    r"\b(?:compatible|compatibility|compare|versus|vs\.?|requirements?|"
+    r"specs?|recommended\s+(?:specs?|requirements?))\b",
+    re.I,
+)
 _SOFTWARE_COMMERCE = re.compile(
     r"\b(?:software|saas|platform|suite|licen[cs]e(?:s)?|subscription|"
     r"seats?|per\s+(?:user|seat|endpoint))\b", re.I,
@@ -75,7 +79,7 @@ def has_explicit_workload_relation(query: str) -> bool:
     extractor. In particular, the word ``for`` alone is intentionally not
     authority to claim that a named application exists.
     """
-    return bool(_RUN.search(str(query or "")))
+    return bool((_RUN.search(str(query or "")) or _COMPAT.search(str(query or ""))))
 
 
 def validate_entity_frame(

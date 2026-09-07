@@ -1179,6 +1179,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     tenant_id = _request_tenant_id(request)
+    storefront_taxonomy_handle = str(
+        (payload or {}).get("storefront_taxonomy_handle") or ""
+    ).strip()[:80] or None
     session_epoch = session_id or uid
     memory_mode = str((payload or {}).get("memory_mode") or "standard").strip().lower()
     if memory_mode not in {"standard", "temporary"}:
@@ -2102,7 +2105,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "relation": str(clarification_reduction.relation)[:40],
             "authority": "buyer_authored_candidate",
         }
-    params["query"] = routing_query
+    # A consumed clarification is itself the current routed turn.  Do not
+    # overwrite the reducer's canonical effective query with the pre-reduction
+    # text (for identity confirmation that would dispatch the literal "yes"
+    # and rerun the original miss instead of the persisted candidate title).
+    params["query"] = (
+        q
+        if clarification_reduction
+        and clarification_reduction.relation == "answer"
+        else routing_query
+    )
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
         try:
@@ -3290,6 +3302,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("bulk_budget")
             if isinstance(data.get("bulk_budget"), dict) else None
         )
+    _architecture_constraints = dict(constraints_used or {})
+    _selected_taxonomy_label = str(
+        (
+            (data.get("decision") or {}).get("requested_category_label")
+            or (data.get("decision") or {}).get("node_path")
+            or ""
+        ) if isinstance(data.get("decision"), dict) else ""
+    ).casefold()
+    for _form_factor in ("laptop", "workstation", "desktop", "server"):
+        if _form_factor in _selected_taxonomy_label:
+            _architecture_constraints["selected_form_factor"] = _form_factor
+            break
     _architecture_projection = project_for_unresolved_form_factor(
         subject_role=(str(data.get("subject_role") or "") or None),
         desired_outcome=str(
@@ -3297,7 +3321,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
              if isinstance(data.get("canonical_facts"), dict) else "")
             or q
         ),
-        constraints=constraints_used,
+        constraints=_architecture_constraints,
         unresolved_inputs=list(data.get("next_questions") or [])[:8],
         workload_context=bool(
             data.get("workload_authorization")
@@ -3403,6 +3427,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         response=data if isinstance(data, dict) else {},
     )
     response_confirmed_slots.update(fresh_turn_confirmed_slots)
+    from src.app.services.budget_grammar import canonical_budget_from_accepted_slots
+
+    _turn_canonical_budget = canonical_budget_from_accepted_slots(
+        data.get("canonical_budget") if isinstance(data.get("canonical_budget"), dict) else None,
+        response_confirmed_slots,
+    )
+    if _turn_canonical_budget is not None:
+        data["canonical_budget"] = _turn_canonical_budget
     routed_decision = (
         data.get("decision") if isinstance(data.get("decision"), dict) else {}
     )
@@ -3414,19 +3446,33 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     elif pending_clarification and routed_clarification_relation == "interrupt":
         pending_clarification_suspended = True
 
+    _response_right_panel = (
+        data.get("right_panel") if isinstance(data.get("right_panel"), dict) else {}
+    )
     semantic_resolution = (
         data.get("semantic_resolution")
         if isinstance(data.get("semantic_resolution"), dict)
+        else _response_right_panel.get("semantic_resolution")
+        if isinstance(_response_right_panel.get("semantic_resolution"), dict)
         else {}
     )
+    # Compatibility transports may still nest the reducer's semantic decision
+    # under the right panel. Rebind it once here so case creation, research,
+    # narration, the public response and the terminal commit all consume the
+    # same object rather than independently inferring authority.
+    if semantic_resolution and not isinstance(data.get("semantic_resolution"), dict):
+        data["semantic_resolution"] = semantic_resolution
     provisional_catalog_authority = (
         data.get("provisional_catalog_authority")
         if isinstance(data.get("provisional_catalog_authority"), dict)
         else {}
     )
-    semantic_catalog_blocked = (
+    semantic_research_required = (
         str(semantic_resolution.get("catalog_authority") or "").strip().lower()
         == "blocked"
+    )
+    semantic_catalog_blocked = (
+        semantic_research_required
         and str(provisional_catalog_authority.get("status") or "").strip().lower()
         != "allowed"
     )
@@ -3758,6 +3804,38 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         )
         for item in list(_workload_authorization.get("evidence") or [])
     )
+    # Structured providers can finish before the open-world case runner is
+    # entered. Reconcile that newer evidence immediately and project it through
+    # the same claim ledger used by the slower research path.
+    _structured_requirement_claims: list[dict[str, Any]] = []
+    if _workload_requirements_established:
+        from src.app.services.structured_requirement_claims import (
+            project_structured_requirement_claims,
+        )
+        from src.app.services.terminal_research_reconciliation import (
+            reconcile_semantic_resolution,
+        )
+
+        _structured_requirement_claims = project_structured_requirement_claims(
+            _workload_authorization,
+        )
+        if _structured_requirement_claims and not buyer_requirement_claims:
+            buyer_requirement_claims = list(_structured_requirement_claims)
+            buyer_requirement_review_required = False
+        _semantic_reconciliation = reconcile_semantic_resolution(
+            semantic_resolution, _workload_authorization, buyer_text=q,
+        )
+        semantic_resolution = _semantic_reconciliation.semantic_resolution
+        data["semantic_resolution"] = semantic_resolution
+        if _semantic_reconciliation.requirements_established:
+            _workload_material_blocked = False
+            semantic_research_required = False
+            semantic_catalog_blocked = (
+                str(semantic_resolution.get("catalog_authority") or "").lower()
+                == "blocked"
+            )
+            if not semantic_catalog_blocked:
+                next_questions = []
     _case_research_plan = None
     try:
         from src.app.services.case_research_plan import build_case_research_plan
@@ -3768,8 +3846,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     except Exception as exc:
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
-        additive_workload_receipt or semantic_catalog_blocked
+        additive_workload_receipt or semantic_research_required
         or _workload_material_blocked
+        # A structured provider may resolve after the core's pre-evidence
+        # catalog pass. Enter the same case projection path once so those
+        # accepted claims can produce a revision-bound shelf and continuity
+        # boundary without rerunning the complete turn.
+        or (_workload_requirements_established and not products)
         or (
             turn_intent == "SEARCH"
             and not products
@@ -3791,9 +3874,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         except Exception as exc:
             logger.debug("open-world research-plan projection skipped: %s", exc)
-    if provisional_exploration_needed and not buyer_requirement_claims:
+    if provisional_exploration_needed and (
+        not buyer_requirement_claims or bool(_structured_requirement_claims)
+    ):
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
+            from src.app.services.case_catalog_candidates import (
+                build_case_catalog_candidate_set,
+            )
 
             _identity_candidates = []
             for item in list(_workload_authorization.get("evidence") or [])[:3]:
@@ -3852,9 +3940,29 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     for item in _case_research_plan.hypotheses
                 ]
             _retained_case_purpose = active_shopping_case_purpose or str(submitted_query or q or "")[:500]
-            _projection = project_accepted_catalog(
-                db, accepted_claims=[], desired_outcome=_retained_case_purpose,
+            _candidate_case_revision = None
+            if active_shopping_case_id:
+                from src.app.services.shopping_case_revision import canonical_case_revision
+
+                _candidate_case_revision = canonical_case_revision(
+                    db,
+                    tenant_id=tenant_id,
+                    case_id=active_shopping_case_id,
+                    fallback=1,
+                )
+            _candidate_set = build_case_catalog_candidate_set(
+                db,
+                retained_purpose=_retained_case_purpose,
                 tenant_id=_request_tenant_id(request),
+                storefront_taxonomy_handle=storefront_taxonomy_handle,
+                case_id=active_shopping_case_id or None,
+                case_revision=_candidate_case_revision,
+            )
+            _projection = project_accepted_catalog(
+                db, accepted_claims=_structured_requirement_claims,
+                desired_outcome=_retained_case_purpose,
+                tenant_id=_request_tenant_id(request),
+                candidate_configuration_ids=_candidate_set.configuration_ids,
                 requested_quantity=(
                     int(data["requested_quantity"])
                     if isinstance(data.get("requested_quantity"), int)
@@ -3877,6 +3985,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 or (
                     _case_research_plan is not None
                     and _case_research_plan.publisher_status == "unresolved"
+                    and not _workload_requirements_established
                 )
             ):
                 # Discovery has not established even the governing publisher yet.
@@ -3902,11 +4011,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 # source has actually been adjudicated.
                 "status": (
                     "provisional" if additive_workload_receipt
+                    else "resolved" if _structured_requirement_claims
                     else "context_only" if _identity_candidates
                     else "provisional"
                 ),
                 "interpretations": _semantic_hypotheses,
                 "next_question": (
+                    None if _structured_requirement_claims else
                     ({"id": "research_scope", "text": _case_research_plan.next_question}
                      if additive_workload_receipt and _case_research_plan is not None
                      else
@@ -3930,10 +4041,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 ),
                 "evidence": (
                     "partial_identity_material_gap" if additive_workload_receipt
+                    else "verified_structured_requirements" if _structured_requirement_claims
                     else "identity_only" if _identity_candidates
                     else "material_gaps"
                 ),
-                "decision": "clarification_required" if _workload_material_blocked else "exploration_allowed",
+                "decision": (
+                    "catalog_qualification" if _structured_requirement_claims
+                    else "clarification_required" if _workload_material_blocked
+                    else "exploration_allowed"
+                ),
                 "cart_authority": "none",
                 "provider_accounting": {
                     "external_calls": sum(
@@ -3960,6 +4076,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     if _case_research_plan is not None else []
                 ),
                 "identity_candidates": _identity_candidates,
+                "catalog_candidate_set": _candidate_set.model_dump(mode="json"),
             }
             if active_case_subject_replaced and _case_research_plan is not None:
                 products = []
@@ -4340,6 +4457,32 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     and str(item.get("kind") or "").strip().lower()
                     in {"game", "software"}
                 )),
+                unresolved_concepts=(lambda coverage, workloads: (
+                    [
+                        str(item.get("query_span") or item.get("text") or "").strip()[:160]
+                        for item in coverage[:3]
+                        if isinstance(item, dict)
+                        and str(item.get("query_span") or item.get("text") or "").strip()
+                    ]
+                    or [
+                        str(item.get("name") or "").strip()[:160]
+                        for item in workloads[:3]
+                        if isinstance(item, dict) and str(item.get("name") or "").strip()
+                    ]
+                ))(
+                    list(
+                        (
+                            (data.get("decision") or {}).get("coverage_abstention_shadow")
+                            if isinstance(data.get("decision"), dict) else {}
+                        ).get("concepts") or []
+                    ),
+                    list(
+                        (
+                            (data.get("decision") or {}).get("workload_entities")
+                            if isinstance(data.get("decision"), dict) else []
+                        ) or []
+                    ),
+                ),
             )
             server_research_result = await asyncio.wait_for(
                 _research_shopping_case_with_db(
@@ -4356,6 +4499,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 ambiguity_exploration["trace_id"] = decision_trace_id
             if isinstance(server_research_result.get("product_shelves"), dict):
                 ambiguous_product_shelves = server_research_result["product_shelves"]
+            research_claims = list(
+                server_research_result.get("buyer_requirement_claims") or []
+            )
+            if research_claims:
+                buyer_requirement_claims = [
+                    dict(claim) for claim in research_claims if isinstance(claim, dict)
+                ]
+                buyer_requirement_review_required = any(
+                    str(claim.get("authority_status") or "").lower()
+                    not in {"verified", "verified_official"}
+                    for claim in buyer_requirement_claims
+                )
             if isinstance(server_research_result.get("workload_authorization"), dict):
                 # Discovery may resolve a cited identity after the core has
                 # already blocked missing requirements. Preserve that newer
@@ -4364,21 +4519,74 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     server_research_result["workload_authorization"]
                 )
                 _workload_authorization = data["workload_authorization"]
-                if str(_workload_authorization.get("status") or "").lower() == "resolved":
+                from src.app.services.terminal_research_reconciliation import (
+                    reconcile_semantic_resolution,
+                )
+
+                _semantic_reconciliation = reconcile_semantic_resolution(
+                    semantic_resolution, _workload_authorization, buyer_text=q,
+                )
+                semantic_resolution = _semantic_reconciliation.semantic_resolution
+                data["semantic_resolution"] = semantic_resolution
+                if _semantic_reconciliation.requirements_established:
                     _workload_requirements_established = True
                     _workload_material_blocked = False
-                    semantic_catalog_blocked = False
+                    semantic_catalog_blocked = (
+                        str(semantic_resolution.get("catalog_authority") or "").lower()
+                        == "blocked"
+                    )
+                    if not semantic_catalog_blocked:
+                        next_questions = []
+                        if isinstance(ambiguity_exploration, dict):
+                            ambiguity_exploration.update({
+                                "status": "resolved",
+                                "next_question": None,
+                                "evidence": "verified_structured_requirements",
+                                "decision": "catalog_qualification",
+                            })
             research_status = str(server_research_result.get("status") or "completed")
+            if research_status == "identity_confirmation_required":
+                _identity_question = (
+                    (server_research_result.get("ambiguity_exploration") or {}).get("next_question")
+                    if isinstance(server_research_result.get("ambiguity_exploration"), dict)
+                    else None
+                )
+                if isinstance(_identity_question, dict):
+                    next_questions = [dict(_identity_question)]
+            from src.app.services.terminal_research_reconciliation import (
+                gate_terminal_catalog_projection,
+            )
+
+            _terminal_catalog_gate = gate_terminal_catalog_projection(
+                research_status=research_status,
+                products=products,
+                product_shelves=ambiguous_product_shelves,
+                catalog_authority=semantic_resolution.get("catalog_authority"),
+            )
+            products = list(_terminal_catalog_gate.products)
+            ambiguous_product_shelves = _terminal_catalog_gate.product_shelves
+            if _terminal_catalog_gate.catalog_authority == "blocked":
+                semantic_catalog_blocked = True
+                semantic_resolution["catalog_authority"] = "blocked"
+                data["semantic_resolution"] = semantic_resolution
             candidate_count = len(
                 list((server_research_result.get("research") or {}).get("candidates") or [])
             )
-            assistant_message = (
-                f"Approved external research completed for this case and found {candidate_count} "
-                "candidate publisher source(s). Review the ranked ownership evidence before "
-                "approving a source; no product, cart, RFQ, or supplier action was authorized."
-                if research_status == "publisher_resolution_required"
-                else str(server_research_result.get("assistant_message") or assistant_message)
-            )
+            if research_status == "publisher_resolution_required":
+                assistant_message = (
+                    f"I found {candidate_count} plausible publisher source"
+                    f"{'s' if candidate_count != 1 else ''}. Review the cited ownership "
+                    "evidence before approving a source; no product, cart, RFQ, or supplier "
+                    "action was authorized."
+                    if candidate_count
+                    else "I could not verify a credible publisher source for that name. "
+                    "Please check the product name or provide its official link; I have not "
+                    "qualified products or authorized any commerce action."
+                )
+            else:
+                assistant_message = str(
+                    server_research_result.get("assistant_message") or assistant_message
+                )
         except Exception as exc:
             detail = getattr(exc, "detail", None)
             code = (
@@ -4414,9 +4622,37 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         and str(item.get("status") or "").strip().lower() == "resolved"
         and (item.get("canonical_title") or item.get("resolved_name"))
     ), None)
+    if _resolved_workload_evidence:
+        # Generic use-case tiers are an early catalog fallback. Once the named
+        # workload has accepted provider requirements, keeping that question
+        # beside qualified products contradicts the evidence and invites the
+        # buyer to overwrite a stronger requirement set with a vague profile.
+        next_questions = [
+            question for question in list(next_questions or [])
+            if not (
+                str(question.get("id") or "").startswith("variant_")
+                or str(question.get("goal") or "") == "pick_use_case_variant"
+            )
+        ]
+    _resolved_shelf_product_ids = {
+        str(
+            ((candidate.get("product") or {}).get("sku")
+             if isinstance(candidate.get("product"), dict) else "")
+            or candidate.get("sku") or candidate.get("id") or ""
+        )
+        for shelf in list((ambiguous_product_shelves or {}).get("shelves") or [])
+        if isinstance(shelf, dict)
+        for candidate in [
+            *list(shelf.get("initial") or []),
+            *list(shelf.get("next_page") or []),
+        ]
+        if isinstance(candidate, dict)
+    }
+    _resolved_shelf_product_ids.discard("")
+    _resolved_shelf_product_count = len(_resolved_shelf_product_ids)
     if (
         _resolved_workload_evidence
-        and products
+        and (products or _resolved_shelf_product_count)
         and str(
             _resolved_workload_evidence.get("canonical_title")
             or _resolved_workload_evidence.get("resolved_name")
@@ -4489,8 +4725,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         else:
             _fit_sentence = (
-                f" I found {len(products)} current catalog candidate"
-                f"{'s' if len(products) != 1 else ''} against those requirements."
+                f" I found {len(products) or _resolved_shelf_product_count} current catalog candidate"
+                f"{'s' if (len(products) or _resolved_shelf_product_count) != 1 else ''} "
+                "against those requirements."
             )
         assistant_message = _identity_sentence + _fit_sentence + (
             " Product availability and exact configuration evidence remain separate from "
@@ -4520,7 +4757,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                  if isinstance(data.get("canonical_facts"), dict) else "")
                 or q
             ),
-            constraints=constraints_used,
+            constraints=_architecture_constraints,
             unresolved_inputs=list(data.get("next_questions") or [])[:8],
             workload_context=True,
         )
@@ -4654,8 +4891,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ),
         "workload_fit": data.get("workload_fit"),
         "semantic_resolution": (
-            data.get("semantic_resolution")
-            if isinstance(data.get("semantic_resolution"), dict) else None
+            semantic_resolution if semantic_resolution else None
         ),
         # Canonical V2 presentation contract. These fields must survive the chat edge or the
         # browser falls back to an unlabeled legacy-looking slate even when the core correctly
@@ -5105,8 +5341,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         for claim in buyer_requirement_claims:
                             if not isinstance(claim, dict):
                                 continue
-                            status = str(claim.get("status") or claim.get("authority") or "").lower()
-                            if status in {"accepted", "verified", "approved"}:
+                            status = str(
+                                claim.get("status") or claim.get("authority_status")
+                                or claim.get("authority") or ""
+                            ).lower()
+                            if status in {
+                                "accepted", "verified", "approved", "verified_official",
+                                "case_origin_critic_accepted",
+                            }:
                                 accepted_requirements.append(dict(claim))
                             elif status in {"rejected", "blocked", "invalid"}:
                                 rejected_requirements.append(dict(claim))
@@ -5228,6 +5470,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     rejected=rejected_requirements,
                                     unresolved=unresolved_requirements,
                                 ),
+                                catalog_scope=(
+                                    ((ambiguity_exploration.get("catalog_candidate_set") or {}).get("catalog_scope"))
+                                    if isinstance(ambiguity_exploration, dict)
+                                    and isinstance(ambiguity_exploration.get("catalog_candidate_set"), dict)
+                                    else None
+                                ),
                                 catalog_authority=catalog_authority,
                                 assistant_message=str(out.get("assistant_message") or ""),
                                 right_panel=(
@@ -5340,6 +5588,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     )
     _operation_id = f"chat:{params_case_patch_idempotency_key}"
     _case_revision = int(out.get("shopping_case_revision") or 1)
+    from src.app.services.terminal_research_narration import terminal_research_narration
+
+    out["assistant_message"] = terminal_research_narration(
+        research_outcome=_research_outcome,
+        execution_evidence=(
+            data.get("execution_evidence")
+            if isinstance(data.get("execution_evidence"), dict) else {}
+        ),
+        existing_message=str(out.get("assistant_message") or ""),
+    )
     out.update({
         "operation_id": _operation_id,
         "case_id": active_shopping_case_id or None,
@@ -5354,6 +5612,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     _terminal_research_resolved = str(
         (server_research_result or {}).get("status") or ""
     ) == "requirements_resolved"
+    _terminal_research_status = str(
+        (server_research_result or {}).get("status") or ""
+    ).strip()
+    if not _terminal_research_status and _research_outcome:
+        if int(_research_outcome.get("accepted_claim_count") or 0) > 0:
+            _terminal_research_status = "requirements_resolved"
+            _terminal_research_resolved = True
+        elif _research_outcome.get("identity"):
+            _terminal_research_status = "identity_resolved_requirements_incomplete"
+        elif str(_research_outcome.get("discovery_status") or "") == "degraded":
+            _terminal_research_status = "research_degraded"
+        else:
+            _terminal_research_status = str(
+                _research_outcome.get("discovery_status") or "not_applicable"
+            )
+    out["needs_disambiguation"] = bool(out.get("next_questions"))
     out["terminal_outcome"] = {
         "schema_version": "turn-terminal-outcome-v1",
         "operation_id": _operation_id,
@@ -5366,9 +5640,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "blocked" if server_research_failure else
             "held" if _research_outcome else "completed"
         ),
-        "research_status": (
-            str((server_research_result or {}).get("status") or "") or
-            str((ambiguity_exploration or {}).get("status") or "not_applicable")
+        "research_status": _terminal_research_status or str(
+            (ambiguity_exploration or {}).get("status") or "not_applicable"
         ),
         "canonical_facts": (
             data.get("canonical_facts")
@@ -5384,6 +5657,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             or ((out.get("turn_read_model") or {}).get("catalog_authority")
                 if isinstance(out.get("turn_read_model"), dict) else "")
             or "unknown"
+        ),
+        "catalog_scope": (
+            (out.get("turn_read_model") or {}).get("catalog_scope")
+            if isinstance(out.get("turn_read_model"), dict) else None
         ),
         "commerce_authority": str(
             _research_outcome.get("commerce_authority") or "none"

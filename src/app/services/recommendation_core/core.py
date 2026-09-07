@@ -772,11 +772,12 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             )
             if model_metrics.get(key) is not None
         }
-    if decision.source == "fallback:model_unavailable":
+    if decision.source.startswith("fallback:"):
         model_outcome = str(model_metrics.get("outcome") or "source_unavailable")
         typed_outcome = (
             "timed_out"
             if model_outcome in {"timeout", "queue_timeout"}
+            else "truncated" if model_outcome == "truncated"
             else "source_unavailable"
         )
         resp.degraded = True
@@ -784,6 +785,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             "status": typed_outcome,
             "source": decision.source,
             "provider_outcome": model_outcome,
+            "failure_code": str(
+                model_metrics.get("failure_code") or decision.source.removeprefix("fallback:")
+            ),
             "late_results_accepted": False,
             "fallback_authority": "deterministic_only",
         }

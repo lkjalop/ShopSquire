@@ -20,6 +20,7 @@ from src.app.services.connectors.steam_requirements import (
     _title_matches,
     get_game_requirements,
     rank_game_identity_candidates,
+    select_live_store_item,
 )
 from src.app.services.gpu_translation import desktop_req_to_laptop_tier, laptop_gpu_tier
 
@@ -199,6 +200,28 @@ def test_official_identity_candidate_can_bridge_remastered_to_remake_without_cla
     assert ranked[0]["appid"] == 3809850
     assert ranked[0]["confidence"] >= 0.9
     assert ranked[0]["authority"] == "identity_candidate_only"
+
+
+def test_live_store_selection_prefers_game_and_rejects_auxiliary_tools():
+    selected = select_live_store_item(
+        "The Witcher 3",
+        [
+            {"id": 2684660, "name": "The Witcher 3 REDkit"},
+            {"id": 292030, "name": "The Witcher 3: Wild Hunt"},
+        ],
+    )
+    assert selected["id"] == 292030
+
+
+def test_live_store_selection_allows_auxiliary_product_only_when_requested():
+    selected = select_live_store_item(
+        "The Witcher 3 REDkit",
+        [
+            {"id": 2684660, "name": "The Witcher 3 REDkit"},
+            {"id": 292030, "name": "The Witcher 3: Wild Hunt"},
+        ],
+    )
+    assert selected["id"] == 2684660
 
 
 def test_baldurs_gate_fixture_exposes_canonical_identity_completeness():

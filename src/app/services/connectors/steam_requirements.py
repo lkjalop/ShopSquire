@@ -315,6 +315,35 @@ def _title_matches(requested: str, resolved: str) -> bool:
     return requested_norm in resolved_norm
 
 
+_AUXILIARY_TITLE_MARKERS = {
+    "demo", "dlc", "editor", "kit", "mod", "redkit", "sdk", "soundtrack",
+    "tool", "tools", "server", "benchmark",
+}
+
+
+def select_live_store_item(requested: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Prefer the requested game and reject unrequested tools or add-ons."""
+
+    requested_norm = _norm_title(requested)
+    requested_tokens = set(requested_norm.split())
+    candidates: list[tuple[int, int, int, Dict[str, Any]]] = []
+    for item in list(items)[:10]:
+        if not isinstance(item, dict) or not _title_matches(requested, item.get("name")):
+            continue
+        candidate_norm = _norm_title(item.get("name"))
+        candidate_tokens = set(candidate_norm.split())
+        if (candidate_tokens - requested_tokens) & _AUXILIARY_TITLE_MARKERS:
+            continue
+        candidates.append((
+            0 if candidate_norm == requested_norm else 1,
+            len(candidate_tokens - requested_tokens),
+            len(candidate_norm),
+            item,
+        ))
+    candidates.sort(key=lambda row: row[:3])
+    return dict(candidates[0][3]) if candidates else {}
+
+
 def _identity_query_variants(title: str) -> List[str]:
     """Bounded official-store queries for colloquial sequel/remaster wording.
 
@@ -441,12 +470,7 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
             ) as client:
                 found = _get_json(client, _SEARCH_URL, {"term": str(title), "cc": "us", "l": "en"})
                 items = (found or {}).get("items") or []
-                matching = [
-                    item for item in items[:10]
-                    if isinstance(item, dict) and _title_matches(title, item.get("name"))
-                ]
-                matching.sort(key=lambda item: len(_norm_title(item.get("name")).split()))
-                first = matching[0] if matching else {}
+                first = select_live_store_item(title, items)
                 if not first:
                     logger.info("steam search mismatch rejected: requested=%r resolved=%r",
                                 title, (items[0].get("name") if items and isinstance(items[0], dict)

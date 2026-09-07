@@ -48,6 +48,25 @@ def test_held_claims_are_not_reported_as_no_evidence_or_verified() -> None:
     assert outcome.failure_code == "independent_policy_human_signoff_pending"
 
 
+def test_top_level_held_ledger_rows_are_counted() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-agisoft", case_revision=3, operation_id="chat:agisoft",
+        research={"status": "requirements_resolved"},
+        requirements={
+            "held": [
+                {"claim_id": "c1", "authority_status": "observed_held"},
+                {"claim_id": "c2", "authority_status": "pending_independent_policy_review"},
+            ],
+            "accepted": [], "rejected": [],
+        },
+        catalog_authority="provisional", commerce_authority="none",
+    )
+
+    assert outcome.parsed_claim_count == 2
+    assert outcome.held_claim_count == 2
+    assert outcome.source_ownership_status == "observed_held"
+
+
 def test_resolved_connector_identity_and_requirements_are_complete() -> None:
     outcome = build_research_outcome(
         case_id="sc-bg3",
@@ -243,3 +262,26 @@ def test_authoritative_structured_evidence_wins_over_degraded_discovery_diagnost
     assert outcome.identity.title == "MIO: Memories in Orbit"
     assert outcome.requirement_completeness == "complete"
     assert outcome.accepted_claim_count == 2
+
+
+def test_identity_confirmation_failure_outranks_lower_ladder_rejections() -> None:
+    outcome = build_research_outcome(
+        case_id="sc-confirm", case_revision=2, operation_id="chat:confirm",
+        research={
+            "evidence_ladder": [{"rejection_reason": "publisher_not_yet_accepted"}],
+            "identity_resolution": {
+                "status": "confirmation_required",
+                "failure_code": "low_confidence_identity_confirmation_required",
+                "identity": {"canonical_title": "The Blood of Dawnwalker"},
+                "cited_rows": [{"row_id": "candidate-1"}],
+                "model_calls": 1,
+                "authority": "cited_candidate_rows_only",
+            },
+        },
+        requirements={"accepted": [], "rejected": []},
+        catalog_authority="blocked", commerce_authority="none",
+    )
+
+    assert outcome.identity.title == "The Blood of Dawnwalker"
+    assert outcome.failure_code == "low_confidence_identity_confirmation_required"
+    assert outcome.next_action == "confirm_canonical_identity"

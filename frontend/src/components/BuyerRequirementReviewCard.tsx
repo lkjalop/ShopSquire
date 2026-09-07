@@ -28,7 +28,7 @@ type Props = {
   ) => Promise<void>;
 };
 
-const label = (value: string) => value.replaceAll('_', ' ');
+const label = (value: unknown) => String(value || 'not recorded').replaceAll('_', ' ');
 
 export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) {
   const caseOriginEvidence = claims.some(

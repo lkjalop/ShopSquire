@@ -181,7 +181,11 @@ def execute_local_model_role(
     schedule_started = time.perf_counter()
     deadline = schedule_started + max(float(timeout_s), 0.05)
     priority = _role_priority(role)
-    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    from src.app.services.ollama_endpoint import normalize_ollama_url
+
+    base_url = normalize_ollama_url(
+        os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    )
     expected = str(digest or "").strip().lower()
     fixture = transport is not None and expected == "0" * 64
     verification_status = "test_fixture" if fixture else verify_ollama_artifact(
@@ -243,6 +247,8 @@ def execute_local_model_role(
         },
         timeout_ms=round(min(max(remaining, 0.05), 120.0) * 1_000),
         max_output_tokens=max_output_tokens,
+        scheduler_queue_ms=round(queue_ms, 2),
+        scheduler_deadline_ms=round(max(float(timeout_s), 0.05) * 1_000),
     )
     execution_started = time.perf_counter()
     result = None

@@ -15,23 +15,39 @@ async function openBuyer(browser: Browser, name: string) {
 }
 
 async function send(page: Page, query: string) {
-  const responsePromise = page.waitForResponse(response => (
-    response.request().method() === 'POST'
-      && /\/api\/v1\/chat\/(?:query|stream)(?:\?|$)/.test(response.url())
-  ), { timeout: 150_000 });
+  let finish!: (value: any) => void;
+  let fail!: (reason: Error) => void;
+  const terminal = new Promise<any>((resolve, reject) => { finish = resolve; fail = reject; });
+  const timer = setTimeout(() => fail(new Error('terminal answer timeout')), 180_000);
+  const onResponse = async (response: import('@playwright/test').Response) => {
+    if (response.request().method() !== 'POST'
+      || !/\/api\/v1\/chat\/(?:query|stream)(?:\?|$)/.test(response.url())) return;
+    try {
+      if (!response.ok()) throw new Error(`chat response ${response.status()}`);
+      const body = await response.text();
+      const payloads: any[] = [];
+      if (!body.includes('data:')) payloads.push(JSON.parse(body));
+      else for (const frame of body.replaceAll('\r\n', '\n').split('\n\n')) {
+        if (!frame.includes('event: answer')) continue;
+        const raw = frame.split('\n').filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trim()).join('\n');
+        if (raw) payloads.push(JSON.parse(raw));
+      }
+      const completed = payloads.find(item => item?.status !== 'in_progress');
+      if (completed) finish(completed);
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+  page.on('response', onResponse);
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(query); await input.press('Enter');
-  const response = await responsePromise;
-  expect(response.ok()).toBeTruthy();
-  const body = await response.text();
-  if (!body.includes('data:')) return JSON.parse(body);
-  for (const frame of body.replaceAll('\r\n', '\n').split('\n\n').reverse()) {
-    if (!frame.includes('event: answer')) continue;
-    const raw = frame.split('\n').filter(line => line.startsWith('data:'))
-      .map(line => line.slice(5).trim()).join('\n');
-    if (raw) return JSON.parse(raw);
+  try {
+    return await terminal;
+  } finally {
+    clearTimeout(timer);
+    page.off('response', onResponse);
   }
-  throw new Error(`missing terminal answer: ${body.slice(0, 800)}`);
 }
 
 function assertOneTruth(answer: any) {

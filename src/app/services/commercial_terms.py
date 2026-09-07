@@ -73,13 +73,27 @@ def parse_commercial_terms(text: str, *, default_currency: str = "USD") -> Comme
     currency_match = re.search(r"\b(aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b", ql)
     currency = _CURRENCY.get(currency_match.group(1), str(default_currency or "USD").upper()) if currency_match else str(default_currency or "USD").upper()
 
+    parsed_budget = parse_budget(q)
     quantity = None
     quantity_unit = None
     quantity_match = re.search(
         r"\b(\d[\d,]{0,8})\s+(?:[a-z][a-z0-9+.-]*\s+){0,3}"
         rf"({_QUANTITY_UNITS})\b", ql,
     )
-    if quantity_match:
+    budget_span = parsed_budget.source_span if parsed_budget is not None else None
+    overlaps_budget = bool(
+        quantity_match and budget_span
+        and quantity_match.start(1) < budget_span[1]
+        and quantity_match.end(1) > budget_span[0]
+    )
+    currency_prefixed = bool(
+        quantity_match
+        and re.search(
+            r"(?:[\$â‚¬Â£]|\b(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy))\s*$",
+            ql[max(0, quantity_match.start(1) - 8):quantity_match.start(1)],
+        )
+    )
+    if quantity_match and not overlaps_budget and not currency_prefixed:
         quantity = int(quantity_match.group(1).replace(",", ""))
         quantity_unit = _UNITS.get(quantity_match.group(2))
 
@@ -109,7 +123,6 @@ def parse_commercial_terms(text: str, *, default_currency: str = "USD") -> Comme
     if term:
         term_months = int(term.group(1)) * (12 if term.group(2).startswith("year") else 1)
 
-    parsed_budget = parse_budget(q)
     scope = classify_budget_scope(q)
     if scope == "unknown" and parsed_budget and parsed_budget.mode == "per_unit":
         scope = "per_unit"

@@ -96,6 +96,159 @@ def test_free_text_answer_is_classified_against_pending_material_question(db):
     assert decision.model_proposal["clarification_relation"] == "answer"
 
 
+def test_model_unknown_entity_is_preserved_as_research_concept_without_alias_rules(db):
+    """An unfamiliar buyer-authored name must reach the identity ladder.
+
+    The router need not know whether the name is a game or application.  It
+    only proposes the exact material entity span; provider/search evidence
+    owns canonical identity and requirements later in the turn.
+    """
+    query = "tarae recommended specs, what laptop do I need under AUD 3500?"
+    envelope = TurnEnvelope.from_suggest_params(
+        query=query,
+        uid="buyer-novel-title",
+        tenant_id="default",
+        external_research_consent=True,
+    )
+
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "requirements": {},
+            "unresolved_entities": ["tarae"],
+            "entity_frame": {
+                "identity": "tarae",
+                "buyer_span": "tarae",
+                "entity_category": "unknown",
+                "turn_role": "RUN_SUBJECT_ON_PRODUCT",
+                "confidence": 0.55,
+            },
+            "confidence": 0.8,
+        }),
+    )
+
+    assert decision.workload_entities == ()
+    assert decision.semantic_proposal["validation"] == "valid"
+    assert decision.semantic_proposal["proposal_origin"] == "model"
+    assert decision.semantic_proposal["concepts"][0]["query_span"] == "tarae"
+    assert decision.coverage_abstention_shadow["concepts"][0]["query_span"] == "tarae"
+
+
+def test_model_unknown_entity_not_in_buyer_text_is_rejected(db):
+    envelope = TurnEnvelope.from_suggest_params(
+        query="recommended specs for this laptop",
+        uid="buyer-injection-clamp",
+        tenant_id="default",
+        external_research_consent=True,
+    )
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "requirements": {},
+            "unresolved_entities": ["invented external product"],
+            "confidence": 0.8,
+        }),
+    )
+
+    concepts = list(decision.semantic_proposal.get("concepts") or [])
+    assert all(row.get("query_span") != "invented external product" for row in concepts)
+
+
+def test_consented_product_fit_turn_repairs_an_omitted_named_dependency(db):
+    calls = []
+
+    def model(prompt, _timeout):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return json.dumps({
+                "lane": "SEARCH",
+                "handle": "el-6-6",
+                "requirements": {},
+                "confidence": 0.8,
+            })
+        return json.dumps({
+            "workload_entity": {"kind": "game", "name": "tarae"},
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="tarae recommended specs, what laptop do I need under AUD 3500?",
+            uid="buyer-repair",
+            tenant_id="default",
+            external_research_consent=True,
+        ),
+        llm_fn=model,
+    )
+
+    assert len(calls) == 2
+    assert decision.workload_entities == (("game", "tarae"),)
+
+
+def test_specs_relation_repairs_identity_without_research_consent_flag(db):
+    calls = []
+
+    def model(prompt, _timeout):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return json.dumps({
+                "lane": "SEARCH", "handle": "el-6-6",
+                "requirements": {}, "confidence": 0.8,
+            })
+        return json.dumps({
+            "workload_entity": {"kind": "game", "name": "tarae"},
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="tarae recommended specs, what laptop do I need under AUD 3500?",
+            uid="buyer-relation-repair",
+            tenant_id="default",
+        ),
+        llm_fn=model,
+    )
+
+    assert len(calls) == 2
+    assert decision.subject_role == "COMPATIBILITY_CHECK"
+    assert decision.workload_entities == (("game", "tarae"),)
+
+
+def test_identity_repair_can_defer_kind_to_governed_discovery(db):
+    calls = []
+
+    def model(_prompt, _timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            return json.dumps({
+                "lane": "SEARCH", "handle": "el-6-6",
+                "requirements": {}, "confidence": 0.8,
+            })
+        return json.dumps({
+            "workload_entity": {"kind": "unknown", "name": "tarae"},
+        })
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query="tarae recommended specs, what laptop do I need?",
+            uid="buyer-unknown-kind",
+            tenant_id="default",
+        ),
+        llm_fn=model,
+    )
+
+    assert decision.workload_entities == ()
+    assert decision.semantic_proposal["concepts"][0]["query_span"] == "tarae"
+    assert decision.coverage_abstention_shadow["concepts"][0]["query_span"] == "tarae"
+
+
 @pytest.mark.parametrize("message", [
     "I need 60 units delivered today.",
     "Make it 40 and the deadline is 3 days.",

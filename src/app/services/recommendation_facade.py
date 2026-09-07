@@ -1042,6 +1042,9 @@ def dispatch_recommendation_core_typed(
         if router_status:
             component = "recommendation_turn_router"
             evidence_status = router_status
+            router_failure = str(router.get("failure_code") or "").strip()
+            if router_failure:
+                failure_code = router_failure
             if router_status in {"timed_out", "timeout", "queue_timeout"}:
                 failure_code = "model_execution_timeout"
             elif router_status in {"source_unavailable", "unavailable"}:

@@ -37,25 +37,47 @@ async function openBuyer(browser: Browser, name: string) {
   return { context, page };
 }
 
-async function send(page: Page, query: string) {
-  const responsePromise = page.waitForResponse(response => (
-    response.request().method() === 'POST'
-      && /\/api\/v1\/chat\/(?:query|stream)(?:\?|$)/.test(response.url())
-  ), { timeout: 180_000 });
-  const input = page.getByPlaceholder('Type your message...');
-  await input.fill(query);
-  await input.press('Enter');
-  const response = await responsePromise;
-  expect(response.ok()).toBeTruthy();
-  const body = await response.text();
-  if (!body.includes('data:')) return JSON.parse(body);
-  for (const frame of body.replaceAll('\r\n', '\n').split('\n\n').reverse()) {
-    if (!frame.includes('event: answer')) continue;
-    const raw = frame.split('\n').filter(line => line.startsWith('data:'))
-      .map(line => line.slice(5).trim()).join('\n');
-    if (raw) return JSON.parse(raw);
+async function captureTerminal(page: Page, trigger: () => Promise<void>) {
+  let finish!: (value: any) => void;
+  let fail!: (reason: Error) => void;
+  const terminal = new Promise<any>((resolve, reject) => { finish = resolve; fail = reject; });
+  const timer = setTimeout(() => fail(new Error('terminal answer timeout')), 180_000);
+  const onResponse = async (response: import('@playwright/test').Response) => {
+    if (response.request().method() !== 'POST'
+      || !/\/api\/v1\/chat\/(?:query|stream)(?:\?|$)/.test(response.url())) return;
+    try {
+      if (!response.ok()) throw new Error(`chat response ${response.status()}`);
+      const body = await response.text();
+      const payloads: any[] = [];
+      if (!body.includes('data:')) payloads.push(JSON.parse(body));
+      else for (const frame of body.replaceAll('\r\n', '\n').split('\n\n')) {
+        if (!frame.includes('event: answer')) continue;
+        const raw = frame.split('\n').filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trim()).join('\n');
+        if (raw) payloads.push(JSON.parse(raw));
+      }
+      const completed = payloads.find(item => item?.status !== 'in_progress');
+      if (completed) finish(completed);
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+  page.on('response', onResponse);
+  try {
+    await trigger();
+    return await terminal;
+  } finally {
+    clearTimeout(timer);
+    page.off('response', onResponse);
   }
-  throw new Error(`missing terminal answer: ${body.slice(0, 800)}`);
+}
+
+async function send(page: Page, query: string) {
+  return captureTerminal(page, async () => {
+    const input = page.getByPlaceholder('Type your message...');
+    await input.fill(query);
+    await input.press('Enter');
+  });
 }
 
 for (const scenario of cases) {
@@ -86,6 +108,19 @@ for (const scenario of cases) {
     expect(terminalText).toMatch(scenario.canonicalTitle);
     expect(answer.assistant_message || '').toMatch(scenario.canonicalTitle);
     expect(answer.assistant_message || '').not.toMatch(/general (office|gaming)|which level fits/i);
+    if (scenario.name === 'pragmata') {
+      expect(outcome?.accepted_claim_count || 0).toBeGreaterThan(0);
+      const shelves = answer.terminal_outcome?.product_shelves?.shelves
+        || answer.product_shelves?.shelves || [];
+      const shelfProducts = shelves.flatMap((shelf: any) => [
+        ...(shelf?.initial || []), ...(shelf?.next_page || []),
+      ]);
+      expect(answer.terminal_outcome?.catalog_authority).toBe('permitted');
+      expect(shelfProducts.length).toBeGreaterThan(0);
+      expect(answer.assistant_message || '').not.toMatch(
+        /could not obtain approved current requirements|which named software/i,
+      );
+    }
 
     await page.getByTitle('Decision Trace').click();
     const trace = page.getByTestId('decision-trace-modal');
@@ -103,3 +138,72 @@ for (const scenario of cases) {
     await context.close();
   });
 }
+
+test('non-instructive continuation resolves its clean subject span', async ({ browser }, testInfo) => {
+  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires demo-live search and Ollama');
+  test.setTimeout(300_000);
+  const { context, page } = await openBuyer(browser, 'where-winds-meet-continuation');
+  await send(page, 'gaming laptop under 3000');
+  const answer = await send(page, 'what about for where winds meet is 3000 ok?');
+  await testInfo.attach('where-winds-meet-continuation.json', {
+    body: Buffer.from(JSON.stringify(answer, null, 2)),
+    contentType: 'application/json',
+  });
+
+  const outcome = answer.terminal_outcome?.research_outcome;
+  expect(outcome?.identity?.title || '').toMatch(/^Where Winds Meet$/i);
+  expect(outcome?.accepted_claim_count || 0).toBeGreaterThan(0);
+  expect(answer.terminal_outcome?.catalog_authority).toBe('permitted');
+  const shelves = answer.terminal_outcome?.product_shelves?.shelves
+    || answer.product_shelves?.shelves || [];
+  expect(shelves.flatMap((shelf: any) => [
+    ...(shelf?.initial || []), ...(shelf?.next_page || []),
+  ]).length).toBeGreaterThan(0);
+  expect(answer.assistant_message || '').not.toMatch(
+    /found 0 candidate|which named software|general gaming/i,
+  );
+  expect(answer.commercial_terms?.quantity).toBeFalsy();
+  expect(answer.action_executed).not.toBe(true);
+  await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
+  await context.close();
+});
+
+test('low-confidence cited identity asks for confirmation without fetching', async ({ browser }, testInfo) => {
+  test.skip(process.env.RUN_LIVE_NOVEL_TITLE_BATTERY !== '1', 'requires demo-live search and Ollama');
+  test.setTimeout(300_000);
+  const { context, page } = await openBuyer(browser, 'low-confidence-dawnwalker');
+  const answer = await send(
+    page, 'What laptop for bloodwalker the new witcher under AUD 3,000?',
+  );
+  await testInfo.attach('low-confidence-dawnwalker.json', {
+    body: Buffer.from(JSON.stringify(answer, null, 2)),
+    contentType: 'application/json',
+  });
+
+  const outcome = answer.terminal_outcome?.research_outcome;
+  expect(answer.terminal_outcome?.execution_evidence?.core_invocation_count).toBe(1);
+  expect(outcome?.identity?.title || '').toMatch(/^The Blood of Dawnwalker$/i);
+  expect(outcome?.failure_code).toBe('low_confidence_identity_confirmation_required');
+  expect(outcome?.fetch_status).toBe('not_attempted');
+  expect(answer.terminal_outcome?.catalog_authority).not.toBe('permitted');
+  expect(answer.assistant_message || '').toMatch(/Did you mean The Blood of Dawnwalker/i);
+  expect(JSON.stringify(answer.terminal_outcome?.next_questions || [])).toMatch(
+    /Did you mean The Blood of Dawnwalker/i,
+  );
+  const shelves = answer.terminal_outcome?.product_shelves?.shelves || [];
+  expect(shelves.flatMap((shelf: any) => [
+    ...(shelf?.initial || []), ...(shelf?.next_page || []),
+  ])).toHaveLength(0);
+  const confirmation = page.getByTestId('canonical-identity-confirmation');
+  await expect(confirmation).toBeVisible();
+  const confirmed = await captureTerminal(page, async () => {
+    await page.getByTestId('confirm-canonical-identity-yes').click();
+  });
+  expect(confirmed.case_revision).toBeGreaterThan(answer.case_revision);
+  expect(confirmed.terminal_outcome?.research_outcome?.identity?.title || '').toMatch(
+    /^The Blood of Dawnwalker$/i,
+  );
+  expect(JSON.stringify(confirmed.terminal_outcome || {})).not.toMatch(/bloodwalker the new witcher/i);
+  await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
+  await context.close();
+});

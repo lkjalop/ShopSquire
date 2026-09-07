@@ -193,17 +193,23 @@ def build_research_outcome(
 
     accepted_rows = list(requirement_data.get("accepted") or [])
     rejected_rows = list(requirement_data.get("rejected") or [])
+    held_requirement_rows = list(requirement_data.get("held") or [])
     accepted = max(len(accepted_rows), int(compilation.get("accepted") or 0))
     provisional_rows = list(research_data.get("provisional_claims") or [])
     pending_review_rows = [
         row for row in rows
-        if str(row.get("acceptance_status") or "").lower()
-        in {"pending", "pending_review", "pending_buyer_review"}
+        if (
+            str(row.get("acceptance_status") or "").lower()
+            in {"pending", "pending_review", "pending_buyer_review"}
+            or str(row.get("authority_status") or "").lower()
+            in {"held", "observed_held", "pending_independent_policy_review"}
+        )
     ]
     compilation_receipts = list(research_data.get("claim_compilation_receipts") or [])
     held = max(
         int(compilation.get("provisional") or 0),
         len(provisional_rows),
+        len(held_requirement_rows),
         len(pending_review_rows),
         sum(int(row.get("provisional_claim_count") or 0) for row in compilation_receipts),
     )
@@ -309,6 +315,16 @@ def build_research_outcome(
 
     next_action = str(_first(rows, "next_action") or "").strip() or None
     failure = _failure_code(rows)
+    identity_confirmation = next((
+        row for row in rows
+        if str(row.get("status") or "").lower() == "confirmation_required"
+        and str(row.get("failure_code") or "").startswith("low_confidence_identity_")
+    ), None)
+    if identity_confirmation is not None:
+        # A terminal identity decision is more actionable than diagnostic
+        # rejections from earlier evidence-ladder rungs.
+        failure = str(identity_confirmation["failure_code"])[:160]
+        next_action = "confirm_canonical_identity"
     if held:
         next_action = next_action or "independent_policy_review"
         # A lower-tier cache miss may coexist with a successful canonical fetch.
@@ -319,6 +335,8 @@ def build_research_outcome(
     bounded_catalog = str(catalog_authority or "unknown").lower()
     if bounded_catalog not in {"permitted", "provisional", "blocked", "unknown"}:
         bounded_catalog = "unknown"
+    if identity_confirmation is not None:
+        bounded_catalog = "blocked"
     bounded_commerce = str(commerce_authority or "none").lower()
     if bounded_commerce not in {"none", "proposal_only", "approved"}:
         bounded_commerce = "none"

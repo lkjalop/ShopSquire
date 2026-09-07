@@ -16,10 +16,44 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from src.app.models.orm import ProductConfiguration
-from src.app.services.taxonomy_registry import ancestors, get_node, search_nodes
+from src.app.services.taxonomy_registry import (
+    ancestors,
+    get_node,
+    primary_sold_node,
+    search_nodes,
+    sells_within,
+    sold_nodes,
+)
 
 
 _WORD = re.compile(r"[a-z0-9]+")
+
+
+class CatalogScope(BaseModel):
+    """Server-authoritative catalog boundary for one case revision.
+
+    A browser-provided taxonomy handle is context only.  The selected root is
+    always checked against the tenant's sold taxonomy and may be replaced by an
+    explicit buyer-authored product form factor or the tenant's grounded primary
+    storefront category.
+    """
+
+    schema_version: Literal["catalog-scope-v1"] = "catalog-scope-v1"
+    case_id: str | None = None
+    case_revision: int | None = Field(default=None, ge=1)
+    tenant_id: str = Field(min_length=1, max_length=120)
+    requested_product_form_factor: str | None = None
+    allowed_taxonomy_roots: list[str] = Field(default_factory=list)
+    selected_taxonomy_root: str | None = None
+    source: Literal[
+        "buyer_explicit", "tenant_primary", "validated_client_context", "unresolved",
+    ]
+    confidence: float = Field(ge=0, le=1)
+    client_context_disposition: Literal[
+        "not_supplied", "accepted", "overridden", "rejected",
+    ]
+    client_taxonomy_handle: str | None = None
+    reason: str
 
 
 class CatalogCandidateSet(BaseModel):
@@ -32,6 +66,7 @@ class CatalogCandidateSet(BaseModel):
     configuration_ids: list[str] = Field(default_factory=list)
     excluded_configuration_ids: list[str] = Field(default_factory=list)
     reason: str
+    catalog_scope: CatalogScope
 
 
 def _normal(value: str) -> str:
@@ -54,7 +89,24 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     ``blood pressure monitor``.
     """
 
-    words = _normal(purpose).split()
+    normalized_purpose = _normal(purpose)
+    # Product form factors are part of the catalog schema, not workload-name
+    # aliases.  Resolve their ordinary singular wording to the canonical node
+    # before the exact taxonomy-name scan (whose labels are often plural, e.g.
+    # "Desktop Computers").
+    form_factor_nodes = (
+        (r"\bgaming laptops?\b", "el-6-11-2"),
+        (r"\b(?:laptops?|notebooks?)\b", "el-6-6"),
+        (r"\bdesktop(?: computers?)?\b", "el-6-3"),
+        (r"\bservers?\b", "el-6-2"),
+    )
+    for pattern, handle in form_factor_nodes:
+        if re.search(pattern, normalized_purpose):
+            node = get_node(handle)
+            if node is not None:
+                return node
+
+    words = normalized_purpose.split()
     matches: dict[str, tuple[int, int, object]] = {}
     for width in range(min(5, len(words)), 0, -1):
         for start in range(0, len(words) - width + 1):
@@ -103,7 +155,13 @@ def _related(left_handle: str, right_handle: str) -> bool:
         return True
     left_ancestors = {row.handle for row in ancestors(left_handle)}
     right_ancestors = {row.handle for row in ancestors(right_handle)}
-    return left_handle in right_ancestors or right_handle in left_ancestors
+    if left_handle in right_ancestors or right_handle in left_ancestors:
+        return True
+    # Shopify places Gaming Laptops outside the ordinary Laptop branch.  This
+    # reviewed equivalence is deliberately narrow; treating every sibling under
+    # Computers as related would leak handhelds, tablets and unrelated devices.
+    laptop_family = {"el-6-6", "el-6-11-2"}
+    return left_handle in laptop_family and right_handle in laptop_family
 
 
 def _derived_configuration_handle(row: ProductConfiguration) -> str | None:
@@ -117,7 +175,7 @@ def _derived_configuration_handle(row: ProductConfiguration) -> str | None:
     }:
         return "el-6-3"
     if form == "server" or device == "server":
-        return "el-6-4"
+        return "el-6-2"
     return None
 
 
@@ -127,17 +185,51 @@ def build_case_catalog_candidate_set(
     retained_purpose: str,
     tenant_id: str,
     storefront_taxonomy_handle: str | None,
+    case_id: str | None = None,
+    case_revision: int | None = None,
 ) -> CatalogCandidateSet:
     purpose = " ".join(str(retained_purpose or "").split())[:500] or "Unresolved buyer request"
-    context_node = get_node(str(storefront_taxonomy_handle or "").strip())
+    client_handle = str(storefront_taxonomy_handle or "").strip() or None
+    client_node = get_node(client_handle or "")
+    client_sellable = (
+        sells_within(db, client_node.handle, tenant_id=tenant_id)
+        if client_node is not None else None
+    )
+    context_node = client_node if client_sellable is True else None
+    tenant_primary_handle = primary_sold_node(db, tenant_id=tenant_id)
+    tenant_primary_node = get_node(tenant_primary_handle or "")
     explicit_node = _explicit_category(
         purpose,
-        preferred_handle=context_node.handle if context_node is not None else None,
+        preferred_handle=(
+            context_node.handle if context_node is not None
+            else tenant_primary_node.handle if tenant_primary_node is not None
+            else None
+        ),
     )
 
-    if explicit_node is not None and context_node is not None and not _related(
-        explicit_node.handle, context_node.handle,
-    ):
+    explicit_sellable = (
+        sells_within(db, explicit_node.handle, tenant_id=tenant_id)
+        if explicit_node is not None else None
+    )
+    allowed_roots = sorted(sold_nodes(db, tenant_id=tenant_id) or [])
+    requested_form_factor = str(explicit_node.name).strip() if explicit_node is not None else None
+
+    if explicit_node is not None and explicit_sellable is not True:
+        scope = CatalogScope(
+            case_id=case_id,
+            case_revision=case_revision,
+            tenant_id=tenant_id,
+            requested_product_form_factor=requested_form_factor,
+            allowed_taxonomy_roots=allowed_roots,
+            selected_taxonomy_root=explicit_node.handle,
+            source="buyer_explicit",
+            confidence=1.0,
+            client_context_disposition=(
+                "overridden" if client_handle else "not_supplied"
+            ),
+            client_taxonomy_handle=client_handle,
+            reason="buyer_named_category_not_sold_by_tenant",
+        )
         return CatalogCandidateSet(
             retained_purpose=purpose,
             status="out_of_category",
@@ -145,11 +237,41 @@ def build_case_catalog_candidate_set(
             taxonomy_label=explicit_node.full_path,
             taxonomy_source="explicit_query",
             reason="buyer_named_category_outside_storefront_context",
+            catalog_scope=scope,
         )
 
-    selected = explicit_node or context_node
+    selected = explicit_node or context_node or tenant_primary_node
     source = "explicit_query" if explicit_node is not None else (
-        "storefront_context" if context_node is not None else "unresolved"
+        "storefront_context" if context_node is not None else
+        "storefront_context" if tenant_primary_node is not None else "unresolved"
+    )
+    scope_source = (
+        "buyer_explicit" if explicit_node is not None else
+        "validated_client_context" if context_node is not None else
+        "tenant_primary" if tenant_primary_node is not None else "unresolved"
+    )
+    client_disposition = (
+        "not_supplied" if client_handle is None else
+        "accepted" if context_node is not None and explicit_node is None else
+        "overridden" if explicit_node is not None else "rejected"
+    )
+    scope = CatalogScope(
+        case_id=case_id,
+        case_revision=case_revision,
+        tenant_id=tenant_id,
+        requested_product_form_factor=requested_form_factor,
+        allowed_taxonomy_roots=allowed_roots,
+        selected_taxonomy_root=selected.handle if selected is not None else None,
+        source=scope_source,
+        confidence=1.0 if explicit_node is not None else 0.9 if selected is not None else 0.0,
+        client_context_disposition=client_disposition,
+        client_taxonomy_handle=client_handle,
+        reason=(
+            "buyer_explicit_sellable_category" if explicit_node is not None else
+            "validated_client_catalog_context" if context_node is not None else
+            "tenant_grounded_primary_category" if tenant_primary_node is not None else
+            "tenant_catalog_not_grounded"
+        ),
     )
     if selected is None:
         return CatalogCandidateSet(
@@ -157,6 +279,7 @@ def build_case_catalog_candidate_set(
             status="unresolved",
             taxonomy_source="unresolved",
             reason="no_product_category_or_storefront_context",
+            catalog_scope=scope,
         )
 
     rows = db.execute(select(ProductConfiguration).where(
@@ -180,7 +303,8 @@ def build_case_catalog_candidate_set(
         configuration_ids=sorted(included),
         excluded_configuration_ids=sorted(excluded),
         reason="query_specific_catalog_candidates" if included else "no_sellable_configuration_in_category",
+        catalog_scope=scope,
     )
 
 
-__all__ = ["CatalogCandidateSet", "build_case_catalog_candidate_set"]
+__all__ = ["CatalogCandidateSet", "CatalogScope", "build_case_catalog_candidate_set"]

@@ -180,6 +180,7 @@ class ResearchShoppingCaseRequest(BaseModel):
     workload_kind_hints: list[Literal["game", "software"]] = Field(
         default_factory=list, max_length=3,
     )
+    unresolved_concepts: list[str] = Field(default_factory=list, max_length=3)
 
 
 class CancelShoppingCaseResearchRequest(BaseModel):
@@ -434,21 +435,55 @@ def _case_research_plan_from_trace(
 
 
 def _case_catalog_candidate_set_from_trace(
-    db, *, case_id: str, tenant_id: str,
+    db, *, case_id: str, tenant_id: str, decision_trace_id: str | None = None,
 ):
     """Load the immutable catalog boundary recorded with the shopping case."""
 
-    from src.app.services.case_catalog_candidates import CatalogCandidateSet
+    from src.app.services.case_catalog_candidates import CatalogCandidateSet, CatalogScope
     from src.app.services.shopping_case_trace_reader import load_case_trace_events
 
-    events = load_case_trace_events(db, case_id=case_id, tenant_id=tenant_id)
+    events = load_case_trace_events(
+        db,
+        case_id=case_id,
+        tenant_id=tenant_id,
+        decision_trace_id=decision_trace_id,
+    )
     for event in reversed(events):
         if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
             continue
         raw = _payload_object(event.get("payload")).get("catalog_candidate_set")
         if isinstance(raw, dict):
             try:
-                return CatalogCandidateSet.model_validate(raw)
+                candidate_payload = dict(raw)
+                # Events written before CatalogScope existed remain readable,
+                # but their legacy taxonomy value is explicitly labelled as
+                # recorded context rather than silently becoming new authority.
+                candidate_payload.setdefault("catalog_scope", CatalogScope(
+                    case_id=case_id,
+                    tenant_id=tenant_id,
+                    allowed_taxonomy_roots=(
+                        [str(raw.get("taxonomy_handle"))]
+                        if raw.get("taxonomy_handle") else []
+                    ),
+                    selected_taxonomy_root=(
+                        str(raw.get("taxonomy_handle"))
+                        if raw.get("taxonomy_handle") else None
+                    ),
+                    source=(
+                        "validated_client_context"
+                        if raw.get("taxonomy_handle") else "unresolved"
+                    ),
+                    confidence=0.5 if raw.get("taxonomy_handle") else 0.0,
+                    client_context_disposition=(
+                        "accepted" if raw.get("taxonomy_handle") else "not_supplied"
+                    ),
+                    client_taxonomy_handle=(
+                        str(raw.get("taxonomy_handle"))
+                        if raw.get("taxonomy_handle") else None
+                    ),
+                    reason="legacy_recorded_catalog_boundary",
+                ).model_dump(mode="json"))
+                return CatalogCandidateSet.model_validate(candidate_payload)
             except ValueError:
                 break
     # A legacy/malformed case may continue gathering evidence, but cannot fall
@@ -458,6 +493,15 @@ def _case_catalog_candidate_set_from_trace(
         status="unresolved",
         taxonomy_source="unresolved",
         reason="case_candidate_set_not_recorded",
+        catalog_scope=CatalogScope(
+            case_id=case_id,
+            tenant_id=tenant_id,
+            allowed_taxonomy_roots=[],
+            source="unresolved",
+            confidence=0.0,
+            client_context_disposition="not_supplied",
+            reason="case_candidate_set_not_recorded",
+        ),
     )
 
 
@@ -2143,9 +2187,11 @@ async def _research_shopping_case_with_db(
                 runtime_status=_external_research_runtime_status(),
                 candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
                     db, case_id=case_id, tenant_id=tenant_id,
+                    decision_trace_id=body.decision_trace_id,
                 ).configuration_ids,
                 budget_cents=body.budget_cents,
                 workload_kind_hints=body.workload_kind_hints,
+                unresolved_concepts=body.unresolved_concepts,
                 cancellation_requested=request_cancelled,
             )
             result["authorization"] = {
@@ -2181,6 +2227,7 @@ async def _research_shopping_case_with_db(
             hypothesis_ids=body.hypothesis_ids,
             candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
                 db, case_id=case_id, tenant_id=tenant_id,
+                decision_trace_id=body.decision_trace_id,
             ).configuration_ids,
             budget_cents=body.budget_cents,
             runtime_status=_external_research_runtime_status(),

@@ -351,13 +351,16 @@ def seed_synthetic_interactions(
                 db.execute(
                     text(
                         """
-                        INSERT INTO recommend_interactions (id, event_time, uid_hash, sku, action, surface, trace_id, context_json)
-                        VALUES (:id, :event_time, :uid_hash, :sku, :action, :surface, :trace_id, :context_json)
+                        INSERT INTO recommend_interactions
+                        (id, event_time, tenant_id, consent_state, uid_hash, sku, action, surface, trace_id, context_json)
+                        VALUES (:id, :event_time, :tenant_id, :consent_state, :uid_hash, :sku, :action, :surface, :trace_id, :context_json)
                         """
                     ),
                     {
                         "id": str(uuid.uuid4()),
                         "event_time": ts.isoformat(),
+                        "tenant_id": "default",
+                        "consent_state": "synthetic",
                         "uid_hash": uid_h,
                         "sku": sku,
                         "action": action,

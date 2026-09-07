@@ -19,6 +19,11 @@ def _payload_matches_case(row: dict[str, Any], case_id: str) -> bool:
     return isinstance(payload, dict) and str(payload.get("case_id") or "") == case_id
 
 
+def _cached_row_matches_tenant(row: dict[str, Any], tenant_id: str) -> bool:
+    """Cached trace rows carry the same tenant boundary as durable rows."""
+    return str(row.get("tenant_id") or "") == str(tenant_id or "")
+
+
 def load_case_trace_events(
     db, *, case_id: str, tenant_id: str, decision_trace_id: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -33,7 +38,8 @@ def load_case_trace_events(
     if decision_trace_id:
         explicit_cached = [
             row for row in get_cached_trace_events(decision_trace_id)
-            if _payload_matches_case(row, case_id)
+            if _cached_row_matches_tenant(row, tenant_id)
+            and _payload_matches_case(row, case_id)
         ]
         if explicit_cached:
             return explicit_cached
@@ -57,7 +63,11 @@ def load_case_trace_events(
         return []
 
     trace_id = case_id.removeprefix("sc-")
-    cached = list(get_cached_trace_events(trace_id))
+    cached = [
+        row for row in get_cached_trace_events(trace_id)
+        if _cached_row_matches_tenant(row, tenant_id)
+        and _payload_matches_case(row, case_id)
+    ]
     if cached:
         return cached
     try:

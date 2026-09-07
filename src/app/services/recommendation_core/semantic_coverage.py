@@ -15,6 +15,7 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _PURPOSE_PATTERNS = (
     re.compile(r"\bfor\s+(?P<span>[^,.;?!]{2,160})", re.IGNORECASE),
     re.compile(r"\bto\s+(?P<span>[^,.;?!]{2,160})", re.IGNORECASE),
+    re.compile(r"\b(?:run|play|use)\s+(?P<span>[^,.;?!]{2,160})", re.IGNORECASE),
 )
 _GRAMMAR_WORDS = frozenset({
     "a", "an", "and", "at", "for", "help", "i", "it", "me", "my", "need", "of",
@@ -68,7 +69,9 @@ def _purpose_spans(query: str) -> list[str]:
     spans: list[str] = []
     for pattern in _PURPOSE_PATTERNS:
         for match in pattern.finditer(request_text):
-            span = str(match.group("span") or "").strip()
+            span = _sanitize_subject_span(
+                request_text, str(match.group("span") or "").strip(),
+            )
             span_tokens = _tokens(span)
             if span_tokens and span_tokens <= _RESEARCH_META_WORDS:
                 continue
@@ -82,6 +85,58 @@ def _purpose_spans(query: str) -> list[str]:
                     and span not in spans):
                 spans.append(span[:160])
     return spans[:3]
+
+
+def _sanitize_subject_span(query: str, span: str) -> str:
+    """Remove already-typed commercial material from a subject anchor.
+
+    This is not a title parser. It retains a contiguous buyer-authored span and
+    subtracts only the canonical budget span, independently parsed by
+    :mod:`budget_grammar`.
+    """
+
+    raw = " ".join(str(span or "").split()).strip()
+    if not raw:
+        return ""
+    from src.app.services.budget_grammar import parse_budget
+
+    budget = parse_budget(query)
+    if budget is None or budget.source_span is None:
+        return raw[:160]
+    folded_query = str(query or "").casefold()
+    start = folded_query.find(raw.casefold())
+    if start < 0:
+        return raw[:160]
+    end = start + len(raw)
+    budget_start, budget_end = budget.source_span
+    if budget_end <= start or budget_start >= end:
+        return raw[:160]
+    local_start = max(0, budget_start - start)
+    local_end = min(len(raw), budget_end - start)
+    cleaned = " ".join((raw[:local_start] + " " + raw[local_end:]).split())
+    return cleaned.strip(" -,:;?")[:160]
+
+
+def sanitize_semantic_concept_spans(
+    query: str, proposal: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Clamp proposed concept anchors before any connector or search lookup."""
+
+    result = dict(proposal or {})
+    concepts: list[dict[str, Any]] = []
+    for raw in list(result.get("concepts") or []):
+        if not isinstance(raw, Mapping):
+            continue
+        concept = dict(raw)
+        original = str(concept.get("query_span") or concept.get("text") or "").strip()
+        cleaned = _sanitize_subject_span(query, original)
+        if cleaned and cleaned != original:
+            concept["query_span"] = cleaned
+            concept["text"] = cleaned
+        concepts.append(concept)
+    if concepts or "concepts" in result:
+        result["concepts"] = concepts
+    return result
 
 
 def _coverage_sets(
@@ -217,3 +272,9 @@ def discard_covered_model_workload_echo(
         query=query, use_cases=use_cases, workload_entities=(), node_path=node_path,
     )
     return workload_entities if unresolved else []
+
+
+__all__ = [
+    "discard_covered_model_workload_echo", "sanitize_semantic_concept_spans",
+    "unresolved_purpose_proposal",
+]
