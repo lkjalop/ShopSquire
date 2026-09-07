@@ -91,3 +91,31 @@ Browser traces/screenshots and logs are in the external checkpoint directory:
 and complete-evidence positive delivery are not sealed by this run.
 
 Large extraction and legacy retirement remain deferred until those gates pass.
+
+## Boundary follow-up — 55b5de94 / b09b463f
+
+- Reproduced the chair router directly with the real model: valid JSON, completed
+  HTTP/model execution, but `fallback:invalid_lane`. Generation previously asked
+  only for JSON. It now constrains `lane` to the existing LANES enum using a
+  structured-output schema; all server clamps remain. No title/lane alias table.
+- Direct rerun: OFF_CATALOG, Office Chairs, refusal authorized by sold taxonomy.
+- Partial-evidence narration now retains canonical identity. Its regression failed
+  before the change, then passed.
+- The feedback test used a request-bound app engine instead of the seeded engine.
+  Capture the fixture engine and bind the dependency explicitly. The product-item
+  serialization test now explicitly stubs its router rather than relying on demo
+  environment/mock fallback behavior. These are fixture tests, not live evidence.
+- Clean detached checkout at b09b463f: 70 focused tests passed, exit 0, no dirty
+  entries after execution; same installed Python environment, not clean-machine.
+- Restarted live server onto the source repairs. Browser run: 3 passed, 1 failed,
+  one worker, zero retries, GPU-disabled Chromium. Chair, unrelated and bulk passed.
+  PRAGMATA now passes identity narration but fails the permitted-catalog assertion.
+- Its saved terminal contains successful Steam evidence, two compiled accepted
+  claims, an attribute_not_registry_authorized rejection, and partial coverage.
+  The GPU path also uses desktop-to-laptop translation for VRAM; this is not the
+  same thing as a literal publisher claim. Evidence compilation/provenance is the
+  next blocker; do not relax the authority gate to manufacture a qualified shelf.
+
+Evidence: `chair-boundary.log`, `chair-schema-live.log`, `boundary-browser.log`,
+`boundary-browser-results`, `clean-contracts-final.log`, `contracts-green.log`
+under the external checkpoint directory. No remote push or human approvals.
