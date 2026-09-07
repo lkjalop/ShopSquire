@@ -103,6 +103,16 @@ def _seed():
             f.write(_orig_flags)
 
 
+@pytest.fixture(autouse=True)
+def _contract_router(monkeypatch):
+    # This suite checks seeded product serialization, not live intent inference.
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._default_llm_fn",
+        lambda _prompt, _timeout: '{"lane":"SEARCH","handle":"el-6-6","confidence":0.9}',
+    )
+
+
 def _suggest(uid: str, query: str) -> dict:
     app = create_app()
     app.state.engine = get_engine()
