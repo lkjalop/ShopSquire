@@ -257,7 +257,14 @@ def validate_runtime_contract() -> dict[str, Any]:
         "ok": len(missing) == 0,
         "missing": missing,
         "warnings": warnings,
-        "contract": contract,
+        # This report is returned by unauthenticated readiness. Validation uses
+        # the private contract above; presentation must never serialize it.
+        # Allowlisting also protects future credentials and authenticated DSNs.
+        "contract": {key: contract[key] for key in (
+            "API_PORT", "FEATURE_FLAGS_PATH", "OLLAMA_VISION_MODEL",
+            "VULN_SCAN_ENABLED", "VULN_SCAN_WEB_ENABLED", "FRAUD_GRAPH_NEO4J_ENABLED",
+            "VECTOR_SEARCH_ENABLED",
+        ) if key in contract},
     }
 
 
