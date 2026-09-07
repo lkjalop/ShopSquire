@@ -107,6 +107,10 @@ Follow-up evidence (same external artifact directory):
   chair failure cannot skip unrelated-question and bulk verification.
 - `scope-independent-browser.log`: unrelated-question and bulk tests both passed
   with zero retries. These are separate executions, not a green full-matrix run.
+- `scope-clean-final.log`: 104 tests passed from a clean worktree at `add64275`,
+  again reusing the local Python environment. The local demo was restarted onto
+  this source checkpoint. Runtime reports search enabled/configured/effective;
+  its shallow readiness probe still does not itself verify network reachability.
 
 Remaining work is not just file size: complete the early-exit/candidate-enforcement
 audit, diagnose the live router validation failure, expand negation/mixed-role and
