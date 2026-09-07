@@ -24,7 +24,7 @@ from src.app.main import create_app
 from src.app.models.db import db_session
 from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
 
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+_FLAGS_PATH = os.environ["FEATURE_FLAGS_PATH"]
 # Deterministic product-path flags so the matrix is robust to whatever flag state other test modules
 # leave in the global feature_flags.json (otherwise order-dependent: a prior test setting
 # AGENT_ROLLOUT_PERCENT=0 routes around the agent path → no order_quantity / price_buckets).

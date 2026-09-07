@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine
+import pytest
 from sqlalchemy.orm import Session
 
 from src.app.models.orm import Base
@@ -15,6 +16,22 @@ def _database():
         add_sold_node(db, node_handle="el-6-6")
         db.commit()
     return engine
+
+
+@pytest.mark.parametrize("purpose", [
+    "I need an ergonomic computer chair under AUD 500.",
+    "I want a computer chair for my office.",
+])
+def test_purchase_object_survives_laptop_storefront_preference(purpose):
+    engine = _database()
+    with Session(engine) as db:
+        result = build_case_catalog_candidate_set(
+            db, retained_purpose=purpose, tenant_id="default",
+            storefront_taxonomy_handle="el-6-6",
+        )
+    assert result.taxonomy_handle == "fr-7"
+    assert result.status == "out_of_category"
+    assert result.configuration_ids == []
 
 
 def test_missing_candidate_boundary_does_not_expand_to_tenant_catalog():

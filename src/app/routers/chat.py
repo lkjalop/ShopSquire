@@ -319,50 +319,14 @@ def _store_chat_message(
 
 
 def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
-    """Parse a budget from natural phrasings into {budget_min, budget_max}. Handles ranges (between/from/
-    bare 'X to Y'/'$X-$Y'), ceilings (under/below/up to), floors (over/at least), PER-UNIT budgets
-    ('$1900 each', 'per laptop'), and fuzzy amounts ('budget about 1900', 'spend ~$2000', a lone '$1900').
-    Amounts require 3+ digits so quantities like '15 laptops' are never read as a price.
+    """Project canonical query-budget facts, including intentional abstention."""
+    from src.app.services.budget_grammar import parse_budget
 
-    Delegates FIRST to the canonical budget_grammar; local patterns are legacy fallback only."""
-    from src.app.services.budget_grammar import parse_budget as _canon
-    _bp = _canon(query)
-    if _bp is not None and _bp.found:
-        return {"budget_min": _bp.budget_min, "budget_max": _bp.budget_max}
-    q = str(query or "").lower()
-
-    def _n(s: str) -> int:
-        return int(str(s).replace(",", ""))
-
-    # 1) explicit range — between/from X to/and/- Y, "$X-$Y", or a bare "X to Y" (both 3-5 digit)
-    m = (re.search(r"\b(?:between|from)\s*\$?([\d,]{3,7})\s*(?:and|to|\-|–)\s*\$?([\d,]{3,7})", q)
-         or re.search(r"\$\s*([\d,]{3,6})\s*(?:to|\-|–)\s*\$?\s*([\d,]{3,6})", q)
-         or re.search(r"\b(\d{3,5})\s*(?:to|\-|–)\s*(\d{3,5})\b", q))
-    if m:
-        lo, hi = _n(m.group(1)), _n(m.group(2))
-        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
-    # 2) ceiling
-    m = re.search(r"\b(?:under|below|max(?:imum)?|up to|no more than|less than)\s*\$?([\d,]{3,7})\b", q)
-    if m:
-        return {"budget_min": None, "budget_max": _n(m.group(1))}
-    # 3) floor
-    m = re.search(r"\b(?:over|above|min(?:imum)?|at least|more than)\s*\$?([\d,]{3,7})\b", q)
-    if m:
-        return {"budget_min": _n(m.group(1)), "budget_max": None}
-    # 4) per-unit ceiling — "1900 each", "$1,800 per laptop/unit/device/seat/pc/person"
-    m = re.search(r"\$?([\d,]{3,7})\s*(?:each\b|a ?piece\b|apiece\b|per\s+(?:unit|laptop|device|machine|seat|pc|person|user))", q)
-    if m:
-        return {"budget_min": None, "budget_max": _n(m.group(1))}
-    # 5) budget/spend/afford amount (optionally fuzzy) — "budget is about 1900", "can spend 2000"
-    m = re.search(r"(?:budget|spend|afford\w*)\b[^\d$]{0,18}\$?([\d,]{3,7})", q)
-    if m:
-        return {"budget_min": None, "budget_max": _n(m.group(1))}
-    # 6) fuzzy/lone money amount — "about $1900", "around 2000", or a lone "$1900" not part of a range
-    m = (re.search(r"(?:about|around|approx\w*|roughly|~)\s*\$?\s*([\d,]{3,7})", q)
-         or re.search(r"\$\s*([\d,]{3,6})\b(?!\s*(?:to|\-|–))", q))
-    if m:
-        return {"budget_min": None, "budget_max": _n(m.group(1))}
-    return {"budget_min": None, "budget_max": None}
+    budget = parse_budget(query)
+    return {
+        "budget_min": budget.budget_min if budget and budget.found else None,
+        "budget_max": budget.budget_max if budget and budget.found else None,
+    }
 
 
 def _is_budget_query_text(query: str | None) -> bool:

@@ -1,13 +1,18 @@
 import json
 import os
+from pathlib import Path
 
 
 def default_headers() -> dict:
     return {"x-api-key": os.getenv("MERCHANT_API_KEY", "local-merchant-key")}
 
 
-def write_feature_flags(flags: dict, path: str = os.path.join("config", "feature_flags.json")) -> None:
+def write_feature_flags(flags: dict, path: str | None = None) -> None:
     """Merge test flags without depending on the archived V1 recommendation suite."""
+    path = path or os.environ.get("FEATURE_FLAGS_PATH")
+    tracked = Path(__file__).resolve().parents[1] / "config" / "feature_flags.json"
+    if not path or Path(path).resolve() == tracked.resolve():
+        raise ValueError("Test flags require an isolated path, never the tracked config")
     base = {}
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as handle:

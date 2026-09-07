@@ -37,7 +37,7 @@ from src.app.models.orm import Base
 from tests.utils import default_headers, write_feature_flags
 from tests.v2_catalog_fixture import grounded_v2_catalog
 
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+_FLAGS_PATH = os.environ["FEATURE_FLAGS_PATH"]
 # Deterministic product-path flags so the gate is order-independent (other test
 # modules leave varying flag state in the global feature_flags.json).
 _PRODUCT_PATH_FLAGS = {

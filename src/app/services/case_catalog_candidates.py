@@ -108,6 +108,7 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
 
     words = normalized_purpose.split()
     matches: dict[str, tuple[int, int, object]] = {}
+    positions: dict[str, tuple[int, int]] = {}
     for width in range(min(5, len(words)), 0, -1):
         for start in range(0, len(words) - width + 1):
             phrase = " ".join(words[start:start + width])
@@ -117,9 +118,21 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
                 if _singular(node.name) != _singular(phrase):
                     continue
                 matches[node.handle] = (width, node.depth, node)
+                positions[node.handle] = (start, start + width)
     if not matches:
         return None
     ranked = list(matches.values())
+    # In a compound category phrase, the trailing category is the head:
+    # storefront-related modifiers must not discard that purchase object.
+    # Only adjacent taxonomy spans participate; workload nouns separated by
+    # "for"/"running" etc. do not compete through this fallback.
+    ranked = [
+        row for row in ranked
+        if not any(
+            positions[row[2].handle][1] == positions[other[2].handle][0]
+            for other in ranked if other[2].handle != row[2].handle
+        )
+    ]
     # When the buyer explicitly names the storefront product ("a laptop for drone
     # photogrammetry"), that purchase object outranks nouns describing the workload.
     # This is a taxonomy relationship rule, not a workload-word exception.

@@ -127,6 +127,10 @@ def _get_or_create_app_for_url() -> object:
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """Install the per-URL singleton factory before any test module is imported."""
+    # Collection-time app creation must also use disposable flags. Never repair
+    # the developer's tracked/runtime configuration as a side effect of pytest.
+    isolated_flags = Path(tempfile.mkdtemp(prefix="shopsquire-pytest-flags-")) / "flags.json"
+    os.environ["FEATURE_FLAGS_PATH"] = str(isolated_flags)
     # ── Guard: ensure KILL_SWITCH is False before any module is collected ────
     # A previous crashed run may leave config/feature_flags.json with
     # KILL_SWITCH: True.  test_rollout_and_killswitch.py captures _ORIGINAL_FLAGS
@@ -689,6 +693,11 @@ def _restore_feature_flags_file():
     )
     existed = flags_path.exists()
     original = flags_path.read_bytes() if existed else None
+    from src.app import feature_flags
+    from src.app.config import get_settings
+    get_settings.cache_clear()
+    feature_flags._FLAGS_CACHE = None
+    feature_flags._FLAGS_CACHE_META = None
     yield
     try:
         if existed and original is not None:
@@ -698,6 +707,10 @@ def _restore_feature_flags_file():
             flags_path.unlink()
     except Exception:
         pass
+    finally:
+        get_settings.cache_clear()
+        feature_flags._FLAGS_CACHE = None
+        feature_flags._FLAGS_CACHE_META = None
 
 
 @pytest.fixture(autouse=True)

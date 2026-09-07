@@ -24,7 +24,7 @@ from src.app.services.taxonomy_registry import (
 from tests.taxonomy_helpers import apply_taxonomy_migration
 from tests.utils import default_headers, write_feature_flags
 
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+_FLAGS_PATH = os.environ["FEATURE_FLAGS_PATH"]
 _SENTINEL = [{"id": "GAM-HOT", "kind": "product", "label": "Hot Pick", "score": 9.9, "reward_weight": 5.0}]
 
 client = TestClient(app, headers=default_headers())

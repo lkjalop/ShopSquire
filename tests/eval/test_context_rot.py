@@ -21,7 +21,7 @@ from src.app.main import create_app
 from src.app.models.db import db_session
 from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
 
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+_FLAGS_PATH = os.environ["FEATURE_FLAGS_PATH"]
 _FLAGS = {
     "USE_AGENT_CAPABILITIES": True,
     "AGENT_ROLLOUT_PERCENT": 100,
