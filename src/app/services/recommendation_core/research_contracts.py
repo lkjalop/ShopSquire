@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from src.app.services.recommendation_core.requirement_scope import RequirementScope
 
 
 ClaimType = Literal[
@@ -492,10 +493,13 @@ class CompiledRequirement(BaseModel):
 
     attribute_key: str = Field(min_length=1, max_length=80)
     operator: Literal[">=", "<=", "=", "in", "contains"]
-    value: str | float | int | bool
+    value: str | float | int | bool | list[str]
     unit: str | None = Field(default=None, max_length=40)
     source_claim_ids: list[str] = Field(min_length=1, max_length=8)
+    source_excerpt: str | None = Field(default=None, max_length=4000)
+    value_spans: list[list[int]] = Field(default_factory=list, max_length=16)
     authority: Literal["accepted_evidence"] = "accepted_evidence"
+    compilation_scope: RequirementScope | None = None
     artefact_name: str | None = Field(default=None, max_length=160)
     artefact_version: str | None = Field(default=None, max_length=80)
     requirement_class: Literal["minimum", "recommended", "target", "optimal"] = "minimum"

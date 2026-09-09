@@ -48,224 +48,17 @@ logger = logging.getLogger("shopsquire.shopping_cases")
 router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"])
 
 
-def _case_budget_cents(db, *, tenant_id: str, case_id: str) -> int | None:
-    """Read the latest canonical case budget without reparsing buyer prose."""
-    try:
-        row = db.execute(text(
-            "SELECT state_json FROM conversation_case_state "
-            "WHERE tenant_id=:tenant_id AND case_id=:case_id "
-            "ORDER BY version DESC LIMIT 1"
-        ), {"tenant_id": tenant_id, "case_id": case_id}).first()
-        if not row:
-            return None
-        state = row[0]
-        if isinstance(state, str):
-            state = json.loads(state)
-        if not isinstance(state, dict):
-            return None
-        procurement_budget = (
-            (state.get("procurement_case_state") or {}).get("budget")
-            if isinstance(state.get("procurement_case_state"), dict) else None
-        )
-        if isinstance(procurement_budget, dict):
-            amount = procurement_budget.get("amount_minor")
-            if amount is not None:
-                return max(0, int(amount))
-        read_budget = (
-            (state.get("read_model") or {}).get("canonical_budget")
-            if isinstance(state.get("read_model"), dict) else None
-        )
-        if isinstance(read_budget, dict):
-            amount = read_budget.get("budget_max")
-            if amount is not None:
-                return max(0, int(amount) * 100)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        logger.warning("case budget projection was malformed", exc_info=True)
-    except Exception:
-        logger.warning("case budget projection unavailable", exc_info=True)
-    return None
+from src.app.services.catalog_shortfall_projection import _case_budget_cents, _catalog_shortfall_alternative
 
 
-def _catalog_shortfall_alternative(
-    db, *, tenant_id: str, exclusion: dict[str, Any] | None,
-    budget_cents: int | None,
-) -> tuple[dict[str, Any], int | None]:
-    """Describe the nearest excluded SKU and its price gap, without qualifying it."""
-    if not isinstance(exclusion, dict) or not exclusion.get("sku"):
-        return {}, None
-    sku = str(exclusion["sku"])
-    row = db.execute(select(ProductConfiguration).where(
-        ProductConfiguration.tenant_id == tenant_id,
-        ProductConfiguration.sku == sku,
-    ).limit(1)).scalar_one_or_none()
-    alternative = {
-        "sku": sku,
-        "reason": exclusion.get("reason"),
-        "status": "not_qualified_or_unavailable",
-    }
-    gap = None
-    if row is not None:
-        alternative.update({
-            "title": row.title,
-            "price_cents": int(row.price_cents),
-            "currency": row.currency,
-        })
-        if budget_cents is not None:
-            gap = max(0, int(row.price_cents) - int(budget_cents))
-    return alternative, gap
-
-
-class CreateRequirementProposal(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    retained_purpose: str | None = Field(default=None, max_length=500)
-    source_reference: str = Field(min_length=1, max_length=500)
-    claims: list[ExtractedRequirementClaim] = Field(min_length=1, max_length=64)
-
-
-class CreateManualRequirementProposal(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    retained_purpose: str | None = Field(default=None, max_length=500)
-    text: str = Field(min_length=3, max_length=10_000)
-
-
-class ClaimCorrection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    claim_id: str = Field(min_length=1, max_length=240)
-    attribute: str = Field(min_length=1, max_length=80)
-    operator: str = Field(min_length=1, max_length=24)
-    value: int | float | str | list[str]
-    unit: str | None = Field(default=None, max_length=40)
-    requirement_class: Literal["minimum", "recommended", "target", "optimal"]
-    constraint_tier: Literal["preferred", "acceptable_alternative"] = "preferred"
-    condition: str | None = Field(default=None, max_length=500)
-
-
-class AcceptRequirementProposal(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    expected_proposal_version: int = Field(ge=1)
-    accepted_claim_ids: list[str] = Field(default_factory=list, max_length=64)
-    rejected_claim_ids: list[str] = Field(default_factory=list, max_length=64)
-    corrections: list[ClaimCorrection] = Field(default_factory=list, max_length=64)
-    research_choice: Literal["local_only", "research_and_corroborate"]
-
-
-class FulfillmentOptionsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    requested_quantity: int = Field(ge=1, le=1_000_000)
-    available_now: int = Field(ge=0, le=1_000_000)
-    known_lead_time_days: int | None = Field(default=None, ge=0, le=3650)
-    deadline_days: int | None = Field(default=None, ge=0, le=3650)
-    has_next_best: bool = False
-    has_architecture_alternative: bool = False
-
-
-class ResearchShoppingCaseRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    budget_cents: int | None = Field(default=None, ge=1, le=1_000_000_000)
-    research_plan_id: str = Field(pattern=r"^crp-[a-f0-9]{20}$")
-    ambiguity_object_ids: list[str] = Field(min_length=1, max_length=8)
-    hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
-    research_authorized: Literal[True]
-    authorization_basis: Literal["buyer_action", "tenant_policy"] = "buyer_action"
-    refresh_authorized: bool = False
-    execution_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{8,80}$")
-    decision_trace_id: str | None = Field(
-        default=None, pattern=r"^[A-Za-z0-9_-]{8,200}$",
-    )
-    workload_kind_hints: list[Literal["game", "software"]] = Field(
-        default_factory=list, max_length=3,
-    )
-    unresolved_concepts: list[str] = Field(default_factory=list, max_length=3)
-
-
-class CancelShoppingCaseResearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    execution_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,80}$")
-    reason: Literal[
-        "buyer_departed", "buyer_cancelled", "research_deadline_exceeded",
-        "research_superseded",
-    ]
-
-
-class ApprovePublisherCandidateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    expected_candidate_version: int = Field(ge=1)
-    approval_scope: Literal["case_only"] = "case_only"
-    allowed_claim_types: list[Literal[
-        "minimum_requirements", "recommended_requirements", "target_requirements",
-        "compatibility", "operating_system_support", "hardware_certification",
-    ]] = Field(
-        default_factory=lambda: [
-            "minimum_requirements", "recommended_requirements", "compatibility",
-        ],
-        min_length=1,
-        max_length=6,
-    )
-    research_authorized: Literal[True]
-
-
-class ResolveBuyerEvidenceSourceRequest(BaseModel):
-    """Resolve one buyer-supplied official source hint inside an active case."""
-
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    source_url: str | None = Field(default=None, min_length=8, max_length=2000)
-    vendor_name: str | None = Field(default=None, min_length=2, max_length=200)
-    research_authorized: bool = False
-    authorization_basis: Literal["buyer_action", "tenant_policy", "none"] = "none"
-    refresh_authorized: bool = False
-
-
-class CreateCaseInterpretationRequest(BaseModel):
-    """Buyer-authored outcome only; the server owns all research scope."""
-
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    retained_purpose: str = Field(min_length=3, max_length=500)
-    storefront_taxonomy_handle: str | None = Field(default=None, min_length=2, max_length=160)
-    session_epoch: str | None = Field(default=None, min_length=1, max_length=200)
-
-
-class ProposeCaseCartMutationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    sku: str = Field(min_length=1, max_length=120)
-    quantity: int = Field(ge=1, le=500)
-
-
-class SelectFulfillmentContinuationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    expected_revision: int = Field(ge=0)
-    choice: Literal[
-        "split_delivery", "wait_preferred", "next_best_now", "supplier_enquiry", "substitute",
-    ]
-    preferred_sku: str = Field(min_length=1, max_length=120)
-    substitute_sku: str | None = Field(default=None, min_length=1, max_length=120)
-    requested_quantity: int = Field(ge=1, le=500)
-    available_now: int = Field(ge=0, le=500)
-    deadline_days: int | None = Field(default=None, ge=0, le=3650)
-
-
-class ConfirmFulfillmentCartRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    expected_revision: int = Field(ge=1)
-    selected_offer_id: str | None = Field(default=None, max_length=120)
-    substitution_authorized: bool = False
-
-
-class PortfolioNarrationPreviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    uid: str = Field(min_length=1, max_length=200)
-    projection: dict[str, Any]
+from src.app.schemas.shopping_case import (
+    CreateRequirementProposal, CreateManualRequirementProposal, ClaimCorrection,
+    AcceptRequirementProposal, FulfillmentOptionsRequest, ResearchShoppingCaseRequest,
+    CancelShoppingCaseResearchRequest, ApprovePublisherCandidateRequest,
+    ResolveBuyerEvidenceSourceRequest, CreateCaseInterpretationRequest,
+    ProposeCaseCartMutationRequest, SelectFulfillmentContinuationRequest,
+    ConfirmFulfillmentCartRequest, PortfolioNarrationPreviewRequest,
+)
 
 
 def _tenant(value: str | None) -> str:
@@ -289,6 +82,7 @@ def get_case_decision_runs(
         load_decision_dependency_edges,
     )
     from src.app.services.procurement_decision_run import load_decision_runs
+    from src.app.services.shopping_case_trace_reader import load_case_turn_history
     from src.app.models.orm import ProcurementDecisionRunRecord
 
     tenant_id = _tenant(x_tenant_id)
@@ -340,6 +134,7 @@ def get_case_decision_runs(
         "case_id": case_id,
         "history_count": history_count,
         "history_returned": len(runs),
+        "turn_history": load_case_turn_history(db, tenant_id=tenant_id, case_id=case_id, limit=limit),
         "latest": project(latest) if latest else None,
         "history": [project(run) for run in runs],
         "dependency_edges": [edge.model_dump(mode="json") for edge in edges],
@@ -395,139 +190,10 @@ def _buyer_claim_reconciliation(
     return rows, counts
 
 
-def _payload_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return dict(parsed) if isinstance(parsed, dict) else {}
-        except (TypeError, ValueError):
-            return {}
-    return {}
-
-
-def _case_research_plan_from_trace(
-    db, *, case_id: str, tenant_id: str, decision_trace_id: str | None = None,
-):
-    """Rebuild a plan only from the server-recorded ambiguity event."""
-
-    from src.app.services.case_research_plan import build_case_research_plan
-    from src.app.services.shopping_case_trace_reader import load_case_trace_events
-
-    events = load_case_trace_events(
-        db, case_id=case_id, tenant_id=tenant_id,
-        decision_trace_id=decision_trace_id,
-    )
-    for event in reversed(events):
-        if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
-            continue
-        payload = _payload_object(event.get("payload"))
-        purpose = str(payload.get("retained_purpose") or "").strip()
-        recorded_plan_id = str(payload.get("research_plan_id") or "").strip()
-        plan = build_case_research_plan(purpose) if purpose else None
-        if plan is None and purpose and recorded_plan_id:
-            plan = build_case_research_plan(purpose, allow_open_world=True)
-        if plan is None or plan.plan_id != recorded_plan_id:
-            return None
-        return plan
-    return None
-
-
-def _case_catalog_candidate_set_from_trace(
-    db, *, case_id: str, tenant_id: str, decision_trace_id: str | None = None,
-):
-    """Load the immutable catalog boundary recorded with the shopping case."""
-
-    from src.app.services.case_catalog_candidates import CatalogCandidateSet, CatalogScope
-    from src.app.services.shopping_case_trace_reader import load_case_trace_events
-
-    events = load_case_trace_events(
-        db,
-        case_id=case_id,
-        tenant_id=tenant_id,
-        decision_trace_id=decision_trace_id,
-    )
-    for event in reversed(events):
-        if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
-            continue
-        raw = _payload_object(event.get("payload")).get("catalog_candidate_set")
-        if isinstance(raw, dict):
-            try:
-                candidate_payload = dict(raw)
-                # Events written before CatalogScope existed remain readable,
-                # but their legacy taxonomy value is explicitly labelled as
-                # recorded context rather than silently becoming new authority.
-                candidate_payload.setdefault("catalog_scope", CatalogScope(
-                    case_id=case_id,
-                    tenant_id=tenant_id,
-                    allowed_taxonomy_roots=(
-                        [str(raw.get("taxonomy_handle"))]
-                        if raw.get("taxonomy_handle") else []
-                    ),
-                    selected_taxonomy_root=(
-                        str(raw.get("taxonomy_handle"))
-                        if raw.get("taxonomy_handle") else None
-                    ),
-                    source=(
-                        "validated_client_context"
-                        if raw.get("taxonomy_handle") else "unresolved"
-                    ),
-                    confidence=0.5 if raw.get("taxonomy_handle") else 0.0,
-                    client_context_disposition=(
-                        "accepted" if raw.get("taxonomy_handle") else "not_supplied"
-                    ),
-                    client_taxonomy_handle=(
-                        str(raw.get("taxonomy_handle"))
-                        if raw.get("taxonomy_handle") else None
-                    ),
-                    reason="legacy_recorded_catalog_boundary",
-                ).model_dump(mode="json"))
-                return CatalogCandidateSet.model_validate(candidate_payload)
-            except ValueError:
-                break
-    # A legacy/malformed case may continue gathering evidence, but cannot fall
-    # back to the tenant-wide catalog and present that as a query-specific shelf.
-    return CatalogCandidateSet(
-        retained_purpose="Unresolved legacy shopping case",
-        status="unresolved",
-        taxonomy_source="unresolved",
-        reason="case_candidate_set_not_recorded",
-        catalog_scope=CatalogScope(
-            case_id=case_id,
-            tenant_id=tenant_id,
-            allowed_taxonomy_roots=[],
-            source="unresolved",
-            confidence=0.0,
-            client_context_disposition="not_supplied",
-            reason="case_candidate_set_not_recorded",
-        ),
-    )
-
-
-def _case_trace_has_event(
-    db, *, case_id: str, tenant_id: str, event_type: str,
-    decision_trace_id: str | None = None,
-) -> bool:
-    from src.app.services.decision_log import get_cached_trace_events
-
-    if decision_trace_id and any(
-        str(row.get("event_type") or "") == event_type
-        for row in get_cached_trace_events(decision_trace_id)
-    ):
-        return True
-    trace_id = case_id.removeprefix("sc-")
-    if any(str(row.get("event_type") or "") == event_type for row in get_cached_trace_events(trace_id)):
-        return True
-    try:
-        return db.execute(text(
-            "SELECT 1 FROM decision_trace_events "
-            "WHERE trace_id=:trace_id AND tenant_id=:tenant_id AND event_type=:event_type LIMIT 1"
-        ), {
-            "trace_id": trace_id, "tenant_id": tenant_id, "event_type": event_type,
-        }).first() is not None
-    except Exception:
-        return False
+from src.app.services.shopping_case_trace_reader import (
+    _payload_object, _case_research_plan_from_trace,
+    _case_catalog_candidate_set_from_trace, _case_trace_has_event,
+)
 
 
 @router.post("/interpretations")
@@ -2177,6 +1843,10 @@ async def _research_shopping_case_with_db(
         )
 
         try:
+            candidate_set = _case_catalog_candidate_set_from_trace(
+                db, case_id=case_id, tenant_id=tenant_id,
+                decision_trace_id=body.decision_trace_id,
+            )
             result = await execute_open_world_publisher_discovery_async(
                 db,
                 plan=plan,
@@ -2187,10 +1857,8 @@ async def _research_shopping_case_with_db(
                     os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
                 ).strip(),
                 runtime_status=_external_research_runtime_status(),
-                candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
-                    db, case_id=case_id, tenant_id=tenant_id,
-                    decision_trace_id=body.decision_trace_id,
-                ).configuration_ids,
+                candidate_configuration_ids=candidate_set.configuration_ids,
+                product_type=(candidate_set.catalog_scope.selected_taxonomy_root or ""),
                 budget_cents=body.budget_cents,
                 workload_kind_hints=body.workload_kind_hints,
                 unresolved_concepts=body.unresolved_concepts,

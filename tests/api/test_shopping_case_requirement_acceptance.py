@@ -24,13 +24,16 @@ def _client(*, catalog_grounded: bool = True) -> TestClient:
             add_sold_node(db, node_handle="el-6-6", tenant_id="default")
             db.commit()
     with engine.begin() as connection:
-        connection.execute(text(
-            "CREATE TABLE conversation_case_state ("
-            "id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, case_id TEXT NOT NULL, "
-            "session_epoch TEXT NOT NULL, subject_ref TEXT NOT NULL, version INTEGER NOT NULL, "
-            "state_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
-            "UNIQUE (tenant_id, case_id, session_epoch))"
-        ))
+        import importlib.util
+        from pathlib import Path
+        from alembic.migration import MigrationContext
+        from alembic.operations import Operations
+        path = Path(__file__).resolve().parents[2] / "alembic/versions/20260853_conversation_case_state.py"
+        spec = importlib.util.spec_from_file_location("case_fixture_migration", path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
     app = FastAPI()
     app.include_router(router)
     app.state.test_engine = engine

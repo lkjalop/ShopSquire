@@ -90,6 +90,13 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     """
 
     normalized_purpose = _normal(purpose)
+    def excluded_at(start: int) -> bool:
+        # Only an immediately scoped literal exclusion may suppress a catalog
+        # noun. This does not infer semantic identity or authorize product fit.
+        prefix = normalized_purpose[:start].split()
+        while prefix and prefix[-1] in {"a", "an", "the", "any"}:
+            prefix.pop()
+        return bool(prefix and prefix[-1] in {"not", "no", "excluding", "except"})
     # Product form factors are part of the catalog schema, not workload-name
     # aliases.  Resolve their ordinary singular wording to the canonical node
     # before the exact taxonomy-name scan (whose labels are often plural, e.g.
@@ -101,7 +108,7 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
         (r"\bservers?\b", "el-6-2"),
     )
     for pattern, handle in form_factor_nodes:
-        if re.search(pattern, normalized_purpose):
+        if any(not excluded_at(match.start()) for match in re.finditer(pattern, normalized_purpose)):
             node = get_node(handle)
             if node is not None:
                 return node
@@ -112,6 +119,9 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     for width in range(min(5, len(words)), 0, -1):
         for start in range(0, len(words) - width + 1):
             phrase = " ".join(words[start:start + width])
+            offset = len(" ".join(words[:start])) + (1 if start else 0)
+            if excluded_at(offset):
+                continue
             if len(phrase) < 4:
                 continue
             for node in search_nodes(phrase, limit=8):
@@ -190,6 +200,19 @@ def _derived_configuration_handle(row: ProductConfiguration) -> str | None:
     if form == "server" or device == "server":
         return "el-6-2"
     return None
+
+
+def buyer_category_changed(prior_scope: dict, purpose: str) -> bool:
+    """An explicit unrelated purchase category outranks commercial amendments.
+
+    Reuse the catalog's purchase-object resolver and reviewed relationships;
+    budget-only turns and workload names cannot manufacture a category switch.
+    """
+    prior = str(prior_scope.get("selected_taxonomy_root") or "")
+    if not prior:
+        return False
+    current = _explicit_category(purpose, preferred_handle=prior)
+    return current is not None and not _related(prior, current.handle)
 
 
 def build_case_catalog_candidate_set(

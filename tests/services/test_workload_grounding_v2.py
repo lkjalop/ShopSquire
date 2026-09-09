@@ -10,6 +10,49 @@ from src.app.services.recommendation_core.turn_router import route_turn
 from src.app.services.recommendation_core import workload_grounding as W
 
 
+def test_provider_projection_preserves_categories_and_both_bounds(monkeypatch):
+    from types import SimpleNamespace
+    from src.app.services.recommendation_core.research_contracts import CompiledRequirement
+    from src.app.services.recommendation_core.requirement_compiler import CompilationResult
+    provider = SimpleNamespace(
+        provider_ids_for=lambda kind: ["fixture"],
+        resolve_with_trace=lambda *args, **kwargs: (
+            SimpleNamespace(to_dict=lambda: {"source": "fixture"}), []),
+    )
+    monkeypatch.setattr("src.app.services.connectors.workload_evidence.default_registry", lambda: provider)
+    claims = tuple(CompiledRequirement(
+        attribute_key=key, operator=op, value=value, source_claim_ids=[f"fixture-{i}"],
+    ) for i, (key, op, value) in enumerate([
+        ("os", "=", "Windows 11"), ("ram_gb", ">=", 16), ("ram_gb", "<=", 32),
+    ]))
+    monkeypatch.setattr(W, "compile_workload_evidence_requirements",
+                        lambda *args, **kwargs: CompilationResult(claims, ()))
+    result = W.resolve_named_workloads([("software", "Fixture workload")], consent=False)
+    assert result["requirements"] == {
+        "os": [("=", "Windows 11")], "ram_gb": [(">=", 16), ("<=", 32)],
+    }
+    from src.app.services.recommendation_core.constraints import from_op_map
+    constraints = from_op_map(result["requirements"], "fixture")
+    assert constraints["ram_gb"].lower == 16
+    assert constraints["ram_gb"].upper == 32
+
+
+def test_translated_gpu_threshold_cannot_become_official_requirement(monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.gpu_translation.desktop_req_to_laptop_tier",
+        lambda value: {"vram_gb_min": 4},
+    )
+    result = W.compile_workload_evidence_requirements({
+        "source": "steam", "app_id": "test-app", "confidence": 1,
+        "retrieved_at": "2026-09-07T00:00:00Z",
+        "minimum": {"ram_gb": 16, "gpu": "Example GPU 6 GB"},
+    }, kind="game", name="Unseen software")
+    assert {row.attribute_key for row in result.requirements} == {"ram_gb"}
+    rejected = next(row for row in result.rejections if row["attribute_key"] == "gpu_vram_gb")
+    assert rejected["reason"] == "derived_claim_requires_policy"
+    assert rejected["source_excerpt"] == "Example GPU 6 GB"
+
+
 @pytest.fixture()
 def db():
     session = sessionmaker(bind=create_engine("sqlite://"))()
@@ -156,14 +199,14 @@ def test_cited_identity_is_requeried_through_structured_provider(monkeypatch):
     assert result["status"] == "resolved"
     assert result["evidence"][0]["app_id"] == "1672810"
     assert result["evidence"][0]["requirements_completeness"] == "minimum_and_recommended"
-    assert result["requirements"]["ram_gb"] == (">=", 8.0)
+    assert result["requirements"]["ram_gb"] == [(">=", 8.0)]
 
 
 def test_canonical_retry_fans_out_enrolled_provider_kinds_when_router_omits_kind(monkeypatch):
     calls = []
     monkeypatch.setattr(
         W, "resolve_named_workloads",
-        lambda entities, consent: calls.append((list(entities), consent)) or {
+        lambda entities, consent, product_type: calls.append((list(entities), consent)) or {
             "requirements": {}, "evidence": [], "live_allowed": False,
         },
     )
@@ -186,7 +229,7 @@ def test_cited_steam_origin_supplies_provider_kind_after_identity(monkeypatch):
     monkeypatch.setattr(
         W,
         "resolve_named_workloads",
-        lambda entities, consent: calls.append((list(entities), consent)) or {
+        lambda entities, consent, product_type: calls.append((list(entities), consent)) or {
             "requirements": {"ram_gb": (">=", 16.0)},
             "evidence": [{
                 "status": "resolved",
@@ -216,7 +259,7 @@ def test_cited_steam_origin_supplies_provider_kind_after_identity(monkeypatch):
 def test_canonical_retry_recovers_from_wrong_model_provider_kind(monkeypatch):
     calls = []
 
-    def resolve(entities, consent):
+    def resolve(entities, consent, product_type):
         bounded = list(entities)
         calls.append((bounded, consent))
         if bounded[0][0] == "game":
@@ -362,7 +405,7 @@ def test_model_workload_entity_suppresses_legacy_title_detector(monkeypatch):
     )
     monkeypatch.setattr(
         W, "resolve_named_workloads",
-        lambda entities, consent: {
+        lambda entities, consent, product_type: {
             "requirements": {"ram_gb": (">=", 24.0)},
             "evidence": [{"kind": "game", "status": "resolved"}],
             "live_allowed": False,

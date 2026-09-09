@@ -6,6 +6,8 @@ not select products or authorize constraints; the shared capability layer does.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import hashlib
+import json
 from typing import Any, Callable, Dict, Iterable, Optional, Protocol
 
 
@@ -46,7 +48,42 @@ class WorkloadEvidence:
         result = asdict(self)
         result["provenance_chain"] = list(self.provenance_chain)
         result["source"] = self.provider_id
+        result["literal_requirement_observations"] = _literal_observations(self)
         return result
+
+
+def _literal_observations(evidence: WorkloadEvidence) -> list[dict[str, Any]]:
+    """Retain cited text without treating model alternatives as fit predicates."""
+    observations = []
+    for section, requirements in (("minimum", evidence.minimum), ("recommended", evidence.recommended)):
+        receipts = requirements.get("source_fields") or {}
+        if not isinstance(receipts, dict):
+            continue
+        for field, attribute in (("cpu", "cpu_model"), ("gpu", "gpu_model"), ("os", "os")):
+            receipt = receipts.get(field)
+            if not isinstance(receipt, dict):
+                continue
+            text, start, end = receipt.get("text"), receipt.get("start"), receipt.get("end")
+            value = requirements.get(field)
+            if not (isinstance(text, str) and len(text) <= 1024
+                    and type(start) is int and type(end) is int
+                    and 0 <= start < end <= len(text) and text[start:end] == value
+                    and receipt.get("representation") == "steam_requirement_line_v1"):
+                continue
+            row = {
+                "canonical_title": evidence.canonical_title or evidence.resolved_name,
+                "source_record_id": evidence.source_record_id, "source_id": evidence.provider_id,
+                "source_url": evidence.source_url, "observed_at": evidence.retrieved_at,
+                "requirement_class": section, "attribute_key": attribute, "value": value,
+                "source_excerpt": text, "span_start": start, "span_end": end,
+                "representation": receipt["representation"],
+                "disposition": "observed", "fit_authority": "none",
+            }
+            row["observation_id"] = "obs-" + hashlib.sha256(json.dumps(
+                row, sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest()
+            observations.append(row)
+    return observations
 
 
 class WorkloadEvidenceProvider(Protocol):

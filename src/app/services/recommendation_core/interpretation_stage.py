@@ -32,6 +32,7 @@ def resolve_interpretation_stage(
         vertical=vertical, use_case_variants=dict(decision.use_case_variants),
         workload_entities=list(decision.workload_entities),
         external_research_consent=envelope.external_research_consent,
+        resolved_product_type=str(decision.requested_product_node or getattr(decision, "node_handle", "") or ""),
     )
     resolved = dict(intent["requirements"])
     interpreted = dataclasses.replace(

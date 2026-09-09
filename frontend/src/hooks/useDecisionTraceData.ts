@@ -30,7 +30,7 @@ export function shoppingCaseIdFromTraceEvents(events: Array<any>): string | null
   return null;
 }
 
-export function useDecisionTraceData({ active, caseId }: { active: boolean; caseId: string | null }) {
+export function useDecisionTraceData({ active, caseId, revision }: { active: boolean; caseId: string | null; revision?: number }) {
   const [data, setData] = useState<any | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const uid = useMemo(() => {
@@ -41,9 +41,14 @@ export function useDecisionTraceData({ active, caseId }: { active: boolean; case
   }, []);
 
   useEffect(() => {
-    if (!active || !caseId) { setStatus('idle'); return; }
+    if (!active || !caseId) { setData(null); setStatus('idle'); return; }
+    let disposed = false;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort('deadline_exceeded'), 5000);
+    const timer = window.setTimeout(() => {
+      controller.abort('deadline_exceeded');
+      if (!disposed) setStatus('unavailable');
+    }, 5000);
+    setData(null);
     setStatus('loading');
     fetch(apiUrl(`/api/v1/shopping-cases/${encodeURIComponent(caseId)}/decision-runs?uid=${encodeURIComponent(uid)}`), {
       credentials: 'include', signal: controller.signal, headers: { 'x-tenant-id': tenantId },
@@ -52,11 +57,11 @@ export function useDecisionTraceData({ active, caseId }: { active: boolean; case
         if (!response.ok) throw new Error(`http_${response.status}`);
         return response.json();
       })
-      .then((value) => { setData(value); setStatus('ready'); })
-      .catch(() => { if (!controller.signal.aborted) setStatus('unavailable'); })
+      .then((value) => { if (!disposed) { setData(value); setStatus('ready'); } })
+      .catch(() => { if (!disposed) setStatus('unavailable'); })
       .finally(() => window.clearTimeout(timer));
-    return () => { window.clearTimeout(timer); controller.abort('trace_closed'); };
-  }, [active, caseId, tenantId, uid]);
+    return () => { disposed = true; window.clearTimeout(timer); controller.abort('trace_closed'); };
+  }, [active, caseId, revision, tenantId, uid]);
 
   return { data, status };
 }

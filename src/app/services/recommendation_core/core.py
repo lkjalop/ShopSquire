@@ -419,6 +419,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 trace_id=envelope.trace_id,
                 session=dict(envelope.session),
                 patches=decision.case_patches,
+                persist=False,
             )
         except ValueError as exc:
             patch_reason = str(exc)

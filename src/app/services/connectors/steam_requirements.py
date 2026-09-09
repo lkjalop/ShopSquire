@@ -156,6 +156,7 @@ def _norm_req(d: Any) -> Dict[str, Any]:
         "gpu": d.get("gpu"),
         "storage_gb": d.get("storage_gb"),
         "os": d.get("os"),
+        **({"cpu": d["cpu"]} if d.get("cpu") else {}),
     }
 
 
@@ -175,12 +176,32 @@ def _bounded_requirements(value: Any) -> Dict[str, Any]:
         storage = int(req["storage_gb"]) if req["storage_gb"] is not None else None
     except (TypeError, ValueError):
         storage = None
-    return {
+    result = {
         "ram_gb": ram if ram is not None and 1 <= ram <= 512 else None,
         "gpu": _bounded_text(req.get("gpu"), 240),
         "storage_gb": storage if storage is not None and 1 <= storage <= 8192 else None,
         "os": _bounded_text(req.get("os"), 160),
+        **({"cpu": _bounded_text(req["cpu"], 240)} if req.get("cpu") else {}),
     }
+    # Spans refer to normalized publisher lines, not offsets in HTML. Preserve
+    # only exact matches; bounding/normalization must never fabricate a quote.
+    receipts = value.get("source_fields") if isinstance(value, dict) else None
+    retained = {}
+    for key in ("cpu", "gpu", "os"):
+        receipt = receipts.get(key) if isinstance(receipts, dict) else None
+        if not isinstance(receipt, dict):
+            continue
+        text, start, end = receipt.get("text"), receipt.get("start"), receipt.get("end")
+        if (receipt.get("representation") == "steam_requirement_line_v1"
+            and isinstance(text, str) and len(text) <= 1024
+            and type(start) is int and type(end) is int
+            and 0 <= start < end <= len(text)
+            and text[start:end] == result.get(key)):
+            retained[key] = {"text": text, "start": start, "end": end,
+                             "representation": "steam_requirement_line_v1"}
+    if retained:
+        result["source_fields"] = retained
+    return result
 
 
 def _requirements_completeness(minimum: Dict[str, Any], recommended: Dict[str, Any]) -> str:
@@ -234,7 +255,7 @@ def _html_to_lines(raw: Any) -> List[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
-def _parse_requirements_html(raw: Any) -> Dict[str, Any]:
+def _parse_requirements_html(raw: Any, *, include_source_fields: bool = False) -> Dict[str, Any]:
     """Steam ``pc_requirements`` HTML → {"ram_gb", "gpu", "storage_gb", "os"}.
 
     Tags are stripped (list breaks become newlines) and each "Label: value" line is mapped
@@ -252,6 +273,8 @@ def _parse_requirements_html(raw: Any) -> Dict[str, Any]:
                 continue
             if out["os"] is None and lab in _OS_LABELS:
                 out["os"] = val
+            elif "cpu" not in out and lab in ("processor", "cpu"):
+                out["cpu"] = val
             elif out["ram_gb"] is None and lab == "memory":
                 m = _SIZE_RE.search(val)
                 if m:
@@ -269,6 +292,15 @@ def _parse_requirements_html(raw: Any) -> Dict[str, Any]:
                         out["storage_gb"] = int(round(n))
                     else:
                         out["storage_gb"] = max(1, int(round(n / 1024)))
+            if include_source_fields:
+                for key in ("cpu", "gpu", "os"):
+                    if out.get(key) == val and key not in out.get("source_fields", {}):
+                        start = line.index(":") + 1
+                        start += len(value) - len(value.lstrip())
+                        out.setdefault("source_fields", {})[key] = {
+                            "text": line, "start": start, "end": start + len(val),
+                            "representation": "steam_requirement_line_v1",
+                        }
     except Exception:
         pass
     return out
@@ -497,9 +529,9 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
                 if isinstance(g, dict) and g.get("description")
             ]
             minimum = _bounded_requirements(
-                _parse_requirements_html(pc.get("minimum") or ""))
+                _parse_requirements_html(pc.get("minimum") or "", include_source_fields=True))
             recommended = _bounded_requirements(
-                _parse_requirements_html(pc.get("recommended") or ""))
+                _parse_requirements_html(pc.get("recommended") or "", include_source_fields=True))
             release = data.get("release_date") if isinstance(data.get("release_date"), dict) else {}
             publishers = data.get("publishers") if isinstance(data.get("publishers"), list) else []
             return {

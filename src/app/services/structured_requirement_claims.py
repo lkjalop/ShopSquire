@@ -9,7 +9,7 @@ import json
 def project_structured_requirement_claims(
     authorization: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Return verified claim rows without granting commerce authority."""
+    """Preserve verification status without granting new claim authority."""
 
     claims: list[dict[str, Any]] = []
     for evidence in list((authorization or {}).get("evidence") or []):
@@ -36,6 +36,7 @@ def project_structured_requirement_claims(
             claims.append({
                 "claim_id": claim_id,
                 "source_claim_ids": identity["source_claim_ids"],
+                "compilation_scope": compiled.get("compilation_scope"),
                 "attribute": compiled.get("attribute_key"),
                 "operator": compiled.get("operator"),
                 "value": compiled.get("value"),
@@ -43,7 +44,10 @@ def project_structured_requirement_claims(
                 "requirement_class": compiled.get("requirement_class") or "minimum",
                 "constraint_tier": "required",
                 "condition": compiled.get("scope_caveat"),
-                "authority_status": "verified_official",
+                "authority_status": (
+                    "verified_official" if compiled.get("verification_status") == "verified"
+                    else "observed_held"
+                ),
                 "source_id": evidence.get("provider_id") or evidence.get("source"),
                 "source_url": evidence.get("source_url"),
                 "observed_at": evidence.get("retrieved_at"),

@@ -2,7 +2,31 @@ from src.app.services.connectors.workload_evidence import (
     WorkloadEvidence,
     WorkloadEvidenceRegistry,
     WorkloadTarget,
+    SteamWorkloadProvider,
 )
+
+
+def test_literal_observations_keep_canonical_provider_identity_and_are_not_fit_claims(monkeypatch):
+    from src.app.services.connectors.steam_requirements import _parse_requirements_html, _bounded_requirements
+    minimum = _bounded_requirements(_parse_requirements_html(
+        '<li>Processor: Example CPU A OR Example CPU B</li><li>OS: Windows 11</li>',
+        include_source_fields=True,
+    ))
+    monkeypatch.setattr('src.app.services.connectors.steam_requirements.get_game_requirements',
+                        lambda *args, **kwargs: {
+                            'title': 'Canonical subject', 'appid': 999,
+                            'source_url': 'https://store.steampowered.com/app/999/',
+                            'retrieved_at': '2026-09-08', 'minimum': minimum,
+                        })
+    payload = SteamWorkloadProvider().resolve('buyer spelling', allow_live=False).to_dict()
+    rows = payload['literal_requirement_observations']
+    assert {r['attribute_key'] for r in rows} == {'cpu_model', 'os'}
+    assert all(r['canonical_title'] == 'Canonical subject' for r in rows)
+    assert all(r['source_record_id'] == '999' for r in rows)
+    assert all(r['disposition'] == 'observed' for r in rows)
+    assert all(r['fit_authority'] == 'none' for r in rows)
+    assert all(r['source_excerpt'][r['span_start']:r['span_end']] == r['value'] for r in rows)
+    assert len({r['observation_id'] for r in rows}) == 2
 
 
 class _Provider:

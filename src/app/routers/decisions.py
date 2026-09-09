@@ -200,28 +200,21 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
         out["security"] = _build_security_payload(security_analysis)
     return out
 
+from sqlalchemy.exc import SQLAlchemyError
+from src.app.platform.tenant_context import current_tenant_id
+
 _QUERY_DECISIONS_SQL = text(
         """
         SELECT id, agent_name, valid_from, valid_to, system_from, system_to, input_data,
                      proposed_action, policy_version, approval_required, execution_status
         FROM decision_logs
-        WHERE (:vf IS NULL OR valid_from >= :vf)
+        WHERE tenant_id = :tenant_id
+            AND (:vf IS NULL OR valid_from >= :vf)
             AND (:vt IS NULL OR valid_to <= :vt)
             AND (:sf IS NULL OR system_from >= :sf)
             AND (:st IS NULL OR system_to <= :st)
-            AND (:agent_name IS NULL OR agent_name = :agent_name)
-        """
-)
-
-_QUERY_DECISIONS_FALLBACK_SQL = text(
-        """
-        SELECT id, agent_name, valid_from,
-               'infinity' AS valid_to,
-               valid_from AS system_from,
-               'infinity' AS system_to,
-               input_data, proposed_action, policy_version, approval_required, execution_status
-        FROM decision_logs
-        WHERE (:vf IS NULL OR valid_from >= :vf)
+            AND (:va IS NULL OR (valid_from <= :va AND (valid_to IS NULL OR valid_to > :va)))
+            AND (:ka IS NULL OR (system_from <= :ka AND (system_to IS NULL OR system_to > :ka)))
             AND (:agent_name IS NULL OR agent_name = :agent_name)
         """
 )
@@ -489,12 +482,26 @@ def _build_security_payload(details: Dict | None) -> Dict:
     }
 
 
+def _utc_history_cutoff(value: str | None) -> str | None:
+    if value is None:
+        return None
+    from datetime import datetime, timezone
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        instant = instant.replace(tzinfo=instant.tzinfo or timezone.utc)
+        return instant.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="invalid_decision_history_timestamp") from None
+
+
 @router.get("/query")
 def query_decisions(
     valid_from: Optional[str] = None,
     valid_to: Optional[str] = None,
     system_from: Optional[str] = None,
     system_to: Optional[str] = None,
+    valid_at: Optional[str] = None,
+    known_at: Optional[str] = None,
     agent_name: Optional[str] = None,
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
     request: Request = None,
@@ -507,11 +514,14 @@ def query_decisions(
             # Avoid DB access during local/tests
             raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
         params = {
-            "vf": valid_from,
-            "vt": valid_to,
-            "sf": system_from,
-            "st": system_to,
+            "vf": _utc_history_cutoff(valid_from),
+            "vt": _utc_history_cutoff(valid_to),
+            "sf": _utc_history_cutoff(system_from),
+            "st": _utc_history_cutoff(system_to),
+            "va": _utc_history_cutoff(valid_at),
+            "ka": _utc_history_cutoff(known_at),
             "agent_name": agent_name,
+            "tenant_id": current_tenant_id(),
         }
         # Use the session wrapper so tests that swap the module engine/session
         # see the same data. The session wrapper also normalizes SQL strings
@@ -527,94 +537,13 @@ def query_decisions(
                 # is respected in tests that create an app with a test engine.
                 rows = db.execute(_QUERY_DECISIONS_SQL, params).mappings().all()
             out = [dict(r) for r in rows]
-        except Exception:
-            out = []
-        # Additional fallback: try the session wrapper in case tests set the
-        # module-level SessionLocal but the injected session did not see
-        # recently inserted rows for visibility reasons.
-        if not out:
-            try:
-                with db_session() as _db:
-                    rows3 = _db.execute(_QUERY_DECISIONS_SQL, params).mappings().all()
-                    out = [dict(r) for r in rows3]
-            except Exception:
-                pass
-        if not out:
-            # Compatibility fallback for lightweight schemas without full bitemporal columns.
-            try:
-                rows4 = db.execute(_QUERY_DECISIONS_FALLBACK_SQL, params).mappings().all()
-                out = [dict(r) for r in rows4]
-            except Exception:
-                pass
-        if not out:
-            try:
-                with db_session() as _db2:
-                    rows5 = _db2.execute(_QUERY_DECISIONS_FALLBACK_SQL, params).mappings().all()
-                    out = [dict(r) for r in rows5]
-            except Exception:
-                pass
-        if not out:
-            try:
-                eng = getattr(getattr(request, "app", None), "state", None)
-                eng = getattr(eng, "engine", None)
-                if eng is not None:
-                    with eng.connect() as conn:
-                        rows6 = conn.execute(_QUERY_DECISIONS_FALLBACK_SQL, params).mappings().all()
-                        out = [dict(r) for r in rows6]
-            except Exception:
-                pass
-        if not out:
-            # Last-resort fallback for tests that mutate global DB sessions across modules.
-            try:
-                db_url = str(os.getenv("DATABASE_URL", "") or "")
-                if db_url.startswith("sqlite"):
-                    eng2 = create_engine(db_url, connect_args={"check_same_thread": False}, future=True)
-                    with eng2.connect() as conn2:
-                        try:
-                            cnt = conn2.execute(text("SELECT COUNT(*) FROM decision_logs")).scalar()
-                            logger.debug("[decisions] env sqlite fallback count=%s url=%s", cnt, db_url)
-                        except Exception:
-                            pass
-                        rows7 = conn2.execute(_QUERY_DECISIONS_FALLBACK_SQL, params).mappings().all()
-                        out = [dict(r) for r in rows7]
-            except Exception:
-                pass
-        if not out:
-            # Resolve relative sqlite URLs against both CWD and repo root.
-            try:
-                eng_url = str(get_engine().url)
-                if eng_url.startswith("sqlite"):
-                    raw_path = eng_url.split("///", 1)[-1]
-                    candidates = [raw_path]
-                    if not os.path.isabs(raw_path):
-                        candidates.append(os.path.abspath(raw_path))
-                        try:
-                            repo_root = str(Path(__file__).resolve().parents[3])
-                            candidates.append(os.path.join(repo_root, raw_path))
-                        except Exception:
-                            pass
-                    seen = set()
-                    for cand in [c for c in candidates if c]:
-                        if cand in seen:
-                            continue
-                        seen.add(cand)
-                        if not os.path.exists(cand):
-                            continue
-                        eng3 = create_engine(f"sqlite+pysqlite:///{cand}", connect_args={"check_same_thread": False}, future=True)
-                        with eng3.connect() as conn3:
-                            rows8 = conn3.execute(_QUERY_DECISIONS_FALLBACK_SQL, params).mappings().all()
-                            if rows8:
-                                out = [dict(r) for r in rows8]
-                                break
-            except Exception:
-                pass
-        try:
-            logger.debug("[decisions] session.bind.url=%s", get_engine().url)
-            logger.debug("[decisions] query row_count=%s ids=%s", len(out), [r.get("id") for r in out[:10]])
-        except Exception:
-            pass
-        # No engine-level fallback: keep a single source of truth via sessions
-        return {"results": out}
+            # An empty authoritative read is a result, not a schema failure.
+            # Retrying another source can discard temporal filters and return
+            # records outside the requested knowledge/effective-time window.
+            return {"results": out}
+        except SQLAlchemyError as exc:
+            logger.exception("Decision history read failed")
+            raise HTTPException(status_code=503, detail="decision_history_unavailable") from exc
 
 
 @router.get("/latest")

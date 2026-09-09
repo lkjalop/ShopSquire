@@ -223,6 +223,7 @@ async def execute_open_world_publisher_discovery_async(
     workload_kind_hints: list[str] | None = None,
     unresolved_concepts: list[str] | None = None,
     cancellation_requested: Callable[[], bool] | None = None,
+    product_type: str = "",
 ) -> dict[str, Any]:
     """Discover and persist publisher candidates for one durable shopping case."""
 
@@ -311,6 +312,7 @@ async def execute_open_world_publisher_discovery_async(
         list(unresolved_concepts or []),
         workload_kind_hints=list(workload_kind_hints or []),
         consent=True,
+        product_type=product_type,
     )
     stage_timings["structured_identity_first_ms"] = round(
         (time.monotonic() - stage_started) * 1000
@@ -469,6 +471,7 @@ async def execute_open_world_publisher_discovery_async(
             discovery.get("identity_resolution"),
             workload_kind_hints=list(workload_kind_hints or []),
             consent=True,
+            product_type=product_type,
         )
         stage_timings["structured_provider_resolution_ms"] = round(
             (time.monotonic() - stage_started) * 1000

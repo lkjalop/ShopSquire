@@ -47,6 +47,9 @@ class ResearchOutcome(BaseModel):
     held_claim_count: int = Field(default=0, ge=0)
     accepted_claim_count: int = Field(default=0, ge=0)
     rejected_claim_count: int = Field(default=0, ge=0)
+    compilation_scopes: list[dict[str, Any]] = Field(default_factory=list)
+    missing_requirement_attributes: list[str] = Field(default_factory=list)
+    literal_requirement_observations: list[dict[str, Any]] = Field(default_factory=list)
     requirement_completeness: Literal[
         "unknown", "none", "identity_only", "partial", "complete",
     ] = "unknown"
@@ -181,6 +184,17 @@ def build_research_outcome(
     requirement_data = dict(requirements or {})
     rows = [*list(_dicts(research_data)), *list(_dicts(requirement_data))]
     identity = _identity(rows)
+    # Observations are delivered independently of compiled/accepted predicates.
+    # Repeated projections must not duplicate a cited publisher observation.
+    literal_observations = {}
+    for row in rows:
+        for observation in row.get("literal_requirement_observations") or []:
+            if not isinstance(observation, Mapping) or not observation.get("observation_id"):
+                continue
+            if observation.get("disposition") != "observed" or observation.get("fit_authority") != "none":
+                continue
+            if len(literal_observations) < 32:
+                literal_observations[str(observation["observation_id"])] = dict(observation)
 
     certificate = next((
         row for row in rows
@@ -213,7 +227,21 @@ def build_research_outcome(
         len(pending_review_rows),
         sum(int(row.get("provisional_claim_count") or 0) for row in compilation_receipts),
     )
-    rejected = max(len(rejected_rows), int(compilation.get("rejected") or 0))
+    # The same compiler receipt can be carried by multiple projections. Count
+    # its distinct rejected predicates, including connector-local rejections.
+    compiler_rejections = {
+        (
+            str(item.get("claim_id") or ""),
+            str(item.get("attribute_key") or ""),
+            str(item.get("reason") or ""),
+        )
+        for row in rows
+        for item in (row.get("claim_rejections") or [])
+        if isinstance(item, Mapping)
+    }
+    rejected = max(
+        len(rejected_rows), len(compiler_rejections), int(compilation.get("rejected") or 0),
+    )
     # Connector evidence may carry already-compiled accepted requirements.
     compiled = max((
         len(row.get("compiled_requirements") or [])
@@ -230,10 +258,49 @@ def build_research_outcome(
         int(compilation.get("parsed") or 0),
     )
 
+    # Scoped provider groups are assessed independently: attributes from two
+    # different workloads cannot fill each other's missing obligations.
+    from src.app.services.recommendation_core.requirement_scope import RequirementScope, scope_is_current
+    scopes: dict[str, dict[str, Any]] = {}
+    missing_attributes: set[str] = set()
+    for row in rows:
+        predicates = row.get("compiled_requirements")
+        if not isinstance(predicates, list):
+            continue
+        groups: dict[tuple[str, str, str], tuple[Any, set[str]]] = {}
+        for predicate in predicates:
+            if not isinstance(predicate, Mapping) or not predicate.get("compilation_scope"):
+                continue
+            try:
+                scope = RequirementScope.model_validate(predicate["compilation_scope"])
+            except ValueError:
+                missing_attributes.add("valid_manifest_scope")
+                continue
+            scope_key = scope.model_dump_json()
+            scopes[scope_key] = scope.model_dump(mode="json")
+            # Container shape is not identity: one provider row can contain
+            # obligations for several artifacts or versions.
+            key = (scope_key, str(predicate.get("artefact_name") or "").casefold(),
+                   str(predicate.get("artefact_version") or ""))
+            if key not in groups:
+                groups[key] = (scope, set())
+            if predicate.get("verification_status") == "verified":
+                groups[key][1].add(str(predicate.get("attribute_key") or ""))
+        for scope, present in groups.values():
+            if not scope_is_current(scope):
+                missing_attributes.add("current_manifest_revision")
+            if not scope.required_attributes:
+                missing_attributes.add("manifest_obligations")
+            missing_attributes.update(set(scope.required_attributes) - present)
+
     completeness_value = str(_first(rows, "requirements_completeness") or "").lower()
     evidence_outcome = str(_first(rows, "evidence_outcome") or "").lower()
-    if any(row.get("claim_rejections") for row in rows):
+    if missing_attributes:
         completeness = "partial"
+    elif any(row.get("claim_rejections") for row in rows):
+        completeness = "partial"
+    elif scopes and not held:
+        completeness = "complete"
     elif completeness_value in {"minimum_and_recommended", "complete", "accepted_complete"}:
         completeness = "complete"
     elif held or accepted or compiled or "partial" in completeness_value:
@@ -360,6 +427,9 @@ def build_research_outcome(
         held_claim_count=held,
         accepted_claim_count=accepted,
         rejected_claim_count=rejected,
+        compilation_scopes=list(scopes.values()),
+        missing_requirement_attributes=sorted(missing_attributes),
+        literal_requirement_observations=list(literal_observations.values()),
         requirement_completeness=completeness,
         catalog_authority=bounded_catalog,
         commerce_authority=bounded_commerce,

@@ -1,6 +1,21 @@
 from src.app.services.research_outcome import build_research_outcome
 
 
+def test_literal_observations_are_delivered_without_counting_as_accepted_predicates():
+    observation = {"observation_id": "obs-example", "attribute_key": "gpu_model",
+                   "value": "GPU A OR GPU B", "canonical_title": "Unseen subject",
+                   "disposition": "observed", "fit_authority": "none"}
+    outcome = build_research_outcome(
+        case_id="case", case_revision=2, operation_id="op", requirements={},
+        catalog_authority="blocked", commerce_authority="none",
+        research={"evidence": [{"literal_requirement_observations": [observation]},
+                               {"literal_requirement_observations": [observation]}]},
+    )
+    assert outcome.literal_requirement_observations == [observation]
+    assert outcome.accepted_claim_count == 0
+    assert outcome.catalog_authority == "blocked"
+
+
 def test_complete_publisher_document_does_not_hide_partial_claim_compilation():
     outcome = build_research_outcome(case_id="sc-partial", case_revision=2,
         operation_id="op-partial", catalog_authority="permitted", commerce_authority="none",
@@ -12,6 +27,7 @@ def test_complete_publisher_document_does_not_hide_partial_claim_compilation():
     assert outcome.requirement_completeness == "partial"
     assert outcome.catalog_authority == "blocked"
     assert outcome.failure_code == "requirements_incomplete"
+    assert outcome.rejected_claim_count == 1
 
 
 def test_held_claims_are_not_reported_as_no_evidence_or_verified() -> None:

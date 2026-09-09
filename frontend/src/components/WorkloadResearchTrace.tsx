@@ -122,7 +122,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     ? Boolean(evidenceOutput.consent_recorded)
     : buyerConsent?.status === 'recorded');
   const hasResearch = Boolean(
-    evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
+    researchOutcome || evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || postCatalogTrigger.id
     || semanticEvidence.id || semanticAuthorization.id || evidenceLadder.length
     || Object.keys(officialResearch).length > 0

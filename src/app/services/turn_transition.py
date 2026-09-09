@@ -87,6 +87,7 @@ class RevisionBoundTurnReadModel(BaseModel):
         "revision-bound-turn-read-model.v1"
     )
     case_id: str
+    operation_id: str | None = None
     case_revision: int = Field(ge=1)
     transition: TurnTransition
     objective: str | None = None
@@ -176,6 +177,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
     ) if outcome.failure_code == "requirements_incomplete" else commit.assistant_message
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
+        operation_id=commit.operation_id,
         case_revision=revision,
         transition=commit.transition,
         objective=commit.objective,

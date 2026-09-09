@@ -135,9 +135,15 @@ def resolve_semantic_evidence_stage(
         research_attempted=True,
         research_status=str(concept_data.get("status") or ""),
     )
+    from src.app.platform.store_profile import active_profile_id
+    from src.app.services.recommendation_core.requirement_scope import resolve_requirement_scope
     compilation = compile_authoritative_requirements(
-        item for item in list(concept_data.get("claims") or [])
-        if isinstance(item, dict)
+        [item for item in list(concept_data.get("claims") or []) if isinstance(item, dict)],
+        scope=resolve_requirement_scope(
+            tenant_id=envelope.tenant_id, profile_id=active_profile_id(),
+            product_type=str(getattr(decision, "node_handle", "") or ""),
+            relationship=str(getattr(decision, "subject_role", "") or ""),
+        ),
     )
     catalog_qualifications = tuple(
         dict(item) for item in (concept_data.get("catalog_qualifications") or [])

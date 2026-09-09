@@ -63,6 +63,7 @@ class AttributeDef:
     enum_values: Dict[str, Tuple[str, ...]] = field(default_factory=dict)  # canonical -> aliases
     true_markers: Tuple[str, ...] = ()   # boolean: phrases in title/specs that imply True
     text_extract: bool = False
+    allowed_uses: Tuple[str, ...] = ()
 
 
 @lru_cache(maxsize=8)
@@ -90,6 +91,7 @@ def load_defs(vertical: str) -> Dict[str, AttributeDef]:
                              for c, al in (d.get("values") or {}).items()},
                 true_markers=tuple(str(m).lower() for m in d.get("true_markers") or ()),
                 text_extract=bool(d.get("text_extract")),
+                allowed_uses=tuple(str(use) for use in d.get("allowed_uses", [role])),
             )
     except FileNotFoundError:
         pass
@@ -376,6 +378,7 @@ def _phrase_in(haystack_padded: str, needle: str) -> bool:
 _OPS = {
     ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b,
     "<": lambda a, b: a < b, "==": lambda a, b: a == b,
+    "=": lambda a, b: a == b,
     "in": lambda a, b: a in (b if isinstance(b, (list, tuple, set)) else [b]),
 }
 

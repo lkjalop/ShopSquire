@@ -7,6 +7,231 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from typing import Optional
+import re
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    budget = _extract_budget_bounds(query)
+    if budget.get("budget_min") is not None:
+        out["budget_min"] = budget.get("budget_min")
+    if budget.get("budget_max") is not None:
+        out["budget_max"] = budget.get("budget_max")
+    # Preserve whole-order budget semantics across the CART_MUTATE short circuit. Without these
+    # typed fields, a later quantity change falls back to the budget from the original search.
+    try:
+        from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+        budget_scope = classify_budget_scope(query)
+        parsed_budget = parse_budget(query)
+        if budget_scope == "total" and parsed_budget and parsed_budget.budget_max is not None:
+            total_budget = int(parsed_budget.budget_max)
+            if total_budget > 0:
+                out["budget_scope"] = "total"
+                out["total_budget_cents"] = total_budget * 100
+                out["budget_max"] = total_budget
+        elif budget_scope == "per_unit":
+            out["budget_scope"] = "per_unit"
+    except Exception:
+        logger.warning("confirmed-slot budget parsing failed", exc_info=True)
+    brands = _extract_brand_mentions(query)
+    if brands:
+        out["brands"] = brands[:6]
+
+    data = response if isinstance(response, dict) else {}
+    applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
+    used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
+    # LONG-HORIZON qty memory: the bulk unit count survives non-qty turns the same way budget does —
+    # turn 1 "need 25 laptops", turn 3 "which has the best battery?" must still know it's a 25-unit
+    # conversation (Add buttons + procurement previews read requested_quantity every turn).
+    _rq = data.get("requested_quantity")
+    if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
+        out["order_quantity"] = int(_rq)
+    decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+    exact_product_sku = str(decision.get("exact_product_sku") or "").strip()
+    if exact_product_sku:
+        out["exact_product_sku"] = exact_product_sku
+    for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
+        v = applied.get(key)
+        if v is None:
+            v = used.get(key)
+        if v is not None:
+            out[key] = v
+    for key in ("brands", "specs", "brand_excludes", "use_case_tags"):
+        vv = applied.get(key)
+        if vv is None:
+            vv = used.get(key)
+        if isinstance(vv, list) and vv:
+            out[key] = vv[:12]
+    # The legacy chat extractor sees every catalog brand token as positive.  Reconcile it
+    # with the shared core's clamped exclusion before persisting session memory.
+    excluded = {str(v).strip().lower() for v in (out.get("brand_excludes") or []) if str(v).strip()}
+    if excluded and isinstance(out.get("brands"), list):
+        kept = [v for v in out["brands"] if str(v).strip().lower() not in excluded]
+        if kept:
+            out["brands"] = kept
+        else:
+            out.pop("brands", None)
+    if isinstance(data.get("product_identity"), dict):
+        ident = data.get("product_identity") or {}
+        if ident.get("constraints"):
+            out["image_identity"] = ident.get("constraints")
+    return out
+
+
+def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
+    """Project canonical query-budget facts, including intentional abstention."""
+    from src.app.services.budget_grammar import parse_budget
+
+    budget = parse_budget(query)
+    return {
+        "budget_min": budget.budget_min if budget and budget.found else None,
+        "budget_max": budget.budget_max if budget and budget.found else None,
+    }
+
+
+def _is_budget_query_text(query: str | None) -> bool:
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    if any(
+        tok in q
+        for tok in (
+            "budget",
+            "under",
+            "below",
+            "up to",
+            "between",
+            "only have",
+            "is that enough",
+            "is this enough",
+            "for high school",
+            "for school",
+            "for university",
+            "for work",
+            "for gaming",
+        )
+    ):
+        return True
+    bounds = _extract_budget_bounds(q)
+    return bounds.get("budget_min") is not None or bounds.get("budget_max") is not None or bool(
+        re.search(r"\$\s*\d{3,5}\b", q)
+    )
+
+
+_DEFICIT_OBS_RE = re.compile(
+    r"only\s+have\s+a?\s*few|few\s+in\s+stock|limited\s+stock|not\s+enough\s+(?:in\s+)?stock|"
+    r"wait\w*\s+(?:for|on)\s+(?:a\s+)?(?:re-?order|re-?stock|restock|backorder|back-?order|the\s+rest|stock)|"
+    r"ok\s+(?:to\s+|with\s+)?wait|back-?order|re-?order",
+    re.I,
+)
+_BULK_QTY_RE = re.compile(r"\b(\d{2,5})\s+[a-z][a-z\s]{0,24}?(?:laptop|desktop|monitor|tablet|unit|machine|device|pc)s?\b", re.I)
+
+
+def _strip_deficit_observation(q: str) -> str:
+    """Remove the shortfall-observation tail from a deficit-reorder query so retrieval sees only
+    the bulk need. 'i need 50 dell laptops but you only have a few in stock, am i ok waiting for a
+    reorder?' -> 'i need 50 dell laptops'. Conservative: only cuts at an observation connector so
+    a plain bulk request is never truncated."""
+    cut = re.split(
+        r"\b(?:but|and)\s+(?:you|i|we)\s+(?:only\s+have|have\s+only|think|know)\b|"
+        r"\bbut\s+(?:you\s+)?(?:only\s+have|have\s+a?\s*few|few\s+in\s+stock|limited\s+stock)\b|"
+        r",?\s*(?:am\s+i\s+ok|is\s+it\s+ok|ok\s+(?:to\s+|with\s+)?wait)\b",
+        q, maxsplit=1, flags=re.I,
+    )[0].strip().rstrip(",")
+    return cut if len(cut) >= 6 else q
+
+
+def _is_deficit_reorder_query(q: str) -> bool:
+    """A bulk QUANTITY need + a deficit/reorder OBSERVATION ("i need 50 dell laptops but you only
+    have a few in stock, ok waiting for a reorder?"). The buyer is acknowledging a shortfall and
+    asking about backorder — NOT requesting a low-stock filter. Without this it hit
+    _classify_turn_intent's `"only " in q` -> FILTER -> the "few in stock" filter zeroed retrieval
+    (live: 0 products, backorder capability fact never reached the answer). Routing it to SEARCH
+    lets the bulk-sourcing path run (products + sourcing preview + the reorder-consent narration)."""
+    if not _DEFICIT_OBS_RE.search(q):
+        return False
+    return bool(_BULK_QTY_RE.search(q)) or bool(re.search(r"\b\d{2,5}\b", q))
+
+
+def _classify_turn_intent(query: str) -> str:
+    q = str(query or "").strip().lower()
+    if not q:
+        return "SEARCH"
+    # Deficit/reorder-consent BEFORE the FILTER branch: a "you only have a few in stock, ok to
+    # wait for a reorder?" turn is a bulk-sourcing intent, not a stock filter (2026-07-09).
+    if _is_deficit_reorder_query(q):
+        return "SEARCH"
+    # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
+    # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
+    # policy questions ("what is your warranty policy?") into photo-triage with zero products.
+    from src.app.services.answer_quality import is_support_claim, policy_faq_answer
+    if is_support_claim(q):
+        return "SUPPORT_CLAIM"
+    if policy_faq_answer(q) is not None:
+        return "POLICY_QUESTION"
+    if (
+        " vs " in q
+        or "compare" in q
+        or "difference" in q
+        or "show both" in q
+        or "which is better" in q
+    ):
+        return "COMPARE"
+    if (
+        q.startswith("why ")
+        or " why " in q
+        or "explain" in q
+        or "reason" in q
+        or "if not why" in q
+        or "overkill" in q
+        or "should i" in q
+    ):
+        return "EXPLAIN"
+    if (
+        "under $" in q
+        or "between $" in q
+        or "budget" in q
+        or "price range" in q
+        or "widen" in q
+        or "increase" in q
+        or "decrease" in q
+        or "only " in q
+        or " with " in q
+        or "without " in q
+    ):
+        return "FILTER"
+    return "SEARCH"
+
+
+def _is_budget_question(item: Dict[str, Any]) -> bool:
+    text = str((item or {}).get("text") or "").lower()
+    qid = str((item or {}).get("id") or "").lower()
+    return any(
+        tok in text or tok in qid
+        for tok in ("budget", "price range", "price", "widen_budget", "budget_range", "increase_match_space")
+    )
+
+
+def _budget_range_from_slots(slots: Dict[str, Any] | None, query: str) -> Dict[str, int | None]:
+    out = _extract_budget_bounds(query)
+    s = slots if isinstance(slots, dict) else {}
+    if out.get("budget_min") is None and s.get("budget_min") is not None:
+        try:
+            out["budget_min"] = int(float(s.get("budget_min")))
+        except Exception:
+            pass
+    if out.get("budget_max") is None and s.get("budget_max") is not None:
+        try:
+            out["budget_max"] = int(float(s.get("budget_max")))
+        except Exception:
+            pass
+    return out
+
+
 
 def terminal_scope_contract(*, scope, case_id, case_revision, applicable=True):
     """Describe binding truth without inventing scope for an early/degraded exit."""

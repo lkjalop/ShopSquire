@@ -5,6 +5,23 @@ from src.app.services.recommendation_core.interpretation_stage import (
 from src.app.services.recommendation_core.turn_router import TurnDecision
 
 
+def test_resolved_product_scope_reaches_intent(monkeypatch):
+    received = []
+    def resolve(*args, **kwargs):
+        received.append(kwargs["resolved_product_type"])
+        return {"requirements": {}, "use_cases": [], "use_case_variants": {}}
+    monkeypatch.setattr("src.app.services.recommendation_core.interpretation_stage.resolve_intent", resolve)
+    monkeypatch.setattr("src.app.services.recommendation_core.interpretation_stage.observe_workload_interpretations",
+                        lambda *args, **kwargs: None)
+    for node in ("el-6-6", "el-6-2", None):
+        resolve_interpretation_stage(
+            TurnDecision(requested_product_node=node, node_handle=node),
+            TurnEnvelope(tenant_id="default", uid="buyer", query="host software", trace_id="scope"),
+            vertical="electronics", is_workload_host_product=lambda _: True,
+        )
+    assert received == ["el-6-6", "el-6-2", ""]
+
+
 def test_accessory_keeps_buyer_requirement_but_drops_workload_floor(monkeypatch) -> None:
     monkeypatch.setattr(
         "src.app.services.recommendation_core.interpretation_stage.resolve_intent",

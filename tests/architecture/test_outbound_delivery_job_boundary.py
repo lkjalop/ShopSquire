@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_operator_outbound_endpoint_does_not_transmit_inline():
-    path = Path("src/app/routers/fulfillment_cases.py")
+    path = Path("src/app/routers/fulfillment_outbound.py")
     tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     route = next(
         node for node in ast.walk(tree)

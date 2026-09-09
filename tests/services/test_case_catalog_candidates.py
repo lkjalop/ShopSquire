@@ -9,6 +9,16 @@ from src.app.services.catalog_evidence_seed import ingest_reviewed_configuration
 from src.app.services.taxonomy_registry import add_sold_node
 
 
+@pytest.mark.parametrize("purpose,changed", [
+    ("Actually I need a computer chair under AUD 400, not a laptop.", True),
+    ("Now I need 10 gaming laptops with a total budget of AUD 30,000.", False),
+    ("Increase the budget to AUD 4000.", False),
+])
+def test_explicit_category_transition_uses_taxonomy_not_budget(purpose, changed):
+    from src.app.services.case_catalog_candidates import buyer_category_changed
+    assert buyer_category_changed({"selected_taxonomy_root": "el-6-6"}, purpose) is changed
+
+
 def _database():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)

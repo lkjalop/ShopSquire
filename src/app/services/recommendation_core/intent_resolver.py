@@ -227,7 +227,8 @@ def resolve(use_cases: Optional[List[str]],
             vertical: Optional[str] = None,
             use_case_variants: Optional[Dict[str, str]] = None,
             workload_entities: Optional[List[Tuple[str, str]]] = None,
-            external_research_consent: bool = False) -> Dict[str, Any]:
+            external_research_consent: bool = False,
+            resolved_product_type: str = "el-6") -> Dict[str, Any]:
     """The resolver (M2-B1: RANGES + provenance + surfaced conflicts). Returns:
       requirements  — {key: [(op, thr), ...]} — KB profiles ∪ per-title ∪ model-stated merged
                       by INTERSECTION (floors max, ceilings min; a floor AND a ceiling coexist
@@ -302,7 +303,8 @@ def resolve(use_cases: Optional[List[str]],
                 resolve_named_workloads,
             )
             grounded = resolve_named_workloads(
-                workload_entities, consent=external_research_consent)
+                workload_entities, consent=external_research_consent,
+                product_type=resolved_product_type)
             if grounded["requirements"]:
                 merged = merge_maps(
                     merged,

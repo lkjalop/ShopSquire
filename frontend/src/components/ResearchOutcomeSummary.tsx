@@ -11,6 +11,15 @@ export type ResearchOutcome = {
   held_claim_count: number;
   accepted_claim_count: number;
   rejected_claim_count: number;
+  missing_requirement_attributes?: string[];
+  literal_requirement_observations?: Array<{
+    observation_id: string; canonical_title?: string; attribute_key: string; value: string;
+    disposition: string; fit_authority: string; source_excerpt?: string;
+  }>;
+  compilation_scopes?: Array<{
+    tenant_id: string; product_type: string; relationship: string;
+    manifest_id: string; manifest_revision: string;
+  }>;
   requirement_completeness: string;
   catalog_authority: string;
   commerce_authority: string;
@@ -26,7 +35,7 @@ export default function ResearchOutcomeSummary({ outcome }: { outcome: ResearchO
   const state = held && Number(outcome.rejected_claim_count || 0) > 0 && !accepted
     ? 'Held source evidence · rejected for case'
     : held ? 'Held for review'
-    : outcome.source_ownership_status === 'verified' ? 'Verified evidence'
+    : outcome.source_ownership_status === 'verified' ? 'Publisher ownership verified'
       : outcome.source_ownership_status === 'accepted_case_only' ? 'Accepted case-only evidence'
         : Number(outcome.rejected_claim_count || 0) > 0 && !accepted ? 'Rejected evidence'
         : accepted ? 'Provisional constraints'
@@ -64,6 +73,33 @@ export default function ResearchOutcomeSummary({ outcome }: { outcome: ResearchO
           {outcome.failure_code ? <> · {words(outcome.failure_code)}</> : null}
         </div>
       ) : null}
+      {!!outcome.missing_requirement_attributes?.length && (
+        <div style={{ marginTop: 4, fontSize: 12 }}>
+          Missing requirements: {outcome.missing_requirement_attributes.map(words).join(', ')}
+        </div>
+      )}
+      {!!outcome.compilation_scopes?.length && (
+        <details style={{ marginTop: 4, fontSize: 12 }}>
+          <summary>Requirement scope</summary>
+          {outcome.compilation_scopes.map((scope, index) => (
+            <div key={`${scope.manifest_revision}-${index}`}>
+              {scope.manifest_id} · {scope.product_type} · {words(scope.relationship)}
+              <div>Manifest revision: {scope.manifest_revision}</div>
+            </div>
+          ))}
+        </details>
+      )}
+      {!!outcome.literal_requirement_observations?.length && (
+        <details style={{ marginTop: 4, fontSize: 12 }}>
+          <summary>Literal publisher observations — not compatibility verification</summary>
+          {outcome.literal_requirement_observations.map(observation => (
+            <div key={observation.observation_id} style={{ marginTop: 4 }}>
+              {observation.canonical_title}: {words(observation.attribute_key)} — {observation.value}
+              {observation.source_excerpt ? <blockquote>{observation.source_excerpt}</blockquote> : null}
+            </div>
+          ))}
+        </details>
+      )}
     </section>
   );
 }

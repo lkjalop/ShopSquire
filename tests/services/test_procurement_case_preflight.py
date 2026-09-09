@@ -113,6 +113,23 @@ def test_competing_stale_revision_is_rejected(monkeypatch) -> None:
         raise AssertionError("stale competing patch was accepted")
 
 
+def test_chat_preflight_stages_changes_without_publishing_a_revision() -> None:
+    db = _db()
+    state = _seed(db)
+    result = apply_case_patches_before_evaluation(
+        db, tenant_id="tenant-a", uid="buyer", session_epoch="epoch-1",
+        trace_id="stage-only", session={"procurement_case_state": state},
+        patches=({"operation": "set", "path": "objective", "value": "New fleet"},),
+        persist=False,
+    )
+    assert result.state.objective == "New fleet"
+    assert result.state.revision == state["revision"]
+    assert result.application["status"] == "staged"
+    persisted = get_case_state(db, tenant_id="tenant-a", case_id="case-60", session_epoch="epoch-1")
+    assert persisted["procurement_case_state"]["objective"] == "Unreal Engine fleet"
+    assert db.execute(text("SELECT COUNT(*) FROM conversation_case_amendment")).scalar() == 0
+
+
 def test_temporal_patch_persists_resolution_in_same_case_revision(monkeypatch) -> None:
     db = _db()
     state = _seed(db)

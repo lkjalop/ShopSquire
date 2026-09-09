@@ -14,3 +14,11 @@ describe('trace presentation', () => {
     expect(shouldShowMissingAnchorReasoning([], [])).toBe(true);
   });
 });
+import { slateConsistencyLabel } from '../tracePresentation';
+
+it('does not equate matching empty shelves with verified product fit', () => {
+  expect(slateConsistencyLabel(true, true, 0)).toBe('Empty — no products');
+  expect(slateConsistencyLabel(true, true, 2)).toBe('Matches recorded order');
+  expect(slateConsistencyLabel(true, false, 2)).toBe('Mismatch — review required');
+  expect(slateConsistencyLabel(false, false, 0)).toBe('Not recorded');
+});

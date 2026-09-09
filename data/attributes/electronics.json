@@ -1,5 +1,10 @@
 {
   "vertical": "electronics",
+  "compilation": {
+    "taxonomy_roots": ["el-6"],
+    "relationships": ["RUN_SUBJECT_ON_PRODUCT", "COMPATIBILITY_CHECK"],
+    "required_attributes": ["ram_gb", "cpu_model", "gpu_model", "os", "storage_gb", "storage_type"]
+  },
   "attributes": {
     "ram_gb": {
       "role": "fit",
@@ -46,6 +51,7 @@
     },
     "storage_gb": {
       "role": "variant_axis",
+      "allowed_uses": ["variant_axis", "fit"],
       "kind": "quantity",
       "unit": "GB",
       "bounds": [
@@ -304,6 +310,7 @@
     },
     "os": {
       "role": "descriptive",
+      "allowed_uses": ["descriptive", "fit"],
       "kind": "enum",
       "key_aliases": [
         "operating_system"

@@ -17,7 +17,7 @@ import {
   projectTraceDomains,
 } from './decision-trace/traceProjections';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
-import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
+import { shouldShowMissingAnchorReasoning, slateConsistencyLabel } from '../lib/tracePresentation';
 import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
 import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './ProcurementOperationalTrace';
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
@@ -751,9 +751,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     canSeeOperatorDraft,
     revision: procurementRevision,
   });
-  const shoppingCaseId = shoppingCaseIdFromTraceEvents(events);
+  const shoppingCaseId = localTurnProjection?.case_id || currentResearchOutcome?.case_id
+    || shoppingCaseIdFromTraceEvents(events);
   const decisionRunTrace = useDecisionTraceData({
     active: activeTab === 'audit', caseId: shoppingCaseId,
+    revision: currentResearchOutcome?.case_revision || localTurnProjection?.case_revision,
   });
   const selectTraceLeaf = (leaf: TraceLeafTab) => {
     setActiveTab(leaf);
@@ -2429,8 +2431,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     <span>{humanizeKey(String((recommendationEventPayload as any)?.execution_mode || 'legacy_or_unrecorded'))}</span>
                   </div>
                   <div className={styles.kvRow}>
-                    <span>Canonical slate</span>
-                    <span>{canonicalIdentity ? (canonicalIdentityVerified ? 'Verified' : 'Mismatch - review required') : 'Not recorded'}</span>
+                    <span>Slate consistency (not fit authority)</span>
+                    <span>{slateConsistencyLabel(Boolean(canonicalIdentity), canonicalIdentityVerified, visibleOrderedSkus.length)}</span>
                   </div>
                   <div className={styles.kvRow}>
                     <span>Tier Decision</span>

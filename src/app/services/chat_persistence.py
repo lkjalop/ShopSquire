@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,80 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from src.app.services.memory import Memory
+
+import base64
+from typing import Dict, List
+from src.app.services.chat_turn_projection import _extract_budget_bounds, _extract_brand_mentions
+
+
+def _store_chat_message(
+    db,
+    *,
+    uid: str,
+    role: str,
+    content: str,
+    trace_id: str | None,
+    session_id: str | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
+) -> str | None:
+    from src.app.services.chat_persistence import store_chat_message
+
+    return store_chat_message(
+        db,
+        uid=uid,
+        role=role,
+        content=content,
+        trace_id=trace_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        session_epoch=session_epoch,
+    )
+
+
+def _stash_image_blob_for_recommend(mem: Memory, uid: str, image_hash: str, image_bytes: bytes) -> None:
+    if not uid or not image_hash or not image_bytes:
+        return
+    max_bytes = int(os.getenv("CHAT_IMAGE_BLOB_CACHE_MAX_BYTES", "262144") or 262144)
+    if len(image_bytes) > max_bytes:
+        return
+    kv = mem.get_kv(uid) or {}
+    blob_cache = kv.get("image_blob_cache") if isinstance(kv.get("image_blob_cache"), dict) else {}
+    blob_cache[str(image_hash)] = base64.b64encode(image_bytes).decode("ascii")
+    # Keep only latest 2 blobs to bound session size.
+    keys = list(blob_cache.keys())
+    if len(keys) > 2:
+        for k in keys[:-2]:
+            blob_cache.pop(k, None)
+    kv["image_blob_cache"] = blob_cache
+    mem.set_kv(uid, kv)
+
+
+def _persist_chat_structured_state(
+    *,
+    redis,
+    uid: str,
+    query: str,
+    products: List[Dict[str, Any]] | None,
+    trace_id: str | None,
+    assistant_message: str | None = None,
+    recent_messages: List[Dict[str, Any]] | None = None,
+    confirmed_slots: Dict[str, Any] | None = None,
+    semantic_resolution: Dict[str, Any] | None = None,
+    case_anchor: Dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
+) -> None:
+    from src.app.services.chat_persistence import persist_chat_structured_state
+
+    return persist_chat_structured_state(
+        redis=redis, uid=uid, query=query, products=products, trace_id=trace_id,
+        budget=_extract_budget_bounds(query), brands=_extract_brand_mentions(query),
+        assistant_message=assistant_message, recent_messages=recent_messages,
+        confirmed_slots=confirmed_slots, semantic_resolution=semantic_resolution,
+        case_anchor=case_anchor, tenant_id=tenant_id, session_epoch=session_epoch,
+    )
+
 
 
 @dataclass(frozen=True)

@@ -66,7 +66,7 @@ def _minimum_constraints(requirements: Dict[str, Any]) -> Dict[str, Tuple[str, f
 
 
 def compile_workload_evidence_requirements(
-    result: Dict[str, Any], *, kind: str, name: str,
+    result: Dict[str, Any], *, kind: str, name: str, product_type: str = "el-6",
 ):
     """Compile one enrolled provider record into registry-authorized receipts.
 
@@ -84,6 +84,7 @@ def compile_workload_evidence_requirements(
         claims.append({
             "need_id": f"{kind}:{attr}",
             "subject_span": str(name)[:120],
+            "artefact_name": str(name)[:160],
             "claim_type": "minimum_requirements",
             "status": "accepted",
             "source_id": result.get("source") or result.get("provider_id"),
@@ -95,12 +96,28 @@ def compile_workload_evidence_requirements(
             "value": predicate[1],
             "authority": "official_requirements",
             "lineage_root": result.get("source") or result.get("provider_id"),
+            # This predicate came from a comparison table, not the publisher's
+            # literal hardware requirement. The compiler must not promote it.
+            "claim_origin": "derived" if attr == "gpu_vram_gb" else "observed",
+            "source_excerpt": (
+                str((result.get("minimum") or {}).get("gpu") or "")[:1000]
+                if attr == "gpu_vram_gb" else None
+            ),
         })
-    return compile_authoritative_requirements(claims)
+    from src.app.platform.store_profile import active_profile_id
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.recommendation_core.requirement_scope import resolve_requirement_scope
+    # This adapter translates computer-host requirements, not arbitrary retail
+    # product claims. A tenant profile without a computer-host policy abstains.
+    scope = resolve_requirement_scope(
+        tenant_id=current_tenant_id(), profile_id=active_profile_id(),
+        product_type=product_type, relationship="RUN_SUBJECT_ON_PRODUCT",
+    )
+    return compile_authoritative_requirements(claims, scope=scope)
 
 
 def resolve_named_workloads(
-    entities: Iterable[Tuple[str, str]], *, consent: bool,
+    entities: Iterable[Tuple[str, str]], *, consent: bool, product_type: str = "el-6",
 ) -> Dict[str, Any]:
     """Resolve clamped workload entities into authorized minimum constraints.
 
@@ -112,7 +129,7 @@ def resolve_named_workloads(
     from src.app.services.connectors.workload_evidence import default_registry
 
     registry = default_registry()
-    requirements: Dict[str, Tuple[str, float]] = {}
+    requirements: Dict[str, list[Tuple[str, Any]]] = {}
     evidence = []
     seen = set()
     for raw_kind, name in list(entities)[:3]:
@@ -140,7 +157,7 @@ def resolve_named_workloads(
             })
             continue
         compilation = compile_workload_evidence_requirements(
-            result, kind=kind, name=name,
+            result, kind=kind, name=name, product_type=product_type,
         )
         if not compilation.requirements:
             evidence.append({
@@ -164,6 +181,7 @@ def resolve_named_workloads(
                 "confidence": result.get("confidence"),
                 "identity_resolution": dict(result.get("identity_resolution") or {}),
                 "minimum": dict(result.get("minimum") or {}),
+                "literal_requirement_observations": list(result.get("literal_requirement_observations") or []),
                 "recommended": dict(result.get("recommended") or {}),
                 "provider_attempts": provider_attempts,
                 "provider_coverage": "identity_only",
@@ -175,10 +193,13 @@ def resolve_named_workloads(
             continue
         for compiled in compilation.requirements:
             attr = compiled.attribute_key
-            predicate = (compiled.operator, float(compiled.value))
-            current = requirements.get(attr)
-            if current is None or predicate[1] > current[1]:
-                requirements[attr] = predicate
+            # Preserve typed predicates. The shared constraint engine owns
+            # intersection/conflict handling; a numeric max loses upper bounds
+            # and cannot represent categorical requirements.
+            predicate = (compiled.operator, compiled.value)
+            predicates = requirements.setdefault(attr, [])
+            if predicate not in predicates:
+                predicates.append(predicate)
         evidence.append({
             "kind": kind,
             "requested_name": name,
@@ -199,6 +220,7 @@ def resolve_named_workloads(
             "confidence": result.get("confidence"),
             "provenance_chain": list(result.get("provenance_chain") or []),
             "minimum": dict(result.get("minimum") or {}),
+            "literal_requirement_observations": list(result.get("literal_requirement_observations") or []),
             "recommended": dict(result.get("recommended") or {}),
             "requested_target": dict(result.get("requested_target") or {}),
             "provider_attempts": provider_attempts,
@@ -224,6 +246,7 @@ def resolve_canonical_workload_identity(
     *,
     workload_kind_hints: Iterable[str],
     consent: bool,
+    product_type: str = "el-6",
 ) -> Dict[str, Any]:
     """Re-query enrolled structured providers after cited identity resolution.
 
@@ -276,6 +299,7 @@ def resolve_canonical_workload_identity(
     result = resolve_named_workloads(
         [(kind, canonical_title) for kind in kinds[:2]],
         consent=consent,
+        product_type=product_type,
     )
     resolved = any(
         str(item.get("status") or "").strip().lower() == "resolved"
@@ -292,6 +316,7 @@ def resolve_canonical_workload_identity(
         fallback = resolve_named_workloads(
             [(kind, canonical_title) for kind in remaining_kinds],
             consent=consent,
+            product_type=product_type,
         )
         merged_requirements = dict(result.get("requirements") or {})
         merged_requirements.update(dict(fallback.get("requirements") or {}))
@@ -324,6 +349,7 @@ def resolve_canonical_workload_identity(
 
 def resolve_unresolved_concepts(
     concepts: Iterable[str], *, workload_kind_hints: Iterable[str], consent: bool,
+    product_type: str = "el-6",
 ) -> Dict[str, Any]:
     """Try the cheapest enrolled identity+requirements providers before open web.
 
@@ -349,7 +375,7 @@ def resolve_unresolved_concepts(
             "status": "not_attempted", "failure_code": "no_bounded_identity_concept",
             "requirements": {}, "evidence": [],
         }
-    result = resolve_named_workloads(entities, consent=consent)
+    result = resolve_named_workloads(entities, consent=consent, product_type=product_type)
     resolved = any(
         isinstance(item, dict)
         and item.get("status") == "resolved"

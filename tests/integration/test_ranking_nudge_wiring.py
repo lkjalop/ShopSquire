@@ -26,7 +26,6 @@ from tests.experiment_helpers import apply_experiment_migrations, create_sealed_
 from tests.taxonomy_helpers import apply_taxonomy_migration
 from tests.utils import default_headers
 
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
 client = TestClient(
     app,
     # This suite owns experiment/ranking composition, not observer persistence.
@@ -70,7 +69,7 @@ def _delete_ranking_experiment(db) -> None:
 
 
 @pytest.fixture()
-def nudge_stack(monkeypatch):
+def nudge_stack(monkeypatch, tmp_path):
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
     monkeypatch.setattr(
         "src.app.services.recommendation_core.turn_router._default_llm_fn",
@@ -80,8 +79,9 @@ def nudge_stack(monkeypatch):
     # Developer .env files may deliberately enable durable token budgets, so
     # own the boundary here rather than inheriting prior local Redis usage.
     monkeypatch.setenv("TOKEN_BUDGET_ENABLED", "false")
-    orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    with open(_FLAGS_PATH, "w", encoding="utf-8") as flags_file:
+    flags_path = tmp_path / "ranking-flags.json"
+    monkeypatch.setenv("FEATURE_FLAGS_PATH", str(flags_path))
+    with flags_path.open("w", encoding="utf-8") as flags_file:
         json.dump({
             "USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100,
             "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
@@ -146,9 +146,6 @@ def nudge_stack(monkeypatch):
         }],
     )
     yield monkeypatch
-    if orig_flags is not None:
-        with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
-            f.write(orig_flags)
     with db_session() as db:
         db.execute(text("DELETE FROM inventory WHERE product_id='RNW-1'"))
         db.execute(text("DELETE FROM products WHERE id='RNW-1'"))

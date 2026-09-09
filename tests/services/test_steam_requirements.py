@@ -32,6 +32,34 @@ _TOP_KEYS = {
 }
 
 
+def test_literal_cpu_and_source_rows_survive_bounding_without_invented_equivalence():
+    raw = (
+        '<ul><li>Processor: Example CPU A OR Example CPU B</li>'
+        '<li>Graphics: Example GPU A 6GB / Example GPU B 8GB</li>'
+        '<li>OS: Windows 11 (64 bit)</li></ul>'
+    )
+    parsed = _parse_requirements_html(raw, include_source_fields=True)
+    result = _bounded_requirements(parsed)
+    assert result['cpu'] == 'Example CPU A OR Example CPU B'
+    assert result['gpu'] == 'Example GPU A 6GB / Example GPU B 8GB'
+    assert result['os'] == 'Windows 11 (64 bit)'
+    assert 'gpu_vram_gb' not in result
+    for key in ('cpu', 'gpu', 'os'):
+        receipt = result['source_fields'][key]
+        assert receipt['representation'] == 'steam_requirement_line_v1'
+        assert receipt['text'][receipt['start']:receipt['end']] == result[key]
+
+
+def test_bounding_discards_forged_source_span():
+    result = _bounded_requirements({
+        'cpu': 'Example CPU A',
+        'source_fields': {'cpu': {'text': 'Processor: Another CPU', 'start': 11, 'end': 22,
+                                  'representation': 'steam_requirement_line_v1'}},
+    })
+    assert result['cpu'] == 'Example CPU A'
+    assert not result.get('source_fields')
+
+
 @pytest.fixture()
 def no_network(monkeypatch):
     """Any attempt to touch the network fails the test loudly."""

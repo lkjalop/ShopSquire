@@ -1,87 +1,73 @@
-import os
-import json
-from uuid import uuid4
-
-from tests.utils import default_headers
-
-# Force SQLite for this test file
-tmp_db = f".test_sqlite_bitemporal_{uuid4().hex}.sqlite"
-os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
-os.environ["FEATURE_FLAGS_PATH"] = "config/feature_flags.json"
-
+"""Isolated decision-history contract tests; never mutate application globals."""
+import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-import src.app.models.db as dbmod
-
-engine = create_engine(
-    f"sqlite+pysqlite:///{tmp_db}",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-    future=True,
-)
-SessionLocal = sessionmaker(bind=engine, future=True)
-dbmod.engine = engine
-dbmod.SessionLocal = SessionLocal
-
-from src.app.main import create_app
-from fastapi.testclient import TestClient
-
-app = create_app()
-client = TestClient(app, headers=default_headers())
+from sqlalchemy.orm import Session
+from src.app.routers import decisions
 
 
-def _enable_flags():
-    with open("config/feature_flags.json", "w", encoding="utf-8") as f:
-        json.dump({"DECISION_LOG_WRITES_ENABLED": True}, f)
-
-
-def _ensure_tables():
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS decision_logs (id TEXT PRIMARY KEY, agent_name TEXT, valid_from TEXT, valid_to TEXT, system_from TEXT, system_to TEXT, input_data TEXT, proposed_action TEXT, policy_version TEXT, approval_required BOOLEAN, execution_status TEXT)"
+@pytest.fixture
+def history(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE decision_logs (
+                id TEXT PRIMARY KEY, agent_name TEXT, valid_from TEXT, valid_to TEXT,
+                system_from TEXT, system_to TEXT, input_data TEXT, proposed_action TEXT,
+                policy_version TEXT, approval_required BOOLEAN, execution_status TEXT,
+                tenant_id TEXT NOT NULL DEFAULT 'default'
             )
-        )
+        """))
+        connection.execute(text("""
+            INSERT INTO decision_logs (id, agent_name, valid_from, valid_to, system_from,
+                system_to, input_data, proposed_action, policy_version, approval_required, execution_status) VALUES
+            ('original', 'agent', '2026-01-01', NULL, '2026-02-01', '2026-03-01',
+             '{}', '{}', 'v1', 0, 'executed'),
+            ('corrected', 'agent', '2026-01-01', NULL, '2026-03-01', NULL,
+             '{}', '{}', 'v2', 0, 'executed')
+        """))
+    monkeypatch.setattr(decisions, "_ff_get_flags", lambda: {})
+    monkeypatch.setattr(decisions, "_decision_reads_enabled", lambda _: True)
+    monkeypatch.setenv("READ_REPLICA_ENABLED", "0")
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
 
 
-def test_decision_query_includes_bitemporal_fields():
-    _enable_flags()
-    _ensure_tables()
-    # Override app.state.engine and dbmod.engine so request handlers
-    # read/write our StaticPool engine (same as our engine.begin() inserts).
-    import src.app.models.db as _dbmod
-    orig_app_engine = getattr(app.state, "engine", None)
-    orig_dbmod_engine = _dbmod.engine
-    app.state.engine = engine
-    _dbmod.engine = engine
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO decision_logs (id, agent_name, valid_from, system_from, input_data, proposed_action, policy_version, approval_required, execution_status) "
-                    "VALUES ('bitemp-1', 'rec-agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{}', '{}', 'v1', 0, 'executed')"
-                )
-            )
-        resp = client.get("/api/v1/decisions/query")
-        assert resp.status_code == 200
-        data = resp.json()
-        rows = data.get("results") or []
-        assert any(r.get("id") == "bitemp-1" for r in rows)
-        row = next(r for r in rows if r.get("id") == "bitemp-1")
-        assert row.get("valid_from")
-        assert row.get("system_from")
-    finally:
-        # Always restore to previous state regardless of what it was.
-        # conftest._restore_db_engine will further align all singletons.
-        app.state.engine = orig_app_engine
-        _dbmod.engine = orig_dbmod_engine
-        # Re-align all singletons so subsequent tests see a consistent engine.
-        from tests.conftest import _SINGLETONS, _SINGLETONS_LOCK
-        with _SINGLETONS_LOCK:
-            for _app_inst in _SINGLETONS.values():
-                try:
-                    _app_inst.state.engine = orig_dbmod_engine
-                except Exception:
-                    pass
+def test_decision_query_includes_bitemporal_fields(history):
+    rows = decisions.query_decisions(db=history, role="owner")["results"]
+    assert {row["id"] for row in rows} == {"original", "corrected"}
+    assert all(row["valid_from"] and row["system_from"] for row in rows)
+
+
+def test_temporal_range_filter_preserves_empty_result(history):
+    assert decisions.query_decisions(system_from="2099-01-01", db=history, role="owner") == {"results": []}
+
+
+def test_history_cannot_read_another_tenant(history):
+    history.execute(text("UPDATE decision_logs SET tenant_id='other' WHERE id='corrected'"))
+    result = decisions.query_decisions(db=history, role="owner")
+    assert [row["id"] for row in result["results"]] == ["original"]
+
+
+def test_equivalent_timezone_cutoffs_return_identical_history(history):
+    utc = decisions.query_decisions(known_at="2026-03-01T00:00:00Z", db=history, role="owner")
+    offset = decisions.query_decisions(known_at="2026-02-28T19:00:00-05:00", db=history, role="owner")
+    assert utc == offset
+
+
+def test_invalid_temporal_cutoff_is_rejected(history):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error:
+        decisions.query_decisions(known_at="not-a-date", db=history, role="owner")
+    assert error.value.status_code == 422
+
+
+@pytest.mark.parametrize("known_at,expected", [
+    ("2026-01-15", []),
+    ("2026-02-15", ["original"]),
+    ("2026-03-01", ["corrected"]),
+])
+def test_retroactive_correction_respects_knowledge_time(history, known_at, expected):
+    result = decisions.query_decisions(valid_at="2026-01-15", known_at=known_at,
+                                      db=history, role="owner")
+    assert [row["id"] for row in result["results"]] == expected

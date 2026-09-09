@@ -22,6 +22,24 @@ def test_distinct_predicates_never_share_the_provider_record_id():
     assert all(c["source_claim_ids"] == ["2162800"] for c in claims)
 
 
+def test_missing_or_unverified_status_is_not_promoted_to_official():
+    for status in [None, "unverified"]:
+        data = authorization()
+        for row in data["evidence"][0]["compiled_requirements"]:
+            if status:
+                row["verification_status"] = status
+        assert all(c["authority_status"] == "observed_held"
+                   for c in project_structured_requirement_claims(data))
+
+
+def test_explicit_verification_is_preserved():
+    data = authorization()
+    for row in data["evidence"][0]["compiled_requirements"]:
+        row["verification_status"] = "verified"
+    assert all(c["authority_status"] == "verified_official"
+               for c in project_structured_requirement_claims(data))
+
+
 def test_claim_identity_is_stable_but_changes_with_evidence_content_or_origin():
     first = authorization()
     ids = lambda value: [c["claim_id"] for c in project_structured_requirement_claims(value)]

@@ -101,7 +101,7 @@ def from_op(key: str, op: str, value: Any, source: str) -> RequirementConstraint
         v = float(value)
         return RequirementConstraint(key=key, upper=v, upper_strict=(op == "<"),
                                      provenance=(source,))
-    if op == "==":
+    if op in {"=", "=="}:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return RequirementConstraint(
                 key=key, discrete=(("==", value),), provenance=(source,))

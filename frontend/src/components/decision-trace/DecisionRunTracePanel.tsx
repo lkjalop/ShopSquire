@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import TurnHistoryPanel from './TurnHistoryPanel';
 
 
 export default function DecisionRunTracePanel({ data, status, classNames }: {
@@ -9,8 +10,9 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
   const [view, setView] = useState<'changed' | 'known' | 'fulfil'>('changed');
   if (status === 'idle') return null;
   if (status === 'loading') return <div className={classNames.empty}>Loading revisioned decision evidence...</div>;
+  const history = Array.isArray(data?.turn_history) ? data.turn_history : [];
   if (status === 'unavailable' || !data?.latest) {
-    return <div className={classNames.empty}>No revisioned decision run is available. No historical state is inferred.</div>;
+    return <><TurnHistoryPanel history={history} /><div className={classNames.empty}>No procurement decision run is recorded. No procurement execution is inferred.</div></>;
   }
   const run = data.latest;
   const views = data.views || {};
@@ -20,6 +22,7 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
       ? views.what_was_known_then : views.who_can_fulfil_now;
   return (
     <section className={classNames.summaryPane} data-testid="decision-run-trace">
+      <TurnHistoryPanel history={history} />
       <h3>Decision snapshot and temporal replay</h3>
       <p>
         Revision {run.case_revision} evaluated using evidence known at{' '}

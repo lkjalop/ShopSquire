@@ -25,6 +25,7 @@ def apply_case_patches_before_evaluation(
     trace_id: str,
     session: dict[str, Any],
     patches: tuple[dict[str, Any], ...],
+    persist: bool = True,
 ) -> ProcurementCasePreflightResult:
     """Apply grounded model proposals before fit/research/fulfilment evaluation.
 
@@ -37,6 +38,20 @@ def apply_case_patches_before_evaluation(
     state = ProcurementCaseState.model_validate(raw)
     if not patches:
         return ProcurementCasePreflightResult(state=state, application=None)
+    if not persist:
+        from src.app.services.procurement_case_state import CasePatch, apply_case_patch_set
+
+        staged = apply_case_patch_set(
+            state, expected_revision=state.revision,
+            patches=[CasePatch.model_validate(patch) for patch in patches],
+        ).state
+        # Evaluation sees the proposed facts, but only the terminal CAS may
+        # publish them. Retain the revision against which the proposal was made.
+        return ProcurementCasePreflightResult(
+            state=staged.model_copy(update={"revision": state.revision}),
+            application={"status": "staged", "version": state.revision,
+                         "state_changed": False, "commerce_authority": False},
+        )
     bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
     if bind is None:
         raise RuntimeError("procurement_case_preflight_requires_database_bind")

@@ -19,7 +19,7 @@ import { useShoppingCaseResearch } from './hooks/useShoppingCaseResearch';
 import { useShoppingCaseActions } from './hooks/useShoppingCaseActions';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
-import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
+import { nextSourcingTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
@@ -2852,13 +2852,9 @@ export default function App() {
             return updated;
           });
         }
-        // A shopping case is the durable multi-turn audit identity. Individual
-        // chat turns still retain their own trace IDs server-side, but replacing
-        // the visible trace with the latest turn made approved research appear
-        // to vanish after a quantity or deadline follow-up.
-        setTraceId(normalizeTraceId(
-          data?.ambiguity_exploration?.trace_id || ambiguityExploration?.trace_id || nextTraceId,
-        ));
+        // Current-turn evidence uses its explicit terminal trace reference.
+        // Earlier case evidence remains available through persisted history.
+        setTraceId(normalizeTraceId(nextTraceId));
 
         // Auto-open decision trace when image is security-flagged so the analyst sees the full matrix immediately
         if (
@@ -4275,15 +4271,11 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
-          tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
+      {/* The modal follows the current terminal trace. Case/procurement history is
+          linked separately; a case identifier is never a substitute trace ID. */}
       {traceOpen && <Suspense fallback={<div role="status">Loading decision trace…</div>}>
         <DecisionTrace
-          traceId={activeShoppingCase?.case_id
-            ? normalizeTraceId(
-              ambiguityExploration?.trace_id || activeShoppingCase.case_id.replace(/^sc-/, ''),
-            )
-            : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
+          traceId={normalizeTraceId(traceId)}
           onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} researchOutcome={researchOutcome} />
       </Suspense>}
 

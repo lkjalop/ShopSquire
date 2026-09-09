@@ -84,6 +84,7 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
         "budget_min": None, "budget_max": 3000, "mode": "ceiling", "source_span": [0, 8],
     }
     assert projection.subject_role == "RUN_SUBJECT_ON_PRODUCT"
+    assert projection.operation_id == "chat:idem-1"
     assert projection.right_panel["canonical_budget"] == projection.canonical_budget
     assert projection.right_panel["commercial_terms"] == projection.commercial_terms
     assert projection.right_panel["subject_role"] == projection.subject_role

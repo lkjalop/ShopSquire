@@ -9,7 +9,6 @@ import uuid
 import base64
 import hashlib
 import os
-from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
@@ -34,15 +33,11 @@ from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
 from src.app.services.infrastructure_alternative_projection import project_for_unresolved_form_factor
-from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
+from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set, buyer_category_changed
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
-
-_CHAT_REPLAY_LOCAL: Dict[str, float] = {}
-_CHAT_REPLAY_LOCK = RLock()
-
 
 def _authoritative_backend_lane(data: Dict[str, Any]) -> Optional[str]:
     """Resolve the finalized V2 lane without promoting unrecognized payload values."""
@@ -65,115 +60,13 @@ def _request_tenant_id(request: Request | None) -> str:
     return str(current_tenant_id() or "default")
 
 
-def _chat_in_progress(
-    *, idempotency_key: str = "", execution_progress: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    operation_key = str(idempotency_key or "")[:128] or None
-    return {
-        "status": "in_progress",
-        "schema_version": "completed-turn-envelope.v1",
-        "retryable": True,
-        "retry_after_ms": 2000,
-        "idempotency_key": operation_key,
-        "operation_id": f"chat:{operation_key}" if operation_key else None,
-        "recommendation_status": "pending",
-        "research_status": "pending",
-        "catalog_authority": "blocked_pending_completion",
-        "catalog_scope": None,
-        "catalog_scope_status": "pending",
-        "commerce_authority": "none",
-        "products": [],
-        "action_executed": False,
-        "execution_progress": dict(execution_progress or {}),
-        "retrieval": {
-            "method": "POST",
-            "path": "/api/v1/chat/query",
-            "idempotency_key": operation_key,
-        },
-        "assistant_message": (
-            "I’m still working on that request. Retrying with the same "
-            "request key will return the completed result without running it twice."
-        ),
-    }
-
-
-def _chat_operation_failed(
-    *, idempotency_key: str = "", exc: Exception | None = None,
-) -> Dict[str, Any]:
-    """Fail closed when a retained operation dies after its initial ACK."""
-    operation_key = str(idempotency_key or "")[:128] or None
-    operation_id = f"chat:{operation_key}" if operation_key else None
-    failure_code = (
-        "chat_operation_deadline_exceeded"
-        if isinstance(exc, asyncio.TimeoutError) else "chat_operation_failed"
-    )
-    terminal = {
-        "operation_id": operation_id,
-        "case_id": None,
-        "case_revision": None,
-        "recommendation_status": "failed",
-        "research_status": "failed",
-        "catalog_authority": "blocked",
-        "catalog_scope": None,
-        "catalog_scope_status": "unavailable",
-        "commerce_authority": "none",
-        "product_shelves": [],
-        "failure_code": failure_code,
-    }
-    return {
-        "status": "failed",
-        "schema_version": "completed-turn-envelope.v1",
-        "assistant_message": (
-            "This request could not complete within its governed execution path. "
-            "No recommendation or commercial action was authorized."
-        ),
-        **terminal,
-        "products": [],
-        "action_executed": False,
-        "execution_evidence": {
-            "component": "chat_operation",
-            "status": "failed",
-            "failure_code": failure_code,
-            "fallback_used": False,
-            "operation_id": operation_id,
-        },
-        "terminal_outcome": terminal,
-    }
-
-
-def _chat_idempotency_cache_key(
-    *, tenant_id: str, uid: str, session_id: str, idempotency_key: str,
-) -> str:
-    """Scope a caller-controlled operation key without placing identity in Redis keys."""
-    scope = hashlib.sha256(
-        f"{tenant_id}|{uid}|{session_id}".encode("utf-8")
-    ).hexdigest()[:24]
-    operation = str(idempotency_key or "").strip()[:128]
-    return f"chat:idem:{scope}:{operation}"
-
-
-def _chat_request_timeout_seconds() -> float:
-    try:
-        configured = float(os.getenv("CHAT_REQUEST_TIMEOUT_SEC", "30") or 30)
-    except (TypeError, ValueError):
-        configured = 30.0
-    return max(0.1, min(configured, 120.0))
-
-
-def _automatic_research_timeout_seconds() -> float:
-    """Return the deadline for the complete governed research pipeline.
-
-    Discovery, identity resolution, official-origin fetch and typed extraction
-    each have smaller internal limits. The former hard-coded 20 second wrapper
-    was shorter than their valid serial critical path and cancelled successful
-    work after the official page had already been fetched.
-    """
-
-    try:
-        configured = float(os.getenv("AUTOMATIC_RESEARCH_TIMEOUT_SEC", "45") or 45)
-    except (TypeError, ValueError):
-        configured = 45.0
-    return max(10.0, min(configured, 120.0))
+from src.app.services.chat_transport import (
+    _chat_in_progress,
+    _chat_operation_failed,
+    _chat_idempotency_cache_key,
+    _chat_request_timeout_seconds,
+    _automatic_research_timeout_seconds,
+)
 
 
 def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
@@ -204,436 +97,39 @@ def _normalize_recent_messages(raw: Any, *, limit: int = 16) -> List[Dict[str, s
     return out[-max(1, int(limit or 1)) :]
 
 
-def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    budget = _extract_budget_bounds(query)
-    if budget.get("budget_min") is not None:
-        out["budget_min"] = budget.get("budget_min")
-    if budget.get("budget_max") is not None:
-        out["budget_max"] = budget.get("budget_max")
-    # Preserve whole-order budget semantics across the CART_MUTATE short circuit. Without these
-    # typed fields, a later quantity change falls back to the budget from the original search.
-    try:
-        from src.app.services.budget_grammar import classify_budget_scope, parse_budget
-
-        budget_scope = classify_budget_scope(query)
-        parsed_budget = parse_budget(query)
-        if budget_scope == "total" and parsed_budget and parsed_budget.budget_max is not None:
-            total_budget = int(parsed_budget.budget_max)
-            if total_budget > 0:
-                out["budget_scope"] = "total"
-                out["total_budget_cents"] = total_budget * 100
-                out["budget_max"] = total_budget
-        elif budget_scope == "per_unit":
-            out["budget_scope"] = "per_unit"
-    except Exception:
-        logger.warning("confirmed-slot budget parsing failed", exc_info=True)
-    brands = _extract_brand_mentions(query)
-    if brands:
-        out["brands"] = brands[:6]
-
-    data = response if isinstance(response, dict) else {}
-    applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
-    used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
-    # LONG-HORIZON qty memory: the bulk unit count survives non-qty turns the same way budget does —
-    # turn 1 "need 25 laptops", turn 3 "which has the best battery?" must still know it's a 25-unit
-    # conversation (Add buttons + procurement previews read requested_quantity every turn).
-    _rq = data.get("requested_quantity")
-    if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
-        out["order_quantity"] = int(_rq)
-    decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
-    exact_product_sku = str(decision.get("exact_product_sku") or "").strip()
-    if exact_product_sku:
-        out["exact_product_sku"] = exact_product_sku
-    for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
-        v = applied.get(key)
-        if v is None:
-            v = used.get(key)
-        if v is not None:
-            out[key] = v
-    for key in ("brands", "specs", "brand_excludes", "use_case_tags"):
-        vv = applied.get(key)
-        if vv is None:
-            vv = used.get(key)
-        if isinstance(vv, list) and vv:
-            out[key] = vv[:12]
-    # The legacy chat extractor sees every catalog brand token as positive.  Reconcile it
-    # with the shared core's clamped exclusion before persisting session memory.
-    excluded = {str(v).strip().lower() for v in (out.get("brand_excludes") or []) if str(v).strip()}
-    if excluded and isinstance(out.get("brands"), list):
-        kept = [v for v in out["brands"] if str(v).strip().lower() not in excluded]
-        if kept:
-            out["brands"] = kept
-        else:
-            out.pop("brands", None)
-    if isinstance(data.get("product_identity"), dict):
-        ident = data.get("product_identity") or {}
-        if ident.get("constraints"):
-            out["image_identity"] = ident.get("constraints")
-    return out
-
-
-def _chat_replay_mark_once(redis, *, replay_key: str, ttl_seconds: int) -> bool:
-    ttl = max(1, int(ttl_seconds or 1))
-    redis_key = f"chat:replay:{replay_key}"
-    try:
-        # NX+EX ensures only the first request in the replay window is accepted.
-        ok = redis.set(redis_key, "1", ex=ttl, nx=True)
-        return bool(ok)
-    except Exception:
-        now = time.time()
-        with _CHAT_REPLAY_LOCK:
-            exp = float(_CHAT_REPLAY_LOCAL.get(replay_key) or 0.0)
-            if exp > now:
-                return False
-            _CHAT_REPLAY_LOCAL[replay_key] = now + ttl
-            stale = [k for k, v in _CHAT_REPLAY_LOCAL.items() if float(v or 0.0) <= now]
-            for k in stale[:128]:
-                _CHAT_REPLAY_LOCAL.pop(k, None)
-        return True
-
-
-def _store_chat_message(
-    db,
-    *,
-    uid: str,
-    role: str,
-    content: str,
-    trace_id: str | None,
-    session_id: str | None = None,
-    tenant_id: str | None = None,
-    session_epoch: str | None = None,
-) -> str | None:
-    from src.app.services.chat_persistence import store_chat_message
-
-    return store_chat_message(
-        db,
-        uid=uid,
-        role=role,
-        content=content,
-        trace_id=trace_id,
-        session_id=session_id,
-        tenant_id=tenant_id,
-        session_epoch=session_epoch,
-    )
-
-
-def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
-    """Project canonical query-budget facts, including intentional abstention."""
-    from src.app.services.budget_grammar import parse_budget
-
-    budget = parse_budget(query)
-    return {
-        "budget_min": budget.budget_min if budget and budget.found else None,
-        "budget_max": budget.budget_max if budget and budget.found else None,
-    }
-
-
-def _is_budget_query_text(query: str | None) -> bool:
-    q = str(query or "").strip().lower()
-    if not q:
-        return False
-    if any(
-        tok in q
-        for tok in (
-            "budget",
-            "under",
-            "below",
-            "up to",
-            "between",
-            "only have",
-            "is that enough",
-            "is this enough",
-            "for high school",
-            "for school",
-            "for university",
-            "for work",
-            "for gaming",
-        )
-    ):
-        return True
-    bounds = _extract_budget_bounds(q)
-    return bounds.get("budget_min") is not None or bounds.get("budget_max") is not None or bool(
-        re.search(r"\$\s*\d{3,5}\b", q)
-    )
-
-
-_DEFICIT_OBS_RE = re.compile(
-    r"only\s+have\s+a?\s*few|few\s+in\s+stock|limited\s+stock|not\s+enough\s+(?:in\s+)?stock|"
-    r"wait\w*\s+(?:for|on)\s+(?:a\s+)?(?:re-?order|re-?stock|restock|backorder|back-?order|the\s+rest|stock)|"
-    r"ok\s+(?:to\s+|with\s+)?wait|back-?order|re-?order",
-    re.I,
+from src.app.services.chat_turn_projection import (
+    _extract_confirmed_slots,
 )
-_BULK_QTY_RE = re.compile(r"\b(\d{2,5})\s+[a-z][a-z\s]{0,24}?(?:laptop|desktop|monitor|tablet|unit|machine|device|pc)s?\b", re.I)
 
 
-def _strip_deficit_observation(q: str) -> str:
-    """Remove the shortfall-observation tail from a deficit-reorder query so retrieval sees only
-    the bulk need. 'i need 50 dell laptops but you only have a few in stock, am i ok waiting for a
-    reorder?' -> 'i need 50 dell laptops'. Conservative: only cuts at an observation connector so
-    a plain bulk request is never truncated."""
-    cut = re.split(
-        r"\b(?:but|and)\s+(?:you|i|we)\s+(?:only\s+have|have\s+only|think|know)\b|"
-        r"\bbut\s+(?:you\s+)?(?:only\s+have|have\s+a?\s*few|few\s+in\s+stock|limited\s+stock)\b|"
-        r",?\s*(?:am\s+i\s+ok|is\s+it\s+ok|ok\s+(?:to\s+|with\s+)?wait)\b",
-        q, maxsplit=1, flags=re.I,
-    )[0].strip().rstrip(",")
-    return cut if len(cut) >= 6 else q
+from src.app.services.chat_transport import (
+    _chat_replay_mark_once,
+)
 
 
-def _is_deficit_reorder_query(q: str) -> bool:
-    """A bulk QUANTITY need + a deficit/reorder OBSERVATION ("i need 50 dell laptops but you only
-    have a few in stock, ok waiting for a reorder?"). The buyer is acknowledging a shortfall and
-    asking about backorder — NOT requesting a low-stock filter. Without this it hit
-    _classify_turn_intent's `"only " in q` -> FILTER -> the "few in stock" filter zeroed retrieval
-    (live: 0 products, backorder capability fact never reached the answer). Routing it to SEARCH
-    lets the bulk-sourcing path run (products + sourcing preview + the reorder-consent narration)."""
-    if not _DEFICIT_OBS_RE.search(q):
-        return False
-    return bool(_BULK_QTY_RE.search(q)) or bool(re.search(r"\b\d{2,5}\b", q))
+from src.app.services.chat_persistence import (
+    _store_chat_message,
+)
 
 
-def _classify_turn_intent(query: str) -> str:
-    q = str(query or "").strip().lower()
-    if not q:
-        return "SEARCH"
-    # Deficit/reorder-consent BEFORE the FILTER branch: a "you only have a few in stock, ok to
-    # wait for a reorder?" turn is a bulk-sourcing intent, not a stock filter (2026-07-09).
-    if _is_deficit_reorder_query(q):
-        return "SEARCH"
-    # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
-    # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
-    # policy questions ("what is your warranty policy?") into photo-triage with zero products.
-    from src.app.services.answer_quality import is_support_claim, policy_faq_answer
-    if is_support_claim(q):
-        return "SUPPORT_CLAIM"
-    if policy_faq_answer(q) is not None:
-        return "POLICY_QUESTION"
-    if (
-        " vs " in q
-        or "compare" in q
-        or "difference" in q
-        or "show both" in q
-        or "which is better" in q
-    ):
-        return "COMPARE"
-    if (
-        q.startswith("why ")
-        or " why " in q
-        or "explain" in q
-        or "reason" in q
-        or "if not why" in q
-        or "overkill" in q
-        or "should i" in q
-    ):
-        return "EXPLAIN"
-    if (
-        "under $" in q
-        or "between $" in q
-        or "budget" in q
-        or "price range" in q
-        or "widen" in q
-        or "increase" in q
-        or "decrease" in q
-        or "only " in q
-        or " with " in q
-        or "without " in q
-    ):
-        return "FILTER"
-    return "SEARCH"
+from src.app.services.chat_turn_projection import (
+    _extract_budget_bounds,
+    _is_budget_query_text,
+    _strip_deficit_observation,
+    _is_deficit_reorder_query,
+    _classify_turn_intent,
+    _is_budget_question,
+)
 
 
-def _is_budget_question(item: Dict[str, Any]) -> bool:
-    text = str((item or {}).get("text") or "").lower()
-    qid = str((item or {}).get("id") or "").lower()
-    return any(
-        tok in text or tok in qid
-        for tok in ("budget", "price range", "price", "widen_budget", "budget_range", "increase_match_space")
-    )
+from src.app.services.chat_cart_projection import (
+    _cart_mutation_short_circuit,
+)
 
 
-def _cart_mutation_short_circuit(
-    data: Any,
-    *,
-    q: str,
-    uid: str,
-    db,
-    redis=None,
-    tenant_id: str | None = None,
-    session_id: str | None = None,
-    session_epoch: str | None = None,
-    persist_conversation: bool = True,
-) -> Optional[Dict[str, Any]]:
-    """CART-MUTATION short-circuit (V2 cart lane, extracted for testability): when the suggest
-    hop returns a cart_mutation payload (RECOMMEND_CART_SERVE=on), build the MINIMAL chat
-    response — the product/answer-quality/copywriting machinery below chat_query is irrelevant
-    (and message-REWRITING) for a cart edit. Forwards the C1 card fields verbatim
-    (needs_confirmation/plan_id/ops ride inside cart_mutation). Returns None when this turn is
-    not a cart mutation. /chat/stream inherits (it emits chat_query's result verbatim)."""
-    if not isinstance(data, dict) or data.get("cart_mutation") is None:
-        return None
-    tid = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
-    msg = str(data.get("assistant_message") or data.get("message") or "").strip()
-    try:
-        if not persist_conversation:
-            raise RuntimeError("temporary_chat")
-        _store_chat_message(
-            db,
-            tenant_id=tenant_id,
-            uid=uid,
-            session_id=session_id,
-            session_epoch=session_epoch,
-            role="user",
-            content=q,
-            trace_id=tid,
-        )
-        if msg:
-            _store_chat_message(
-                db,
-                tenant_id=tenant_id,
-                uid=uid,
-                session_id=session_id,
-                session_epoch=session_epoch,
-                role="assistant",
-                content=msg,
-                trace_id=tid,
-            )
-    except Exception as _cm_exc:
-        if persist_conversation:
-            logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
-    multi_intent = None
-    try:
-        enabled = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in (
-            "1", "true", "yes", "on",
-        )
-        if not enabled:
-            from src.app.feature_flags import get_flags as _get_flags
-
-            enabled = bool(_get_flags().get("MULTI_INTENT_PLANNER_ENABLED", False))
-        if enabled:
-            from src.app.services.multi_intent_live import plan_live
-
-            multi_intent = plan_live(str(q or ""), str(uid))
-    except Exception as exc:
-        # A cart action is still bounded by its own confirmation contract. Keep
-        # the planner failure visible instead of silently dropping the other
-        # obligations from a mixed buyer turn.
-        multi_intent = {
-            "warnings": [f"multi_intent planner error: {str(exc)[:120]}"],
-            "needs_confirmation": True,
-            "plan": [],
-        }
-    response_slots = _extract_confirmed_slots(query=q, response=data)
-    persisted_slots = dict(response_slots)
-    mutation = data.get("cart_mutation") if isinstance(data.get("cart_mutation"), dict) else {}
-    if mutation.get("needs_confirmation"):
-        # A proposal is not accepted case state. The authoritative quantity
-        # remains the persisted cart line until the apply endpoint commits.
-        persisted_slots.pop("order_quantity", None)
-        persisted_slots.pop("quantity", None)
-    out = {
-        "products": [],
-        "view_mode": "cards",
-        "assistant_message": msg,
-        "cart_mutation": data.get("cart_mutation"),
-        "cart_updated": bool(data.get("cart_updated")),
-        "cart": data.get("cart"),
-        "multi_intent": multi_intent,
-        "turn_intent": "CART_MUTATE",
-        "execution_mode": data.get("execution_mode") or "v2_served",
-        "execution_lane": data.get("execution_lane") or "CART_MUTATE",
-        "delegation_reason": data.get("delegation_reason"),
-        "action_executed": bool(data.get("action_executed")),
-        # Read-only case status/summary responses intentionally keep the buyer's
-        # current product/cart/procurement panel in place. This is a typed UI
-        # contract, not an inference from an empty product list.
-        # A cart amendment is an in-place operation on the visible cart/procurement case.  An
-        # empty products list is not permission to replace that view with search results.
-        "preserve_current_view": True,
-        "case_operation": data.get("case_operation"),
-        "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
-        "state_changed": data.get("state_changed"),
-        # Bounded delivery/payment amendments are accepted by the recommendation
-        # reducer and then committed later by the cart sourcing boundary.  Keep
-        # the canonical constraints at the HTTP/SSE edge; dropping them here made
-        # the UI acknowledge the amendment while confirming the old requirements.
-        "constraints_used": (
-            data.get("constraints_used")
-            if isinstance(data.get("constraints_used"), dict) else {}
-        ),
-        "decision_trace_id": tid,
-        "trace_id": tid,
-        "next_questions": [],
-        "confirmed_slots": response_slots,
-        "requested_quantity": (
-            data.get("requested_quantity")
-            if data.get("requested_quantity") is not None
-            else response_slots.get("order_quantity")
-        ),
-        "explanation": (
-            data.get("explanation")
-            if isinstance(data.get("explanation"), dict) else None
-        ),
-        "delivery_feasibility": (
-            data.get("delivery_feasibility")
-            if isinstance(data.get("delivery_feasibility"), dict) else None
-        ),
-        "case_obligations": (
-            data.get("case_obligations")
-            if isinstance(data.get("case_obligations"), list) else []
-        ),
-        "policy_answer": (
-            data.get("policy_answer") if isinstance(data.get("policy_answer"), dict) else None
-        ),
-        "support_handoff": (
-            data.get("support_handoff") if isinstance(data.get("support_handoff"), dict) else None
-        ),
-        "supplier_status": (
-            data.get("supplier_status") if isinstance(data.get("supplier_status"), dict) else None
-        ),
-        "timing_breakdown": (
-            data.get("timing_breakdown")
-            if isinstance(data.get("timing_breakdown"), dict)
-            else {}
-        ),
-        "blocked": False,
-        "needs_human_review": False,
-        "security_route": "allow",
-    }
-    try:
-        if not persist_conversation:
-            raise RuntimeError("temporary_chat")
-        _persist_chat_structured_state(
-            redis=redis,
-            uid=uid,
-            query=q,
-            products=[],
-            trace_id=str(tid or "") or None,
-            assistant_message=msg,
-            confirmed_slots=persisted_slots,
-            tenant_id=tenant_id,
-            session_epoch=session_epoch,
-        )
-    except Exception:
-        if persist_conversation:
-            logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
-    return out
-
-
-def _budget_range_from_slots(slots: Dict[str, Any] | None, query: str) -> Dict[str, int | None]:
-    out = _extract_budget_bounds(query)
-    s = slots if isinstance(slots, dict) else {}
-    if out.get("budget_min") is None and s.get("budget_min") is not None:
-        try:
-            out["budget_min"] = int(float(s.get("budget_min")))
-        except Exception:
-            pass
-    if out.get("budget_max") is None and s.get("budget_max") is not None:
-        try:
-            out["budget_max"] = int(float(s.get("budget_max")))
-        except Exception:
-            pass
-    return out
+from src.app.services.chat_turn_projection import (
+    _budget_range_from_slots,
+)
 
 
 from src.app.services.chat_turn_projection import (
@@ -644,248 +140,14 @@ from src.app.services.chat_turn_projection import (
     _include_adaptive_metadata, _merge_material_nqe_answer,
 )
 
-def _derive_attack_intent_and_repercussions(cv_signals: Dict[str, Any] | None) -> tuple[str, str]:
-    """Map detected CV signals to a plain-English attacker intent + likely repercussions.
-
-    Briefs the human SOC reviewer on *why* an upload was flagged and what could go
-    wrong if the image-derived signals were trusted blindly.
-    """
-    s = cv_signals if isinstance(cv_signals, dict) else {}
-    intents: List[str] = []
-    repercussions: List[str] = []
-    if s.get("qr_prompt_injection") or s.get("qr_external_url_detected") or s.get("qr_code_detected"):
-        intents.append(
-            "QR-borne indirect prompt injection / redirect to an external "
-            "(possible credential-harvest or malware) URL"
-        )
-        repercussions.append(
-            "agent goal hijack, shopper redirected to a malicious site, possible "
-            "credential/account compromise"
-        )
-    if s.get("ocr_prompt_injection"):
-        intents.append("text-in-image prompt injection to override system instructions")
-        repercussions.append("policy bypass, unauthorised tool or action execution by the agent")
-    if s.get("steg_suspicious"):
-        intents.append("steganographic payload smuggling (covert data/command channel)")
-        repercussions.append("covert data exfiltration or staged second-stage payload delivery")
-    if float(s.get("adversarial_score") or 0.0) >= 0.5:
-        intents.append("adversarial perturbation crafted to evade the CV classifiers")
-        repercussions.append("model evasion, mislabelled product, downstream fraud")
-    if s.get("manipulation_detected"):
-        intents.append("image manipulation / forgery")
-        repercussions.append("return or warranty fraud, fabricated evidence")
-    if s.get("encoded_payload_detected") or s.get("polyglot_suspected"):
-        intents.append("encoded / polyglot file payload (a file valid as two formats at once)")
-        repercussions.append("parser confusion, sandbox escape, malware delivery")
-    if not intents:
-        intents.append("untrusted or anomalous image upload")
-        repercussions.append("elevated review required before any image-derived signal can be trusted")
-    return "; ".join(intents), "; ".join(repercussions)
-
-
-def _summarize_recognized_product(labels: List[str] | None) -> Optional[str]:
-    """Best-effort short human label for what the image shows, from SAFE visual labels.
-
-    Lets us keep shopping context in the user-facing message even when the image
-    was flagged — we still recognised the product, we just quarantined the
-    malicious channel (QR/OCR/steg). Returns None when nothing is recognisable.
-    """
-    toks = [str(x).lower() for x in (labels or []) if str(x).strip()]
-    if not toks:
-        return None
-    blob = " ".join(toks)
-    _is_gaming = any(
-        t in blob for t in ("gaming", "rog", "legion", "raider", "predator", "nitro", "alienware", "omen", "tuf")
-    )
-    if any(t in blob for t in ("laptop", "notebook", "macbook")):
-        return "gaming laptop" if _is_gaming else "laptop"
-    if any(t in blob for t in ("desktop", "tower", "workstation")) or "pc" in toks:
-        return "gaming PC" if _is_gaming else "desktop PC"
-    if any(t in blob for t in ("phone", "smartphone", "iphone")):
-        return "phone"
-    if any(t in blob for t in ("tablet", "ipad")):
-        return "tablet"
-    if any(t in blob for t in ("monitor", "display", "screen")):
-        return "monitor"
-    if any(t in blob for t in ("headphone", "headset", "earphone")):
-        return "headset"
-    return toks[0]
-
-
-def _assess_image_compromise_breach(
-    *,
-    merged_text: str,
-    cv_signals: Dict[str, Any] | None,
-    source_ip: str | None,
-    uid: str | None,
-    image_hash: str | None,
-    posture: Dict[str, Any],
-    request: Any = None,
-) -> Dict[str, Any]:
-    """Run a synchronous breach assessment for a compromised image upload.
-
-    Enriches the requester IP via ASN/GeoIP (known-bad-actor scoring), maps the
-    attack to MITRE ATLAS / OWASP tags, and notifies humans by persisting a
-    security event that auto-routes to an incident + WORM audit. Returns a
-    structured summary for the chat response.
-
-    NEVER blocks the recommendation — this is the warn-and-continue path.
-    """
-    from src.app.security.observer import analyze_payload, emit_security_event
-
-    intent, repercussions = _derive_attack_intent_and_repercussions(cv_signals)
-    sec_payload: Dict[str, Any] = {
-        "query": str(merged_text or "")[:1000],
-        "source": "chat_image_compromise",
-    }
-    if source_ip:
-        sec_payload["ip"] = source_ip
-    if uid:
-        sec_payload["uid"] = uid
-    if cv_signals:
-        sec_payload["cv_signals"] = cv_signals
-
-    severity = str(posture.get("severity") or "high")
-    details: Dict[str, Any] = {}
-    try:
-        analysis = analyze_payload(sec_payload)
-        if isinstance(analysis, dict):
-            severity = str(analysis.get("severity") or severity)
-            details = analysis.get("details") if isinstance(analysis.get("details"), dict) else {}
-    except Exception:
-        details = {}
-
-    geo: Dict[str, Any] = {}
-    signals: Dict[str, Any] = {}
-    try:
-        geo = ((details.get("network") or {}).get("geo")) or {}
-        signals = details.get("signals") or {}
-    except (AttributeError, TypeError):
-        geo, signals = {}, {}
-
-    # Known-bad-actor determination via ASN / GeoIP risk.
-    bad_asn: set = set()
-    try:
-        from src.app.security.observer import _load_bad_asn
-        bad_asn = set(_load_bad_asn())
-    except Exception:
-        bad_asn = set()
-    is_bad_actor = bool(
-        signals.get("ip_risk")
-        or float(geo.get("risk") or 0.0) >= 0.7
-        or geo.get("is_hosting")
-        or geo.get("is_vpn")
-        or (geo.get("asn") in bad_asn if geo.get("asn") is not None else False)
-    )
-    ip_assessment = {
-        "ip_hash": ((details.get("network") or {}).get("ip_hash")),
-        "asn": geo.get("asn"),
-        "asn_org": geo.get("asn_org"),
-        "country": geo.get("country"),
-        "is_hosting": bool(geo.get("is_hosting")),
-        "is_vpn": bool(geo.get("is_vpn")),
-        "risk": float(geo.get("risk") or 0.0),
-        "known_bad_actor": is_bad_actor,
-        "geo_country_mismatch": bool(signals.get("geo_country_mismatch")),
-    }
-
-    # Notify humans: persist a security event that auto-routes to an incident + WORM.
-    human_notified = False
-    try:
-        emit_security_event(
-            path="/api/v1/chat/image-compromise",
-            payload={
-                **sec_payload,
-                "attack_intent": intent,
-                "repercussions": repercussions,
-                "image_hash": str(image_hash or "")[:64],
-                "ip_assessment": ip_assessment,
-            },
-            request=request,
-        )
-        human_notified = True
-    except Exception:
-        human_notified = False
-
-    assessment = {
-        "severity": severity,
-        "attack_intent": intent,
-        "potential_repercussions": repercussions,
-        "ip_assessment": ip_assessment,
-        "mitre_atlas": (details.get("mitre_atlas") or [])[:8],
-        "owasp_llm_top10": (details.get("owasp_llm_top10") or [])[:8],
-        "owasp_agentic_top10": (details.get("owasp_agentic_top10") or [])[:8],
-        "human_notified": human_notified,
-        "route": str(posture.get("route") or "escalate"),
-    }
-    try:
-        log_trace_event(
-            trace_id=None,
-            event_type="image_compromise_breach_assessment",
-            source_type="agent",
-            source_id="Security_Observer_Agent",
-            target_type="chat",
-            target_id=uid,
-            payload={
-                "severity": severity,
-                "attack_intent": intent,
-                "known_bad_actor": is_bad_actor,
-                "asn": geo.get("asn"),
-                "country": geo.get("country"),
-                "image_hash": str(image_hash or "")[:64],
-            },
-        )
-    except Exception:
-        pass
-    return assessment
-
-
-def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    p = posture if isinstance(posture, dict) else {}
-    route = str(p.get("route") or "allow")
-    return derive_qr_legitimacy_details(sig, policy_route=route)
-
-
-def _image_trust_channels(posture: Dict[str, Any] | None) -> Dict[str, bool]:
-    posture = posture or {}
-    route = str(posture.get("route") or "allow")
-    if posture.get("analysis_pending"):
-        return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
-    if posture.get("analysis_degraded") and not posture.get("security_risk"):
-        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
-    if route == "allow":
-        return {"visual_embedding_trusted": True, "ocr_trusted": True, "qr_trusted": True}
-    if route == "visual_sanitized":
-        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
-    if route == "escalate":
-        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
-    return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
-
-
-def _frameworks_for_image_security(*, signals: Dict[str, Any], severity: str) -> Dict[str, Any]:
-    norm = {str(k): bool(v) for k, v in (signals or {}).items()}
-    dread = compute_dread(signals={}, cv_signals=norm, severity=severity or "warn")
-    corr = correlate_security_analysis(
-        channel="image",
-        severity=severity,
-        tags=[],
-        reasons=[],
-        threat_correlation={"mitre_attack": [], "dread": dread},
-        signals=norm,
-        evidence={},
-    )
-    return {
-        "mitre_atlas": corr.get("mitre_atlas") or [],
-        "mitre_attack": corr.get("mitre_attack") or [],
-        "owasp_llm_top10": corr.get("owasp_llm_top10") or [],
-        "stride_categories": corr.get("stride_categories") or [],
-        "pasta": corr.get("pasta") or {},
-        "pasta_stage": corr.get("pasta_stage"),
-        "dread": dread,
-        "cvss": corr.get("cvss") or {},
-        "compliance": corr.get("compliance") or {},
-        "lev": corr.get("lev") or {},
-    }
+from src.app.services.chat_image_security import (
+    _derive_attack_intent_and_repercussions,
+    _summarize_recognized_product,
+    _assess_image_compromise_breach,
+    _derive_qr_details,
+    _image_trust_channels,
+    _frameworks_for_image_security,
+)
 
 
 def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
@@ -894,65 +156,13 @@ def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
     return decode_image_b64(image_obj)
 
 
-def _stash_image_blob_for_recommend(mem: Memory, uid: str, image_hash: str, image_bytes: bytes) -> None:
-    if not uid or not image_hash or not image_bytes:
-        return
-    max_bytes = int(os.getenv("CHAT_IMAGE_BLOB_CACHE_MAX_BYTES", "262144") or 262144)
-    if len(image_bytes) > max_bytes:
-        return
-    kv = mem.get_kv(uid) or {}
-    blob_cache = kv.get("image_blob_cache") if isinstance(kv.get("image_blob_cache"), dict) else {}
-    blob_cache[str(image_hash)] = base64.b64encode(image_bytes).decode("ascii")
-    # Keep only latest 2 blobs to bound session size.
-    keys = list(blob_cache.keys())
-    if len(keys) > 2:
-        for k in keys[:-2]:
-            blob_cache.pop(k, None)
-    kv["image_blob_cache"] = blob_cache
-    mem.set_kv(uid, kv)
-
-
-def _persist_chat_structured_state(
-    *,
-    redis,
-    uid: str,
-    query: str,
-    products: List[Dict[str, Any]] | None,
-    trace_id: str | None,
-    assistant_message: str | None = None,
-    recent_messages: List[Dict[str, Any]] | None = None,
-    confirmed_slots: Dict[str, Any] | None = None,
-    semantic_resolution: Dict[str, Any] | None = None,
-    case_anchor: Dict[str, Any] | None = None,
-    tenant_id: str | None = None,
-    session_epoch: str | None = None,
-) -> None:
-    from src.app.services.chat_persistence import persist_chat_structured_state
-
-    return persist_chat_structured_state(
-        redis=redis, uid=uid, query=query, products=products, trace_id=trace_id,
-        budget=_extract_budget_bounds(query), brands=_extract_brand_mentions(query),
-        assistant_message=assistant_message, recent_messages=recent_messages,
-        confirmed_slots=confirmed_slots, semantic_resolution=semantic_resolution,
-        case_anchor=case_anchor, tenant_id=tenant_id, session_epoch=session_epoch,
-    )
-async def _idem_single_flight(
-    redis,
-    key: str,
-    producer,
-    *,
-    wait_timeout_seconds: float = 2.0,
-):
-    from src.app.services.chat_transport import idempotent_single_flight
-
-    return await idempotent_single_flight(
-        redis, key, producer, wait_timeout_seconds=wait_timeout_seconds,
-        in_progress_factory=lambda idem_key: _chat_in_progress(idempotency_key=idem_key),
-        error_factory=lambda idem_key, exc: _chat_operation_failed(
-            idempotency_key=idem_key, exc=exc,
-        ),
-        logger=logger,
-    )
+from src.app.services.chat_persistence import (
+    _stash_image_blob_for_recommend,
+    _persist_chat_structured_state,
+)
+from src.app.services.chat_transport import (
+    _idem_single_flight,
+)
 
 
 async def _call_recommend_in_process(
@@ -1682,6 +892,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     case_active_at_turn_start = bool(active_shopping_case_id)
     active_shopping_case_purpose = ""
     canonical_case_snapshot: Dict[str, Any] = {}
+    prior_catalog_scope: Dict[str, Any] = {}
     additive_workload_receipt: Dict[str, Any] | None = None
     routing_query = q
     if active_shopping_case_id:
@@ -1727,6 +938,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             }).first()
             if case_state_row:
                 raw_state = json.loads(case_state_row[0])
+                prior_catalog_scope = (raw_state.get("turn_read_model") or {}).get("catalog_scope") or {}
                 typed_state = raw_state.get("procurement_case_state")
                 if isinstance(typed_state, dict):
                     canonical_case_snapshot = {
@@ -3467,11 +2679,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         literal_buyer_turn,
     )
     subject_switch_receipt: Dict[str, Any] | None = None
+    purchased_category_changed = buyer_category_changed(prior_catalog_scope, literal_buyer_turn)
     active_case_subject_replaced = bool(
         active_shopping_case_id
         and not additive_workload_receipt
         and (
-            named_workload_replacement
+            purchased_category_changed
+            or named_workload_replacement
             or deterministic_workload_replacement
             or (
                 not case_commercial_obligations
@@ -3703,6 +2917,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     _preflight_compilation = compile_workload_evidence_requirements(
                         canonical_item,
                         kind=str(canonical_item.get("kind") or "workload"),
+                        product_type=str(
+                            (data.get("decision") or {}).get("requested_product_node")
+                            or (data.get("decision") or {}).get("node_handle") or ""
+                        ),
                         name=str(
                             canonical_item.get("canonical_title")
                             or canonical_item.get("resolved_name")
@@ -5258,8 +4476,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 or (isinstance(case_patches, list) and case_patches)
                             ),
                             new_category=bool(
-                                not case_active_at_turn_start
-                                and not subject_switch_receipt
+                                purchased_category_changed or (
+                                    not case_active_at_turn_start
+                                    and not subject_switch_receipt
+                                )
                             ),
                             workload_refinement=bool(
                                 active_case_id and not subject_switch_receipt
@@ -5403,7 +4623,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 ),
                                 case_patches=(
                                     list(case_patches)
-                                    if preflight_application is None and isinstance(case_patches, list)
+                                    if (preflight_application is None or preflight_application.get("status") == "staged")
+                                    and isinstance(case_patches, list)
                                     else []
                                 ),
                                 pending_clarification=PendingClarificationCommit(

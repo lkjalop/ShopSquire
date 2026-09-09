@@ -4,6 +4,16 @@ import { describe, expect, it } from 'vitest';
 import WorkloadResearchTrace from '../WorkloadResearchTrace';
 
 describe('WorkloadResearchTrace', () => {
+  it('renders the terminal outcome without requiring legacy research events', () => {
+    render(<WorkloadResearchTrace researchOutcome={{
+      schema_version: 'research-outcome-v1', case_id: 'case', case_revision: 2, operation_id: 'op',
+      discovery_status: 'completed', fetch_status: 'completed', requirement_completeness: 'partial',
+      accepted_claim_count: 2, held_claim_count: 0, rejected_claim_count: 1, parsed_claim_count: 3,
+      catalog_authority: 'blocked', commerce_authority: 'none',
+    }} />);
+    expect(screen.getByTestId('research-outcome-summary')).toBeVisible();
+    expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
+  });
   it('does not claim that missing research records prove research was unnecessary', () => {
     render(<WorkloadResearchTrace executionSteps={[]} />);
 

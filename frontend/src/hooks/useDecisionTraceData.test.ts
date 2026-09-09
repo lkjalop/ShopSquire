@@ -1,6 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
 
-import { shoppingCaseIdFromTraceEvents } from './useDecisionTraceData';
+import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from './useDecisionTraceData';
+
+it('refreshes persisted history when the same case advances revision', async () => {
+  const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ok:true, json:async()=>({turn_history:[]})} as Response);
+  try {
+    const {result, rerender, unmount} = renderHook(({revision}) => useDecisionTraceData({active:true, caseId:'case-one', revision}), {initialProps:{revision:2}});
+    await waitFor(()=>expect(result.current.status).toBe('ready'));
+    rerender({revision:3});
+    await waitFor(()=>expect(request).toHaveBeenCalledTimes(2));
+    unmount();
+  } finally { request.mockRestore(); }
+});
 
 
 describe('shoppingCaseIdFromTraceEvents', () => {

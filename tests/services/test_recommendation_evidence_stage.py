@@ -25,7 +25,8 @@ def test_semantic_evidence_stage_compiles_only_provider_evidence(monkeypatch):
         tenant_id="tenant-1",
         external_research_consent=True,
     )
-    decision = SimpleNamespace(clarification_relation="continuation")
+    decision = SimpleNamespace(clarification_relation="continuation", node_handle="el-6-6",
+                               subject_role="RUN_SUBJECT_ON_PRODUCT")
     observed: dict[str, object] = {}
 
     def fake_gather(_plan, **kwargs):
