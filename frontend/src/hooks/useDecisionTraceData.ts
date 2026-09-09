@@ -48,7 +48,7 @@ export function useDecisionTraceData({ active, caseId, revision }: { active: boo
     const timer = window.setTimeout(() => {
       controller.abort('deadline_exceeded');
       if (!disposed) setStatus('unavailable');
-    }, 5000);
+    }, 8000); // Match the audit transport budget, including browser connection queueing.
     setData(null);
     setStatus('loading');
     fetch(apiUrl(`/api/v1/shopping-cases/${encodeURIComponent(caseId)}/decision-runs?uid=${encodeURIComponent(uid)}`), {

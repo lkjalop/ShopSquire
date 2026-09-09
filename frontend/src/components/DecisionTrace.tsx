@@ -754,7 +754,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const shoppingCaseId = localTurnProjection?.case_id || currentResearchOutcome?.case_id
     || shoppingCaseIdFromTraceEvents(events);
   const decisionRunTrace = useDecisionTraceData({
-    active: activeTab === 'audit', caseId: shoppingCaseId,
+    // Fetch once when this revision-bound modal is opened. Waiting until the
+    // audit click makes history compete with the heavier audit-chain request;
+    // leaving that tab also used to discard a completed historical snapshot.
+    active: Boolean(traceIdText), caseId: shoppingCaseId,
     revision: currentResearchOutcome?.case_revision || localTurnProjection?.case_revision,
   });
   const selectTraceLeaf = (leaf: TraceLeafTab) => {

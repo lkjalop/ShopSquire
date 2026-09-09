@@ -60,6 +60,9 @@ Artifacts are outside source control at `C:/AI/ShopSquire-checkpoints/pilot-revi
 - The first stronger browser attempt failed under concurrent suite load: history retrieval exceeded the UI deadline. A direct read found the persisted turn. Added a failing UI regression, corrected unavailable-versus-empty narration and exposed an explicit retry. The original failed receipt is retained, not erased by the subsequent passing run.
 - Integration rerun exposed an obsolete assertion: a no-requirements fixture expected resolved fit. It now requires context-only identity, blocked fit and no products while retaining the additive-workload assertions.
 - Final integration run: 94 passed, eight skipped, zero failures. After the completion-cache correction: 101 acceptance/history/architecture tests passed, zero failures.
+- Follow-up backend changes also passed four tests from the detached clean checkout at `8a619089`.
+- Cold/full-panel runs subsequently reproduced history-request aborts. History now starts on modal/case revision, rather than being discarded on tab switches, and uses the existing audit transport's eight-second budget. Explicit retry and bounded timeout have unit regressions. These adjustments must not be represented as a proved database latency fix; passing runs and failed receipts are both retained.
+- Final four-turn/all-panel browser gate after those adjustments: passed in 1.8 minutes, zero retries (`playwright-history-budget.log`). This closes the local exercised history path, not arbitrary-load or cold-machine reliability certification.
 
 ## Not certified / still open
 
