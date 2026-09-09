@@ -1,6 +1,20 @@
 import json
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
+
+
+@pytest.mark.parametrize('tenant,case', [('other', 'case-a'), ('a', 'case-other')])
+def test_completion_cache_cannot_grant_another_tenant_or_case_event(monkeypatch, tenant, case):
+    from src.app.services.shopping_case_trace_reader import _case_trace_has_event
+    row = {'tenant_id': tenant, 'event_type': 'research_completed', 'payload': {'case_id': case}}
+    monkeypatch.setattr('src.app.services.decision_log.get_cached_trace_events', lambda _: [row])
+    monkeypatch.setattr('src.app.services.shopping_case_trace_reader.get_cached_trace_events', lambda _: [row])
+    engine = create_engine('sqlite:///:memory:')
+    with Session(engine) as db:
+        assert not _case_trace_has_event(db, case_id='case-a', tenant_id='a',
+                                        event_type='research_completed', decision_trace_id='trace-a')
+    engine.dispose()
 
 
 def test_turn_history_filters_tenant_and_both_time_axes():

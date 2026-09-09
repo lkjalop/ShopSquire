@@ -2,16 +2,22 @@ import { useState } from 'react';
 import TurnHistoryPanel from './TurnHistoryPanel';
 
 
-export default function DecisionRunTracePanel({ data, status, classNames }: {
+export default function DecisionRunTracePanel({ data, status, classNames, onRetry }: {
   data: any;
   status: 'idle' | 'loading' | 'ready' | 'unavailable';
   classNames: Record<string, string>;
+  onRetry?: () => void;
 }) {
   const [view, setView] = useState<'changed' | 'known' | 'fulfil'>('changed');
   if (status === 'idle') return null;
   if (status === 'loading') return <div className={classNames.empty}>Loading revisioned decision evidence...</div>;
   const history = Array.isArray(data?.turn_history) ? data.turn_history : [];
-  if (status === 'unavailable' || !data?.latest) {
+  if (status === 'unavailable') {
+    return <div className={classNames.empty} role="status">Decision history is unavailable. This does not establish that no records exist.
+      {onRetry && <button type="button" onClick={onRetry}>Retry decision history</button>}
+    </div>;
+  }
+  if (!data?.latest) {
     return <><TurnHistoryPanel history={history} /><div className={classNames.empty}>No procurement decision run is recorded. No procurement execution is inferred.</div></>;
   }
   const run = data.latest;

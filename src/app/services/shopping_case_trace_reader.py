@@ -123,25 +123,15 @@ def _case_trace_has_event(
     db, *, case_id: str, tenant_id: str, event_type: str,
     decision_trace_id: str | None = None,
 ) -> bool:
-    from src.app.services.decision_log import get_cached_trace_events
-
-    if decision_trace_id and any(
+    # Completion/idempotency is evidence too. Use the same tenant, case and
+    # explicit-turn binding as plan retrieval, including the cache boundary.
+    return any(
         str(row.get("event_type") or "") == event_type
-        for row in get_cached_trace_events(decision_trace_id)
-    ):
-        return True
-    trace_id = case_id.removeprefix("sc-")
-    if any(str(row.get("event_type") or "") == event_type for row in get_cached_trace_events(trace_id)):
-        return True
-    try:
-        return db.execute(text(
-            "SELECT 1 FROM decision_trace_events "
-            "WHERE trace_id=:trace_id AND tenant_id=:tenant_id AND event_type=:event_type LIMIT 1"
-        ), {
-            "trace_id": trace_id, "tenant_id": tenant_id, "event_type": event_type,
-        }).first() is not None
-    except Exception:
-        return False
+        for row in load_case_trace_events(
+            db, case_id=case_id, tenant_id=tenant_id,
+            decision_trace_id=decision_trace_id,
+        )
+    )
 
 
 def load_case_turn_history(db, *, tenant_id: str, case_id: str,

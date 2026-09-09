@@ -50,10 +50,12 @@ test('live category and quantity turns retain their own trace and recorded histo
   await page.getByRole('button', {name:/Ask Me/i}).click({force:true});
   const operations = new Set<string>();
   const traces = new Set<string>();
+  let previousTerminal: any;
   for (const query of [
     'Could a laptop under AUD 2,500 run PRAGMATA at 1080p?',
     'Actually I need a computer chair under AUD 400, not a laptop.',
     'Now I need 10 laptops with a total budget of AUD 30,000.',
+    'Make that 12 laptops, keeping the total budget at AUD 30,000.',
   ]) {
     const data = await send(page, query);
     const terminal = data.terminal_outcome;
@@ -66,6 +68,10 @@ test('live category and quantity turns retain their own trace and recorded histo
     expect(data.turn_read_model.operation_id).toBe(terminal.operation_id);
     expect(data.turn_read_model.case_revision).toBe(terminal.case_revision);
     expect(terminal.commerce_authority).toBe('none');
+    if (operations.size === 4) {
+      expect(terminal.case_id).toBe(previousTerminal.case_id);
+      expect(terminal.case_revision).toBe(previousTerminal.case_revision + 1);
+    }
     await page.getByTitle('Decision Trace', {exact:true}).click();
     const modal = page.getByTestId('decision-trace-modal');
     await expect(modal).toBeVisible();
@@ -82,11 +88,21 @@ test('live category and quantity turns retain their own trace and recorded histo
         panels[leaf] = await panel.innerText();
         if (leaf === 'summary') await expect(panel).toContainText(terminal.decision_trace_id);
         if (leaf === 'audit') await expect(panel.getByTestId('recorded-turn-history')).toBeVisible();
+        if (leaf === 'audit' && operations.size === 4) {
+          const history = panel.getByTestId('recorded-turn-history');
+          await history.getByLabel('Recorded turn revision').selectOption({label:`Revision ${previousTerminal.case_revision}`});
+          await expect(history).toContainText(previousTerminal.operation_id);
+          await expect(history).not.toContainText(terminal.operation_id);
+          await history.getByLabel('Recorded turn revision').selectOption({label:`Revision ${terminal.case_revision}`});
+          await expect(history).toContainText(terminal.operation_id);
+          await expect(history).toContainText('commerce authority: none');
+        }
       }
     }
     expect(panels.raw).toContain(terminal.decision_trace_id);
     await info.attach(`turn-${operations.size}`, {body:JSON.stringify({terminal,panels}, null, 2), contentType:'application/json'});
     await modal.getByTitle('Close', {exact:true}).click();
+    previousTerminal = terminal;
   }
   expect(dispatches).toEqual([]);
   expect(failures).toEqual([]);

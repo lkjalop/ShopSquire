@@ -5,6 +5,11 @@ import DecisionRunTracePanel from '../DecisionRunTracePanel';
 
 
 describe('DecisionRunTracePanel', () => {
+  it('does not report missing records when history retrieval failed', () => {
+    render(<DecisionRunTracePanel status="unavailable" data={null} classNames={{empty:'empty'}} />);
+    expect(screen.getByText(/Decision history is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText(/No procurement decision run is recorded/)).not.toBeInTheDocument();
+  });
   it('shows unresolved conflicts and denies commercial authority', () => {
     render(<DecisionRunTracePanel status="ready" classNames={{ summaryPane: 'summary', empty: 'empty' }} data={{
       latest: {

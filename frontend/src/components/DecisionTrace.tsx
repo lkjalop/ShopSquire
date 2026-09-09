@@ -4311,6 +4311,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   <DecisionRunTracePanel
                     data={decisionRunTrace.data}
                     status={decisionRunTrace.status}
+                    onRetry={decisionRunTrace.retry}
                     classNames={styles}
                   />
                   <AuditTracePanel

@@ -32,6 +32,7 @@ export function shoppingCaseIdFromTraceEvents(events: Array<any>): string | null
 
 export function useDecisionTraceData({ active, caseId, revision }: { active: boolean; caseId: string | null; revision?: number }) {
   const [data, setData] = useState<any | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
   const uid = useMemo(() => {
     try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; }
@@ -61,7 +62,7 @@ export function useDecisionTraceData({ active, caseId, revision }: { active: boo
       .catch(() => { if (!disposed) setStatus('unavailable'); })
       .finally(() => window.clearTimeout(timer));
     return () => { disposed = true; window.clearTimeout(timer); controller.abort('trace_closed'); };
-  }, [active, caseId, revision, tenantId, uid]);
+  }, [active, caseId, revision, tenantId, uid, attempt]);
 
-  return { data, status };
+  return { data, status, retry: () => setAttempt(value => value + 1) };
 }
