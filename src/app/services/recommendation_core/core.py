@@ -328,7 +328,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # router incorrectly labels the turn as a switch or returns no node. This is a core
     # authorization invariant, not an intent heuristic: the canonical budget parser proves
     # the bounded constraint, and the prior node was already sellability-clamped.
-    if decision.node_handle is None and (envelope.session or {}).get("prior_node"):
+    if (decision.node_handle is None and decision.subject_action == "continue"
+            and (envelope.session or {}).get("prior_node")):
         try:
             prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
             if (
@@ -828,6 +829,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         )
         question = {
             "id": "workload_requirements",
+            "workload_subjects": names,
             "goal": "resolve_named_workload",
             "reason": "named_workload_evidence_unresolved",
             "missing_slots": missing_slots,

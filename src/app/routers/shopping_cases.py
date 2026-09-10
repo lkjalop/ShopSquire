@@ -790,11 +790,14 @@ async def _accept_requirement_proposal_with_db(
     case = db.execute(select(ShoppingCase).where(
         ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
     )).scalar_one()
-    from src.app.services.catalog_shortfall_projection import read_acceptance_budget
+    from src.app.services.catalog_shortfall_projection import read_acceptance_budget, stretch_consent_receipt
     try:
         unit_budget, order_quantity = read_acceptance_budget(
             db, tenant_id=tenant_id, case_id=case_id, expected_revision=int(case.revision or 1),
         )
+        result['stretch_consent'] = stretch_consent_receipt(
+            body.stretch_consent.model_dump() if body.stretch_consent else None,
+            case_id=case_id, revision=int(case.revision or 1), budget=unit_budget, reviewer=body.uid)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={'code': str(exc)}) from exc
     result['budget_context'] = {'unit_budget_cents': unit_budget, 'quantity': order_quantity,
@@ -802,6 +805,7 @@ async def _accept_requirement_proposal_with_db(
     shelves = project_accepted_catalog(
         db, accepted_claims=accepted,
         budget_cents=unit_budget, requested_quantity=order_quantity,
+        stretch_budget_cents=(result['stretch_consent'] or {}).get('unit_cap_cents'),
         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
         tenant_id=tenant_id,
         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
@@ -877,6 +881,7 @@ async def _accept_requirement_proposal_with_db(
                         db,
                         accepted_claims=[*accepted, *official_claims],
                         budget_cents=unit_budget, requested_quantity=order_quantity,
+                        stretch_budget_cents=(result['stretch_consent'] or {}).get('unit_cap_cents'),
                         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
                         tenant_id=tenant_id,
                         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(

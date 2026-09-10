@@ -79,12 +79,13 @@ def compile_workload_evidence_requirements(
         compile_authoritative_requirements,
     )
 
+    canonical_name = str(result.get("canonical_title") or result.get("resolved_name") or name)[:160]
     claims = []
     for attr, predicate in _minimum_constraints(result).items():
         claims.append({
             "need_id": f"{kind}:{attr}",
             "subject_span": str(name)[:120],
-            "artefact_name": str(name)[:160],
+            "artefact_name": canonical_name,
             "claim_type": "minimum_requirements",
             "status": "accepted",
             "source_id": result.get("source") or result.get("provider_id"),
@@ -103,6 +104,34 @@ def compile_workload_evidence_requirements(
                 str((result.get("minimum") or {}).get("gpu") or "")[:1000]
                 if attr == "gpu_vram_gb" else None
             ),
+        })
+    # These are exact literal predicates, not performance equivalences. An
+    # unsplit alternative or qualified model string cannot match a different
+    # catalog model. Richer interpretation still needs cited typed extraction.
+    minimum = result.get("minimum") or {}
+    receipts = minimum.get("source_fields") or {}
+    for field, attribute in (("cpu", "cpu_model"), ("gpu", "gpu_model"),
+                             ("os", "os"), ("storage_type", "storage_type")):
+        receipt = receipts.get(field) if isinstance(receipts, dict) else None
+        if not isinstance(receipt, dict):
+            continue
+        excerpt, start, end = receipt.get("text"), receipt.get("start"), receipt.get("end")
+        value = minimum.get(field)
+        if not (isinstance(value, str) and isinstance(excerpt, str) and len(excerpt) <= 1024
+                and type(start) is int and type(end) is int
+                and 0 <= start < end <= len(excerpt) and excerpt[start:end] == value
+                and receipt.get("representation") == "steam_requirement_line_v1"
+                and (result.get("source") or result.get("provider_id")) == "steam"):
+            continue
+        claims.append({
+            "subject_span": str(name)[:120], "artefact_name": canonical_name,
+            "status": "accepted", "authority": "official_requirements",
+            "claim_origin": "observed", "source_id": "steam", "lineage_root": "steam",
+            "source_record_id": result.get("source_record_id") or result.get("app_id"),
+            "observed_at": result.get("retrieved_at"), "confidence": result.get("confidence"),
+            "attribute_key": attribute, "operator": "in", "value": [value],
+            "source_excerpt": excerpt, "value_spans": [[start, end]],
+            "requirement_class": "minimum",
         })
     from src.app.platform.store_profile import active_profile_id
     from src.app.platform.tenant_context import current_tenant_id

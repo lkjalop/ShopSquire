@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
+import { turnViolations } from './helpers/turnOracle';
 
 const sections = {
   'Decision': ['summary', 'events', 'execution'],
@@ -59,6 +60,12 @@ test('live category and quantity turns retain their own trace and recorded histo
   ]) {
     const data = await send(page, query);
     const terminal = data.terminal_outcome;
+    expect(turnViolations(data, {budgetMax: [2500, 400, 30000, 30000][operations.size]})).toEqual([]);
+    if (operations.size >= 2) {
+      expect(terminal.next_questions || []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({id:'priority_tradeoff'}),
+      ]));
+    }
     expect(terminal.operation_id).toBeTruthy();
     expect(operations.has(terminal.operation_id)).toBe(false);
     operations.add(terminal.operation_id);
@@ -75,6 +82,14 @@ test('live category and quantity turns retain their own trace and recorded histo
     await page.getByTitle('Decision Trace', {exact:true}).click();
     const modal = page.getByTestId('decision-trace-modal');
     await expect(modal).toBeVisible();
+    if (operations.size === 1) {
+      expect(terminal.research_outcome).toBeTruthy();
+      const outcome = terminal.research_outcome;
+      await expect(modal.getByTestId('revision-bound-research-outcome'))
+        .toContainText(`${outcome.accepted_claim_count} accepted, ${outcome.held_claim_count} held`);
+      await expect(modal.getByTestId('revision-bound-turn-projection'))
+        .toContainText(`Case revision ${terminal.case_revision}`);
+    }
     const panels: Record<string, string> = {};
     for (const [section, leaves] of Object.entries(sections)) {
       await modal.getByLabel('Decision Trace sections', {exact:true}).getByRole('button', {name:new RegExp('^'+section)}).click();
@@ -86,6 +101,17 @@ test('live category and quantity turns retain their own trace and recorded histo
         await expect(panel).not.toContainText(/Loading .*\.\.\./, {timeout:15_000});
         await expect(panel).not.toBeEmpty();
         panels[leaf] = await panel.innerText();
+        if (leaf === 'research' && operations.size === 1) {
+          const outcome = terminal.research_outcome;
+          const summary = panel.getByTestId('research-outcome-summary');
+          await expect(summary).toBeVisible();
+          for (const [label, value] of Object.entries({Parsed:outcome.parsed_claim_count,
+            Held:outcome.held_claim_count, Accepted:outcome.accepted_claim_count,
+            Rejected:outcome.rejected_claim_count})) {
+            await expect(summary).toContainText(`${label}: ${value}`);
+          }
+          await expect(summary).toContainText(`Catalog authority: ${outcome.catalog_authority.replaceAll('_', ' ')}`);
+        }
         if (leaf === 'summary') await expect(panel).toContainText(terminal.decision_trace_id);
         if (leaf === 'audit') await expect(panel.getByTestId('recorded-turn-history')).toBeVisible();
         if (leaf === 'audit' && operations.size === 4) {

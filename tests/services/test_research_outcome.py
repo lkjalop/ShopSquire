@@ -1,6 +1,46 @@
 from src.app.services.research_outcome import build_research_outcome
 
 
+def test_resolved_identity_does_not_accept_unverified_compiled_predicates():
+    outcome = build_research_outcome(
+        case_id="c", case_revision=1, operation_id="o", requirements={},
+        catalog_authority="blocked", commerce_authority="none",
+        research={"evidence": [{"status": "resolved", "provider_id": "store",
+            "canonical_title": "Example", "source_url": "https://example.org/requirements",
+            "compiled_requirements": [{"attribute_key": "ram_gb", "value": 16,
+                                       "verification_status": "unverified"}]}]},
+    )
+    assert outcome.accepted_claim_count == 0
+    assert outcome.held_claim_count == 1
+
+
+def test_compiled_receipts_count_unique_claims_across_provider_groups():
+    from src.app.services.structured_requirement_claims import project_structured_requirement_claims
+    evidence = [{"status": "resolved", "provider_id": "store",
+        "canonical_title": name, "source_url": f"https://example.org/{name}",
+        "compiled_requirements": [{"attribute_key": "ram_gb", "value": 16,
+            "artefact_name": name, "verification_status": "verified"}]}
+        for name in ("first", "second")]
+    claims = project_structured_requirement_claims({"evidence": evidence})
+    outcome = build_research_outcome(
+        case_id="c", case_revision=1, operation_id="o",
+        requirements={"accepted": [claims[0], claims[0]]},
+        catalog_authority="blocked", commerce_authority="none",
+        research={"evidence": [*evidence, evidence[0]]},
+    )
+    assert outcome.accepted_claim_count == 2
+    assert outcome.parsed_claim_count == 2
+
+
+def test_duplicate_case_ledger_claims_are_counted_once():
+    outcome = build_research_outcome(
+        case_id="c", case_revision=1, operation_id="o", research={},
+        requirements={"accepted": [{"claim_id": "a"}, {"claim_id": "a"}]},
+        catalog_authority="blocked", commerce_authority="none",
+    )
+    assert outcome.accepted_claim_count == 1
+
+
 def test_literal_observations_are_delivered_without_counting_as_accepted_predicates():
     observation = {"observation_id": "obs-example", "attribute_key": "gpu_model",
                    "value": "GPU A OR GPU B", "canonical_title": "Unseen subject",
@@ -275,8 +315,8 @@ def test_authoritative_structured_evidence_wins_over_degraded_discovery_diagnost
                     "release_date": "20 Jan, 2026",
                     "requirements_completeness": "minimum_and_recommended",
                     "compiled_requirements": [
-                        {"attribute_key": "ram_gb", "operator": ">=", "value": 8},
-                        {"attribute_key": "gpu_vram_gb", "operator": ">=", "value": 4},
+                        {"attribute_key": "ram_gb", "operator": ">=", "value": 8, "verification_status": "verified"},
+                        {"attribute_key": "gpu_vram_gb", "operator": ">=", "value": 4, "verification_status": "verified"},
                     ],
                 }],
             },

@@ -2,6 +2,43 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.describe.configure({ retries: 0 });
 
+test('live preflight cannot replace executed provider requirements', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(uid => sessionStorage.setItem('uid', uid), `preflight-ledger-${Date.now()}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Ask Me!', exact: true }).click();
+  const response = await send(page, 'I need a laptop under AUD 5000 to play Baldur’s Gate 3');
+  const evidence = response.workload_authorization.evidence;
+  const provider = evidence.find((item: any) => item.app_id === '1086940');
+  expect(provider).toBeDefined();
+  expect(provider.cached).toBe(false);
+  expect(provider.live_allowed).toBe(true);
+  const attributes = provider.compiled_requirements.map((claim: any) => claim.attribute_key);
+  expect(attributes).toEqual(expect.arrayContaining(['cpu_model', 'gpu_model']));
+  const terminal = response.terminal_outcome;
+  expect(terminal.operation_id).toBe(response.operation_id);
+  expect(terminal.case_revision).toBe(response.case_revision);
+  expect(terminal.research_outcome.accepted_claim_count).toBeGreaterThan(2);
+  await info.attach('preflight-reconciliation', { body: JSON.stringify({ provider, outcome: terminal.research_outcome }), contentType: 'application/json' });
+});
+
+test('live complete-evidence qualified-product delivery gate', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(uid => sessionStorage.setItem('uid', uid), `positive-delivery-${Date.now()}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Ask Me!', exact: true }).click();
+  const response = await send(page, 'I need a laptop under AUD 5000 to play Baldur’s Gate 3');
+  const terminal = response.terminal_outcome;
+  await info.attach('positive-delivery-outcome', { body: JSON.stringify(terminal), contentType: 'application/json' });
+  expect(terminal.research_outcome.accepted_claim_count).toBeGreaterThan(0);
+  expect(terminal.research_outcome.requirement_completeness).toBe('complete');
+  expect(terminal.research_outcome.catalog_authority).toBe('permitted');
+  const qualified = (terminal.product_shelves?.shelves || []).flatMap((shelf: any) => [...shelf.initial, ...shelf.remaining])
+    .filter((item: any) => item.fit_status === 'qualified');
+  expect(qualified.length, 'Live evidence and matching inventory must actually deliver qualified products').toBeGreaterThan(0);
+  await expect(page.getByText(qualified[0].title, { exact: true }).first()).toBeVisible();
+});
+
 test('approximate budget keeps its literal anchor without automatic stretch', async ({ page }, info) => {
   test.setTimeout(180_000);
   await page.addInitScript(uid => { sessionStorage.setItem('uid', uid); }, `approx-budget-${Date.now()}`);

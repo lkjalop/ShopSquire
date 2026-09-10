@@ -30,6 +30,13 @@ class ClaimCorrection(BaseModel):
     condition: str | None = Field(default=None, max_length=500)
 
 
+class StretchConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmed: Literal[True]
+    expected_revision: int = Field(strict=True, ge=1)
+    unit_cap_cents: int = Field(strict=True, gt=0, le=1_000_000_000)
+
+
 class AcceptRequirementProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     uid: str = Field(min_length=1, max_length=200)
@@ -38,6 +45,7 @@ class AcceptRequirementProposal(BaseModel):
     rejected_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     corrections: list[ClaimCorrection] = Field(default_factory=list, max_length=64)
     research_choice: Literal["local_only", "research_and_corroborate"]
+    stretch_consent: StretchConsent | None = None
 
 
 class FulfillmentOptionsRequest(BaseModel):

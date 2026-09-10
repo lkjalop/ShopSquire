@@ -169,6 +169,15 @@ _SET_PATHS = {
 }
 
 
+def case_patch_path_supported(operation: str, path: str) -> bool:
+    """Shared proposal/execution vocabulary; unknown paths are never aliases."""
+    if operation == "set":
+        return path in _SET_PATHS
+    if operation in {"add", "remove"}:
+        return path in {"workloads", "candidate_skus"}
+    return operation == "move_quantity" and path == "destinations"
+
+
 def resolve_temporal_constraint(
     constraint: TemporalConstraint,
     *,

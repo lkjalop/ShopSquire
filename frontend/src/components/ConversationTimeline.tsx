@@ -22,7 +22,7 @@ type Props = {
   onUndoServer: (message: ChatMessage) => void;
   onConfirmCart: (message: ChatMessage) => void;
   onDismissCart: (message: ChatMessage) => void;
-  onAcceptRequirements: (message: ChatMessage, claimIds: string[], choice: any, corrections: any) => Promise<void>;
+  onAcceptRequirements: (message: ChatMessage, claimIds: string[], choice: any, corrections: any, stretchCapCents?: number) => Promise<void>;
   onAffordabilityChoice: (message: ChatMessage, choice: any) => void;
   onSourceFetch?: (message: ChatMessage) => void;
 };
@@ -54,7 +54,7 @@ export default function ConversationTimeline(props: Props) {
     {msg.undoClear?.items.length ? <div style={{ marginTop: 8 }}><button type="button" className={styles.filterBtn} onClick={() => props.onUndoClear(msg)} title="Put the cleared items back">↩️ Undo — restore {msg.undoClear.items.length} item(s)</button></div> : null}
     {msg.undoServer && <div style={{ marginTop: 8 }}><button type="button" className={styles.filterBtn} onClick={() => props.onUndoServer(msg)} title="Restore the cart from before that change (server snapshot)">↩️ Undo that cart change</button></div>}
     {msg.cartConfirm && <PendingCartChangeCard plan={msg.cartConfirm} cartItems={props.cartItems} onConfirm={() => props.onConfirmCart(msg)} onDismiss={() => props.onDismissCart(msg)} />}
-    {msg.buyerRequirementClaims && <BuyerRequirementReviewCard claims={msg.buyerRequirementClaims} onAccept={msg.buyerRequirementProposal ? (claimIds, choice, corrections) => props.onAcceptRequirements(msg, claimIds, choice, corrections) : undefined} />}
+    {msg.buyerRequirementClaims && <BuyerRequirementReviewCard claims={msg.buyerRequirementClaims} onAccept={msg.buyerRequirementProposal ? (claimIds, choice, corrections, cap) => props.onAcceptRequirements(msg, claimIds, choice, corrections, cap) : undefined} />}
     {msg.buyerClaimReconciliation && <BuyerClaimReconciliationCard rows={msg.buyerClaimReconciliation} />}
     {msg.cartPlanStatus && <div style={{ marginTop: 8, fontSize: 12, color: '#92400e' }}>{msg.cartPlanStatus}</div>}
     {msg.affordabilityResolution && <AffordabilityResolutionCard resolution={msg.affordabilityResolution} onChoose={choice => props.onAffordabilityChoice(msg, choice)} />}

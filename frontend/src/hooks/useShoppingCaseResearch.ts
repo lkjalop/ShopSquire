@@ -356,11 +356,12 @@ export function useShoppingCaseResearch() {
 
   const acceptRequirementProposal = useCallback(async ({
     uid, caseId, proposalId, proposalVersion, acceptedClaimIds, rejectedClaimIds,
-    corrections = [], researchChoice,
+    corrections = [], researchChoice, stretchConsent,
   }: {
     uid: string; caseId: string; proposalId: string; proposalVersion: number;
     acceptedClaimIds: string[]; rejectedClaimIds: string[];
     corrections?: Record<string, unknown>[];
+    stretchConsent?: { confirmed: true; expected_revision: number; unit_cap_cents: number };
     researchChoice: 'local_only' | 'research_and_corroborate';
   }) => postShoppingCase(
     `/api/v1/shopping-cases/${encodeURIComponent(caseId)}`
@@ -368,6 +369,7 @@ export function useShoppingCaseResearch() {
     {
       uid, expected_proposal_version: proposalVersion, accepted_claim_ids: acceptedClaimIds,
       rejected_claim_ids: rejectedClaimIds, corrections, research_choice: researchChoice,
+      ...(stretchConsent ? { stretch_consent: stretchConsent } : {}),
     },
     `accept-${proposalId}-${proposalVersion}`,
   ), []);

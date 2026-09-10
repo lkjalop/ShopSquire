@@ -27,7 +27,7 @@ def _evaluate_bounded_case_patches(
     """
     from pydantic import ValidationError
 
-    from src.app.services.procurement_case_state import CasePatch
+    from src.app.services.procurement_case_state import CasePatch, case_patch_path_supported
 
     raw = data.get("case_patches")
     if not isinstance(raw, list):
@@ -138,6 +138,9 @@ def _evaluate_bounded_case_patches(
             patch = CasePatch.model_validate(candidate_item)
         except ValidationError:
             reject(index, candidate_item, "schema_validation_failed", "CasePatch")
+            continue
+        if not case_patch_path_supported(patch.operation, patch.path):
+            reject(index, candidate_item, "unsupported_case_patch_path", "case_patch_path_supported")
             continue
         is_grounded, predicate = grounded(patch)
         if not is_grounded:

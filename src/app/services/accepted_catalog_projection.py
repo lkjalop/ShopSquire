@@ -455,6 +455,7 @@ def project_accepted_catalog(
     accepted_claims: Sequence[Mapping[str, Any]],
     desired_outcome: str = "Buyer accepted requirements",
     budget_cents: int | None = None,
+    stretch_budget_cents: int | None = None,
     requested_quantity: int | None = None,
     tenant_id: str = "default",
     hypothesis_labels: Mapping[str, str] | None = None,
@@ -567,6 +568,7 @@ def project_accepted_catalog(
     return build_product_shelves(
         candidates, hypothesis_ids=hypothesis_ids, scope_labels=labels,
         budget_cents=budget_cents, requested_quantity=requested_quantity,
+        stretch_budget_cents=stretch_budget_cents,
         suppress_zero_relevance=bool(accepted_claims), suppress_unavailable=True,
     )
 

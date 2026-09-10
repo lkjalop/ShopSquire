@@ -32,6 +32,17 @@ _TOP_KEYS = {
 }
 
 
+def test_authorized_live_lookup_is_not_shadowed_by_curated_fixture(monkeypatch):
+    from src.app.services.connectors import steam_requirements as steam
+    monkeypatch.setattr(steam, '_LIVE_CACHE', {})
+    monkeypatch.setattr(steam, '_lookup_fixture', lambda title: {'title': 'Old fixture'})
+    current = {'title': 'Current official title', 'minimum': {'cpu': 'Cited CPU'}, 'cached': False}
+    calls = []
+    monkeypatch.setattr(steam, '_live_lookup', lambda title: calls.append(title) or current)
+    assert steam.get_game_requirements('Requested title', allow_live=True) == current
+    assert calls == ['Requested title']
+
+
 def test_literal_cpu_and_source_rows_survive_bounding_without_invented_equivalence():
     raw = (
         '<ul><li>Processor: Example CPU A OR Example CPU B</li>'
@@ -133,8 +144,9 @@ def test_live_failure_returns_none_never_raises(monkeypatch):
     monkeypatch.setattr(httpx, "Client", _BoomClient)
     # fixture miss + live lane exploding → None, no exception
     assert get_game_requirements("totally unknown game zzz", allow_live=True) is None
-    # fixture-first: a fixture hit never needs the (broken) live lane
-    got = get_game_requirements("elden ring", allow_live=True)
+    # A live failure must not be concealed by an older fixture.
+    assert get_game_requirements("elden ring", allow_live=True) is None
+    got = get_game_requirements("elden ring", allow_live=False)
     assert got is not None and got["cached"] is True
 
 

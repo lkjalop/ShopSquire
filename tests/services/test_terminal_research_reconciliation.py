@@ -4,6 +4,20 @@ from src.app.services.terminal_research_reconciliation import (
 )
 
 
+def test_requirement_question_retires_only_after_its_bound_workloads_resolve():
+    from src.app.services.terminal_research_reconciliation import reconcile_workload_questions
+    question = {"id": "workload_requirements", "goal": "resolve_named_workload",
+                "workload_subjects": ["pragmata"], "text": "Requirements unavailable"}
+    other = {"id": "budget", "text": "What is your budget?"}
+    assert reconcile_workload_questions([question, other], _authorization()) == [other]
+    assert reconcile_workload_questions([question], {"evidence": []}) == [question]
+    mixed = {**question, "workload_subjects": ["pragmata", "another workload"]}
+    assert reconcile_workload_questions([mixed], _authorization()) == [mixed]
+    held = _authorization()
+    held["evidence"][0]["compiled_requirements"] = []
+    assert reconcile_workload_questions([question], held) == [question]
+
+
 def _semantic(*, extra_concept: bool = False) -> dict:
     concepts = [{
         "text": "pragmata",

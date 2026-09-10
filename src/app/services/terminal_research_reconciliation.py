@@ -27,6 +27,27 @@ def _phrase_in(value: object, phrase: str) -> bool:
     ))
 
 
+def reconcile_workload_questions(
+    questions: list[dict[str, Any]], authorization: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Retire only provider-answered obligations, never buyer preferences.
+
+    Unbound legacy questions remain unresolved: prose is not an identity key.
+    A combined obligation remains until every bound workload has evidence.
+    """
+    resolved = {
+        _normal(row.get("requested_name"))
+        for row in (authorization or {}).get("evidence", [])
+        if isinstance(row, Mapping) and row.get("status") == "resolved"
+        and row.get("compiled_requirements") and row.get("source_url")
+    } - {""}
+    return [question for question in questions if not (
+        question.get("goal") == "resolve_named_workload"
+        and question.get("workload_subjects")
+        and {_normal(name) for name in question["workload_subjects"]} <= resolved
+    )]
+
+
 @dataclass(frozen=True)
 class SemanticResearchReconciliation:
     semantic_resolution: dict[str, Any]

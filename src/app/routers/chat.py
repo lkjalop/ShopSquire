@@ -2124,39 +2124,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         pass
     if turn_intent in ("EXPLAIN", "SUPPORT_CLAIM"):
         next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
-    if not next_questions and not products and turn_intent not in (
-        "EXPLAIN", "SUPPORT_CLAIM", "POLICY_QUESTION",
-    ):
-        # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
-        next_questions = [
-            {
-                "id": "widen_budget",
-                "text": "Can we widen your budget upward from your current range?",
-                "goal": "increase_match_space",
-                "options": [
-                    {"id": "widen_small", "label": "Widen a little (+$200)", "value": "expand_budget:+200"},
-                    {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
-                ],
-            },
-        ]
-        # Ask to relax only a positive hard brand filter. An explicit exclusion is already a
-        # resolved buyer constraint; asking them to consider the excluded brand contradicts the
-        # same response. Brand names and vertical policy stay in the bounded core payload.
-        _confirmed = data.get("confirmed_slots") if isinstance(data.get("confirmed_slots"), dict) else {}
-        _decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
-        _hard_brand = _decision.get("brand_filter") or _confirmed.get("brand_filter")
-        _excluded = _decision.get("exclude_brand") or _confirmed.get("brand_excludes")
-        if _hard_brand and not _excluded:
-            next_questions.append({
-                "id": "relax_brand",
-                "text": "Should I relax the current brand constraint?",
-                "goal": "increase_match_space",
-            })
-        next_questions.append({
-            "id": "priority_tradeoff",
-            "text": "Prioritize interactive performance or rendering/export speed first?",
-            "goal": "resolve_tradeoff",
-        })
+    # Empty retrieval is not proof of a budget, brand, or rendering tradeoff.
+    # Preserve questions owned by the evaluated core/research obligations; the
+    # transport must not manufacture new buyer requirements from zero results.
     # Budget stated but NO in-budget match (nearest-above fallback shows OVER-budget products): still expose
     # the WIDEN option. The old trigger only fired when products was empty, so a budget query that fell back
     # to over-budget picks hid the widen chip (the brittle path GPT-5.5 flagged). Deterministic: budget set +
@@ -2975,13 +2945,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             if match_index is None:
                 projected_items.append(dict(canonical_item))
             else:
-                projected_items[match_index] = {
-                    **projected_items[match_index],
-                    **{
-                        key: value for key, value in canonical_item.items()
-                        if value not in (None, "", [], {})
-                    },
-                }
+                from src.app.services.structured_requirement_claims import merge_preflight_identity
+                projected_items[match_index] = merge_preflight_identity(
+                    projected_items[match_index], canonical_item,
+                )
         projected_authorization["evidence"] = projected_items
         projected_authorization.setdefault("status", "evidence_resolved_catalog_pending")
         projected_authorization.setdefault("reason", "canonical_identity_preflight")
@@ -3369,7 +3336,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # subsequent quantity, deadline, selection, swap, or supplier turns amend
     # this purpose instead of floating as unrelated chat prose. Ambiguity and
     # research projections remain separate and retain their stricter contract.
-    if not active_shopping_case_id and (products or bool(data.get("off_catalog")) or unresolved_purchase):
+    if not active_shopping_case_id and (
+        products or bool(data.get("off_catalog")) or unresolved_purchase
+        or routed_decision.get("request_scope") == "product"
+    ):
         try:
             from datetime import datetime, timezone
             import uuid as _uuid
@@ -3826,6 +3796,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         and (item.get("canonical_title") or item.get("resolved_name"))
     ), None)
     if _resolved_workload_evidence:
+        from src.app.services.terminal_research_reconciliation import reconcile_workload_questions
+        next_questions = reconcile_workload_questions(list(next_questions or []), _workload_authorization)
         # Generic use-case tiers are an early catalog fallback. Once the named
         # workload has accepted provider requirements, keeping that question
         # beside qualified products contradicts the evidence and invites the

@@ -52,7 +52,7 @@ def select_requirement_sections(text: str, *, max_chars: int = 6_000) -> str:
 
     source = str(text or "")
     limit = max(1_000, min(int(max_chars), 10_000))
-    lines = [" ".join(line.split()) for line in source.splitlines() if line.strip()]
+    lines = [line for line in source.splitlines() if line.strip()]
     if len(source) <= limit or not lines:
         return source[:limit]
     selected: list[tuple[int, str]] = []

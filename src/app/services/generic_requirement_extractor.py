@@ -211,31 +211,41 @@ def critique_extracted_requirements(
     forbidden = set(forbidden_attributes or set())
     accepted: list[ExtractedOfficialRequirement] = []
     rejected: list[dict[str, str]] = []
-    seen: dict[tuple[str, str, str], int | float | str | tuple[str, ...]] = {}
+    def scope_key(claim: ExtractedOfficialRequirement) -> tuple:
+        return (claim.attribute, claim.requirement_class, claim.operator,
+                claim.condition or "",
+                claim.page_section.casefold() if claim.requirement_class == "conditional" else "")
+
+    seen: dict[tuple, int | float | str | tuple[str, ...]] = {}
+    conflicts: set[tuple] = set()
     for claim in claims:
         reason = ""
-        value = tuple(claim.value) if isinstance(claim.value, list) else claim.value
-        key = (
-            claim.attribute,
-            claim.requirement_class,
-            claim.page_section.casefold() if claim.requirement_class == "conditional" else "",
-        )
+        value = tuple(sorted(set(claim.value))) if isinstance(claim.value, list) else claim.value
+        key = scope_key(claim)
         if str(claim.citation_url).rstrip("/") != str(accepted_url).rstrip("/"):
             reason = "citation_origin_mismatch"
         elif claim.quoted_evidence_span not in source_text:
             reason = "quoted_span_not_found"
         elif claim.attribute in forbidden:
             reason = "forbidden_attribute"
-        elif allowed and claim.attribute not in allowed:
+        elif allowed_attributes is not None and claim.attribute not in allowed:
             reason = "attribute_out_of_scope"
-        elif key in seen and seen[key] != value:
-            reason = "contradictory_claim"
         if reason:
             rejected.append({"attribute": claim.attribute, "reason": reason})
             continue
+        if key in seen and seen[key] != value:
+            conflicts.add(key)
         seen[key] = value
         accepted.append(claim)
-    return ExtractionCritique(accepted=accepted, rejected=rejected)
+    # Contradiction invalidates the entire competing group, not just whichever
+    # claim happened to arrive last. Unrelated obligations remain usable.
+    consistent = []
+    for claim in accepted:
+        if scope_key(claim) in conflicts:
+            rejected.append({"attribute": claim.attribute, "reason": "contradictory_claim"})
+        else:
+            consistent.append(claim)
+    return ExtractionCritique(accepted=consistent, rejected=rejected)
 
 
 __all__ = [

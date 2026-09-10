@@ -2,8 +2,18 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from copy import deepcopy
 import hashlib
 import json
+
+
+def merge_preflight_identity(current: Mapping[str, Any], preflight: Mapping[str, Any]) -> dict[str, Any]:
+    """Fill identity metadata only; executed evidence/failure state always wins."""
+    result = deepcopy(dict(current))
+    for key in ("app_id", "canonical_title", "resolved_name", "publisher"):
+        if not result.get(key) and preflight.get(key):
+            result[key] = deepcopy(preflight[key])
+    return result
 
 
 def project_structured_requirement_claims(
@@ -28,15 +38,22 @@ def project_structured_requirement_claims(
                 **{key: compiled.get(key) for key in (
                     "attribute_key", "operator", "value", "unit", "requirement_class",
                     "scope_caveat", "source_revision", "artefact_name", "artefact_version",
+                    "compilation_scope", "source_excerpt", "value_spans",
                 )},
             }
             claim_id = "req-" + hashlib.sha256(json.dumps(
                 identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
             ).encode("utf-8")).hexdigest()
-            claims.append({
+            # The ledger is a snapshot, not a mutable view of provider output.
+            # Preserve the compiler's cited alternatives without inferring any
+            # additional equivalence or upgrading their verification status.
+            claims.append(deepcopy({
                 "claim_id": claim_id,
                 "source_claim_ids": identity["source_claim_ids"],
                 "compilation_scope": compiled.get("compilation_scope"),
+                "source_excerpt": compiled.get("source_excerpt"),
+                "value_spans": compiled.get("value_spans") or [],
+                "source_revision": compiled.get("source_revision"),
                 "artefact_name": compiled.get("artefact_name"),
                 "artefact_version": compiled.get("artefact_version"),
                 "attribute": compiled.get("attribute_key"),
@@ -53,7 +70,7 @@ def project_structured_requirement_claims(
                 "source_id": evidence.get("provider_id") or evidence.get("source"),
                 "source_url": evidence.get("source_url"),
                 "observed_at": evidence.get("retrieved_at"),
-            })
+            }))
     return claims
 
 

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.describe.configure({ retries: 0 });
-test('live manual acceptance preserves case budget and cannot verify partial evidence', async ({ page }, info) => {
+for (const stretch of [false, true]) test(`live manual acceptance preserves case budget and cannot verify partial evidence (stretch=${stretch})`, async ({ page }, info) => {
   test.setTimeout(240_000);
   const mutations: string[] = [];
   page.on('request', request => {
@@ -19,6 +19,10 @@ test('live manual acceptance preserves case budget and cannot verify partial evi
   await page.getByRole('button', { name: 'Review extracted requirements', exact: true }).click();
   const accept = page.getByRole('button', { name: 'Use selected provisionally', exact: true }).last();
   await expect(accept).toBeVisible({ timeout: 30_000 });
+  if (stretch) {
+    await page.getByRole('checkbox', { name: 'Allow bounded stretch for this review only' }).last().check();
+    await page.getByRole('spinbutton', { name: 'Stretch maximum AUD per item' }).last().fill('3300');
+  }
   const responsePromise = page.waitForResponse(response => /requirement-proposals\/.*\/accept/.test(response.url()), { timeout: 30_000 });
   await accept.click();
   const response = await responsePromise;
@@ -26,10 +30,12 @@ test('live manual acceptance preserves case budget and cannot verify partial evi
   await info.attach('acceptance-summary', { body: JSON.stringify({ status: response.status(), budget: body.budget_context, detail: body.detail }), contentType: 'application/json' });
   expect(response.status()).toBe(200);
   expect(body.budget_context).toMatchObject({ unit_budget_cents: 300000, quantity: 1 });
+  if (stretch) expect(body.stretch_consent).toMatchObject({ original_unit_budget_cents: 300000, unit_cap_cents: 330000, scope: 'this_acceptance_only', commerce_authority: 'none' });
+  else expect(body.stretch_consent).toBeNull();
   for (const shelf of body.product_shelves?.shelves || []) {
-    expect(shelf.budget_band).not.toBe('stretch');
+    if (!stretch) expect(shelf.budget_band).not.toBe('stretch');
     for (const item of [...shelf.initial, ...shelf.remaining]) {
-      expect(item.price_cents).toBeLessThanOrEqual(300000);
+      expect(item.price_cents).toBeLessThanOrEqual(stretch ? 330000 : 300000);
       expect(item.fit_status).not.toBe('qualified');
     }
   }

@@ -10,6 +10,46 @@ from src.app.services.recommendation_core.turn_router import route_turn
 from src.app.services.recommendation_core import workload_grounding as W
 
 
+def test_literal_connector_fields_compile_with_exact_identity_and_spans():
+    minimum = {"ram_gb": 16, "storage_gb": 150,
+               "cpu": "Example CPU", "gpu": "Example GPU", "os": "Windows 11",
+               "storage_type": "SSD", "source_fields": {}}
+    for field in ("cpu", "gpu", "os", "storage_type"):
+        value = minimum[field]
+        minimum["source_fields"][field] = {
+            "text": value, "start": 0, "end": len(value),
+            "representation": "steam_requirement_line_v1"}
+    result = W.compile_workload_evidence_requirements({
+        "source": "steam", "app_id": "fixture", "confidence": 1,
+        "canonical_title": "Canonical Fixture", "retrieved_at": "2026-09-10",
+        "minimum": minimum,
+    }, kind="game", name="buyer typo")
+    rows = {row.attribute_key: row for row in result.requirements}
+    assert {"cpu_model", "gpu_model", "os", "storage_type"} <= rows.keys()
+    for field in ("cpu_model", "gpu_model", "os", "storage_type"):
+        assert rows[field].operator == "in"
+        assert rows[field].artefact_name == "Canonical Fixture"
+        assert rows[field].source_excerpt
+        assert rows[field].value_spans
+    assert rows['storage_type'].value == ['ssd']
+
+
+@pytest.mark.parametrize("defect", ["span", "representation", "missing"])
+def test_uncited_literal_field_never_grants_compatibility(defect):
+    receipt = {"text": "Example CPU", "start": 0, "end": 11,
+               "representation": "steam_requirement_line_v1"}
+    if defect == "span":
+        receipt["end"] = 4
+    if defect == "representation":
+        receipt["representation"] = "unknown"
+    result = W.compile_workload_evidence_requirements({
+        "source": "steam", "app_id": "fixture", "confidence": 1,
+        "retrieved_at": "2026-09-10", "minimum": {"cpu": "Example CPU",
+            "source_fields": {} if defect == "missing" else {"cpu": receipt}},
+    }, kind="game", name="Fixture")
+    assert not result.requirements
+
+
 def test_provider_projection_preserves_categories_and_both_bounds(monkeypatch):
     from types import SimpleNamespace
     from src.app.services.recommendation_core.research_contracts import CompiledRequirement

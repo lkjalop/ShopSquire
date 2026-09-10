@@ -116,8 +116,8 @@ def test_generic_critic_rejects_conflicting_values_within_one_requirement_tier()
         claims, source_text=source,
         accepted_url="https://publisher.example/requirements",
     )
-    assert len(reviewed.accepted) == 1
-    assert reviewed.rejected == [{"attribute": "ram_gb", "reason": "contradictory_claim"}]
+    assert reviewed.accepted == []
+    assert reviewed.rejected == [{"attribute": "ram_gb", "reason": "contradictory_claim"}] * 2
 
 
 def test_resolution_accepts_the_publisher_multiplication_glyph():
@@ -129,3 +129,30 @@ def test_resolution_accepts_the_publisher_multiplication_glyph():
     assert [(row.attribute, row.value) for row in claims] == [
         ("resolution", "3840x2160"), ("fps", 60),
     ]
+
+
+def test_empty_attribute_scope_is_not_unrestricted_authority():
+    source = 'Minimum requirements\nMemory: 16 GB RAM'
+    claims = extract_generic_requirements(source,
+        citation_url='https://publisher.example/requirements',
+        observed_at=datetime(2026,9,10,tzinfo=timezone.utc))
+    result = critique_extracted_requirements(claims, source_text=source,
+        accepted_url='https://publisher.example/requirements', allowed_attributes=set())
+    assert result.accepted == []
+    assert result.rejected[0]['reason'] == 'attribute_out_of_scope'
+
+
+def test_separate_conditions_and_bounds_do_not_conflict():
+    from src.app.services.generic_requirement_extractor import ExtractedOfficialRequirement
+    base = dict(attribute='ram_gb', value=16, operator='>=', unit='GB',
+        requirement_class='minimum', citation_url='https://publisher.example/requirements',
+        observed_at=datetime(2026,9,10,tzinfo=timezone.utc), page_section='Minimum',
+        quoted_evidence_span='Memory: 16 GB RAM')
+    claims = [ExtractedOfficialRequirement(**base),
+        ExtractedOfficialRequirement(**{**base, 'value':32, 'operator':'<=', 'quoted_evidence_span':'Memory: 32 GB RAM'}),
+        ExtractedOfficialRequirement(**{**base, 'value':32, 'condition':'Large projects', 'quoted_evidence_span':'Memory: 32 GB RAM'})]
+    result = critique_extracted_requirements(claims,
+        source_text='Memory: 16 GB RAM\nMemory: 32 GB RAM',
+        accepted_url='https://publisher.example/requirements')
+    assert len(result.accepted) == 3
+    assert result.rejected == []

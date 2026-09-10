@@ -1,3 +1,4 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -93,7 +94,8 @@ def test_manual_specifications_create_same_case_review_proposal():
     assert payload["cart_mutation"] == "not_authorized"
 
 
-def test_acceptance_passes_durable_total_budget_and_quantity_to_fit(monkeypatch):
+@pytest.mark.parametrize('stretch', [False, True])
+def test_acceptance_passes_durable_total_budget_and_quantity_to_fit(monkeypatch, stretch):
     import json
     from src.app.routers import shopping_cases
     client = _client()
@@ -115,11 +117,18 @@ def test_acceptance_passes_durable_total_budget_and_quantity_to_fit(monkeypatch)
         headers={'Idempotency-Key':'budget-acceptance-test'}, json={
             'uid':'budget-buyer', 'expected_proposal_version':1,
             'accepted_claim_ids':[row['claim_id'] for row in proposal['claims']],
-            'research_choice':'local_only'})
+            'research_choice':'local_only',
+            **({'stretch_consent': {'confirmed': True, 'expected_revision': 1, 'unit_cap_cents': 330000}} if stretch else {})})
     assert response.status_code == 200, response.text
     assert captured[0]['budget_cents'] == 300000
     assert captured[0]['requested_quantity'] == 10
     assert response.json()['budget_context']['unit_budget_cents'] == 300000
+    assert captured[0]['stretch_budget_cents'] == (330000 if stretch else None)
+    if stretch:
+        assert response.json()['stretch_consent']['scope'] == 'this_acceptance_only'
+        with client.app.state.test_engine.connect() as connection:
+            state = json.loads(connection.execute(text('SELECT state_json FROM conversation_case_state')).scalar_one())
+            assert state['procurement_case_state']['budget']['amount_minor'] == 3000000
 
 
 def test_manual_specifications_abstain_when_no_typed_claim_can_be_extracted():

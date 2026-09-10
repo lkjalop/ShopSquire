@@ -80,6 +80,20 @@ def test_grounded_tenant_still_serves(db):
     assert r.grounding == "grounded" and not r.degraded   # grounded path unaffected by M1.1
 
 
+def test_new_purchase_budget_does_not_authorize_prior_subject_inheritance(db, monkeypatch):
+    from src.app.services.taxonomy_registry import add_sold_node
+    from src.app.services.recommendation_core import core
+    from src.app.services.recommendation_core.turn_router import TurnDecision
+    from src.app.services.recommendation_core.turn_outcome import finalize_turn_decision
+    add_sold_node(db, node_handle="el-6-6")
+    env = _env(query="Now I need 10 laptops under AUD 30000",
+               session={"prior_node": "fr-12-2"})
+    raw = TurnDecision(lane="SEARCH", subject_action="switch", request_scope="product")
+    monkeypatch.setattr(core, "route_turn_outcome", lambda *a, **k: finalize_turn_decision(raw, env, db=db))
+    response = core.recommend_turn(db, env)
+    assert response.extras["decision"].get("requested_product_node") != "fr-12-2"
+
+
 def test_refusal_allowed_only_on_explicit_false(db):
     from src.app.services.taxonomy_registry import add_sold_node
     assert refusal_allowed(db, "el-6-2") is False      # ungrounded tenant: None -> never refuse

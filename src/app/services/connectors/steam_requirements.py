@@ -5,17 +5,17 @@ system requirements, structured for the fit layer and the narration claim guard.
 Lane-3-adjacent evidence with provenance (source_url + retrieved_at), sitting between the
 model's parametric knowledge and free web search.
 
-Resolution order (fixture-first — CI must NEVER hit the network):
+Resolution modes (offline tests must NEVER authorize the network):
   1. Local curated fixture ``config/knowledge_pool/steam_fixtures.json`` (override with
      ``STEAM_FIXTURES_PATH``), keyed by normalized title with alias + token-subset fuzzy
      match ("cyberpunk" finds "Cyberpunk 2077"). Fixture hits return ``cached=True``.
-  2. ONLY if ``allow_live=True`` AND the fixture missed: the official Steam storefront
+  2. ONLY if ``allow_live=True``: the official Steam storefront, bypassing fixtures,
      JSON endpoints (storesearch → appdetails), governed by the per-vertical
      ``external_research_allowlist`` (store.steampowered.com is enrolled for the
      electronics profile). The governed caller also requires explicit consent and a dedicated
      operator flag. Each request has a short deadline, responses are bounded and title-matched,
      and live results are TTL-cached. Live hits return ``cached=False`` with retrieval time.
-On ANY failure the connector returns the fixture result or None — it never raises.
+On live failure the connector returns None, not a fixture disguised as live evidence.
 
 IMPORTANT domain knowledge — desktop vs laptop GPUs:
   Steam/publisher requirements name DESKTOP GPUs ("GTX 1060", "RTX 2060"). A laptop GPU
@@ -559,8 +559,8 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
 def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[dict]:
     """Min/recommended system requirements for ``title`` as bounded, citable evidence.
 
-    Fixture-first: the curated local cache always wins (CI never touches the network).
-    The live storefront lane runs ONLY on a fixture miss AND ``allow_live=True`` (the
+    Offline calls use the curated fixture. Authorized live calls use current
+    provider evidence, never a fixture shadowing the network lane (the
     caller is responsible for the consent gate / domain allowlist check). Returns None
     for unknown titles or on any failure — never raises.
     """
@@ -568,7 +568,7 @@ def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[d
         if not _norm_title(title):
             return None
         fixture = _lookup_fixture(title)
-        if fixture is not None:
+        if fixture is not None and not allow_live:
             return _fixture_result(fixture)
         if not allow_live:
             return None

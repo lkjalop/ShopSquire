@@ -366,3 +366,11 @@ def test_canonical_completion_does_not_reemit_inherited_commercial_fields() -> N
     )
 
     assert [patch["path"] for patch in patches] == ["destinations"]
+def test_unknown_model_patch_path_rejected_before_case_execution():
+    from src.app.services.recommendation_core.case_patch_grounding import _evaluate_bounded_case_patches
+    result = _evaluate_bounded_case_patches({"case_patches": [
+        {"operation": "set", "path": "total_quantity", "value": 10},
+        {"operation": "set", "path": "requested_quantity", "value": 10},
+    ]}, "Now I need 10 laptops with a total budget of AUD 30,000.")
+    assert [patch["path"] for patch in result.accepted] == ["requested_quantity"]
+    assert result.rejections[0]["reason"] == "unsupported_case_patch_path"

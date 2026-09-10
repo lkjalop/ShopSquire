@@ -8,6 +8,22 @@ from src.app.models.orm import ProductConfiguration
 logger = logging.getLogger("shopsquire.catalog_shortfall")
 
 
+def stretch_consent_receipt(consent, *, case_id, revision, budget, reviewer):
+    """One acceptance operation only; this never amends the durable buyer budget."""
+    if consent is None:
+        return None
+    cap = consent.get('unit_cap_cents')
+    if consent.get('expected_revision') != revision:
+        raise ValueError('stretch_revision_conflict')
+    if budget is None or isinstance(cap, bool) or not isinstance(cap, int) or cap <= budget:
+        raise ValueError('stretch_requires_known_budget_and_higher_cap')
+    from datetime import datetime, timezone
+    return {'case_id': case_id, 'case_revision': revision, 'reviewer_id': reviewer,
+            'recorded_at': datetime.now(timezone.utc).isoformat(),
+            'original_unit_budget_cents': budget, 'unit_cap_cents': cap,
+            'currency': 'AUD', 'scope': 'this_acceptance_only', 'commerce_authority': 'none'}
+
+
 def acceptance_budget(state: dict[str, Any]) -> tuple[int | None, int]:
     """Return a per-unit allowance, never reinterpret a bulk total as unit money."""
     procurement = state.get('procurement_case_state') or {}

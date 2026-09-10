@@ -84,7 +84,8 @@
       ],
       "values": {
         "nvme_ssd": ["nvme", "nvme ssd", "pcie ssd", "m.2 nvme"],
-        "sata_ssd": ["ssd", "sata ssd", "2.5 inch ssd"],
+        "ssd": ["solid state drive"],
+        "sata_ssd": ["sata ssd", "2.5 inch ssd"],
         "sata_hdd": ["hdd", "hard disk", "sata hdd", "mechanical drive"],
         "ide_hdd": ["ide", "pata", "ide hdd", "pata hdd"],
         "emmc": ["emmc", "embedded multimedia card"],

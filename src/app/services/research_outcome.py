@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
+import json
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -75,6 +76,12 @@ def _first(rows: Iterable[Mapping[str, Any]], key: str) -> Any:
         if value is not None and value != "":
             return value
     return None
+
+
+def _unique_claims(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Deduplicate transported receipts; a repeated projection is not a claim."""
+    return list({str(row.get("claim_id") or json.dumps(dict(row), sort_keys=True, default=str)): row
+                 for row in rows if isinstance(row, Mapping)}.values())
 
 
 def _identity(rows: list[Mapping[str, Any]]) -> ResearchIdentity | None:
@@ -205,9 +212,17 @@ def build_research_outcome(
     execution = dict(certificate.get("execution") or {}) if certificate else {}
     security = dict(certificate.get("security") or {}) if certificate else None
 
-    accepted_rows = list(requirement_data.get("accepted") or [])
-    rejected_rows = list(requirement_data.get("rejected") or [])
-    held_requirement_rows = list(requirement_data.get("held") or [])
+    from src.app.services.structured_requirement_claims import project_structured_requirement_claims
+    structured_claims = project_structured_requirement_claims({"evidence": rows})
+    accepted_rows = _unique_claims([
+        *(requirement_data.get("accepted") or []),
+        *(claim for claim in structured_claims if claim["authority_status"] == "verified_official"),
+    ])
+    rejected_rows = _unique_claims(requirement_data.get("rejected") or [])
+    held_requirement_rows = _unique_claims([
+        *(requirement_data.get("held") or []),
+        *(claim for claim in structured_claims if claim["authority_status"] == "observed_held"),
+    ])
     accepted = max(len(accepted_rows), int(compilation.get("accepted") or 0))
     provisional_rows = list(research_data.get("provisional_claims") or [])
     pending_review_rows = [
@@ -242,15 +257,14 @@ def build_research_outcome(
     rejected = max(
         len(rejected_rows), len(compiler_rejections), int(compilation.get("rejected") or 0),
     )
-    # Connector evidence may carry already-compiled accepted requirements.
+    # Compilation presence describes execution, not acceptance. Acceptance is
+    # projected above from each predicate's explicit verification disposition.
     compiled = max((
         len(row.get("compiled_requirements") or [])
         for row in rows if isinstance(row.get("compiled_requirements"), list)
         and row.get("provider_id") and row.get("source_url")
         and row.get("status") == "resolved"
     ), default=0)
-    if identity and compiled:
-        accepted = max(accepted, compiled)
     # Held source claims may later be accepted or rejected for this case while
     # remaining held at publisher-policy level. Those are dispositions of the
     # same claims, not additional parsed claims.

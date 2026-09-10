@@ -3058,6 +3058,7 @@ export default function App() {
     acceptedClaimIds: string[],
     researchChoice: 'local_only' | 'research_and_corroborate',
     corrections: Record<string, unknown>[] = [],
+    stretchCapCents?: number,
   ) => {
     const proposal = message.buyerRequirementProposal;
     if (!proposal) throw new Error('This requirement proposal is missing its case identity.');
@@ -3071,6 +3072,8 @@ export default function App() {
       proposalVersion: proposal.proposal_version, acceptedClaimIds,
       rejectedClaimIds: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
       corrections, researchChoice,
+      stretchConsent: stretchCapCents === undefined ? undefined : { confirmed: true,
+        expected_revision: Number(activeShoppingCase.revision), unit_cap_cents: stretchCapCents },
     });
     if (!terminalInstallation.current.isCurrent(installationToken)) {
       throw new Error('A newer request superseded this review result. Current recommendations were not changed.');
@@ -3562,8 +3565,8 @@ export default function App() {
                   onUndoServer={(message) => { void undoServerSnapshot(message); }}
                   onConfirmCart={(message) => { void confirmCartPlan(message); }}
                   onDismissCart={(message) => { void dismissCartPlan(message); }}
-                  onAcceptRequirements={(message, claimIds, choice, corrections) => {
-                    return acceptBuyerRequirementProposal(message, claimIds, choice, corrections);
+                  onAcceptRequirements={(message, claimIds, choice, corrections, cap) => {
+                    return acceptBuyerRequirementProposal(message, claimIds, choice, corrections, cap);
                   }}
                   onAffordabilityChoice={(message, choice) => { void chooseAffordabilityResolution(message, choice); }}
                 />

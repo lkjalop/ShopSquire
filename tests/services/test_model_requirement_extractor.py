@@ -82,6 +82,39 @@ def test_long_page_selects_requirement_sections_without_rewriting_source_spans()
     assert all(line in source for line in selected.splitlines())
 
 
+@pytest.mark.parametrize('line', ['  Processor:\tCPU A  or  CPU B', 'Storage:\t SSD required  '])
+def test_section_selection_preserves_literal_whitespace(line):
+    source = ('Navigation.\n' * 800) + line + '\n'
+    selected = select_requirement_sections(source, max_chars=2000)
+    assert line in selected
+    assert all(part in source for part in selected.splitlines())
+
+
+@pytest.mark.parametrize('values', [(16, 32), (32, 16)])
+def test_conflicting_model_claims_cannot_gain_authority_from_order(values):
+    claims = [{'attribute':'ram_gb', 'operator':'>=', 'value':value, 'unit':'GB',
+        'requirement_class':'minimum', 'condition':None, 'page_section':'Minimum',
+        'quoted_evidence_span':f'Memory: {value} GB RAM'} for value in values]
+    receipt = propose_typed_requirements('Memory: 16 GB RAM\nMemory: 32 GB RAM',
+        citation_url='https://publisher.example/requirements',
+        observed_at=datetime(2026,9,10,tzinfo=timezone.utc),
+        model_fn=lambda *_:json.dumps({'claims':claims}))
+    assert receipt['claims'] == []
+    assert len(receipt['rejected']) == 2
+
+
+def test_reordered_exact_alternatives_are_not_a_contradiction():
+    rows = [{'attribute':'cpu_model', 'operator':'in', 'value':values, 'unit':None,
+        'requirement_class':'minimum', 'condition':None, 'page_section':'Minimum',
+        'quoted_evidence_span':'CPU A or CPU B'} for values in [['CPU A','CPU B'], ['CPU B','CPU A']]]
+    receipt = propose_typed_requirements('CPU A or CPU B',
+        citation_url='https://publisher.example/requirements',
+        observed_at=datetime(2026,9,10,tzinfo=timezone.utc),
+        model_fn=lambda *_:json.dumps({'claims':rows}))
+    assert len(receipt['claims']) == 2
+    assert receipt['rejected'] == []
+
+
 def test_model_receipt_records_section_selection_capacity():
     source = ("Navigation filler.\n" * 600) + "Recommended\nMemory: 32 GB RAM"
     raw = json.dumps({"claims": [{

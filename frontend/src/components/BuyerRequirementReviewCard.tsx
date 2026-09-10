@@ -25,6 +25,7 @@ type Props = {
     acceptedClaimIds: string[],
     researchChoice: 'local_only' | 'research_and_corroborate',
     corrections: Record<string, unknown>[],
+    stretchCapCents?: number,
   ) => Promise<void>;
 };
 
@@ -50,12 +51,16 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
   const [busy, setBusy] = React.useState(false);
   const [completed, setCompleted] = React.useState(false);
   const [status, setStatus] = React.useState('');
+  const [stretchEnabled, setStretchEnabled] = React.useState(false);
+  const [stretchCap, setStretchCap] = React.useState('');
   if (!Array.isArray(claims) || claims.length === 0) return null;
   const accept = async (choice: 'local_only' | 'research_and_corroborate') => {
     if (!onAccept || busy) return;
     setBusy(true);
     setStatus('');
     try {
+      const cap = Math.round(Number(stretchCap) * 100);
+      if (stretchEnabled && (!Number.isSafeInteger(cap) || cap <= 0)) throw new Error('Enter an explicit positive AUD maximum per item.');
       const corrections = editableClaims.flatMap((claim) => {
         if (!selected.has(claim.claim_id)) return [];
         const original = Array.isArray(claim.value) ? claim.value.join(', ') : String(claim.value);
@@ -73,7 +78,8 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
           condition: claim.condition || null,
         }];
       });
-      await onAccept([...selected], choice, corrections);
+      if (stretchEnabled) await onAccept([...selected], choice, corrections, cap);
+      else await onAccept([...selected], choice, corrections);
       setCompleted(true);
       setStatus(selected.size === 0
         ? 'Rejected all extracted requirements.'
@@ -171,6 +177,14 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
             ? 'Accepting these records your provisional constraints; it does not turn pending source evidence into authoritative requirements.'
             : 'Select the claims to use. Buyer acceptance keeps them provisional until corroborated.'}
       </div>
+      {onAccept && editableClaims.length > 0 && (
+        <fieldset disabled={busy || completed}>
+          <label><input type="checkbox" checked={stretchEnabled} onChange={e => setStretchEnabled(e.target.checked)} />
+            Allow bounded stretch for this review only</label>
+          {stretchEnabled && <label>Maximum AUD per item <input aria-label="Stretch maximum AUD per item" type="number" min="0.01" step="0.01" value={stretchCap} onChange={e => setStretchCap(e.target.value)} /></label>}
+          <div>Your original budget stays unchanged. This permits exploration only, not a purchase, and does not carry into later turns.</div>
+        </fieldset>
+      )}
       {onAccept && editableClaims.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
