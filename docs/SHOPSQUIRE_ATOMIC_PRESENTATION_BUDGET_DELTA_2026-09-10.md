@@ -88,3 +88,19 @@ These changes have not been restarted into the live server or browser-certified.
 - The dependency-complete checkpoint includes the previously untracked ordering module and regression tests. The separate third-party defect-register document remains untracked and preserved. Runtime logs, databases, screenshots, videos and credentials are outside the source commit.
 
 Still not certified: complete-evidence live qualified-product delivery, explicit stretch consent, all legacy terminal action paths, every Decision Trace tab, hosted/PostgreSQL release and independent source reviews. This checkpoint must not be described as a release certificate.
+
+## Explicit stretch and live positive-delivery gate
+
+Implemented optional bounded stretch on the requirement-acceptance workflow. The checkbox defaults off. The buyer specifies an AUD per-item cap, confirmed against the current case revision. The server retains the original canonical budget, rejects stale/invalid/unknown-budget consent, and persists a timestamped reviewer/case receipt in the acceptance record. The cap applies only to this acceptance's exploration, including its final corroborated re-ranking; it is not inherited by subsequent turns and grants no commerce authority. This is not a general chat-wide stretch feature.
+
+Verification artifacts outside the repository:
+
+- `stretch-final-regressions.log`: acceptance, schema, manifest, shelf and synthetic-delivery regressions.
+- `stretch-ui-final.log`: 17 frontend tests passed; production build passed.
+- `stretch-live-browser.log`: both live acceptance journeys (stretch off and explicit AUD 3300 cap) passed without retries. Original AUD 3000 budget remained unchanged and partial evidence did not qualify products.
+- `stretch-delivery-test.log`: synthetic complete evidence delivers products; a bounded stretch shelf is actually produced when explicitly allowed.
+- `stretch-final-size.log`: source-size guard passed with unchanged ceilings.
+
+The real BG3 positive-delivery gate FAILED and remains an unconditional test. Captured live terminal outcome: accepted claims 2; held 0; completeness partial; missing cpu_model, gpu_model, os, storage_type; failure requirements_incomplete; catalog authority blocked; product shelves null. The stricter rerun (`positive-delivery-strict.log`) also fails on partial versus complete. No sources were approved or evidence authority widened to obtain a shelf. Next: repair literal requirements compilation and reviewed compatibility provenance, then repeat this gate. Supplier dispatch and all trace tabs were not certified here.
+
+API restarted onto stretch implementation as PID 24736. This follow-up remains uncommitted because the combined delivery gate is not green. The earlier ad65cee4 checkpoint is unchanged.
