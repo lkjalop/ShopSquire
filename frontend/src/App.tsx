@@ -24,6 +24,7 @@ import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
+import { terminalShelves } from './lib/terminalShelves';
 import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
 import { isUnusableImageEvidence } from './lib/imageEvidenceAuthority';
 import AttachmentButton from './components/AttachmentButton';
@@ -1893,9 +1894,7 @@ export default function App() {
             setAmbiguityExploration(null);
             setActiveShoppingCase(null);
           }
-          if (terminal?.product_shelves?.schema_version === 'product-shelves-v1') {
-            setProductShelves(terminal.product_shelves as ProductShelfProjection);
-          }
+          setProductShelves(terminalShelves(terminal));
           if (Number.isInteger(interpretation?.requested_quantity)) {
             setConfirmedSlots((previous) => ({
               ...(previous || {}),
@@ -2444,6 +2443,8 @@ export default function App() {
         const terminalOutcome = data?.terminal_outcome?.schema_version === 'turn-terminal-outcome-v1'
           ? data.terminal_outcome : null;
         if (terminalOutcome) {
+          setProductShelves(terminalShelves(terminalOutcome));
+          setAmbiguityExploration(terminalOutcome.ambiguity_exploration ?? null);
           data = {
             ...data,
             assistant_message: terminalOutcome.assistant_message ?? data.assistant_message,
@@ -2769,14 +2770,6 @@ export default function App() {
             revision: incomingRevision,
             interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
-          if (!continuesActiveCase || revisionAdvanced || materiallyAmendsActiveCase) {
-            const terminalShelves = data?.terminal_outcome?.product_shelves;
-            setProductShelves(
-              terminalShelves?.schema_version === 'product-shelves-v1'
-                ? terminalShelves as ProductShelfProjection
-                : null,
-            );
-          }
           switchRightPanelMode('grid');
         }
         if (

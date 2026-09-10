@@ -246,6 +246,8 @@ def build_research_outcome(
     compiled = max((
         len(row.get("compiled_requirements") or [])
         for row in rows if isinstance(row.get("compiled_requirements"), list)
+        and row.get("provider_id") and row.get("source_url")
+        and row.get("status") == "resolved"
     ), default=0)
     if identity and compiled:
         accepted = max(accepted, compiled)
@@ -354,7 +356,9 @@ def build_research_outcome(
     elif "fetch" in evidence_outcome and parsed:
         fetch_status = "partial"
     elif identity and compiled:
-        fetch_status = "completed"
+        # Structured evidence may be cached. Identity/compilation does not
+        # attest that a fetch ran in this operation.
+        fetch_status = "not_attempted"
     else:
         fetch_status = "not_attempted"
 
@@ -371,9 +375,8 @@ def build_research_outcome(
         ownership = "accepted_case_only"
     elif held or "pending_review" in evidence_outcome or "claims_pending" in evidence_outcome:
         ownership = "observed_held"
-    elif (authority_values | accepted_authority_values) & {
-        "verified", "verified_official", "publisher_verified",
-    } or (identity and compiled):
+    elif any(row.get("publisher_ownership_status") == "verified"
+             and row.get("ownership_receipt_id") for row in rows):
         ownership = "verified"
     elif has_candidates:
         ownership = "discovered_candidate"

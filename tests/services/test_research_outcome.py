@@ -270,6 +270,7 @@ def test_authoritative_structured_evidence_wins_over_degraded_discovery_diagnost
                     "provider_id": "steam",
                     "canonical_title": "MIO: Memories in Orbit",
                     "app_id": "1672810",
+                    "source_url": "https://store.steampowered.com/app/1672810/",
                     "release_state": "released",
                     "release_date": "20 Jan, 2026",
                     "requirements_completeness": "minimum_and_recommended",
@@ -286,7 +287,8 @@ def test_authoritative_structured_evidence_wins_over_degraded_discovery_diagnost
     )
 
     assert outcome.discovery_status == "completed"
-    assert outcome.fetch_status == "completed"
+    # Cached structured evidence is useful, but not proof of this turn fetching.
+    assert outcome.fetch_status == "not_attempted"
     assert outcome.identity is not None
     assert outcome.identity.title == "MIO: Memories in Orbit"
     assert outcome.requirement_completeness == "complete"

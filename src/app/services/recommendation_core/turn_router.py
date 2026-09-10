@@ -2460,7 +2460,13 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
             if node is not None:
                 routing_source = "model+use_case_host"
 
+    from src.app.services.subject_role import validate_subject_role as _validate_host_role
+    host_role = _validate_host_role(
+        envelope.buyer_query or envelope.query, node_handle=node.handle if node else None,
+        sold_state=None, model_proposal=data.get("subject_role"),
+    )
     if (node is not None and use_cases and not subject_from_session
+            and host_role.value not in {"PROCURE_SUBJECT", "ADJACENT_PRODUCT"}
             and not (lane == "EXPLAIN" and prior_shortlist)):
         workload_host = _grounded_use_case_host(db, envelope, use_cases)
         explicitly_named = set(_query_named_sold_handles(db, envelope))

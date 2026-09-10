@@ -34,6 +34,7 @@ from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATIO
 from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
 from src.app.services.infrastructure_alternative_projection import project_for_unresolved_form_factor
 from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set, buyer_category_changed
+from src.app.services.turn_transition import effective_turn_facts
 
 logger = logging.getLogger(__name__)
 
@@ -2615,6 +2616,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     routed_decision = (
         data.get("decision") if isinstance(data.get("decision"), dict) else {}
     )
+    resolved_purchase_node = (
+        routed_decision.get("requested_product_node") or routed_decision.get("node_handle")
+    ) if not routed_decision.get("subject_from_session") else None
     routed_clarification_relation = str(
         routed_decision.get("clarification_relation") or "none"
     ).strip().lower()
@@ -2679,12 +2683,19 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         literal_buyer_turn,
     )
     subject_switch_receipt: Dict[str, Any] | None = None
-    purchased_category_changed = buyer_category_changed(prior_catalog_scope, literal_buyer_turn)
+    from src.app.services.subject_switch_boundary import unresolved_purchase_replacement
+    unresolved_purchase = unresolved_purchase_replacement(
+        routed_decision, explicit_replacement=explicit_replacement_turn,
+        additive=bool(additive_workload_receipt),
+    )
+    purchased_category_changed = buyer_category_changed(
+        prior_catalog_scope, literal_buyer_turn, resolved_product_node=resolved_purchase_node,
+    )
     active_case_subject_replaced = bool(
         active_shopping_case_id
         and not additive_workload_receipt
         and (
-            purchased_category_changed
+            purchased_category_changed or unresolved_purchase
             or named_workload_replacement
             or deterministic_workload_replacement
             or (
@@ -2701,6 +2712,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         )
     )
     if active_case_subject_replaced:
+        if purchased_category_changed or unresolved_purchase:
+            data.pop("workload_authorization", None)
+            next_questions = []
         # The literal turn, rather than clarification-expanded prose, is the root
         # of the replacement case. It must not inherit the old product node,
         # purpose, research consent, or visible decision trace.
@@ -3052,7 +3066,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         except Exception as exc:
             logger.debug("open-world research-plan projection skipped: %s", exc)
-    if provisional_exploration_needed and (
+    if provisional_exploration_needed and not unresolved_purchase and (
         not buyer_requirement_claims or bool(_structured_requirement_claims)
     ):
         try:
@@ -3132,6 +3146,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 storefront_taxonomy_handle=storefront_taxonomy_handle,
                 case_id=active_shopping_case_id or None,
                 case_revision=_candidate_case_revision,
+                resolved_product_node=resolved_purchase_node,
             )
             _projection = project_accepted_catalog(
                 db, accepted_claims=_structured_requirement_claims,
@@ -3348,7 +3363,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # subsequent quantity, deadline, selection, swap, or supplier turns amend
     # this purpose instead of floating as unrelated chat prose. Ambiguity and
     # research projections remain separate and retain their stricter contract.
-    if not active_shopping_case_id and (products or bool(data.get("off_catalog"))):
+    if not active_shopping_case_id and (products or bool(data.get("off_catalog")) or unresolved_purchase):
         try:
             from datetime import datetime, timezone
             import uuid as _uuid
@@ -3384,6 +3399,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 exc_info=True,
             )
 
+    if unresolved_purchase:
+        _case_research_plan = None
+        semantic_research_required = False
+        products, ambiguous_product_shelves, ambiguity_exploration = [], None, None
+        _architecture_alternatives = None
+        next_questions = [{"id": "current_purchase_category", "text": "What type of product do you want to buy for this new requirement?"}]
+        assistant_message = "I understand this is a different purchase. What type of product do you want to buy for this new requirement?"
     durable_interpretation_job: Dict[str, Any] | None = None
     if (
         active_shopping_case_id
@@ -4659,12 +4681,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                     unresolved=unresolved_requirements,
                                 ),
                                 catalog_scope=(
-                                    ((ambiguity_exploration.get("catalog_candidate_set") or {}).get("catalog_scope"))
-                                    if isinstance(ambiguity_exploration, dict)
-                                    and isinstance(ambiguity_exploration.get("catalog_candidate_set"), dict)
-                                    else build_case_catalog_candidate_set(
+                                    build_case_catalog_candidate_set(
                                         case_db, retained_purpose=active_shopping_case_purpose or q,
                                         tenant_id=tenant_id, storefront_taxonomy_handle=storefront_taxonomy_handle,
+                                        resolved_product_node=resolved_purchase_node,
+                                        unresolved_product_subject=unresolved_purchase,
                                     ).catalog_scope.model_dump(mode="json")
                                 ),
                                 catalog_authority=catalog_authority,
@@ -4783,6 +4804,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
     out["assistant_message"] = terminal_research_narration(
         research_outcome=_research_outcome,
+        subject_role=out.get("subject_role"),
         execution_evidence=(
             data.get("execution_evidence")
             if isinstance(data.get("execution_evidence"), dict) else {}
@@ -4825,6 +4847,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 _research_outcome.get("discovery_status") or "not_applicable"
             )
     out["needs_disambiguation"] = bool(out.get("next_questions"))
+    out["right_panel"] = {
+        **(out.get("right_panel") or {}), "canonical_budget": out.get("canonical_budget"),
+    }
     out["terminal_outcome"] = {
         "schema_version": "turn-terminal-outcome-v1",
         "operation_id": _operation_id,
@@ -4836,9 +4861,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "research_status": _terminal_research_status or str(
             (ambiguity_exploration or {}).get("status") or "not_applicable"
         ),
-        "canonical_facts": (
-            data.get("canonical_facts")
-            if isinstance(data.get("canonical_facts"), dict) else {}
+        "canonical_facts": effective_turn_facts(
+            data.get("canonical_facts") or {}, canonical_budget=out.get("canonical_budget"),
         ),
         "semantic_status": (
             data.get("semantic_status")
@@ -4854,6 +4878,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             _research_outcome.get("commerce_authority") or "none"
         ),
         "research_outcome": _research_outcome or None,
+        "ambiguity_exploration": ambiguity_exploration,
         "products": list(products or []),
         "right_panel": out.get("right_panel"),
         "architecture_alternatives": out.get("architecture_alternatives"),

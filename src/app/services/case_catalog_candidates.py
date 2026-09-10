@@ -46,7 +46,7 @@ class CatalogScope(BaseModel):
     allowed_taxonomy_roots: list[str] = Field(default_factory=list)
     selected_taxonomy_root: str | None = None
     source: Literal[
-        "buyer_explicit", "tenant_primary", "validated_client_context", "unresolved",
+        "buyer_explicit", "tenant_primary", "validated_client_context", "unresolved", "validated_semantic_proposal",
     ]
     confidence: float = Field(ge=0, le=1)
     client_context_disposition: Literal[
@@ -202,7 +202,7 @@ def _derived_configuration_handle(row: ProductConfiguration) -> str | None:
     return None
 
 
-def buyer_category_changed(prior_scope: dict, purpose: str) -> bool:
+def buyer_category_changed(prior_scope: dict, purpose: str, *, resolved_product_node: str | None = None) -> bool:
     """An explicit unrelated purchase category outranks commercial amendments.
 
     Reuse the catalog's purchase-object resolver and reviewed relationships;
@@ -211,7 +211,7 @@ def buyer_category_changed(prior_scope: dict, purpose: str) -> bool:
     prior = str(prior_scope.get("selected_taxonomy_root") or "")
     if not prior:
         return False
-    current = _explicit_category(purpose, preferred_handle=prior)
+    current = get_node(resolved_product_node) if resolved_product_node else _explicit_category(purpose, preferred_handle=prior)
     return current is not None and not _related(prior, current.handle)
 
 
@@ -223,9 +223,22 @@ def build_case_catalog_candidate_set(
     storefront_taxonomy_handle: str | None,
     case_id: str | None = None,
     case_revision: int | None = None,
+    resolved_product_node: str | None = None,
+    unresolved_product_subject: bool = False,
 ) -> CatalogCandidateSet:
     purpose = " ".join(str(retained_purpose or "").split())[:500] or "Unresolved buyer request"
     client_handle = str(storefront_taxonomy_handle or "").strip() or None
+    if unresolved_product_subject:
+        return CatalogCandidateSet(
+            retained_purpose=purpose, status="unresolved", taxonomy_source="unresolved",
+            reason="current_purchase_category_unresolved",
+            catalog_scope=CatalogScope(
+                case_id=case_id, case_revision=case_revision, tenant_id=tenant_id,
+                source="unresolved", confidence=0,
+                client_context_disposition="rejected" if client_handle else "not_supplied",
+                client_taxonomy_handle=client_handle, reason="current_purchase_category_unresolved",
+            ),
+        )
     client_node = get_node(client_handle or "")
     client_sellable = (
         sells_within(db, client_node.handle, tenant_id=tenant_id)
@@ -242,6 +255,12 @@ def build_case_catalog_candidate_set(
             else None
         ),
     )
+    # Internal callers pass only the router's already-clamped purchase node,
+    # never a raw model or browser proposal. Recheck registry/sellability here.
+    if resolved_product_node:
+        explicit_node = get_node(resolved_product_node)
+        if explicit_node is None:
+            raise ValueError("resolved_purchase_node_not_registered")
 
     explicit_sellable = (
         sells_within(db, explicit_node.handle, tenant_id=tenant_id)
@@ -258,7 +277,7 @@ def build_case_catalog_candidate_set(
             requested_product_form_factor=requested_form_factor,
             allowed_taxonomy_roots=allowed_roots,
             selected_taxonomy_root=explicit_node.handle,
-            source="buyer_explicit",
+            source="validated_semantic_proposal" if resolved_product_node else "buyer_explicit",
             confidence=1.0,
             client_context_disposition=(
                 "overridden" if client_handle else "not_supplied"
@@ -282,6 +301,7 @@ def build_case_catalog_candidate_set(
         "storefront_context" if tenant_primary_node is not None else "unresolved"
     )
     scope_source = (
+        "validated_semantic_proposal" if resolved_product_node else
         "buyer_explicit" if explicit_node is not None else
         "validated_client_context" if context_node is not None else
         "tenant_primary" if tenant_primary_node is not None else "unresolved"

@@ -96,6 +96,22 @@ def test_free_text_answer_is_classified_against_pending_material_question(db):
     assert decision.model_proposal["clarification_relation"] == "answer"
 
 
+def test_purchase_category_is_not_replaced_by_inherited_workload_host(db, monkeypatch):
+    from src.app.services.taxonomy_registry import get_node
+    monkeypatch.setattr('src.app.services.recommendation_core.turn_router._grounded_use_case_host',
+                        lambda *args: get_node('el-6-6'))
+    envelope = TurnEnvelope.from_suggest_params(
+        query='Actually I need something for better disaster recovery. What else should I buy?',
+        uid='purchase-boundary', tenant_id='default', session=_pending_session(),
+    )
+    decision = route_turn(db, envelope, llm_fn=lambda *_: json.dumps({
+        'lane': 'OFF_CATALOG', 'handle': 'bi-13', 'requirements': {},
+        'use_cases': ['engineering_simulation'], 'clarification_relation': 'interrupt',
+        'subject_role': 'PROCURE_SUBJECT', 'confidence': 0.8,
+    }))
+    assert decision.node_handle != 'el-6-6'
+
+
 def test_model_unknown_entity_is_preserved_as_research_concept_without_alias_rules(db):
     """An unfamiliar buyer-authored name must reach the identity ladder.
 

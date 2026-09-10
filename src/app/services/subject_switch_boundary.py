@@ -1,7 +1,24 @@
 """Deterministic state boundary for buyer subject replacement turns."""
 from __future__ import annotations
 
-from typing import Any, MutableMapping
+from typing import Any, Mapping, MutableMapping
+
+
+def unresolved_purchase_replacement(
+    decision: Mapping[str, Any], *, explicit_replacement: bool, additive: bool,
+) -> bool:
+    """A new, ungrounded purchase cannot consume a previous workload question.
+
+    This grants neither category identity nor off-catalog refusal authority.
+    It only withholds inherited scope until the buyer clarifies the new product.
+    """
+    return bool(
+        explicit_replacement and not additive
+        and decision.get("subject_role") == "PROCURE_SUBJECT"
+        and not decision.get("subject_from_session")
+        and not (decision.get("requested_product_node") or decision.get("node_handle"))
+        and decision.get("requested_category_label")
+    )
 
 
 _SUBJECT_SCOPED_KEYS = (

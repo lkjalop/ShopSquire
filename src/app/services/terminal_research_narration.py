@@ -35,9 +35,14 @@ def terminal_research_narration(
     research_outcome: Mapping[str, Any] | None,
     execution_evidence: Mapping[str, Any] | None,
     existing_message: str,
+    subject_role: str | None = None,
 ) -> str:
     """Return canonical failure/held narration, otherwise preserve the answer."""
 
+    # Host-workload evidence cannot answer a different purchased object. The
+    # caller supplies the validated role; no title/keyword matching occurs here.
+    if subject_role in {"PROCURE_SUBJECT", "ADJACENT_PRODUCT"}:
+        return str(existing_message or "")
     outcome = dict(research_outcome or {})
     if outcome.get("failure_code") == "requirements_incomplete":
         identity = outcome.get("identity")

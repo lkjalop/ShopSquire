@@ -151,6 +151,17 @@ def derive_turn_transition(
     return TurnTransition.UNRESOLVED
 
 
+def effective_turn_facts(literal_facts: Mapping[str, Any], *, canonical_budget: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Project accepted case constraints without rewriting literal buyer facts."""
+    result = dict(literal_facts)
+    literal_budget = result.get("literal_canonical_budget", result.get("canonical_budget"))
+    result["literal_canonical_budget"] = literal_budget
+    result["canonical_budget"] = dict(canonical_budget) if canonical_budget else None
+    result["budget_source"] = ("buyer_turn" if literal_budget else
+                               "accepted_case_constraints" if canonical_budget else "not_stated")
+    return result
+
+
 def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBoundTurnReadModel:
     scope = ({**commit.catalog_scope, "case_id": commit.case_id, "case_revision": revision}
              if commit.catalog_scope else None)
@@ -174,6 +185,7 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
     message = terminal_research_narration(
         research_outcome=outcome.model_dump(mode="json"), execution_evidence={},
         existing_message=commit.assistant_message,
+        subject_role=commit.subject_role,
     ) if outcome.failure_code == "requirements_incomplete" else commit.assistant_message
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,

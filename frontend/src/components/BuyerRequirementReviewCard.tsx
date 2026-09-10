@@ -120,7 +120,7 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
         {verifiedEvidence
           ? 'Verified official requirements are shown read-only. Product fit and commerce authority are evaluated separately; no cart action was authorized. Any remaining unverified claims retain their own authority labels.'
           : caseOriginEvidence
-          ? 'These cited claims came from the exact publisher origin you approved for this case. Review, correct, or reject them before they affect product fit. No cart action was authorized.'
+          ? 'These cited claims came from an exact publisher origin permitted for this case. Fetch permission is not buyer approval or independent publisher verification. Review, correct, or reject the claims before they affect product fit. No cart action was authorized.'
           : policyPendingSourceEvidence
             ? 'These cited claims were extracted from the reviewed canonical publisher page. They may be used only as provisional buyer constraints until the independent source-policy review is signed off; no product or cart action was authorized.'
             : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
