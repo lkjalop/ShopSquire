@@ -22,6 +22,7 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
         out["budget_max"] = budget.get("budget_max")
     # Preserve whole-order budget semantics across the CART_MUTATE short circuit. Without these
     # typed fields, a later quantity change falls back to the budget from the original search.
+    parsed_budget = None
     try:
         from src.app.services.budget_grammar import classify_budget_scope, parse_budget
 
@@ -79,6 +80,11 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
         ident = data.get("product_identity") or {}
         if ident.get("constraints"):
             out["image_identity"] = ident.get("constraints")
+    if parsed_budget is not None:
+        # A new literal budget replaces both bounds, including an absent one.
+        # Response-side retrieval constraints must not rewrite buyer facts.
+        out.update(budget_min=parsed_budget.budget_min, budget_max=parsed_budget.budget_max,
+                   budget_mode=parsed_budget.mode)
     return out
 
 

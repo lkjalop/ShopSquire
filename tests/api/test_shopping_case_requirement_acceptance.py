@@ -93,6 +93,35 @@ def test_manual_specifications_create_same_case_review_proposal():
     assert payload["cart_mutation"] == "not_authorized"
 
 
+def test_acceptance_passes_durable_total_budget_and_quantity_to_fit(monkeypatch):
+    import json
+    from src.app.routers import shopping_cases
+    client = _client()
+    proposal = client.post('/api/v1/shopping-cases/budget-case/requirement-proposals/from-text',
+        json={'uid': 'budget-buyer', 'text': 'RAM 32GB minimum'}).json()
+    with client.app.state.test_engine.begin() as connection:
+        connection.execute(text('INSERT INTO conversation_case_state '
+            '(id,tenant_id,case_id,session_epoch,subject_ref,version,state_json,created_at,updated_at) '
+            "VALUES ('budget-state','default','budget-case','epoch','buyer',1,:state,'now','now')"),
+            {'state': json.dumps({'procurement_case_state': {'requested_quantity': 10,
+                'budget': {'amount_minor': 3000000, 'scope': 'total', 'currency': 'AUD'}}})})
+    captured = []
+    original = shopping_cases.project_accepted_catalog
+    def project(db, **kwargs):
+        captured.append(kwargs)
+        return original(db, **kwargs)
+    monkeypatch.setattr(shopping_cases, 'project_accepted_catalog', project)
+    response = client.post(f"/api/v1/shopping-cases/budget-case/requirement-proposals/{proposal['proposal_id']}/accept",
+        headers={'Idempotency-Key':'budget-acceptance-test'}, json={
+            'uid':'budget-buyer', 'expected_proposal_version':1,
+            'accepted_claim_ids':[row['claim_id'] for row in proposal['claims']],
+            'research_choice':'local_only'})
+    assert response.status_code == 200, response.text
+    assert captured[0]['budget_cents'] == 300000
+    assert captured[0]['requested_quantity'] == 10
+    assert response.json()['budget_context']['unit_budget_cents'] == 300000
+
+
 def test_manual_specifications_abstain_when_no_typed_claim_can_be_extracted():
     client = _client()
     case_id = "case-manual-empty"

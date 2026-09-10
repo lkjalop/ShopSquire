@@ -33,6 +33,7 @@ export type ShoppingCasePresentationState = {
 };
 
 export type ShoppingCasePresentationAction =
+  | { type: 'terminal.installed'; value: ShoppingCasePresentationState }
   | { type: 'active.replaced'; value: StateUpdate<ActiveShoppingCase | null> }
   | { type: 'ambiguity.replaced'; value: StateUpdate<AmbiguityExploration | null> }
   | { type: 'shelves.replaced'; value: StateUpdate<ProductShelfProjection | null> }
@@ -55,6 +56,8 @@ export function shoppingCasePresentationReducer(
   action: ShoppingCasePresentationAction,
 ): ShoppingCasePresentationState {
   switch (action.type) {
+    case 'terminal.installed':
+      return action.value;
     case 'active.replaced':
       return { ...state, activeShoppingCase: applyUpdate(state.activeShoppingCase, action.value) };
     case 'ambiguity.replaced':
@@ -113,6 +116,9 @@ export function useShoppingCaseResearch() {
     initialShoppingCasePresentationState,
   );
   const { activeShoppingCase, ambiguityExploration, productShelves, supplierContinuation } = presentation;
+  const installCasePresentation = useCallback((value: ShoppingCasePresentationState) => {
+    dispatchPresentation({ type: 'terminal.installed', value });
+  }, []);
   const setActiveShoppingCase = useCallback((value: StateUpdate<ActiveShoppingCase | null>) => {
     dispatchPresentation({ type: 'active.replaced', value });
   }, []);
@@ -288,7 +294,9 @@ export function useShoppingCaseResearch() {
     setResearchState('running');
     setResearchStartedAt(Date.now());
     const deadline = window.setTimeout(
-      () => cancelResearch('research_deadline_exceeded'),
+      () => {
+        if (executionRef.current?.executionId === executionId) cancelResearch('research_deadline_exceeded');
+      },
       deadlineMs,
     );
     try {
@@ -317,22 +325,32 @@ export function useShoppingCaseResearch() {
         }),
       });
       const payload = await safeJson(response);
+      if (executionRef.current?.executionId !== executionId) {
+        throw Object.assign(new DOMException('Research superseded', 'AbortError'), { failure_code: 'research_superseded' });
+      }
+      if (controller.signal.aborted) {
+        throw new DOMException('Research cancelled', 'AbortError');
+      }
       if (!response.ok) {
         throw new Error(String(
           payload?.detail?.message || payload?.detail?.code || payload?.detail
           || 'Approved-source research failed.',
         ));
       }
-      setResearchState('completed');
+      if (executionRef.current?.executionId === executionId) setResearchState('completed');
       return payload;
     } catch (error: any) {
-      setResearchState(error?.name === 'AbortError' ? 'timed_out' : 'failed');
+      if (executionRef.current?.executionId === executionId) setResearchState(error?.name === 'AbortError' ? 'timed_out' : 'failed');
       throw error;
     } finally {
       window.clearTimeout(deadline);
-      if (controllerRef.current === controller) controllerRef.current = null;
-      if (executionRef.current?.executionId === executionId) executionRef.current = null;
-      setResearchStartedAt(null);
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+      }
+      if (executionRef.current?.executionId === executionId) {
+        executionRef.current = null;
+        setResearchStartedAt(null);
+      }
     }
   }, [ambiguityExploration, cancelResearch]);
 
@@ -404,6 +422,7 @@ export function useShoppingCaseResearch() {
   }, [ambiguityExploration]);
 
   return {
+    installCasePresentation,
     activeShoppingCase,
     setActiveShoppingCase,
     ambiguityExploration,

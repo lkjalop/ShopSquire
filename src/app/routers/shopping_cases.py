@@ -781,28 +781,27 @@ async def _accept_requirement_proposal_with_db(
         "cart_mutation": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
-        "review_receipt": {
-            "schema_version": "case-requirement-review-receipt-v1",
-            "reviewer_id": body.uid,
-            "reviewer_kind": "buyer_case_reviewer",
-            "reviewed_at": reviewed_at,
-            "resolution": review_resolution,
-            "approved_claim_ids": [item["claim_id"] for item in accepted],
-            "rejected_claim_ids": sorted(rejected_ids),
-            "authority_effect": (
-                "accepted_case_only" if accepted_case_origin
-                else "buyer_provisional_only" if accepted
-                else "no_claim_authority"
-            ),
-            "publisher_verification_granted": False,
-            "commerce_authority": "none",
-        },
     }
+    from src.app.services.source_requirement_review import requirement_review_receipt
+    result['review_receipt'] = requirement_review_receipt(
+        reviewer_id=body.uid, reviewed_at=reviewed_at, resolution=review_resolution,
+        accepted=accepted, rejected_ids=rejected_ids, accepted_case_origin=accepted_case_origin,
+    )
     case = db.execute(select(ShoppingCase).where(
         ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
     )).scalar_one()
+    from src.app.services.catalog_shortfall_projection import read_acceptance_budget
+    try:
+        unit_budget, order_quantity = read_acceptance_budget(
+            db, tenant_id=tenant_id, case_id=case_id, expected_revision=int(case.revision or 1),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={'code': str(exc)}) from exc
+    result['budget_context'] = {'unit_budget_cents': unit_budget, 'quantity': order_quantity,
+                               'case_revision': int(case.revision or 1)}
     shelves = project_accepted_catalog(
         db, accepted_claims=accepted,
+        budget_cents=unit_budget, requested_quantity=order_quantity,
         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
         tenant_id=tenant_id,
         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
@@ -840,6 +839,7 @@ async def _accept_requirement_proposal_with_db(
                     case_id,
                     ResearchShoppingCaseRequest(
                         uid=body.uid, research_plan_id=plan.plan_id,
+                        budget_cents=unit_budget,
                         ambiguity_object_ids=[row.ambiguity_id for row in plan.ambiguities],
                         hypothesis_ids=[row.hypothesis_id for row in plan.hypotheses],
                         # The buyer explicitly asked to corroborate newly accepted
@@ -876,6 +876,7 @@ async def _accept_requirement_proposal_with_db(
                     combined_projection = project_accepted_catalog(
                         db,
                         accepted_claims=[*accepted, *official_claims],
+                        budget_cents=unit_budget, requested_quantity=order_quantity,
                         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
                         tenant_id=tenant_id,
                         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(

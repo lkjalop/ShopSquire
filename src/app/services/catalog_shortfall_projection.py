@@ -7,6 +7,56 @@ from src.app.models.orm import ProductConfiguration
 
 logger = logging.getLogger("shopsquire.catalog_shortfall")
 
+
+def acceptance_budget(state: dict[str, Any]) -> tuple[int | None, int]:
+    """Return a per-unit allowance, never reinterpret a bulk total as unit money."""
+    procurement = state.get('procurement_case_state') or {}
+    if not isinstance(procurement, dict):
+        raise ValueError('budget_state_invalid')
+    quantity = procurement.get('requested_quantity', 1)
+    if quantity is None:
+        quantity = 1
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        raise ValueError('quantity_unresolved')
+    budget = procurement.get('budget') or {}
+    if not isinstance(budget, dict):
+        raise ValueError('budget_state_invalid')
+    amount = budget.get('amount_minor')
+    if amount is None:
+        read_budget = (state.get('turn_read_model') or {}).get('canonical_budget') or {}
+        if read_budget.get('budget_max') is not None:
+            amount = read_budget['budget_max'] * 100
+    if amount is None:
+        return None, quantity
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+        raise ValueError('budget_amount_invalid')
+    if budget.get('currency') not in (None, 'AUD'):
+        raise ValueError('budget_currency_conversion_required')
+    scope = budget.get('scope')
+    if scope == 'total':
+        if not procurement.get('requested_quantity'):
+            raise ValueError('budget_quantity_unresolved')
+        amount //= quantity
+    elif scope != 'per_unit' and quantity > 1:
+        raise ValueError('budget_scope_unresolved')
+    return amount, quantity
+
+
+def read_acceptance_budget(db, *, tenant_id: str, case_id: str, expected_revision: int):
+    rows = db.execute(text(
+        'SELECT version,state_json FROM conversation_case_state '
+        'WHERE tenant_id=:tenant_id AND case_id=:case_id'
+    ), {'tenant_id': tenant_id, 'case_id': case_id}).all()
+    if not rows:
+        return None, 1
+    if len(rows) != 1 or int(rows[0][0]) != expected_revision:
+        raise ValueError('budget_case_revision_conflict')
+    raw = rows[0][1]
+    state = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(state, dict):
+        raise ValueError('budget_state_invalid')
+    return acceptance_budget(state)
+
 def _case_budget_cents(db, *, tenant_id: str, case_id: str) -> int | None:
     """Read the latest canonical case budget without reparsing buyer prose."""
     try:

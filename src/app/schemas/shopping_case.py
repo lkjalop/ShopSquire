@@ -54,7 +54,7 @@ class FulfillmentOptionsRequest(BaseModel):
 class ResearchShoppingCaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     uid: str = Field(min_length=1, max_length=200)
-    budget_cents: int | None = Field(default=None, ge=1, le=1_000_000_000)
+    budget_cents: int | None = Field(default=None, ge=0, le=1_000_000_000)
     research_plan_id: str = Field(pattern=r"^crp-[a-f0-9]{20}$")
     ambiguity_object_ids: list[str] = Field(min_length=1, max_length=8)
     hypothesis_ids: list[str] = Field(min_length=1, max_length=3)

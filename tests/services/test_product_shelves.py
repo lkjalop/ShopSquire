@@ -146,7 +146,7 @@ def test_budget_creates_explicit_within_and_stretch_shelves():
         _candidate(4, price=400_000, score=0.8),
     ]
 
-    projection = build_product_shelves(candidates, budget_cents=250_000)
+    projection = build_product_shelves(candidates, budget_cents=250_000, stretch_budget_cents=400_000)
 
     assert [item.product.sku for item in _shelf(
         projection, "shared:within_budget"
@@ -159,6 +159,24 @@ def test_budget_creates_explicit_within_and_stretch_shelves():
     assert all(item.commercial_decision.budget_outcome == "within" for item in _shelf(
         projection, "shared:within_budget"
     ).initial)
+
+
+def test_budget_does_not_authorize_stretch_or_over_budget_availability_shelves():
+    projection = build_product_shelves(
+        [_candidate(1, price=200_000), _candidate(2, price=479_900)],
+        budget_cents=300_000, requested_quantity=1,
+    )
+    assert projection.shelves
+    assert all(shelf.budget_band != "stretch" for shelf in projection.shelves)
+    assert all(item.price_cents <= 300_000 for shelf in projection.shelves for item in shelf.initial)
+
+
+def test_authorized_stretch_has_a_finite_limit():
+    projection = build_product_shelves(
+        [_candidate(1, price=320_000), _candidate(2, price=479_900)],
+        budget_cents=300_000, stretch_budget_cents=330_000,
+    )
+    assert [item.price_cents for item in _shelf(projection, "shared:stretch").initial] == [320_000]
 
 
 def test_no_budget_uses_relevance_before_price():

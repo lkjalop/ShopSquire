@@ -8,6 +8,26 @@ from typing import Any, Mapping, Sequence
 from src.app.models.orm import RequirementProposal
 
 
+def requirement_review_receipt(*, reviewer_id, reviewed_at, resolution, accepted,
+                               rejected_ids, accepted_case_origin):
+    """Describe case review without promoting buyer consent to publisher authority."""
+    return {
+        "schema_version": "case-requirement-review-receipt-v1",
+        "reviewer_id": reviewer_id,
+        "reviewer_kind": "buyer_case_reviewer",
+        "reviewed_at": reviewed_at,
+        "resolution": resolution,
+        "approved_claim_ids": [item["claim_id"] for item in accepted],
+        "rejected_claim_ids": sorted(rejected_ids),
+        "authority_effect": (
+            "accepted_case_only" if accepted_case_origin
+            else "buyer_provisional_only" if accepted else "no_claim_authority"
+        ),
+        "publisher_verification_granted": False,
+        "commerce_authority": "none",
+    }
+
+
 def create_source_review_proposal(
     db: Any,
     *,

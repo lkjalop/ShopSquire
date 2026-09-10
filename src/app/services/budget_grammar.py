@@ -85,9 +85,15 @@ def canonical_budget_from_accepted_slots(
     """
 
     parsed = BudgetParse.from_dict(current)
-    if parsed is not None:
-        return parsed.to_dict()
     slots = accepted_slots if isinstance(accepted_slots, dict) else {}
+    if parsed is not None:
+        # An amount-only transport projection has no buyer-authored span. It
+        # cannot silently relabel an unchanged accepted approximation.
+        if (parsed.source_span is None and slots.get("budget_mode") == "around"
+                and parsed.budget_min is None and slots.get("budget_min") is None
+                and parsed.budget_max == slots.get("budget_max")):
+            return BudgetParse(None, parsed.budget_max, "around", None).to_dict()
+        return parsed.to_dict()
 
     def amount(key: str) -> Optional[int]:
         value = slots.get(key)
@@ -107,6 +113,8 @@ def canonical_budget_from_accepted_slots(
     if lo is None and hi is None:
         return None
     mode = "range" if lo is not None and hi is not None else "floor" if lo is not None else "ceiling"
+    if slots.get("budget_mode") == "around" and lo is None and hi is not None:
+        mode = "around"
     return BudgetParse(lo, hi, mode, None).to_dict()
 
 
@@ -345,22 +353,22 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
             return BudgetParse(v, None, "floor", m.span())
 
     # Explicit approximation language must win over the broad budget/spend
-    # anchor below. This is a preferred target, not a hard ceiling.
+    # anchor below. Preserve the literal target; approximation does not grant
+    # a percentage uplift. Above-target exploration needs separate permission.
     m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
+            return BudgetParse(None, v, "around", m.span())
 
-    # 6) budget-anchored single value BEFORE the around-band — "can spend about $2000" is a stated
-    #    CEILING (the buyer named their limit), not a fuzzy band. "budget is 1600", "budget: $1,400".
+    # 6) Non-approximate budget/spend anchors: "budget is 1600", "budget: $1,400".
     m = re.search(rf"\b(?:budget|spend|afford\w*)\b[^\d$€£]{{0,18}}{_CUR}?\s*{_NUM}{_UNIT_GUARD}(?!\s*(?:-|–|—|to|and)\s*[\$€£]?\d)", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
             return BudgetParse(None, v, "ceiling", m.span())
 
-    # 7) around — "around 1500", "about $2k", "roughly 1200" → ±20% band
+    # 7) Affordability and remaining literal target forms.
     # Affordability question: "is $1800 enough?", "is AUD 3000 excessive
     # for X?", or "do I have enough at $1000?". This is a proposed maximum,
     # not a product specification. The adjective is buyer-facing semantics;
@@ -377,7 +385,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
+            return BudgetParse(None, v, "around", m.span())
 
     # A singular product price ("I need a 4000 laptop") is a target tier,
     # not permission to ignore the amount and start at the cheapest item. The
@@ -390,7 +398,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     if m:
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= _floor:
-            return BudgetParse(int(v * 0.8), int(v * 1.2), "around", m.span())
+            return BudgetParse(None, v, "around", m.span())
 
     # 8) bare currency-anchored amount — "headsets for $1200", "$1,200 for those". The currency
     #    marker is ITSELF the money cue, so no cue word is required here; a bare number with NO

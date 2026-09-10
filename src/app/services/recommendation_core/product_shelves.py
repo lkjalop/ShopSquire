@@ -371,17 +371,20 @@ def build_product_shelves(
     scope_labels: Mapping[str, str] | None = None,
     budget_cents: int | None = None,
     requested_quantity: int | None = None,
+    stretch_budget_cents: int | None = None,
     suppress_zero_relevance: bool = False,
     suppress_unavailable: bool = False,
 ) -> ProductShelfProjection:
     """Build shared and hypothesis shelves with deterministic 3+5 paging.
 
-    A budget creates separate within-budget and stretch shelves.  With no
+    Stretch requires an explicit bounded allowance from the caller. With no
     budget, ranking is price-agnostic except for the deterministic tie-breaker;
     relevance and qualification decide the result before price.
     """
     if budget_cents is not None and budget_cents < 0:
         raise ValueError("budget_cents_must_be_non_negative")
+    if stretch_budget_cents is not None and (budget_cents is None or stretch_budget_cents <= budget_cents):
+        raise ValueError("stretch_must_exceed_a_known_budget")
     if requested_quantity is not None and requested_quantity < 1:
         raise ValueError("requested_quantity_must_be_positive")
     labels = dict(scope_labels or {})
@@ -579,6 +582,11 @@ def build_product_shelves(
                 )
             )
 
+        # Apply the allowance to every shelf, including availability and
+        # commercial alternatives, not only the primary budget shelf.
+        allowance = stretch_budget_cents if stretch_budget_cents is not None else budget_cents
+        if allowance is not None:
+            eligible = [item for item in eligible if item.price_cents <= allowance]
         scope_label = labels.get(
             scope_id, "Best across shared needs" if scope_id == "shared" else scope_id
         )

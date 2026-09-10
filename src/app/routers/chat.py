@@ -961,6 +961,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 durable_slots["total_budget_cents"] = int(amount_minor)
                         durable_slots["budget_scope"] = durable_budget.get("scope")
                         durable_slots["currency"] = durable_budget.get("currency")
+                        # Restore semantics from this same durable revision,
+                        # not the browser/Redis copy of confirmed slots.
+                        from src.app.services.budget_grammar import BudgetParse
+                        retained_budget = BudgetParse.from_dict((raw_state.get("turn_read_model") or {}).get("canonical_budget"))
+                        if retained_budget and retained_budget.budget_max == durable_slots.get("budget_max"):
+                            durable_slots.update(budget_mode=retained_budget.mode, budget_min=retained_budget.budget_min)
                     durable_quantity = canonical_case_snapshot.get("requested_quantity")
                     if durable_quantity is not None:
                         durable_slots["order_quantity"] = int(durable_quantity)

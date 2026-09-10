@@ -66,10 +66,11 @@ def test_accepted_claims_build_shared_conditional_and_budget_shelves_without_fal
 
     shelf_ids = {shelf.shelf_id for shelf in projection.shelves}
     assert "shared:within_budget" in shelf_ids
-    assert "shared:stretch" in shelf_ids
+    assert "shared:stretch" not in shelf_ids
     assert "conditional_scope:within_budget" in shelf_ids
     assert "architecture:desktop_workstation:within_budget" in shelf_ids
-    assert "architecture:mobile_workstation:stretch" in shelf_ids
+    assert not any(shelf.budget_band == "stretch" for shelf in projection.shelves)
+    assert all(item.price_cents <= 600_000 for shelf in projection.shelves for item in shelf.initial + shelf.next_page)
     assert "local_vm:within_budget" in shelf_ids
     assert all(
         product.fit_status == "conditional"
@@ -143,6 +144,20 @@ def test_hypothesis_shelf_uses_only_claims_bound_to_that_research_scope():
     )
 
 
+@pytest.mark.parametrize('authority', ['verified_pending', 'verified_fake', 'case_origin_critic_accepted'])
+def test_authority_prefix_is_not_verified_evidence(authority):
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(db, accepted_claims=[{
+            'claim_id': 'held-ram', 'attribute': 'ram_gb', 'operator': '>=', 'value': 64,
+            'requirement_class': 'minimum', 'authority_status': authority,
+        }], now=datetime(2026, 8, 8, 12, tzinfo=timezone.utc))
+    assert projection.shelves
+    assert all(item.fit_status != 'qualified' for shelf in projection.shelves for item in shelf.initial + shelf.next_page)
+
+
 def test_exact_observations_supply_claim_refs_independent_freshness_and_location_stock():
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
@@ -164,10 +179,10 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
 
     shared = next(row for row in projection.shelves if row.scope_id == "shared")
     titan = next(row for row in [*shared.initial, *shared.next_page] if row.product.sku == "SCORP-126982")
-    assert titan.fit_status == "qualified"
+    assert titan.fit_status == "conditional"
     assert titan.explanation is not None
-    assert titan.explanation.evidence_basis == "verified_exact"
-    assert "Exact-configuration evidence meets 1 accepted requirement" in titan.explanation.summary
+    assert titan.explanation.evidence_basis == "conditional"
+    assert "incomplete" in titan.explanation.summary
     assert titan.explanation.availability_note == (
         "Fresh availability evidence reports this configuration available."
     )

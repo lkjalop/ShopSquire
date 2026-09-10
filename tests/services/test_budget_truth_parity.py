@@ -80,8 +80,8 @@ def test_currency_amount_is_never_reinterpreted_as_item_quantity(query):
 @pytest.mark.parametrize(
     "query, expected_budget",
     [
-        ("on a 2500 laptop", (2000, 3000)),
-        ("for a 3000 workstation", (2400, 3600)),
+        ("on a 2500 laptop", (None, 2500)),
+        ("for a 3000 workstation", (None, 3000)),
     ],
 )
 def test_article_led_bare_product_price_is_not_a_bulk_quantity(

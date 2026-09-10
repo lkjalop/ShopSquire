@@ -314,7 +314,7 @@ def _decision(
         capability = _evidence_for_attribute(row, attribute, observations, now=now)
         observed = capability["observed"]
         verdict = "contested" if capability["contested"] else _verdict(claim, observed)
-        requirement_verified = str(claim.get("authority_status") or "").startswith("verified")
+        requirement_verified = claim.get("authority_status") == "verified_official"
         ledger.append(FitLedgerRow(
             attribute_key=attribute,
             attribute_label=attribute.replace("_", " "),
@@ -336,12 +336,14 @@ def _decision(
             freshness_status=capability["freshness"],
             resolver="catalog_evidence_ledger",
         ))
+    from src.app.services.recommendation_core.requirement_scope import accepted_requirement_gaps
+    completeness_gaps = accepted_requirement_gaps(claims, tenant_id=row.tenant_id)
     workload = WorkloadContract(
         desired_outcome=desired_outcome, artefact_name="buyer-accepted provisional scope",
         budget_cents=budget_cents, currency="AUD", surviving_hypothesis_ids=[scope_id],
-        material_unknowns=(
+        material_unknowns=completeness_gaps + (
             [] if claims and all(
-                str(claim.get("authority_status") or "").startswith("verified")
+                claim.get("authority_status") == "verified_official"
                 for claim in claims
             ) else ["buyer-supplied requirements are not independently corroborated"]
         ),

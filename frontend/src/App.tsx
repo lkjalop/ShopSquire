@@ -25,6 +25,7 @@ import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
 import { terminalShelves } from './lib/terminalShelves';
+import { TerminalInstallationGate } from './lib/terminalInstallation';
 import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
 import { isUnusableImageEvidence } from './lib/imageEvidenceAuthority';
 import AttachmentButton from './components/AttachmentButton';
@@ -411,6 +412,7 @@ export default function App() {
     setActiveShoppingCase,
     productShelves,
     setProductShelves,
+    installCasePresentation,
     supplierContinuation,
     setSupplierContinuation,
     researchState,
@@ -503,6 +505,12 @@ export default function App() {
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = getOrCreateStoredUid();
   const [conversationEpoch, setConversationEpoch] = useState(() => getOrCreateConversationEpoch());
+  const terminalInstallation = useRef(new TerminalInstallationGate());
+  const beginCaseAction = useCallback(() => {
+    setIsThinking(false);
+    setStreamAcknowledgement(null);
+    return terminalInstallation.current.begin();
+  }, []);
   const [temporaryChat, setTemporaryChat] = useState(false);
   // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer OR a live demo (the demo runs
   // the Vite dev server, so a DEV auto-enable leaks the badge on camera). Show it ONLY on an explicit opt-in
@@ -1539,6 +1547,7 @@ export default function App() {
   const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string }; externalResearchConsent?: boolean }) => {
     const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
+    const installationToken = terminalInstallation.current.begin();
     try {
       localStorage.setItem('shopsquire_last_user_query', q);
     } catch {}
@@ -1866,6 +1875,7 @@ export default function App() {
           if (terminal?.schema_version !== 'turn-terminal-outcome-v1') {
             throw new Error('case_interpretation_missing_terminal_outcome');
           }
+          if (!terminalInstallation.current.accept(installationToken, terminal)) return;
           if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
             // A new case owns the right panel. Do not leave the prior turn's
             // catalog cards actionable underneath provisional case shelves.
@@ -2305,10 +2315,10 @@ export default function App() {
               if (eventName === 'error') {
                 throw new Error((parsed && parsed.message) ? parsed.message : 'chat_stream_failed');
               }
-              if (eventName === 'acknowledgement' && parsed?.message) {
+              if (eventName === 'acknowledgement' && parsed?.message && terminalInstallation.current.isCurrent(installationToken)) {
                 setStreamAcknowledgement(String(parsed.message));
               }
-              if (eventName === 'progress' && parsed?.message) {
+              if (eventName === 'progress' && parsed?.message && terminalInstallation.current.isCurrent(installationToken)) {
                 setStreamAcknowledgement(String(parsed.message));
               }
               if (eventName === 'answer' && parsed) {
@@ -2412,7 +2422,7 @@ export default function App() {
             if (data?.status === 'in_progress') {
               const elapsedMs = Number(data?.execution_progress?.elapsed_ms);
               const elapsed = Number.isFinite(elapsedMs) ? ` · ${Math.max(1, Math.round(elapsedMs / 1000))}s` : '';
-              setStreamAcknowledgement(`Research and fit checks are still running${elapsed}.`);
+              if (terminalInstallation.current.isCurrent(installationToken)) setStreamAcknowledgement(`Research and fit checks are still running${elapsed}.`);
             }
           }
           if (data?.status === 'in_progress') {
@@ -2422,6 +2432,8 @@ export default function App() {
         // A completed case turn has one revision-bound projection. The assistant,
         // shelves, right panel and Decision Trace must consume it together rather
         // than independently re-deriving which response fields are current.
+        if (!terminalInstallation.current.isCurrent(installationToken)) return;
+        if (data?.terminal_outcome && !terminalInstallation.current.accept(installationToken, data.terminal_outcome)) return;
         const turnReadModel = data?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
           ? data.turn_read_model : null;
         if (turnReadModel) {
@@ -2443,8 +2455,17 @@ export default function App() {
         const terminalOutcome = data?.terminal_outcome?.schema_version === 'turn-terminal-outcome-v1'
           ? data.terminal_outcome : null;
         if (terminalOutcome) {
-          setProductShelves(terminalShelves(terminalOutcome));
-          setAmbiguityExploration(terminalOutcome.ambiguity_exploration ?? null);
+          installCasePresentation({
+            activeShoppingCase: terminalOutcome.case_id ? {
+              case_id: terminalOutcome.case_id, revision: terminalOutcome.case_revision,
+              retained_purpose: String(data.shopping_case_retained_purpose || q), uid,
+              interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
+            } : null,
+            productShelves: terminalShelves(terminalOutcome),
+            ambiguityExploration: terminalOutcome.ambiguity_exploration ?? null,
+            supplierContinuation: null,
+          });
+          if (terminalOutcome.ambiguity_exploration) switchRightPanelMode('grid');
           data = {
             ...data,
             assistant_message: terminalOutcome.assistant_message ?? data.assistant_message,
@@ -2736,7 +2757,7 @@ export default function App() {
           // an earlier case's shelves as if they reflect the newly extracted claims.
           setProductShelves(null);
         }
-        if (data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+        if (!terminalOutcome && data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
           const incomingCaseId = String(data.ambiguity_exploration.case_id || '');
           const continuesActiveCase = Boolean(
             activeShoppingCase?.case_id && activeShoppingCase.case_id === incomingCaseId,
@@ -2774,6 +2795,7 @@ export default function App() {
         }
         if (
           data?.shopping_case_id
+          && !terminalOutcome
           && data?.shopping_case_retained_purpose
           && !activeShoppingCase?.case_id
         ) {
@@ -2961,6 +2983,7 @@ export default function App() {
             const maxTries = 12;
             const nextDelayMs = () => Math.min(1250 * Math.pow(2, tries), 5000);
             const tick = async () => {
+              if (!terminalInstallation.current.isCurrent(installationToken)) { activeNarrationJobs.delete(narrationJobId); return; }
               // Cancelled (message content replaced / job cleared): stop the chain, no fetch.
               if (!activeNarrationJobs.has(narrationJobId)) {
                 activeNarrationJobs.delete(narrationJobId);
@@ -3005,6 +3028,7 @@ export default function App() {
         }
       }
     } catch (e: any) {
+      if (!terminalInstallation.current.isCurrent(installationToken)) return;
       setTraceId(null);
       switchRightPanelMode('none');
       setRightPanelContract(null);
@@ -3017,8 +3041,10 @@ export default function App() {
       }]);
       return;
     } finally {
-      setStreamAcknowledgement(null);
-      setIsThinking(false);
+      if (terminalInstallation.current.isCurrent(installationToken)) {
+        setStreamAcknowledgement(null);
+        setIsThinking(false);
+      }
     }
   };
 
@@ -3035,6 +3061,10 @@ export default function App() {
   ) => {
     const proposal = message.buyerRequirementProposal;
     if (!proposal) throw new Error('This requirement proposal is missing its case identity.');
+    if (!activeShoppingCase || proposal.case_id !== activeShoppingCase.case_id) {
+      throw new Error('This review belongs to an earlier case. Use the current case review instead.');
+    }
+    const installationToken = beginCaseAction();
     const allIds = (message.buyerRequirementClaims || []).map((claim) => claim.claim_id);
     const payload = await executeRequirementAcceptance({
       uid, caseId: proposal.case_id, proposalId: proposal.proposal_id,
@@ -3042,6 +3072,9 @@ export default function App() {
       rejectedClaimIds: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
       corrections, researchChoice,
     });
+    if (!terminalInstallation.current.isCurrent(installationToken)) {
+      throw new Error('A newer request superseded this review result. Current recommendations were not changed.');
+    }
     if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
       setResearchOutcome(payload.research_outcome as ResearchOutcome);
     }
@@ -3088,10 +3121,12 @@ export default function App() {
         ? payload.buyer_claim_reconciliation as BuyerClaimReconciliation[] : undefined,
       },
     });
-  }, [uid, traceId, switchRightPanelMode, executeRequirementAcceptance, dispatchPresentationEvent]);
+  }, [uid, traceId, switchRightPanelMode, executeRequirementAcceptance, dispatchPresentationEvent, beginCaseAction, activeShoppingCase]);
 
   const submitManualSpecifications = useCallback(async (text: string) => {
+    const installationToken = beginCaseAction();
     const payload = await executeManualSpecifications(uid, text);
+    if (!terminalInstallation.current.isCurrent(installationToken)) return;
     setMessages((current) => [...current, {
       role: 'assistant',
       content: `I extracted ${payload.claims?.length || 0} provisional requirement claims from your typed specifications. Review or correct them below. I have not qualified a product or changed your cart.`,
@@ -3103,13 +3138,14 @@ export default function App() {
         proposal_version: payload.proposal_version,
       },
     }]);
-  }, [executeManualSpecifications, uid]);
+  }, [executeManualSpecifications, uid, beginCaseAction]);
 
   const researchAmbiguousShoppingCase = useCallback(async (
     refreshAuthorized = false,
     authorizationBasis: 'buyer_action' | 'tenant_policy' = 'buyer_action',
     explorationOverride?: AmbiguityExploration,
   ) => {
+    const installationToken = beginCaseAction();
     setIsThinking(true);
     try {
       const payload = await executeShoppingCaseResearch({
@@ -3118,6 +3154,7 @@ export default function App() {
         authorizationBasis,
         exploration: explorationOverride,
       });
+      if (!terminalInstallation.current.isCurrent(installationToken)) return;
       if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
         setResearchOutcome(payload.research_outcome as ResearchOutcome);
       }
@@ -3152,6 +3189,8 @@ export default function App() {
         },
       });
     } catch (error: any) {
+      if (!terminalInstallation.current.isCurrent(installationToken)) return;
+      if (error?.failure_code === 'research_superseded') return;
       dispatchPresentationEvent({
         type: 'conversation.message.appended', source: 'research',
         authority: 'presentation_only', message: { role: 'assistant',
@@ -3159,15 +3198,17 @@ export default function App() {
         timestamp: new Date() },
       });
     } finally {
-      setIsThinking(false);
+      if (terminalInstallation.current.isCurrent(installationToken)) setIsThinking(false);
     }
-  }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId, dispatchPresentationEvent]);
+  }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId, dispatchPresentationEvent, beginCaseAction]);
 
   const resolveBuyerEvidenceSource = useCallback(async (
     hint: { source_url?: string; vendor_name?: string },
     researchAuthorized: boolean,
   ) => {
+    const installationToken = beginCaseAction();
     const payload = await executeEvidenceSourceResolution(uid, hint, researchAuthorized);
+    if (!terminalInstallation.current.isCurrent(installationToken)) return { status: 'superseded' };
     if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
       setResearchOutcome(payload.research_outcome as ResearchOutcome);
     }
@@ -3212,12 +3253,14 @@ export default function App() {
           provisional_claim_count: Array.isArray(payload?.claims) ? payload.claims.length : 0,
         }
       : { status: 'unresolved', reason: 'resolution_not_recorded' };
-  }, [executeEvidenceSourceResolution, uid, traceId]);
+  }, [executeEvidenceSourceResolution, uid, traceId, beginCaseAction]);
 
   const approvePublisherCandidate = useCallback(async (
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => {
+    const installationToken = beginCaseAction();
     const payload = await executePublisherApproval(uid, candidate);
+    if (!terminalInstallation.current.isCurrent(installationToken)) return;
     if (payload?.research_outcome?.schema_version === 'research-outcome-v1') {
       setResearchOutcome(payload.research_outcome as ResearchOutcome);
     }
@@ -3239,7 +3282,7 @@ export default function App() {
         ? 'official_claims_pending_buyer_review' : 'zero_parser_yield',
       provider_accounting: payload?.provider_accounting || current.provider_accounting,
     } : current);
-  }, [executePublisherApproval, uid, traceId]);
+  }, [executePublisherApproval, uid, traceId, beginCaseAction]);
 
   const {
     assessSupplierContinuation,
@@ -3520,7 +3563,7 @@ export default function App() {
                   onConfirmCart={(message) => { void confirmCartPlan(message); }}
                   onDismissCart={(message) => { void dismissCartPlan(message); }}
                   onAcceptRequirements={(message, claimIds, choice, corrections) => {
-                    void acceptBuyerRequirementProposal(message, claimIds, choice, corrections);
+                    return acceptBuyerRequirementProposal(message, claimIds, choice, corrections);
                   }}
                   onAffordabilityChoice={(message, choice) => { void chooseAffordabilityResolution(message, choice); }}
                 />
@@ -3603,6 +3646,7 @@ export default function App() {
                     onClick={() => {
                       const next = !temporaryChat;
                       setTemporaryChat(next);
+                      terminalInstallation.current.reset();
                       setConversationEpoch(rotateConversationEpoch());
                       setMessages([]);
                       setConfirmedSlots({});

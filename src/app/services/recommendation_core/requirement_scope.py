@@ -67,3 +67,33 @@ def scope_is_current(scope: RequirementScope) -> bool:
         product_type=scope.product_type, relationship=scope.relationship,
     )
     return current == scope
+
+
+def accepted_requirement_gaps(claims, *, tenant_id: str) -> list[str]:
+    """Recheck completeness at fit time; unrelated identities cannot fill gaps."""
+    gaps: set[str] = set()
+    groups = {}
+    if not claims:
+        return ['manifest_scope_missing']
+    for claim in claims:
+        try:
+            scope = RequirementScope.model_validate(claim.get('compilation_scope'))
+        except ValueError:
+            gaps.add('manifest_scope_missing')
+            continue
+        if scope.tenant_id != tenant_id or not scope_is_current(scope):
+            gaps.add('manifest_scope_stale_or_mismatched')
+            continue
+        identity = str(claim.get('artefact_name') or '').strip()
+        if not identity:
+            gaps.add('requirement_identity_missing')
+        key = (scope.model_dump_json(), identity, str(claim.get('artefact_version') or ''),
+               str(claim.get('requirement_class') or 'minimum'), str(claim.get('condition') or ''))
+        group = groups.setdefault(key, (scope, set()))
+        if claim.get('authority_status') == 'verified_official':
+            group[1].add(str(claim.get('attribute') or ''))
+    for scope, present in groups.values():
+        if not scope.required_attributes:
+            gaps.add('manifest_obligations_missing')
+        gaps.update(set(scope.required_attributes) - present)
+    return sorted(gaps)

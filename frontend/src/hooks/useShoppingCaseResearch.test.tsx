@@ -8,6 +8,24 @@ afterEach(() => {
 });
 
 describe('useShoppingCaseResearch', () => {
+  it('does not let a superseded request finish the current research state', async () => {
+    const pending: Array<(value: any) => void> = [];
+    vi.stubGlobal('fetch', vi.fn((url) => String(url).endsWith('/research-cancel')
+      ? Promise.resolve({ ok: true })
+      : new Promise(resolve => pending.push(resolve))));
+    const { result } = renderHook(() => useShoppingCaseResearch());
+    const exploration = { case_id: 'case-race', research_plan_id: 'plan', interpretations: [], ambiguity_objects: [] } as any;
+    let old!: Promise<any>, current!: Promise<any>;
+    act(() => { old = result.current.executeResearch({ uid: 'buyer', exploration }).catch(error => error); });
+    act(() => { current = result.current.executeResearch({ uid: 'buyer', exploration }); });
+    await act(async () => {
+      pending[0]({ ok: true, json: async () => ({ stale: true }) });
+      expect(await old).toMatchObject({ name: 'AbortError' });
+    });
+    expect(result.current.researchState).toBe('running');
+    await act(async () => { pending[1]({ ok: true, json: async () => ({}) }); await current; });
+    expect(result.current.researchState).toBe('completed');
+  });
   it('dispatches the durable plan and records completion', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

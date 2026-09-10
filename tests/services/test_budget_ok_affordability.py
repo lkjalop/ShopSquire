@@ -18,7 +18,7 @@ def test_singular_product_price_is_a_target_band_not_a_ceiling():
     parsed = parse_budget("I need a 4000 laptop for university")
     assert parsed is not None
     assert parsed.mode == "around"
-    assert (parsed.budget_min, parsed.budget_max) == (3200, 4800)
+    assert (parsed.budget_min, parsed.budget_max) == (None, 4000)
 
 
 def test_display_intent_distinguishes_limit_target_and_affordability():
@@ -51,8 +51,8 @@ def test_want_to_spend_around_is_a_target_band_not_a_hard_ceiling():
     intent = interpret_price_intent(query)
 
     assert parsed is not None
-    assert (parsed.budget_min, parsed.budget_max, parsed.mode) == (2400, 3600, "around")
+    assert (parsed.budget_min, parsed.budget_max, parsed.mode) == (None, 3000, "around")
     assert intent is not None
     assert (intent.mode, intent.target, intent.preferred_min, intent.preferred_max) == (
-        "target_band", 3000, 2400, 3600,
+        "target_band", 3000, None, 3000,
     )

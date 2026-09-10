@@ -37,6 +37,8 @@ def project_structured_requirement_claims(
                 "claim_id": claim_id,
                 "source_claim_ids": identity["source_claim_ids"],
                 "compilation_scope": compiled.get("compilation_scope"),
+                "artefact_name": compiled.get("artefact_name"),
+                "artefact_version": compiled.get("artefact_version"),
                 "attribute": compiled.get("attribute_key"),
                 "operator": compiled.get("operator"),
                 "value": compiled.get("value"),

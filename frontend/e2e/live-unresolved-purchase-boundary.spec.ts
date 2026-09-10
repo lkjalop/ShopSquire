@@ -2,6 +2,30 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.describe.configure({ retries: 0 });
 
+test('approximate budget keeps its literal anchor without automatic stretch', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(uid => { sessionStorage.setItem('uid', uid); }, `approx-budget-${Date.now()}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Ask Me!', exact: true }).click();
+  const response = await send(page, 'I need a laptop for about AUD 3000');
+  const terminal = response.terminal_outcome;
+  const budget = terminal.canonical_facts.canonical_budget;
+  await info.attach('budget-contract', { body: JSON.stringify({ budget, panel: terminal.right_panel?.canonical_budget, operation_id: terminal.operation_id }), contentType: 'application/json' });
+  expect(budget).toMatchObject({ mode: 'around', budget_min: null, budget_max: 3000 });
+  expect(terminal.right_panel.canonical_budget).toEqual(budget);
+  for (const shelf of terminal.product_shelves?.shelves || []) {
+    expect(shelf.budget_band).not.toBe('stretch');
+    for (const product of [...(shelf.initial || []), ...(shelf.remaining || [])]) expect(product.price_cents).toBeLessThanOrEqual(300000);
+  }
+  await expect(page.getByText('budget AUD 3,600', { exact: false })).toHaveCount(0);
+  const continued = await send(page, 'It needs more storage');
+  expect(continued.terminal_outcome.canonical_facts.canonical_budget).toMatchObject({
+    mode: 'around', budget_min: null, budget_max: 3000,
+  });
+  expect(continued.terminal_outcome.right_panel.canonical_budget)
+    .toEqual(continued.terminal_outcome.canonical_facts.canonical_budget);
+});
+
 async function send(page: Page, query: string) {
   const result = new Promise<any>((resolve, reject) => {
     const timer = setTimeout(() => { page.off('response', handler); reject(new Error('terminal deadline')); }, 150_000);

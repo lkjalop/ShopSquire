@@ -22,7 +22,7 @@ type Props = {
   onUndoServer: (message: ChatMessage) => void;
   onConfirmCart: (message: ChatMessage) => void;
   onDismissCart: (message: ChatMessage) => void;
-  onAcceptRequirements: (message: ChatMessage, claimIds: string[], choice: any, corrections: any) => void;
+  onAcceptRequirements: (message: ChatMessage, claimIds: string[], choice: any, corrections: any) => Promise<void>;
   onAffordabilityChoice: (message: ChatMessage, choice: any) => void;
   onSourceFetch?: (message: ChatMessage) => void;
 };
