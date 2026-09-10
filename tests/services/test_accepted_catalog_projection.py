@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import pytest
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -6,6 +8,37 @@ from sqlalchemy.orm import Session
 from src.app.models.orm import Base, ProductConfiguration
 from src.app.services.accepted_catalog_projection import project_accepted_catalog as _project_accepted_catalog
 from src.app.services.catalog_evidence_seed import ingest_reviewed_configurations
+
+
+@pytest.mark.parametrize('operator,expected,observed,verdict', [
+    ('=', 'GPU 10', 'GPU 100', 'below_minimum'),
+    ('one_of', ['GPU 10'], 'GPU 10 Mobile', 'below_minimum'),
+    ('in', ['CPU A', 'CPU B'], 'CPU B', 'meets_minimum'),
+    ('<=', 32, 16, 'meets_minimum'),
+    ('>=', 1, True, 'unknown'),
+    ('>=', 16, float('nan'), 'unknown'),
+    ('contains', 'CPU', 'CPU A', 'unknown'),
+    ('=', '', 'CPU A', 'unknown'),
+    ('=', False, 0, 'unknown'),
+    ('=', False, False, 'meets_minimum'),
+])
+def test_exact_typed_fit_never_infers_hardware_equivalence(operator, expected, observed, verdict):
+    from src.app.services.accepted_catalog_projection import _verdict
+    assert _verdict({'operator': operator, 'value': expected}, observed) == verdict
+
+
+def test_fresh_derived_catalog_observation_is_not_independently_verified():
+    from src.app.services.accepted_catalog_projection import _evidence_for_attribute
+    now = datetime(2026, 9, 10, tzinfo=timezone.utc)
+    observation = SimpleNamespace(
+        id='derived-gpu', attribute_key='gpu_model', supersedes_id=None,
+        value_json={'value':'GPU A'}, evidence_status='observed',
+        claim_class='derived', observed_at=now, expires_at=None,
+    )
+    result = _evidence_for_attribute(None, 'gpu_model', [observation], now=now)
+    assert result['observed'] == 'GPU A'
+    assert result['claim_class'] == 'derived'
+    assert result['verified'] is False
 
 
 def project_accepted_catalog(db, **kwargs):

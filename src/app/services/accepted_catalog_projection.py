@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import math
 from typing import Any, Mapping, Sequence
 
 from sqlalchemy import select
@@ -59,21 +60,40 @@ def _normalized(value: Any) -> str:
 
 
 def _verdict(claim: Mapping[str, Any], observed: Any) -> str:
+    from src.app.services.attribute_registry import meets
+
     if observed is None:
         return "unknown"
     operator = str(claim.get("operator") or "=")
     expected = claim.get("value")
-    if operator == ">=":
+    if operator in {">=", "<=", ">", "<"}:
         try:
-            return "meets_minimum" if float(observed) >= float(expected) else "below_minimum"
-        except (TypeError, ValueError):
+            if isinstance(observed, bool) or isinstance(expected, bool):
+                return "unknown"
+            observed, expected = float(observed), float(expected)
+            if not math.isfinite(observed) or not math.isfinite(expected):
+                return "unknown"
+        except (TypeError, ValueError, OverflowError):
             return "unknown"
-    if operator == "one_of":
-        options = expected if isinstance(expected, list) else [expected]
-        return "meets_minimum" if any(_normalized(option) in _normalized(observed) for option in options) else "below_minimum"
-    if operator == "conditional" and not claim.get("condition"):
-        return "not_applicable"
-    return "meets_minimum" if _normalized(expected) in _normalized(observed) else "below_minimum"
+    else:
+        if operator == "conditional":
+            if not claim.get("condition"):
+                return "not_applicable"
+            operator = "="
+        operator = {"one_of": "in", "equals": "="}.get(operator, operator)
+        if operator not in {"=", "==", "in"}:
+            return "unknown"
+        values = expected if isinstance(expected, list) else [expected]
+        if isinstance(observed, bool) or any(isinstance(value, bool) for value in values):
+            if not isinstance(observed, bool) or not all(isinstance(value, bool) for value in values):
+                return "unknown"
+            return "meets_minimum" if observed in values else "below_minimum"
+        if not values or any(value is None or not str(value).strip() for value in values):
+            return "unknown"
+        observed = _normalized(observed)
+        expected = [_normalized(value) for value in values] if operator == "in" else _normalized(expected)
+    result = meets({"value": observed}, "value", operator, expected)
+    return "unknown" if result is None else "meets_minimum" if result else "below_minimum"
 
 
 def _as_utc(value: Any) -> datetime | None:
@@ -154,7 +174,9 @@ def _evidence_for_attribute(
             recorded
             and not contested
             and all(item.evidence_status == "observed" for item in recorded)
-            and "substitutable" not in classes
+            # Freshness is not derivation approval. A model/rule-derived value
+            # remains visible but cannot establish independently verified fit.
+            and not classes.intersection({"substitutable", "derived"})
             and fresh == "fresh"
         )
         return {
@@ -168,7 +190,9 @@ def _evidence_for_attribute(
                 "conflicting product observations are retained"
                 if contested else
                 "component is substitutable; exact installed part is not guaranteed"
-                if "substitutable" in classes else None
+                if "substitutable" in classes else
+                "derived observation requires reviewed rule provenance"
+                if "derived" in classes else None
             ),
         }
     field = _CAPABILITY_FIELDS.get(attribute)

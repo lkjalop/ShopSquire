@@ -1,10 +1,25 @@
 import json
+import pytest
 from datetime import datetime, timezone
 
 from src.app.services.model_requirement_extractor import (
     propose_typed_requirements,
     select_requirement_sections,
 )
+
+
+@pytest.mark.parametrize('value', ['CPU B', ['CPU A', 'CPU B']])
+def test_real_quote_cannot_support_invented_model_identity(value):
+    raw = json.dumps({'claims':[{
+        'attribute':'cpu_model', 'operator':'in' if isinstance(value,list) else 'equals',
+        'value':value, 'unit':None, 'requirement_class':'minimum',
+        'condition':None, 'page_section':'Minimum', 'quoted_evidence_span':'Processor: CPU A',
+    }]})
+    receipt = propose_typed_requirements('Minimum\nProcessor: CPU A',
+        citation_url='https://publisher.example/requirements',
+        observed_at=datetime(2026,9,10,tzinfo=timezone.utc), model_fn=lambda *_:raw)
+    assert receipt['claims'] == []
+    assert receipt['rejected'][0]['reason'] == 'value_not_in_quoted_span'
 
 
 def test_model_proposals_are_typed_and_retain_exact_page_spans():

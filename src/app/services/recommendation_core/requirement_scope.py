@@ -48,7 +48,9 @@ def resolve_requirement_scope(*, tenant_id: str, profile_id: str,
     definitions = registry.load_defs(profile_id)
     if not definitions:
         return None
-    snapshot = {"policy": policy, "definitions": {
+    # A changed derivation policy invalidates the pinned scope just as changed
+    # definitions do. Hashing a rule is not approval to execute that rule.
+    snapshot = {"policy": policy, "derivations": raw.get("derivations") or [], "definitions": {
         key: asdict(value) for key, value in definitions.items()
     }}
     revision = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

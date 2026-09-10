@@ -1,4 +1,5 @@
 import pytest
+import json
 
 from src.app.services.recommendation_core.requirement_compiler import compile_authoritative_requirements
 from src.app.services.recommendation_core.requirement_scope import resolve_requirement_scope
@@ -15,6 +16,24 @@ def scope(**changes):
         "tenant_id": "tenant-a", "profile_id": "electronics", "product_type": "el-6-6",
         "relationship": "RUN_SUBJECT_ON_PRODUCT", **changes,
     })
+
+
+def test_manifest_revision_covers_derivation_policy(monkeypatch, tmp_path):
+    from src.app.services import attribute_registry as registry
+    raw = json.loads((registry._DATA_DIR / 'electronics.json').read_text(encoding='utf-8'))
+    definitions = registry.load_defs('electronics')
+    monkeypatch.setattr(registry, '_DATA_DIR', tmp_path)
+    monkeypatch.setattr(registry, 'load_defs', lambda _: definitions)
+    path = tmp_path / 'electronics.json'
+    path.write_text(json.dumps(raw), encoding='utf-8')
+    before = scope()
+    raw['derivations'] = [{'target':'gpu_vram_gb', 'set':0, 'when':{'gpu_discrete':False}, 'only_if_missing':True}]
+    path.write_text(json.dumps(raw), encoding='utf-8')
+    # Ensure this is a different rule payload even if the source already had it.
+    raw['derivations'][0]['set'] = 1
+    path.write_text(json.dumps(raw), encoding='utf-8')
+    after = scope()
+    assert before.manifest_revision != after.manifest_revision
 
 
 def test_discovery_retries_preserve_explicit_product_scope(monkeypatch):

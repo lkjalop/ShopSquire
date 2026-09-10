@@ -143,9 +143,20 @@ def propose_typed_requirements(
         critique = critique_extracted_requirements(
             candidates, source_text=text, accepted_url=citation_url,
         )
+        # A genuine quote does not validate a different value attached to it.
+        # Text identities must be literal; normalization/equivalence belongs to
+        # the separately governed registry, not model extraction authority.
+        literal_claims = []
+        for claim in critique.accepted:
+            values = claim.value if isinstance(claim.value, list) else [claim.value]
+            if any(isinstance(value, str) and (not value.strip() or value not in claim.quoted_evidence_span)
+                   for value in values):
+                critique.rejected.append({'attribute':claim.attribute, 'reason':'value_not_in_quoted_span'})
+            else:
+                literal_claims.append(claim)
         return {
             "status": "completed",
-            "claims": critique.accepted,
+            "claims": literal_claims,
             "rejected": critique.rejected,
             "extractor": "model_proposal_deterministic_critic",
             "source_chars": len(str(text or "")),
