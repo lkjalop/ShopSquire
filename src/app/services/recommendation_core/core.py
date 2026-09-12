@@ -2071,6 +2071,9 @@ def _bulk_message(econ: Dict[str, Any], decision: TurnDecision) -> str:
     floor = econ["qualified_unit_floor_cents"]
     total = econ.get("total_budget_cents")
     uc = (list(getattr(decision, "use_cases", None) or ["your use case"]))[0].replace("_", " ")
+    uc = uc.strip()
+    if not uc or uc.casefold() == "general":
+        uc = "your use case"
     if econ["verdict"] == "unsized":
         return (f"For {q} units for {uc}, the per-unit floor is ${floor / 100:,.0f} — about "
                 f"${econ['required_total_cents'] / 100:,.0f} total. Tell me your budget and I'll size it.")

@@ -230,9 +230,9 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     if isinstance(bulk_budget, dict) and str(bulk_budget.get("budget_scope") or "").lower() == "total":
         per_unit = bulk_budget.get("per_unit_cap_cents")
         if isinstance(per_unit, (int, float)) and per_unit > 0:
-            q_lo, q_hi = None, int(per_unit) // 100
+            q_lo, q_hi = None, per_unit / 100
     lo_msg, hi_msg = _extract_price_range_from_message(base_message)
-    prices = [int(float(p.get("price") or 0)) for p in (products or []) if p.get("price") is not None]
+    prices = [float(p.get("price") or 0) for p in (products or []) if p.get("price") is not None]
     if prices and (lo_msg is None or hi_msg is None):
         lo_msg, hi_msg = min(prices), max(prices)
     # The band must reflect the BUYER'S budget, not the raw product price range — over-budget
@@ -252,7 +252,9 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
         # Never print a reversed band (a mis-parsed cap once produced "$1,599-$1,500"): the floor is the
         # cheapest in-budget option and the ceiling the buyer's cap, so order them defensively.
         lo_band, hi_band = min(lo_msg, hi_msg), max(lo_msg, hi_msg)
-        return f"{direct} a practical budget band is ${lo_band:,}-${hi_band:,}. {base_message}".strip()
+        lo_display = f"{lo_band:,.2f}".removesuffix(".00")
+        hi_display = f"{hi_band:,.2f}".removesuffix(".00")
+        return f"{direct} a practical budget band is ${lo_display}-${hi_display}. {base_message}".strip()
     return f"{direct} {base_message}".strip()
 
 
