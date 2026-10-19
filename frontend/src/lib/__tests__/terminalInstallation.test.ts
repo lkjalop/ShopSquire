@@ -29,4 +29,14 @@ describe('terminal installation ordering', () => {
     expect(gate.accept(token, terminal(1))).toBe(false);
     expect(gate.isCurrent(token)).toBe(false);
   });
+  it('installs a new read-only operation without advancing the material case revision', () => {
+    const gate = new TerminalInstallationGate();
+    expect(gate.accept(gate.begin(), terminal(3))).toBe(true);
+    const read = {...terminal(3, 'draft-1'), read_only_case_task: true};
+    const token = gate.begin();
+    expect(gate.accept(token, read)).toBe(true);
+    expect(gate.accept(token, read)).toBe(false);
+    expect(gate.accept(gate.begin(), {...terminal(2, 'stale-read'), read_only_case_task: true})).toBe(false);
+    expect(gate.accept(gate.begin(), terminal(3, 'same-revision-mutation'))).toBe(false);
+  });
 });

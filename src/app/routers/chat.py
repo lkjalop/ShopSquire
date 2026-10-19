@@ -980,6 +980,30 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 detail="procurement_case_state_unavailable",
             ) from exc
 
+    # A pure task reads the current material revision. Recommitting a read as
+    # a buyer amendment would invalidate its accepted stock selection/permits.
+    from src.app.services.case_task_delivery import is_case_task_read, deliver_case_task
+    if (active_shopping_case_id and canonical_case_snapshot
+            and not image_ocr_text_in and not image_hash_in
+            and not re.search(r'https?://', submitted_query or '')
+            and is_case_task_read(submitted_query, canonical_case_snapshot)):
+        task_out = {'shopping_case_id': active_shopping_case_id,
+                    'operation_id': f'chat:{params_case_patch_idempotency_key}',
+                    'read_only_case_task': True,
+                    'decision': {'lane': 'PROCUREMENT', 'subject_action': 'continue',
+                                 'case_operation': 'status', 'source': 'deterministic_case_task_read'}}
+        deliver_case_task(out=task_out, request_db=db, tenant_id=tenant_id, uid=uid,
+                          session_epoch=session_epoch, query=submitted_query)
+        if persist_conversation:
+            from src.app.services.chat_persistence import persist_chat_result
+            persist_chat_result(db, redis=redis, uid=uid, query=submitted_query,
+                products=task_out['products'], trace_id=task_out['decision_trace_id'],
+                assistant_message=task_out['assistant_message'], session_id=session_id,
+                budget=_extract_budget_bounds(submitted_query), brands=_extract_brand_mentions(submitted_query),
+                tenant_id=tenant_id, session_epoch=session_epoch,
+                confirmed_slots=task_out['confirmed_slots'], turn_read_model=task_out['turn_read_model'])
+        return task_out
+
     # ``also`` / ``as well`` adds a workload to the current procurement case;
     # it is neither an answer to an old clarification nor a subject reset. Bind
     # the buyer-authored combination before model routing so the stricter
@@ -4922,6 +4946,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     out["terminal_outcome"].update(scope_contract)
     if isinstance(out.get("right_panel"), dict):
         out["right_panel"].update(scope_contract)
+    from src.app.services.case_task_delivery import deliver_case_task
+    deliver_case_task(out=out, request_db=db, tenant_id=tenant_id, uid=uid,
+                      session_epoch=session_epoch, query=submitted_query)
     if persist_conversation:
         from src.app.services.chat_persistence import persist_chat_result
 
