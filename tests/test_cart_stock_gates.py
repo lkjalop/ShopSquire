@@ -212,6 +212,7 @@ def test_added_at_stamped_and_surfaced(client_with_stock):
 # ── reload-durable UNDO (Phase 2c: Redis snapshot survives page reload) ───────
 
 class _FakeRedis:
+    is_shared_backend = False
     def __init__(self):
         self.store = {}
     def setex(self, k, ttl, v):

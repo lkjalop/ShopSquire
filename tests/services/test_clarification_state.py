@@ -398,6 +398,8 @@ def test_facade_reads_pending_question_without_fabricating_legacy_state():
     from src.app.services.recommendation_facade import _read_session_slice
 
     class Redis:
+        # A local dictionary without an erasure index is not a shared backend.
+        is_shared_backend = False
         def __init__(self):
             self.data = {}
 

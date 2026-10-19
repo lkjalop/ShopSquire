@@ -2,6 +2,7 @@ from src.app.services.memory import Memory
 
 
 class FakeRedis:
+    is_shared_backend = False
     def __init__(self):
         self.store = {}
 
@@ -26,10 +27,14 @@ def test_summary_truncates_over_50_utterances():
     assert len(stored) == 50
 
 
-def test_recent_retrieval_expires():
+def test_recent_retrieval_expires(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('src.app.services.memory.time.time', lambda: clock[0])
     fake = FakeRedis()
     mem = Memory(fake)
     uid = "u-ttl"
     mem.set_recent_retrieval(uid, {"facts": ["a", "b"]}, ttl_seconds=1)
     ctx = mem.get_context(uid)
     assert ctx.get("recent_retrieval") is not None
+    clock[0] += 2
+    assert mem.get_context(uid)['recent_retrieval'] is None

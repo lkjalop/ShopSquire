@@ -7,10 +7,12 @@ from src.app.services.recommendation_core.envelope import CoreResponse, ProductC
 
 
 class _Redis:
-    def __init__(self): self.store = {}
+    def __init__(self): self.store = {}; self.sets = {}
     def get(self, k): return self.store.get(k)
     def setex(self, k, ttl, v): self.store[k] = v
     def set(self, k, v): self.store[k] = v
+    def sadd(self, k, v): self.sets.setdefault(k, set()).add(v)
+    def expire(self, k, ttl): return k in self.store or k in self.sets
 
 
 def _env(**o):

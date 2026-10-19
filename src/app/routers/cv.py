@@ -6,6 +6,7 @@ import time
 import base64
 import io
 import shutil
+import asyncio
 
 _log = logging.getLogger("shopsquire.cv")
 
@@ -1082,7 +1083,6 @@ async def upload(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     """Upload an image, run Tier 2 CV including forensics verdict, and return a decision hint.
-
     If `nonce` is provided, it is checked for recent issuance (best-effort).
     """
     fallback_case_id = uuid.uuid4().hex
@@ -1150,11 +1150,15 @@ async def upload(
         order_ctx = None
         if order_id:
             try:
-                with db_session() as db:
-                    row = db.execute(
-                        sql_text("SELECT id, customer_id, guest_email, status, total_cents, created_at FROM orders WHERE id = :id LIMIT 1"),
-                        {"id": order_id},
-                    ).fetchone()
+                import asyncio as _db_asyncio
+                def _db_operation_1153():
+                    with db_session() as db:
+                        row = db.execute(
+                            sql_text("SELECT id, customer_id, guest_email, status, total_cents, created_at FROM orders WHERE id = :id LIMIT 1"),
+                            {"id": order_id},
+                        ).fetchone()
+                    return row
+                row = await _db_asyncio.to_thread(_db_operation_1153)
                 if row:
                     order_ctx = {
                         "found": True,
@@ -1195,18 +1199,17 @@ async def upload(
             use_s3 = False
         if use_s3:
             try:
-                sanitized = None
-                try:
-                    sanitized = sanitize_image(content)
-                except Exception:
-                    sanitized = None
-                data_bytes = (sanitized.get("bytes") if isinstance(sanitized, dict) and sanitized.get("bytes") else content)
+                from src.app.services.image_intake import sanitize_image
+                sanitized = sanitize_image(content)
+                if not isinstance(sanitized, dict) or sanitized.get('status') != 'sanitized' or not sanitized.get('bytes'):
+                    raise ValueError('image_sanitization_failed')
+                data_bytes = sanitized['bytes']
                 # Sanitize filename to prevent unicode/XSS/path traversal issues
                 import re as _re
                 _safe_name = _re.sub(r"[^\w\-.]", "_", (image.filename or "upload"))[:100]
                 key = f"{uuid.uuid4().hex}_{_safe_name}"
                 storage = get_default_storage()
-                res = storage.upload_bytes(key, data_bytes, content_type=(normalized_content_type or None))
+                res = await asyncio.to_thread(storage.upload_bytes, key, data_bytes, content_type=(sanitized.get('mime') or normalized_content_type or None))
                 if isinstance(res, dict) and res.get("ok"):
                     storage_url = res.get("url")
             except Exception:
@@ -1250,7 +1253,8 @@ async def upload(
                 _upload_timeout = max(1.0, min(float(os.getenv("CV_UPLOAD_TIMEOUT_SEC", "15") or 15), 30.0))
             except (TypeError, ValueError):
                 _upload_timeout = 15.0
-            t2 = call_with_resilience(
+            t2 = await asyncio.to_thread(
+                call_with_resilience,
                 "cv.tier2",
                 lambda: run_tier2(
                     content,
