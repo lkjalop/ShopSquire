@@ -10,6 +10,7 @@ describe('WorkloadResearchTrace', () => {
       discovery_status: 'completed', fetch_status: 'completed', requirement_completeness: 'partial',
       accepted_claim_count: 2, held_claim_count: 0, rejected_claim_count: 1, parsed_claim_count: 3,
       catalog_authority: 'blocked', commerce_authority: 'none',
+      source_ownership_status: 'unresolved',
     }} />);
     expect(screen.getByTestId('research-outcome-summary')).toBeVisible();
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();

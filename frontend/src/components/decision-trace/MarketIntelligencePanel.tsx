@@ -17,9 +17,9 @@ export default function MarketIntelligencePanel({
   connectorHealth?: Record<string, any> | null;
   connectorHealthStatus?: string;
   dependencyEvidence?: ReactNode;
-  classNames: { summaryPane: string; sectionTitle: string; empty: string; kvRow: string };
+  classNames: Record<string, string>;
   humanize: (value: unknown) => string;
-  formatTime: (value: unknown) => string;
+  formatTime: (value: string | undefined) => string;
 }) {
   return (
     <div className={classNames.summaryPane} data-testid="market-intelligence-tab">

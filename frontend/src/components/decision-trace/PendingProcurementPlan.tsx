@@ -9,10 +9,10 @@ type PendingPlan = {
   split?: {
     now: PendingLine[];
     later: PendingLine[];
-  };
+  } | null;
   suppliers?: Record<string, {
-    name?: string;
-    channel?: string;
+    name?: string | null;
+    channel?: string | null;
   }>;
 };
 

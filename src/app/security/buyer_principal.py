@@ -39,14 +39,28 @@ def _strict_mode() -> bool:
 
 
 def _tenant_allowed(subject: str, tenant_id: str) -> bool:
-    if tenant_id == "default":
-        return True
     try:
         bindings = json.loads(os.getenv("BUYER_TENANT_BINDINGS_JSON", "{}") or "{}")
-        allowed = bindings.get(subject) if isinstance(bindings, dict) else None
-        return isinstance(allowed, list) and tenant_id in {str(value) for value in allowed}
+        if not isinstance(bindings, dict):
+            return False
+        if subject in bindings:
+            allowed = bindings[subject]
+            return isinstance(allowed, list) and tenant_id in {str(value) for value in allowed}
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
+    try:
+        with db_session() as db:
+            row = db.execute(text('SELECT tenant_id,tenant_ownership_status FROM customers WHERE id=:subject'),
+                             {'subject':subject}).first()
+        if row and row[1] == 'authenticated_request_context':
+            # Native registration records ownership in the authorized request
+            # context. A caller-supplied tenant/UID alone cannot create this row.
+            return str(row[0]) == tenant_id
+    except Exception:
+        # An unavailable membership store cannot establish that a signed buyer
+        # belongs to default rather than a different native storefront.
+        return False
+    return tenant_id == 'default'
 
 
 def _verified_access_subject(request: Request) -> Optional[str]:
@@ -145,3 +159,54 @@ def assert_case_owner(db, case_id: str, principal: Optional[BuyerPrincipal]) -> 
     ).fetchone()
     if not row or str(row[0] or "") != principal.subject:
         raise HTTPException(status_code=404, detail="case not found")
+
+
+async def require_shopping_case_principal(request: Request) -> BuyerPrincipal:
+    """Authenticate the entire buyer-case surface, including reads and creation.
+
+    Compatibility UIDs cannot establish ownership even in a fictional shop.
+    FastAPI reuses the cached request body for subsequent schema validation.
+    """
+    supplied_uid=request.query_params.get('uid')
+    if request.method in {'POST','PUT','PATCH','DELETE'}:
+        try:
+            body=await request.json()
+        except (ValueError,TypeError):
+            body=None
+        if isinstance(body,dict) and body.get('uid') is not None:
+            if supplied_uid is not None and supplied_uid!=body['uid']:
+                raise HTTPException(status_code=403,detail='buyer_identity_mismatch')
+            supplied_uid=body['uid']
+    principal=resolve_buyer_principal(request,supplied_uid=supplied_uid)
+    if principal is None or not principal.verified:
+        raise HTTPException(status_code=401,detail='verified_buyer_identity_required')
+    requested_tenant=str(request.headers.get('x-tenant-id') or 'default').strip() or 'default'
+    if requested_tenant!=principal.tenant_id:
+        raise HTTPException(status_code=403,detail='buyer_tenant_context_mismatch')
+    request.state.buyer_principal=principal
+    return principal
+
+
+async def require_buyer_or_operator(request: Request) -> str:
+    """Own-UID buyer access for chat/cart; retain explicit operator credentials.
+
+    A native buyer session is not an operator role. Reuse the same signed
+    identity and tenant checks used by the shopping-case surface.
+    """
+    key = request.headers.get('x-api-key') or request.cookies.get('shopsquire_api_key')
+    authorization = request.headers.get('authorization')
+    if not key and (_verified_access_subject(request) or _session_subject(request)):
+        await require_shopping_case_principal(request)
+        uid = request.query_params.get('uid')
+        if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+            try:
+                body = await request.json()
+            except (ValueError, TypeError):
+                body = None
+            if isinstance(body, dict):uid = body.get('uid', uid)
+        if not uid:
+            raise HTTPException(status_code=400, detail='buyer_uid_required')
+        return 'buyer'
+    from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+    return require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])(
+        x_api_key=key, authorization=authorization, request=request)

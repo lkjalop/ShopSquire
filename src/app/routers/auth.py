@@ -397,7 +397,9 @@ def _jwt_audience() -> str:
 
 
 def _jwt_default_role() -> str:
-    return str(os.getenv("LOCAL_AUTH_DEFAULT_ROLE", "merchant") or "merchant")
+    # Public account creation is not operator enrollment. Privileged access
+    # requires separately provisioned operator credentials and membership.
+    return 'buyer'
 
 
 def _jwt_encode_hs256(claims: Dict[str, object], secret: str) -> str:

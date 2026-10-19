@@ -35,6 +35,7 @@ export function selectProportionateAlternatives(
   const seen = new Set<string>();
   const selected: ProportionateAlternative[] = [];
   for (const candidate of ordered) {
+      if (candidate.fit_status === 'failed') continue;
       if (seen.has(candidate.product.sku)) continue;
       seen.add(candidate.product.sku);
       const savingsCents = preferred.price_cents - candidate.price_cents;

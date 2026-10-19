@@ -13,7 +13,7 @@ export default function RawTracePanel({
   traceId: string;
   replay: unknown;
   replayLoading: boolean;
-  classNames: { muted: string; sectionTitle: string; rawJson: string };
+  classNames: Record<string, string>;
 }) {
   const payload = trace || {
     trace_id: traceId,

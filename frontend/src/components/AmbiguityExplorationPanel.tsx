@@ -190,7 +190,7 @@ export default function AmbiguityExplorationPanel({
                     type="button"
                     disabled={Boolean(approvingCandidate)}
                     onClick={() => {
-                      setApprovingCandidate(candidate.candidate_id);
+                      setApprovingCandidate(candidate.candidate_id ?? null);
                       setCandidateStatus('');
                       void onApprovePublisherCandidate(candidate)
                         .then(() => setCandidateStatus(

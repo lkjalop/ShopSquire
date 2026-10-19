@@ -16,6 +16,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.buyer_principal import require_buyer_or_operator
 from src.app.deps import get_redis
 from src.app.models.db import get_db
 from src.app.services.memory import Memory
@@ -189,7 +190,7 @@ async def chat_query(
     payload: Dict,
     redis=Depends(get_redis),
     db=Depends(get_db),
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    role: str = Depends(require_buyer_or_operator),
 ) -> Dict:
     """Single-flight entry (review-7 P0). Idempotency-Key rides both /chat/stream and this
     fallback; when present, the second in-flight duplicate returns the first's cached result
@@ -4943,7 +4944,7 @@ def chat_history(
     before: Optional[str] = None,
     session_epoch: Optional[str] = Query(None, max_length=128),
     db=Depends(get_db),
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    role: str = Depends(require_buyer_or_operator),
 ) -> Dict[str, Any]:
     _ = role
     tenant_id = _request_tenant_id(request)

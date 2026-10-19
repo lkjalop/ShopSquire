@@ -30,10 +30,14 @@ function csrfHeaders(): Record<string, string> {
 }
 
 function authHeaders(extra: Record<string, string> = {}, includeJsonContentType = false): Record<string, string> {
+  // Deployment scope is a routing hint. The server still authenticates membership.
+  const tenant = String(import.meta.env.VITE_STOREFRONT_TENANT_ID || '').trim();
+  const explicitTenant = Object.keys(extra).some(key => key.toLowerCase() === 'x-tenant-id');
   return {
     ...(includeJsonContentType ? { 'Content-Type': 'application/json' } : {}),
     ...csrfHeaders(),
     ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
+    ...(tenant && !explicitTenant ? { 'x-tenant-id': tenant } : {}),
     ...extra,
   };
 }

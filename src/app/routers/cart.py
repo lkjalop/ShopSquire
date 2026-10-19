@@ -16,7 +16,7 @@ from src.app.models.db import db_session
 from src.app.observability.tracing import get_tracer
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.commerce_request_guard import inspect_commerce_request
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.buyer_principal import require_buyer_or_operator
 from src.app.deps import get_redis
 from src.app.services.bundle_approvals import bind_bundle_approval_state
 from src.app.services.bundle_pricing import evaluate_bundle_savings
@@ -368,7 +368,7 @@ def _with_bundle_state(*, cart_id: str, uid: str, role: str, hydrated: Dict) -> 
 
 @router.get("")
 def get_cart(uid: str, redis=Depends(get_redis),
-            role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+            role: str = Depends(require_buyer_or_operator)) -> Dict:
     with tracer.start_as_current_span("cart.get"):
         signal = _guard_cart_request(surface="cart.get", uid=uid, sku_values=[], quantity_values=[])
         cart_id, items, updated_at = _get_or_create_cart(uid)
@@ -393,7 +393,7 @@ class UndoStashPayload(BaseModel):
 
 @router.post("/undo/stash")
 def stash_cart_undo(payload: UndoStashPayload, redis=Depends(get_redis),
-                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+                    role: str = Depends(require_buyer_or_operator)) -> Dict:
     """Persist the lines a client-side clear just removed, so 'undo' survives a reload. Best-effort — a
     Redis hiccup degrades to the in-session chip, never blocks the clear."""
     _guard_cart_request(surface="cart.undo_stash", uid=payload.uid, sku_values=[], quantity_values=[])
@@ -411,7 +411,7 @@ def stash_cart_undo(payload: UndoStashPayload, redis=Depends(get_redis),
 
 @router.post("/undo")
 def undo_cart_clear(uid: str, redis=Depends(get_redis),
-                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+                    role: str = Depends(require_buyer_or_operator)) -> Dict:
     """Restore the exact pre-change cart snapshot and consume it.
 
     Undo is replacement, not addition. Adding a prior quantity to a currently
@@ -459,7 +459,7 @@ def undo_cart_clear(uid: str, redis=Depends(get_redis),
 
 
 @router.get("/split-offer")
-def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def split_offer(uid: str, role: str = Depends(require_buyer_or_operator)) -> Dict:
     """Split-fulfillment offer for the buyer's cart, surfaced BEFORE payment: what ships NOW (from on-hand
     stock) vs what FOLLOWS from a supplier — the "follows" ETA is the SUPPLIER's own lead time (a real figure
     from the supplier catalog, not a guess). Delivery fees + the free-shipping threshold come from the active
@@ -557,7 +557,7 @@ def _batch_stock_levels(skus: List[str]) -> Dict[str, int]:
 
 
 @router.post("/items")
-def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def add_item(payload: CartItemPayload, role: str = Depends(require_buyer_or_operator)) -> Dict:
     with tracer.start_as_current_span("cart.add_item"):
         if not payload.sku:
             raise HTTPException(status_code=400, detail="SKU required")
@@ -646,7 +646,7 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
 
 
 @router.put("/items")
-def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def replace_items(payload: CartItemsPayload, role: str = Depends(require_buyer_or_operator)) -> Dict:
     with tracer.start_as_current_span("cart.replace_items"):
         signal = _guard_cart_request(
             surface="cart.replace_items",
@@ -696,7 +696,7 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
 
 
 @router.delete("/items/{sku}")
-def remove_item(sku: str, uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def remove_item(sku: str, uid: str, role: str = Depends(require_buyer_or_operator)) -> Dict:
     with tracer.start_as_current_span("cart.remove_item"):
         signal = _guard_cart_request(surface="cart.remove_item", uid=uid, sku_values=[sku], quantity_values=[1])
         cart_id, items, _ = _get_or_create_cart(uid)
@@ -712,7 +712,7 @@ def remove_item(sku: str, uid: str, role: str = Depends(require_role([ROLE_MERCH
 
 @router.put("/items/{sku}")
 def set_item_quantity(sku: str, payload: CartItemPayload,
-                      role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+                      role: str = Depends(require_buyer_or_operator)) -> Dict:
     """SET a line's ABSOLUTE quantity (the cart stepper / 'change your mind' control) — distinct from
     POST /items which INCREMENTS. qty<=0 removes the line. Stock-gated like add. Vertical-blind."""
     with tracer.start_as_current_span("cart.set_item_quantity"):
@@ -748,7 +748,7 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
 
 @router.post("/clear")
 def clear_cart(uid: str, session_epoch: str | None = None, redis=Depends(get_redis),
-               role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+               role: str = Depends(require_buyer_or_operator)) -> Dict:
     with tracer.start_as_current_span("cart.clear"):
         signal = _guard_cart_request(surface="cart.clear", uid=uid, sku_values=[], quantity_values=[])
         cart_id, prior_items, _ = _get_or_create_cart(uid)
@@ -1059,7 +1059,7 @@ def _apply_voucher_atomic(
 @router.post("/voucher")
 def apply_voucher(
     payload: VoucherPayload,
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    role: str = Depends(require_buyer_or_operator),
 ) -> Dict:
     """Apply a discount voucher code to the user's active cart.
 

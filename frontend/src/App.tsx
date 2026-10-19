@@ -456,7 +456,7 @@ export default function App() {
   const [traceDeepLink] = useState(initialTraceDeepLink);
   const [traceId, setTraceId] = useState<string | null>(traceDeepLink.traceId);
   const [traceOpen, setTraceOpen] = useState(Boolean(traceDeepLink.traceId));
-  const [traceInitialTab] = useState<string | undefined>(traceDeepLink.tab);
+  const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(traceDeepLink.tab);
   const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
   const [researchOutcome, setResearchOutcome] = useState<ResearchOutcome | null>(null);
   const [architectureAlternatives, setArchitectureAlternatives] = useState<ArchitectureAlternatives | null>(null);

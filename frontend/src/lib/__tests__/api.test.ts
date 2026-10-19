@@ -9,6 +9,7 @@ import {
   emitConsumerSignal,
   emitPageView,
   resolveImplicitApiBase,
+  apiRequestHeaders,
 } from '../api';
 
 function resp(body: any, status = 200) {
@@ -17,7 +18,20 @@ function resp(body: any, status = 200) {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
+
+describe('storefront tenant grounding', () => {
+  it('uses the configured tenant without treating it as an authentication credential', () => {
+    vi.stubEnv('VITE_STOREFRONT_TENANT_ID', 'fictional-shop');
+    expect(apiRequestHeaders()['x-tenant-id']).toBe('fictional-shop');
+  });
+  it('allows an explicit endpoint scope without duplicate differently cased tenant headers', () => {
+    vi.stubEnv('VITE_STOREFRONT_TENANT_ID', 'fictional-shop');
+    const headers = apiRequestHeaders({'X-Tenant-ID':'operator-shop'});
+    expect(Object.keys(headers).filter(k=>k.toLowerCase()==='x-tenant-id')).toEqual(['X-Tenant-ID']);
+    expect(headers['X-Tenant-ID']).toBe('operator-shop');
+  });
+});
 
 describe('local API routing', () => {
   it('uses the same-origin Vite proxy in a clean local checkout', () => {

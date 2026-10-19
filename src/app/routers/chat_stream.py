@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from src.app.deps import get_redis
 from src.app.models.db import db_session
-from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.security.buyer_principal import require_buyer_or_operator
 from src.app.services.response_normalizer import ResponseNormalizer
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat-stream"])
@@ -96,7 +96,7 @@ async def chat_stream(
     request: Request,
     payload: Dict,
     redis=Depends(get_redis),
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    role: str = Depends(require_buyer_or_operator),
 ):
     """SSE streaming chat endpoint.
 

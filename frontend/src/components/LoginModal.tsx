@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiUrl, safeJson } from '../lib/api';
+import { apiRequestHeaders, apiUrl, safeJson } from '../lib/api';
 import { setStoredRole, setStoredUid } from '../lib/browserSession';
 
 interface Props {
@@ -27,7 +27,7 @@ export default function LoginModal({ onClose, onLogin }: Props) {
       const r = await fetch(apiUrl(endpoint), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiRequestHeaders({}, true),
         body: JSON.stringify(body),
       });
       const j = await safeJson(r);
