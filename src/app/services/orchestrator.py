@@ -1,5 +1,4 @@
 import base64
-import concurrent.futures
 import json
 import uuid
 from dataclasses import dataclass
@@ -8,25 +7,7 @@ import asyncio
 import logging
 
 
-def _run_async_safe(coro):
-    """Run an async coroutine from a sync context safely.
-
-    When the orchestrator.run() sync method is called directly from an async
-    FastAPI route handler there is already a running event loop in the thread,
-    so asyncio.run() raises RuntimeError.  This helper detects that case and
-    executes the coroutine in a fresh thread pool thread that has no event loop,
-    preserving the asyncio.run() semantics without crashing.
-    """
-    try:
-        asyncio.get_running_loop()
-        # We ARE inside a running loop — delegate to a thread where it's safe.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            # H fix: generous backstop so a hung wrapped coroutine surfaces a TimeoutError instead
-            # of parking the calling thread forever (wrapped coros are individually bounded).
-            return pool.submit(asyncio.run, coro).result(timeout=300.0)
-    except RuntimeError:
-        # No running loop in this thread — asyncio.run() is safe.
-        return asyncio.run(coro)
+from src.app.services.async_safe import run_async_safe as _run_async_safe
 
 from src.app.models.db import db_session
 from src.app.repositories.catalog import CatalogRepository

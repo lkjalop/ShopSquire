@@ -116,16 +116,27 @@ def init_logging() -> None:
         try:
             import os as _os
             _os.makedirs(_os.path.dirname(log_file), exist_ok=True)
-            fh = logging.FileHandler(log_file)
+            root = logging.getLogger()
+            absolute_path = _os.path.abspath(log_file)
+            fh = next((handler for handler in root.handlers
+                       if isinstance(handler, logging.FileHandler)
+                       and handler.baseFilename == absolute_path), None)
+            if fh is None:
+                fh = logging.FileHandler(log_file)
+                root.addHandler(fh)
             fh.setLevel(level)
             fh.setFormatter(formatter)
-            logging.getLogger().addHandler(fh)
-            logging.getLogger("shopsquire.http").addHandler(fh)
+            # HTTP records propagate to root. Attaching the same handler to
+            # both loggers emits every record twice and retains extra handles.
+            http_logger = logging.getLogger('shopsquire.http')
+            if fh in http_logger.handlers:
+                http_logger.removeHandler(fh)
         except Exception:
             pass
     root = logging.getLogger()
-    root.addFilter(TraceContextFilter())
-    root.addFilter(RedactionFilter())
+    for filter_type in (TraceContextFilter, RedactionFilter):
+        if not any(isinstance(item, filter_type) for item in root.filters):
+            root.addFilter(filter_type())
     for h in root.handlers:
         try:
             h.setFormatter(formatter)

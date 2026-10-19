@@ -8,6 +8,8 @@ from src.app.services.memory import Memory
 
 
 class FakeRedis:
+    # This deliberately minimal dictionary adapter has no durable shared index.
+    is_shared_backend = False
     def __init__(self):
         self.store = {}
 

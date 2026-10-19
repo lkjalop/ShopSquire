@@ -1,5 +1,6 @@
 from src.app.services.memory import MEMORY_CONTRACT_VERSION, Memory
 from src.app.services.episodic_memory import Episode, EpisodicMemory, UserProfile
+import pytest
 
 
 class _Redis:
@@ -29,6 +30,69 @@ class _Redis:
 
     def smembers(self, key):
         return self.sets.get(key, set())
+
+
+def test_other_worker_erasure_cannot_resurrect_local_conversation_copy():
+    redis=_Redis()
+    writer=Memory(redis,tenant_id='worker-erasure')
+    eraser=Memory(redis,tenant_id='worker-erasure')
+    # Model distinct process-local stores rather than accidentally sharing the
+    # class cache and making a distributed erasure test pass locally.
+    writer._LOCAL_STORE={};writer._LOCAL_INDEX={}
+    eraser._LOCAL_STORE={};eraser._LOCAL_INDEX={}
+    writer.set_kv('buyer',{'private':'CONVERSATION_CANARY'})
+    eraser.erase_subject('buyer')
+    assert writer.get_kv('buyer')=={}
+
+
+def test_shared_conversation_read_abstains_during_partition():
+    class Partition(_Redis):
+        offline=False
+        def get(self,key):
+            if self.offline:raise ConnectionError('partition')
+            return super().get(key)
+    redis=Partition();memory=Memory(redis,tenant_id='partitioned-memory')
+    memory.set_kv('buyer',{'private':'CONVERSATION_CANARY'})
+    redis.offline=True
+    assert memory.get_kv('buyer')=={}
+    redis.offline=False
+    assert memory.get_kv('buyer')=={'private':'CONVERSATION_CANARY'}
+
+
+def test_failed_backend_write_cannot_resurrect_old_context_on_recovery():
+    class FlakyRedis(_Redis):
+        failed=False
+        def setex(self,*args):
+            if self.failed:raise ConnectionError('injected write failure')
+            super().setex(*args)
+    redis=FlakyRedis();memory=Memory(redis)
+    scope=dict(tenant_id='outage-test',session_epoch='outage-epoch')
+    memory.set_kv('buyer',{'quantity':30},**scope)
+    redis.failed=True
+    memory.set_kv('buyer',{'quantity':40},**scope)
+    redis.failed=False
+    assert Memory(redis).get_kv('buyer',**scope)=={'quantity':40}
+    assert Memory(redis).get_kv('other',**scope)=={}
+
+
+@pytest.mark.parametrize('operation',['session','clarification','subject'])
+def test_failed_delete_is_reported_and_old_memory_cannot_reappear_locally(operation):
+    class FlakyRedis(_Redis):
+        failed=False
+        def delete(self,*keys):
+            if self.failed:raise ConnectionError('injected delete failure')
+            super().delete(*keys)
+    redis=FlakyRedis();memory=Memory(redis,tenant_id='delete-'+operation)
+    memory.set_pending_clarification('buyer',{'budget':1000})
+    redis.failed=True
+    action={'session':lambda:memory.clear_session('buyer'),
+            'clarification':lambda:memory.clear_pending_clarification('buyer'),
+            'subject':lambda:memory.erase_subject('buyer')}[operation]
+    with pytest.raises(RuntimeError,match='memory_erasure_incomplete'):action()
+    redis.failed=False
+    assert memory.get_pending_clarification('buyer')=={}
+    action()
+    assert not redis.data
 
 
 def test_memory_isolated_by_tenant_subject_and_session_epoch():

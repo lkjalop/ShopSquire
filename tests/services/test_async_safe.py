@@ -40,3 +40,36 @@ def test_timeout_returns_without_waiting_for_daemon_runner_shutdown():
     with pytest.raises(TimeoutError, match="caller deadline"):
         run_async_safe(stuck(), timeout_seconds=0.03)
     assert time.perf_counter() - started < 0.25
+
+
+def test_orchestrator_uses_the_same_bounded_bridge():
+    from src.app.services.orchestrator import _run_async_safe
+    async def stuck():
+        await asyncio.sleep(1)
+    async def outer():
+        started = time.perf_counter()
+        with pytest.raises(TimeoutError, match='caller deadline'):
+            _run_async_safe(stuck(), timeout_seconds=0.03)
+        assert time.perf_counter() - started < 0.25
+    asyncio.run(outer())
+
+
+def test_coroutine_runtime_error_is_propagated_once():
+    calls = []
+    async def fails():
+        calls.append(1)
+        raise RuntimeError('operation failed')
+    with pytest.raises(RuntimeError, match='operation failed'):
+        run_async_safe(fails())
+    assert calls == [1]
+
+
+def test_bridge_preserves_the_callers_tenant_and_trace_context():
+    from src.app.platform.tenant_context import set_active_tenant_id, reset_active_tenant_id, current_tenant_id
+    token = set_active_tenant_id('bridge-owned-tenant')
+    try:
+        async def current():
+            return current_tenant_id()
+        assert run_async_safe(current()) == 'bridge-owned-tenant'
+    finally:
+        reset_active_tenant_id(token)

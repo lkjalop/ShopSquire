@@ -47,6 +47,30 @@ _FAMILIES = (
     "pending_clarification",
 )
 
+# Register before writing: Redis scripts are atomic with respect to other
+# clients, but do not roll back earlier commands after a command error. A
+# failed index operation must therefore never leave a readable orphan value.
+_WRITE_INDEXED = """
+redis.call('SADD', KEYS[1], KEYS[2])
+local remaining = redis.call('TTL', KEYS[1])
+if remaining < tonumber(ARGV[1]) then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return redis.call('SETEX', KEYS[2], ARGV[2], ARGV[3])
+"""
+_ERASE_SUBJECT = """
+local members = redis.call('SMEMBERS', KEYS[1])
+for _, key in ipairs(members) do redis.call('DEL', key) end
+redis.call('DEL', KEYS[1])
+return members
+"""
+_ERASE_KEYS = """
+for i = 2, #KEYS do
+    redis.call('DEL', KEYS[i])
+    redis.call('SREM', KEYS[1], KEYS[i])
+end
+if redis.call('SCARD', KEYS[1]) == 0 then redis.call('DEL', KEYS[1]) end
+return 1
+"""
+
 
 def _identity_digest(value: str) -> str:
     """Return a deterministic, non-PII key segment."""
@@ -113,6 +137,7 @@ class MemoryScope:
 
 class Memory:
     _LOCAL_LOCK = RLock()
+    _LAST_WRITE_NS = 0
     _LOCAL_STORE: Dict[str, Dict[str, Any]] = {}
     _LOCAL_INDEX: Dict[str, set[str]] = {}
 
@@ -124,7 +149,8 @@ class Memory:
         subject_id: str | None = None,
         session_epoch: str | None = None,
     ):
-        self.redis = redis_client
+        # A declared local-only adapter is not an authoritative shared store.
+        self.redis = None if getattr(redis_client,'is_shared_backend',True) is False else redis_client
         self._tenant_id = tenant_id
         self._subject_id = subject_id
         self._session_epoch = session_epoch
@@ -173,19 +199,35 @@ class Memory:
 
     def _register_key(self, scope: MemoryScope, key: str, ttl: int) -> None:
         index_key = scope.subject_index_key
-        try:
-            if self.redis is not None:
-                self.redis.sadd(index_key, key)
-                # The index must never expire before any indexed value or a
-                # later erasure could miss an older long-lived epoch.
-                self.redis.expire(index_key, max(ttl, self.kv_ttl, 90 * 86400))
-        except Exception:
-            pass
-        with self._LOCAL_LOCK:
-            self._LOCAL_INDEX.setdefault(index_key, set()).add(key)
+        if self.redis is not None:
+            # Compatibility for explicit in-memory adapters without scripting.
+            # Failure propagates to _set_json, which must not write the value.
+            self.redis.sadd(index_key, key)
+            self.redis.expire(index_key, max(ttl, self.kv_ttl, 90 * 86400))
+
+    def _prune_local(self) -> None:
+        """Reclaim idle subjects and cap retained payloads; caller holds lock."""
+        now = time.time()
+        for key, row in list(self._LOCAL_STORE.items()):
+            if float(row.get('exp', 0)) <= now:
+                self._LOCAL_STORE.pop(key, None)
+        max_keys = self._env_ttl('MEMORY_LOCAL_MAX_KEYS', default=1024)
+        max_bytes = self._env_ttl('MEMORY_LOCAL_MAX_BYTES', default=64 * 1024 * 1024)
+        size = sum(row.get('size', len(row['value'].encode('utf-8')))
+                   for row in self._LOCAL_STORE.values())
+        while self._LOCAL_STORE and (len(self._LOCAL_STORE) > max_keys or size > max_bytes):
+            key = next(iter(self._LOCAL_STORE))
+            row = self._LOCAL_STORE.pop(key)
+            size -= row.get('size', len(row['value'].encode('utf-8')))
+        live = self._LOCAL_STORE.keys()
+        for index, members in list(self._LOCAL_INDEX.items()):
+            members.intersection_update(live)
+            if not members:
+                self._LOCAL_INDEX.pop(index, None)
 
     def _local_get(self, key: str) -> Optional[str]:
         with self._LOCAL_LOCK:
+            self._prune_local()
             row = self._LOCAL_STORE.get(key)
             if not row:
                 return None
@@ -195,26 +237,40 @@ class Memory:
                 return None
             return row.get("value")
 
-    def _local_setex(self, key: str, ttl: int, value: str) -> None:
+    def _local_setex(self, key: str, ttl: int, value: str, index_key: str | None = None) -> None:
         with self._LOCAL_LOCK:
+            # Reinsert updates at the end so eviction retains recent writes.
+            self._LOCAL_STORE.pop(key, None)
             self._LOCAL_STORE[key] = {
                 "value": value,
                 "exp": time.time() + max(1, int(ttl)),
+                "size": len(value.encode('utf-8')),
             }
+            if index_key:
+                self._LOCAL_INDEX.setdefault(index_key, set()).add(key)
+            self._prune_local()
 
     def _set_json(self, scope: MemoryScope, family: str, value: Any, ttl: int) -> None:
         key = scope.key(family)
-        payload = json.dumps(value)
-        self._register_key(scope, key, ttl)
+        # Cache transport metadata is separate from the caller's facts. Accepted
+        # case revisions remain database-owned; this orders cache copies only.
+        with self._LOCAL_LOCK:
+            Memory._LAST_WRITE_NS=max(time.time_ns(),Memory._LAST_WRITE_NS+1)
+            written_at=Memory._LAST_WRITE_NS
+        payload = json.dumps({'_memory_storage_version':1,'written_at_ns':written_at,'value':value})
         try:
             if self.redis is None:
                 raise RuntimeError("redis_unavailable")
-            self.redis.setex(key, max(1, int(ttl)), payload)
+            if callable(getattr(self.redis, 'eval', None)):
+                self.redis.eval(_WRITE_INDEXED, 2, scope.subject_index_key, key,
+                                max(ttl, self.kv_ttl, 90 * 86400), max(1, int(ttl)), payload)
+            else:
+                self._register_key(scope, key, ttl)
+                self.redis.setex(key, max(1, int(ttl)), payload)
         except Exception:
-            self._local_setex(key, ttl, payload)
+            self._local_setex(key, ttl, payload, scope.subject_index_key)
         else:
-            # A bounded local copy provides continuity during a later Redis outage.
-            self._local_setex(key, ttl, payload)
+            self._local_setex(key, ttl, payload, scope.subject_index_key)
 
     def _get_json(self, scope: MemoryScope, family: str, default: Any) -> Any:
         key = scope.key(family)
@@ -223,13 +279,29 @@ class Memory:
             if self.redis is not None:
                 raw = self.redis.get(key)
         except Exception:
-            pass
-        if not raw:
-            raw = self._local_get(key)
-        try:
-            return json.loads(raw) if raw else default
-        except (TypeError, ValueError, json.JSONDecodeError):
+            # This worker cannot know whether another worker erased the scope.
+            # Durable accepted case facts are restored separately from SQL.
             return default
+        if self.redis is not None and raw is None:
+            # An authoritative shared miss must not resurrect a local copy.
+            # Local-only deployments (redis=None) retain their bounded fallback.
+            with self._LOCAL_LOCK:
+                self._LOCAL_STORE.pop(key,None)
+                self._prune_local()
+            return default
+        candidates=[]
+        for value in (raw,self._local_get(key)):
+            try:
+                decoded=json.loads(value) if value else None
+                if decoded is None:continue
+                if (isinstance(decoded,dict) and decoded.get('_memory_storage_version')==1
+                        and type(decoded.get('written_at_ns')) is int and 'value' in decoded):
+                    candidates.append((decoded['written_at_ns'],decoded['value']))
+                else:
+                    candidates.append((0,decoded))  # compatible legacy cache
+            except (TypeError,ValueError,json.JSONDecodeError):
+                continue
+        return max(candidates,key=lambda item:item[0])[1] if candidates else default
 
     def get_context(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
         scope = self.scope(uid, **scope_args)
@@ -248,6 +320,9 @@ class Memory:
             key = scope.key(family)
             try:
                 if self.redis is not None:
+                    # Extending a value's lifetime must also extend its erasure
+                    # index, including sessions first written many days ago.
+                    self._register_key(scope, key, ttl)
                     self.redis.expire(key, ttl)
             except Exception:
                 continue
@@ -257,18 +332,37 @@ class Memory:
     def clear_session(self, uid: str, **scope_args: Any) -> None:
         scope = self.scope(uid, **scope_args)
         keys = [scope.key(family) for family in _FAMILIES]
+        self._erase_keys(scope, keys)
+
+    def _tombstone_keys(self, scope: MemoryScope, keys) -> None:
+        # Suppress stale backend copies during a failed delete. These local
+        # tombstones are continuity protection, not proof of durable erasure.
+        with self._LOCAL_LOCK:
+            Memory._LAST_WRITE_NS=max(time.time_ns(),Memory._LAST_WRITE_NS+1)
+            payload=json.dumps({'_memory_storage_version':1,'written_at_ns':Memory._LAST_WRITE_NS,'value':None})
+            for key in keys:
+                self._local_setex(key,max(self.kv_ttl,90*86400),payload,scope.subject_index_key)
+
+    def _erase_keys(self, scope: MemoryScope, keys: list[str]) -> None:
+        self._tombstone_keys(scope, keys)
         try:
             if self.redis is not None:
-                self.redis.delete(*keys)
-                self.redis.srem(scope.subject_index_key, *keys)
-        except Exception:
-            pass
+                if callable(getattr(self.redis, 'eval', None)):
+                    self.redis.eval(_ERASE_KEYS, 1 + len(keys), scope.subject_index_key, *keys)
+                else:
+                    self.redis.delete(*keys)
+                    self.redis.srem(scope.subject_index_key, *keys)
+        except Exception as exc:
+            # Keep the index for a retry; callers must not report completion.
+            raise RuntimeError('memory_erasure_incomplete') from exc
         with self._LOCAL_LOCK:
             for key in keys:
                 self._LOCAL_STORE.pop(key, None)
             indexed = self._LOCAL_INDEX.get(scope.subject_index_key)
             if indexed is not None:
                 indexed.difference_update(keys)
+                if not indexed:
+                    self._LOCAL_INDEX.pop(scope.subject_index_key, None)
 
     def erase_subject(
         self,
@@ -284,7 +378,24 @@ class Memory:
             session_epoch="erasure-index",
         )
         index_key = scope.subject_index_key
+        if self.redis is not None and callable(getattr(self.redis, 'eval', None)):
+            with self._LOCAL_LOCK:
+                self._tombstone_keys(scope, tuple(self._LOCAL_INDEX.get(index_key, ())))
+            try:
+                # Snapshot and deletion share one Redis serialization point.
+                # A concurrent write is either erased or registered afterwards.
+                raw_keys = self.redis.eval(_ERASE_SUBJECT, 1, index_key) or []
+            except Exception as exc:
+                raise RuntimeError('memory_erasure_incomplete') from exc
+            with self._LOCAL_LOCK:
+                keys = set(self._LOCAL_INDEX.pop(index_key, set()))
+                keys.update(item.decode() if isinstance(item, bytes) else str(item) for item in raw_keys)
+                for key in keys:
+                    self._LOCAL_STORE.pop(key, None)
+            return {'tenant_id': scope.tenant_id, 'subject_id': subject_id,
+                    'erased_keys': len(keys), 'contract_version': MEMORY_CONTRACT_VERSION}
         keys: set[str] = set()
+        index_failed = False
         try:
             if self.redis is not None:
                 raw_keys = self.redis.smembers(index_key) or set()
@@ -293,16 +404,17 @@ class Memory:
                     for item in raw_keys
                 )
         except Exception:
-            pass
+            index_failed = True
         with self._LOCAL_LOCK:
             keys.update(self._LOCAL_INDEX.get(index_key, set()))
+        if keys:
+            self._erase_keys(scope, sorted(keys))
+        if index_failed:
+            raise RuntimeError('memory_erasure_incomplete:index_unavailable')
         try:
-            if self.redis is not None and keys:
-                self.redis.delete(*sorted(keys))
-            if self.redis is not None:
-                self.redis.delete(index_key)
-        except Exception:
-            pass
+            if self.redis is not None:self.redis.delete(index_key)
+        except Exception as exc:
+            raise RuntimeError('memory_erasure_incomplete') from exc
         with self._LOCAL_LOCK:
             for key in keys:
                 self._LOCAL_STORE.pop(key, None)
@@ -340,14 +452,7 @@ class Memory:
     def clear_pending_clarification(self, uid: str, **scope_args: Any) -> None:
         scope = self.scope(uid, **scope_args)
         key = scope.key("pending_clarification")
-        try:
-            if self.redis is not None:
-                self.redis.delete(key)
-                self.redis.srem(scope.subject_index_key, key)
-        except Exception:
-            pass
-        with self._LOCAL_LOCK:
-            self._LOCAL_STORE.pop(key, None)
+        self._erase_keys(scope, [key])
 
     def set_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
         self._set_json(self.scope(uid, **scope_args), "summary", summary, ttl_seconds or self.summary_ttl)
