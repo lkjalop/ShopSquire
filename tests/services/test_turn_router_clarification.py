@@ -68,6 +68,38 @@ def _pending_session():
     }
 
 
+@pytest.mark.parametrize("query", [
+    "Mostly small PLC models, but occasionally a large factory model.",
+    "Can you read these specifications?",
+    "Here is the required RAM and storage configuration.",
+])
+def test_timeout_cannot_replace_a_pending_workload_without_new_subject_evidence(db, query):
+    decision = route_turn(
+        db, TurnEnvelope.from_suggest_params(
+            query=query, buyer_query=query, uid="buyer-1", tenant_id="default",
+            session=_pending_session(),
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+    assert decision.source == "fallback:model_unavailable"
+    assert decision.subject_action == "continue"
+    assert decision.clarification_relation != "supersede"
+    assert decision.semantic_proposal["persisted_case_blocker"] is True
+    assert decision.node_handle is None
+
+
+def test_timeout_still_marks_an_explicit_named_workload_replacement_as_switch(db):
+    query = "Actually replace that workload with Baldur's Gate 3."
+    decision = route_turn(
+        db, TurnEnvelope.from_suggest_params(
+            query=query, buyer_query=query, uid="buyer-1", tenant_id="default",
+            session=_pending_session(),
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+    assert decision.subject_action == "switch"
+
+
 def test_free_text_answer_is_classified_against_pending_material_question(db):
     envelope = TurnEnvelope.from_suggest_params(
         query="Siemens NX 2025 running locally",

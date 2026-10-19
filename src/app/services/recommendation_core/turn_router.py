@@ -722,6 +722,16 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         # A timeout cannot turn lexical similarity into catalog authority. Preserve
         # explicit commercial facts below, but leave the product node unresolved.
         node = None
+        from src.app.services.recommendation_core.literal_workload_identity import (
+            deterministic_named_workload_switch,
+        )
+        # Missing model output is not evidence that an owned pending workload
+        # was replaced. Retain its blocker for answers and evidence intake;
+        # literal replacement and software-purchase boundaries remain explicit.
+        if not explicit_software_purchase and not deterministic_named_workload_switch(
+            envelope.buyer_query or envelope.query,
+        ):
+            subject_action = "continue"
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
     if pending_budget_answer and node is None and not unresolved_case:
         prior = get_node(str(session.get("prior_node") or ""))
@@ -774,6 +784,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             workload_entities=literal_workloads,
             clarification_relation=("answer" if pending_budget_answer else "none"),
             subject_role=fallback_subject_role.value,
+            subject_action=subject_action,
         )
 
     compatible_use_cases = tuple(
