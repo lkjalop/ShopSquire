@@ -10,6 +10,16 @@ from src.app.services.market_analysis import MarketFinding, load_recent_findings
 from src.app.services.market_intelligence_agent import gather_market_context
 
 
+def test_graph_recall_cannot_bypass_finding_admission():
+    from src.app.services.market_intelligence_agent import _structured_evidence
+    result = _structured_evidence([], [
+        {'kind': 'finding', 'label': 'UNVERIFIED_DEMAND_CANARY', 'score': 0.99},
+        {'kind': 'product', 'label': 'SKU-1', 'score': 0.9},
+    ])
+    assert result['findings'] == []
+    assert result['salient_entities'] == [{'kind': 'product', 'label': 'SKU-1', 'score': 0.9}]
+
+
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
@@ -83,9 +93,9 @@ def test_structured_and_narration_evidence_emitted(db):
     persist_findings(db, [MarketFinding("demand_shift", None, "critical", 0.95, "demand surging 3x", {}, "daily")])
     db.commit()
     ctx = gather_market_context(db, query="what is trending in the market now", uid_hash="u1")
-    assert ctx["market_evidence"]["findings"], "structured evidence object populated"
-    assert "demand surging 3x" in ctx["narration_note"]   # narration-ready preamble carries the summary
-    assert "invent" in ctx["narration_note"].lower()       # the guard phrasing is present
+    assert ctx["market_evidence"]["findings"] == []
+    assert ctx["narration_note"] == ""
+    assert ctx["withheld_market_findings"][0]["admission_reason"] == "not_observed"
 
 
 def test_recall_surfaces_finding_tied_to_surfaced_product(db):
@@ -147,13 +157,16 @@ def test_agent_never_reads_another_tenants_findings(db):
 
 
 def test_market_finding_boundary_emits_typed_provenance(db):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     persist_findings(db, [MarketFinding(
         "demand_shift", "SKU-1", "warn", 0.88, "Demand is rising",
         {
             "subject_type": "sku", "subject_id": "SKU-1", "direction": "spike",
             "source_system": "orders", "source_record_id": "aggregate-7d",
             "lineage_root": "orders", "provenance_chain": ["orders/aggregate-7d"],
-            "observed_at": "2026-07-26T01:00:00Z", "status": "observed",
+            "observed_at": now.isoformat(), "status": "observed",
+            "effective_from": now.isoformat(), "effective_to": (now + timedelta(days=1)).isoformat(),
         }, "7d",
     )], tenant_id="tenant-a")
     db.commit()
@@ -169,6 +182,9 @@ def test_market_finding_boundary_emits_typed_provenance(db):
     assert finding["authority"] == "advisory"
     assert finding["status"] == "observed"
     assert finding["provenance_complete"] is True
+    assert finding["admission_status"] == "admitted"
+    assert ctx["market_evidence"]["findings"][0]["entity"] == "SKU-1"
+    assert "Demand is rising" in ctx["narration_note"]
 
 
 def test_legacy_finding_without_lineage_is_visible_but_insufficient(db):

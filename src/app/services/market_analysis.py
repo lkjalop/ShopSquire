@@ -813,13 +813,13 @@ def correct_finding(db, finding_id: str, *, note: str = "", tenant_id: str = DEF
         return False
 
 
-def load_recent_findings(db, *, limit: int = 50, tenant_id: str = DEFAULT_TENANT) -> List[MarketFinding]:
+def load_recent_findings(db, *, limit: int = 50, tenant_id: str = DEFAULT_TENANT,
+                         raise_on_error: bool = False) -> List[MarketFinding]:
     """Read recent ACTIVE persisted findings (fast — the hot-path read), tenant-scoped. Superseded and
     human-corrected rows are excluded from the live read. Best-effort."""
     if db is None:
         return []
     try:
-        ensure_finding_table(db)
         rows = db.execute(
             text("SELECT finding_type, entity_ref, severity, confidence, summary, evidence_json, \"window\" "
                  "FROM market_finding "
@@ -828,6 +828,8 @@ def load_recent_findings(db, *, limit: int = 50, tenant_id: str = DEFAULT_TENANT
             {"lim": int(limit), "t": str(tenant_id).strip() or DEFAULT_TENANT},
         ).fetchall()
     except Exception:
+        if raise_on_error:
+            raise
         return []
     import json
     out: List[MarketFinding] = []

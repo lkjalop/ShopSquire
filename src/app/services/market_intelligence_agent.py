@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional
 from src.app.schemas.market_evidence import MarketEvidence
 
 _SEVERITY_RANK = {"critical": 1.0, "warn": 0.7, "info": 0.4}
-_USEFUL_INSIGHT_KINDS = ("product", "finding", "brand", "segment")
+# Finding claims enter narration only through the admitted finding projection.
+# Graph recall remains diagnostic; a label must not bypass provenance/freshness.
+_USEFUL_INSIGHT_KINDS = ("product", "brand", "segment")
 
 
 def _catalog_subject_scope(db, *, tenant_id: str, result_skus: List[str]) -> tuple[List[str], List[str]]:
@@ -168,24 +170,40 @@ def _scope_findings(findings: List[Any], *, result_skus: List[str],
 
 
 def _structured_evidence(findings: List[Dict[str, Any]], insights: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from src.app.services.market_evidence_admission import market_evidence_admission
+    findings = [finding for finding in findings if market_evidence_admission(finding) is None]
+    citations = [{
+        "id": f"{f['source_system']}:{f['source_record_id']}@{f['observed_at']}",
+        **{key: f.get(key) for key in (
+            "source_system", "source_record_id", "lineage_root", "provenance_chain",
+            "observed_at", "effective_from", "effective_to", "scope", "subject_type",
+            "subject_id", "trust_tier", "licence_id", "licence_url",
+        )},
+    } for f in findings]
     salient = [{"label": i.get("label"), "kind": i.get("kind"), "score": i.get("score")}
                for i in (insights or []) if isinstance(i, dict) and i.get("kind") in _USEFUL_INSIGHT_KINDS][:6]
     return {
         "findings": [{"type": f.get("finding_type"), "severity": f.get("severity"),
                       "summary": f.get("summary"), "entity": f.get("entity_ref"),
                       "subject_type": f.get("subject_type"), "subject_id": f.get("subject_id"),
-                      "taxonomy_node": f.get("taxonomy_node"), "source_system": f.get("source_system")}
-                     for f in (findings or [])],
+                      "taxonomy_node": f.get("taxonomy_node"), "source_system": f.get("source_system"),
+                      "citation_ref": citation["id"]}
+                     for f, citation in zip(findings, citations)],
+        "citations": citations,
         "salient_entities": salient,
     }
 
 
 def format_evidence_for_narration(findings: List[Dict[str, Any]], *, max_items: int = 4) -> str:
+    from src.app.services.market_evidence_admission import market_evidence_admission
     lines = []
     for finding in (findings or [])[:max_items]:
+        if market_evidence_admission(finding) is not None:
+            continue
         summary = finding.get("summary") or f"{finding.get('finding_type')} ({finding.get('severity')})"
         if summary:
-            lines.append(f"- {summary}")
+            lines.append(f"- {summary} [{finding['source_system']}:{finding['source_record_id']}"
+                         f"; observed {finding['observed_at']}; valid until {finding['effective_to']}]")
     if not lines:
         return ""
     return ("Verified internal market evidence for this query (cite ONLY if it answers the user; never "
@@ -197,10 +215,12 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
                           taxonomy_nodes: Optional[List[str]] = None,
                           ancestor_nodes: Optional[List[str]] = None,
                           tenant_id: Optional[str] = None, top_k: int = 8,
-                          max_findings: int = 5, force: bool = False) -> Dict[str, Any]:
+                          max_findings: int = 5, force: bool = False,
+                          include_graph: bool = True) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "hippograph_insights": [], "needs_market_evidence": False, "evidence_kinds": [],
-        "market_findings": [], "market_evidence": {}, "narration_note": "",
+        "market_findings": [], "market_evidence": {"findings": [], "citations": []},
+        "narration_note": "", "delivery_status": "not_requested", "delivery_reason": None,
     }
     try:
         if not tenant_id:
@@ -212,16 +232,18 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
             db, tenant_id=tenant_id, result_skus=seed_skus)
         taxonomy_nodes = sorted(set(taxonomy_nodes or []) | set(derived_nodes))
         ancestor_nodes = sorted(set(ancestor_nodes or []) | set(derived_ancestors))
-        from src.app.services.hippograph_feedback import build_hippograph_insights
-        out["hippograph_insights"] = build_hippograph_insights(
-            db, tenant_id=tenant_id, uid_hash=uid_hash, seed_skus=seed_skus, top_k=top_k)
+        if include_graph:
+            from src.app.services.hippograph_feedback import build_hippograph_insights
+            out["hippograph_insights"] = build_hippograph_insights(
+                db, tenant_id=tenant_id, uid_hash=uid_hash, seed_skus=seed_skus, top_k=top_k)
         from src.app.services.query_decomposer import decompose
         plan = decompose(query)
         if force or getattr(plan, "needs_market_evidence", False):
             out["needs_market_evidence"] = True
             out["evidence_kinds"] = list(getattr(plan, "market_evidence_kinds", []) or [])
             from src.app.services.market_analysis import load_recent_findings
-            raw = load_recent_findings(db, limit=max(int(max_findings) * 4, 12), tenant_id=tenant_id)
+            raw = load_recent_findings(db, limit=max(int(max_findings) * 4, 12),
+                                       tenant_id=tenant_id, raise_on_error=True)
             scoped = _scope_findings(raw, result_skus=seed_skus, taxonomy_nodes=taxonomy_nodes,
                                      ancestor_nodes=ancestor_nodes)[:int(max_findings)]
             out["market_findings"] = []
@@ -231,8 +253,24 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
                                        ancestor_nodes=ancestor_nodes)
                 item["scope"] = match[1] if match else None
                 out["market_findings"].append(item)
-        out["market_evidence"] = _structured_evidence(out["market_findings"], out["hippograph_insights"])
+        from src.app.services.market_evidence_admission import market_evidence_admission
+        accepted = []
+        withheld = []
+        for finding in out["market_findings"]:
+            reason = market_evidence_admission(finding)
+            finding["admission_status"] = "withheld" if reason else "admitted"
+            finding["admission_reason"] = reason
+            (withheld if reason else accepted).append(finding)
+        out["withheld_market_findings"] = withheld
+        # Preserve diagnostics in market_findings; only admitted observations
+        # enter the structured evidence and narrator input.
+        out["market_evidence"] = _structured_evidence(accepted, out["hippograph_insights"])
         out["narration_note"] = format_evidence_for_narration(out["market_findings"])
+        if out["needs_market_evidence"]:
+            out["delivery_status"] = "available" if accepted else "blocked"
+            out["delivery_reason"] = None if accepted else "no_current_scoped_evidence"
         return out
     except Exception:
+        out.update(delivery_status="unavailable", delivery_reason="market_evidence_unavailable",
+                   market_evidence={"findings": [], "citations": []}, narration_note="")
         return out
