@@ -83,10 +83,10 @@ def deliver_case_task(*, out, request_db, tenant_id, uid, session_epoch, query):
                     'Current market intelligence is unavailable for this request.'
                     if context['delivery_status'] == 'unavailable' else
                     'I have no current, scoped market evidence for this request. Its quantity and budget are retained.')
-        _project_task_snapshot(out, state, stored, revision, query)
+        _project_task_snapshot(out, state, revision, query)
 
 
-def _project_task_snapshot(out, state, stored, revision, query):
+def _project_task_snapshot(out, state, revision, query):
     from src.app.services.research_outcome import ResearchOutcome
     from src.app.services.turn_transition import (
         RevisionBoundTurnReadModel, PendingClarificationCommit, RequirementCommit, TurnTransition,
@@ -94,16 +94,17 @@ def _project_task_snapshot(out, state, stored, revision, query):
     case_id = state['case_id']
     operation = out['operation_id']
     trace_id = out.get('decision_trace_id') or case_id.removeprefix('sc-')
-    previous = stored.get('turn_read_model') or {}
-    if previous:
-        view = RevisionBoundTurnReadModel.model_validate(previous)
-    else:
-        view = RevisionBoundTurnReadModel(case_id=case_id, case_revision=revision,
-            transition=TurnTransition.UNRESOLVED, objective=state.get('objective'),
-            workloads=state.get('workloads') or [], pending_clarification=PendingClarificationCommit(),
-            external_research_authorized=False, requirements=RequirementCommit(),
-            catalog_authority='blocked', commerce_authority='none',
-            research_outcome=ResearchOutcome(case_id=case_id, case_revision=revision, catalog_authority='blocked'))
+    # A saved display projection is a cache, including when its schema is
+    # valid. Rebuild task facts from canonical state; old products/authority
+    # cannot re-enter a read response through a stale or corrupt projection.
+    shared = {key: state[key] for key in ('requested_quantity', 'budget', 'destinations', 'temporal') if state.get(key)}
+    view = RevisionBoundTurnReadModel(case_id=case_id, case_revision=revision,
+        transition=TurnTransition.UNRESOLVED, objective=state.get('objective'),
+        workloads=state.get('workloads') or [], shared_constraints=shared,
+        pending_clarification=PendingClarificationCommit(),
+        external_research_authorized=False, requirements=RequirementCommit(),
+        catalog_authority='blocked', commerce_authority='none',
+        research_outcome=ResearchOutcome(case_id=case_id, case_revision=revision, catalog_authority='blocked'))
     outcome = view.research_outcome.model_copy(update={'operation_id': operation})
     facts = {key: state[key] for key in ('requested_quantity', 'budget', 'destinations', 'temporal') if state.get(key)}
     panel = {**(view.right_panel or {}), 'retained_buyer_facts': facts}

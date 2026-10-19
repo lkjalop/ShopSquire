@@ -143,3 +143,39 @@ def test_draft_read_keeps_the_accepted_selection_and_case_revision(owned_task_ca
 def test_task_read_never_consumes_a_quantity_amendment_or_unrelated_email(query, expected):
     from src.app.services.case_task_delivery import is_case_task_read
     assert is_case_task_read(query, {'requested_quantity': 40}) is expected
+
+
+@pytest.mark.parametrize('valid_schema', [False, True])
+def test_corrupt_derived_view_cannot_override_canonical_task_facts(owned_task_case, valid_schema):
+    app, subject, case_id, headers = owned_task_case
+    with Session(app.state.engine) as db:
+        raw = db.execute(text('SELECT state_json FROM conversation_case_state WHERE case_id=:case'),
+                         {'case': case_id}).scalar_one()
+        stored = json.loads(raw)
+        stored['turn_read_model'] = {'schema_version': 'obsolete-untrusted-projection',
+                                    'requested_quantity': 999, 'commerce_authority': 'approved'}
+        if valid_schema:
+            stored['turn_read_model'] = {
+                'schema_version': 'revision-bound-turn-read-model.v1', 'case_id': case_id,
+                'case_revision': 1, 'transition': 'UNRESOLVED',
+                'shared_constraints': {'requested_quantity': 999},
+                'pending_clarification': {'action': 'none'}, 'external_research_authorized': False,
+                'research_outcome': {'schema_version': 'research-outcome-v1', 'case_id': case_id,
+                    'case_revision': 1, 'catalog_authority': 'permitted'},
+                'requirements': {}, 'catalog_authority': 'permitted', 'commerce_authority': 'none',
+                'products': [{'sku': 'NOT-CURRENT'}]}
+        db.execute(text('UPDATE conversation_case_state SET state_json=:state WHERE case_id=:case'),
+                   {'state': json.dumps(stored), 'case': case_id})
+        db.commit()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post('/api/v1/chat/query', headers=headers,
+            json={'uid': subject, 'shopping_case_id': case_id,
+                  'query': 'Draft an email for the unit quantity shortfall for my current request.'})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['requested_quantity'] == body['email_draft']['requested_quantity'] == 40
+    assert body['case_revision'] == 1
+    assert body['terminal_outcome']['commerce_authority'] == 'none'
+    assert body['turn_read_model']['schema_version'] == 'revision-bound-turn-read-model.v1'
+    assert body['turn_read_model']['shared_constraints']['requested_quantity'] == 40
+    assert body['products'] == []
