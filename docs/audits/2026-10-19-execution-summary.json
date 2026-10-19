@@ -1,0 +1,969 @@
+{
+  "generated_at_utc": "2026-10-19T13:03:46.451628+00:00",
+  "assessment_started_local_date": "2026-10-19",
+  "completed_local_date": "2026-10-20",
+  "verdict": "not_release_green",
+  "source_inventory": {
+    "head": "929ba5e6b3fd84a6af355f02a424ca6359f11c2e",
+    "files": 5635,
+    "text_lines": 971931,
+    "production_functions_over_200": 99,
+    "broad_production_handlers": 5609,
+    "swallowed_production_handlers": 2116,
+    "python_syntax_errors": []
+  },
+  "inventory_excludes": "Ignored runtime/dependency files and the generated docs/audits/2026-10-19-* output ledgers themselves.",
+  "code_commits": [
+    {
+      "sha": "929ba5e6b3fd84a6af355f02a424ca6359f11c2e",
+      "title": "Restore the public anomaly scoring contract"
+    },
+    {
+      "sha": "5dc38e364b58558989cddd15d4e0fc97c3e49f2d",
+      "title": "Declare local Redis fallback and isolate episodic-memory tests"
+    },
+    {
+      "sha": "ed878c948b396bad9bd9c478738e15654d38fd90",
+      "title": "Sanitize stored uploads and keep slow CV work off the event loop"
+    },
+    {
+      "sha": "7999834f1cc7ecdd140ac645c6073517828f2a37",
+      "title": "Patch frontend test tooling security advisories"
+    },
+    {
+      "sha": "3d815bb7475f55822369bfac10e8a26e902dbb74",
+      "title": "Fix scoped memory erasure and bounded worker lifecycle"
+    }
+  ],
+  "full_python_process": {
+    "exit_code": 1,
+    "elapsed_seconds": 3310.016,
+    "counts": {
+      "tests": 8004,
+      "failures": 36,
+      "errors": 8,
+      "skipped": 124,
+      "passed": 7836
+    },
+    "observed_peaks": {
+      "rss_bytes": 1509556224,
+      "handles": 4910,
+      "threads": 65
+    },
+    "resource_violations": [],
+    "diagnostic_gc_interval": 25,
+    "source_limit": "Started during remediation; earlier imported source is not relabelled as the final tree."
+  },
+  "general_python_cohorts": {
+    "completed_batches": 80,
+    "counts": {
+      "tests": 7991,
+      "failures": 29,
+      "errors": 0,
+      "skipped": 119,
+      "passed": 7843
+    }
+  },
+  "cohort_failures_retest": {
+    "tests": 29,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "passed": 28
+  },
+  "extra_full_process_retests": [
+    {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 7
+    },
+    {
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 10
+    }
+  ],
+  "other_python_directories": {
+    "tests": 134,
+    "failures": 2,
+    "errors": 0,
+    "skipped": 127,
+    "passed": 5
+  },
+  "cpu_slow_profile": {
+    "tests": 61,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9,
+    "passed": 52
+  },
+  "redis_owned": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "postgres_owned": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "python_collection": 8143,
+  "current_identities_executed_at_least_once": 7927,
+  "current_identities_not_executed": [
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_a100_never_sells_laptops",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_finetune_never_sells_pharmacy",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_carries_requirements_even_on_clarify",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_verdicts_on_product_turn",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[gaming and school laptop under 1500-gm-hybrid]",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[i want to fine tune a 7b model locally under 2500-gm-ft]",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[photoshop and video editing laptop under 1600-gm-ps]",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[stable diffusion image generation laptop under 1900-gm-sd]",
+    "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[unity game development laptop under 2000-gm-unity]",
+    "tests/acceptance/test_swap_rate_battery.py::test_ai_query_returns_no_accessory_noise",
+    "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[ai_honesty-i want to fine tune a 7b model locally under 2500]",
+    "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[contradiction-i need 12 dell laptops and a monitor and 2 headsets under 1500 total]",
+    "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[off_catalog-i need 5 rack-mount GPU servers with A100s, budget 80k]",
+    "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[budget_yn-is 1800 enough for gaming?]",
+    "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[fit_conflict-i need something for training llm models, is 3500 enough? if i go higher what then?]",
+    "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[game_fit-gaming laptop for valorant under 1900]",
+    "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[knowledge-what's the real difference between an 8gb and 16gb gpu for AI work?]",
+    "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[payment-i want to spend around 25000 on machines for my team \\u2014 do you offer payment plans?]",
+    "tests/acceptance/test_swap_rate_battery.py::test_off_catalog_returns_no_laptops",
+    "tests/browser/test_admin.py::test_admin_decisions_view[chromium]",
+    "tests/browser/test_filters_and_security.py::test_pci_query_triggers_security_review[chromium]",
+    "tests/browser/test_filters_and_security.py::test_price_spec_query_not_security_blocked[chromium]",
+    "tests/browser/test_storefront.py::test_browse_to_checkout[chromium]",
+    "tests/browser/test_trace_panel.py::test_trace_panel_opens[chromium]",
+    "tests/certification/test_postgres_draft_boundary.py::test_explicit_sourcing_is_durable_idempotent_and_never_enqueues_dispatch",
+    "tests/chaos/test_demand_allocation_concurrency_postgres.py::test_eight_simultaneous_allocators_cannot_exceed_atp",
+    "tests/chaos/test_money_concurrency_http.py::test_concurrent_order_transitions_one_winner_postgres",
+    "tests/chaos/test_money_concurrency_postgres.py::test_cancel_and_mark_paid_cannot_both_win",
+    "tests/chaos/test_money_concurrency_postgres.py::test_concurrent_refund_workers_call_provider_once",
+    "tests/chaos/test_money_concurrency_postgres.py::test_inventory_release_credits_stock_once",
+    "tests/chaos/test_money_concurrency_postgres.py::test_refund_slot_has_one_winner",
+    "tests/cv/test_cv_provider_llava_available.py::test_ollama_llava_installed",
+    "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[llava]",
+    "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[minicpm-v]",
+    "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[qwen2.5-vl]",
+    "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_baseline_adaptation_off",
+    "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_market_intelligence_on",
+    "tests/e2e/test_adaptive_growth_playwright.py::test_gate2_finding_to_hippograph_to_narration_to_trace",
+    "tests/e2e/test_adaptive_growth_playwright.py::test_gate3_assignment_and_visible_ranking_delta",
+    "tests/e2e/test_cv_upload_api.py::test_cv_upload_flow_api_noninteractive",
+    "tests/e2e/test_cv_upload_playwright.py::test_camera_ui_capture_and_upload",
+    "tests/e2e/test_full_platform_e2e.py::test_browser_recommend_to_cart_upsell",
+    "tests/e2e/test_full_platform_e2e.py::test_full_recommend_and_decision_trace_tabs",
+    "tests/e2e/test_full_platform_e2e.py::test_image_upload_cv_pipeline",
+    "tests/e2e/test_full_platform_e2e.py::test_platform_latency_budget",
+    "tests/e2e/test_full_platform_e2e.py::test_shopping_cart_and_upsell",
+    "tests/e2e/test_live_allocation_workbench.py::test_eight_buyer_pressure_wave_and_partial_recovery_are_visible",
+    "tests/e2e/test_live_policy_trace.py::test_policy_question_uses_typed_chat_and_projects_authority_boundaries",
+    "tests/e2e/test_live_procurement_closed_loop.py::test_exact_cart_line_amendment_requires_delivery_reconfirmation",
+    "tests/e2e/test_procurement_journey_playwright.py::test_buyer_storefront_renders_procurement_check",
+    "tests/e2e/test_procurement_journey_playwright.py::test_fluid_sourcing_journey_api",
+    "tests/e2e/test_procurement_journey_playwright.py::test_full_governed_procurement_journey_api",
+    "tests/e2e/test_procurement_malicious_reply_playwright.py::test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert",
+    "tests/e2e/test_returns_adversarial_playwright.py::test_adversarial_cv_upload_mixed_images_and_trace",
+    "tests/e2e/test_returns_wrong_image_e2e.py::test_returns_wrong_image_e2e",
+    "tests/e2e/test_returns_wrong_item_sku_e2e.py::test_returns_wrong_item_sku_mismatch_e2e",
+    "tests/e2e/test_storefront_playwright.py::test_decision_trace_contract",
+    "tests/e2e/test_storefront_playwright.py::test_decision_trace_multimodal_tabs_regression",
+    "tests/e2e/test_storefront_playwright.py::test_decision_trace_populates_after_chat",
+    "tests/e2e/test_storefront_playwright.py::test_frontend_storefront_shell_smoke",
+    "tests/e2e/test_storefront_playwright.py::test_storefront_http_fallback",
+    "tests/e2e/test_storefront_playwright.py::test_storefront_playwright_basic",
+    "tests/e2e/test_storefront_upload_threshold_calibration_playwright.py::test_storefront_upload_threshold_calibration_playwright",
+    "tests/e2e/test_visual_fastpath_regression.py::test_compromised_images_render_products_trace_tabs_and_healthz",
+    "tests/integration/test_celery_task_signing_runtime.py::test_celery_runtime_rejects_unsigned_and_bad_signature",
+    "tests/integration/test_db_postgres_timescale_matrix.py::test_postgres_source_of_truth_connectivity",
+    "tests/integration/test_db_postgres_timescale_matrix.py::test_timescale_extension_and_time_bucket_or_skip",
+    "tests/integration/test_e2e.py::test_e2e_full_flow",
+    "tests/integration/test_e2e_full_flow_v2.py::test_e2e_customer_flow_with_orders_and_memory",
+    "tests/integration/test_recommend_contract_stability.py::test_image_match_shape",
+    "tests/integration/test_recommend_contract_stability.py::test_security_block_shape",
+    "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[llama3:8b]",
+    "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[mistral:latest]",
+    "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[qwen2.5:latest]",
+    "tests/pw/test_admin_bi_security_trend_panels.py::test_admin_bi_panels_render_security_matrix_and_decision_replay[chromium]",
+    "tests/pw/test_admin_dashboards.py::test_admin_ragas_dashboards_links_present[chromium]",
+    "tests/pw/test_admin_escalations_matrix_gate_ui.py::test_escalations_shows_matrix_gate_error_on_409[chromium]",
+    "tests/pw/test_answer_first_parity.py::test_widget_no_results_is_graceful_not_blank[chromium]",
+    "tests/pw/test_answer_first_parity.py::test_widget_results_match_backend[chromium]",
+    "tests/pw/test_cv_escalation_rules.py::test_cv_escalation_rules_create_ticket",
+    "tests/pw/test_cv_upload_escalation.py::test_cv_upload_triggers_escalation_and_ticket",
+    "tests/pw/test_decision_trace_e2e.py::test_decision_trace_modal_and_trace_api[chromium]",
+    "tests/pw/test_decision_trace_modal.py::test_decision_trace_gear_modal[chromium]",
+    "tests/pw/test_decision_trace_nlp_panels.py::test_decision_trace_nlp_panels[chromium]",
+    "tests/pw/test_decision_trace_timeline.py::test_event_drilldown[chromium]",
+    "tests/pw/test_decision_trace_timeline.py::test_timeline_renders_events[chromium]",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_complaint_triage_apple_not_in_catalog",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_cv_analyze_apple_not_laptop",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_vision_triage_apple",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestBrowserDemoClickthrough::test_browser_skipped",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_chat_query_bsod_with_image",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_complaint_triage_bsod_technical",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_cv_analyze_bsod_image",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_support_answer_bsod_query",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_add_images_to_existing_case",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_case_status_after_submit",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_chat_query_damaged_return",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_cv_analyze_cracked_mac",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_submit_complaint_cracked_mac",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_guest_submit_with_apple_as_receipt",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_submit_complaint_with_cracked_mac_order",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_high_fraud_chargeback_threat",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_low_fraud_legitimate_return",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_chat_query_with_msi_image",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_cv_analyze_msi_qr",
+    "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_vision_triage_msi_qr",
+    "tests/pw/test_email_lab_security_matrix_flow.py::test_email_lab_analyze_populates_trace_and_security_matrix[chromium]",
+    "tests/pw/test_followup_budget_envelope.py::test_exact_followup_keeps_budget_and_result_envelope",
+    "tests/pw/test_followup_chips.py::test_followup_chips_render_and_are_clickable[chromium]",
+    "tests/pw/test_followup_chips_e2e.py::test_followup_chips_e2e[chromium]",
+    "tests/pw/test_forensics_ui_placeholder.py::test_forensics_ui_route[chromium]",
+    "tests/pw/test_nlp_contract_fixture.py::test_deterministic_fixture_basic",
+    "tests/pw/test_persona_budget_quality.py::test_budget_max_hard_cap_no_over_products",
+    "tests/pw/test_persona_budget_quality.py::test_budget_max_strict_filter_text_only",
+    "tests/pw/test_persona_budget_quality.py::test_budget_question_gets_llm_response",
+    "tests/pw/test_persona_budget_quality.py::test_high_school_routes_correctly_not_university_general",
+    "tests/pw/test_persona_budget_quality.py::test_llm_response_no_technical_token_leakage",
+    "tests/pw/test_persona_budget_quality.py::test_llm_response_no_think_block_leak",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_does_not_trigger_nqe_gate_early_return",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I train ML models with PyTorch on large datasets-ai_ml_workstation]",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a content creator doing 4K video editing in Premiere Pro-content_creator]",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a high school student looking for a laptop-high_school]",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[corporate laptop for Microsoft Teams and Excel presentations-corporate]",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[engineering student who needs AutoCAD and SolidWorks-engineering_student]",
+    "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[university student for assignments and lectures-student]",
+    "tests/pw/test_persona_budget_quality.py::test_recommend_with_flagged_image_still_returns_products",
+    "tests/pw/test_persona_budget_quality.py::test_security_flagged_image_does_not_500",
+    "tests/pw/test_persona_budget_quality.py::test_truly_open_ended_query_triggers_nqe",
+    "tests/pw/test_product_detail.py::test_product_detail_not_found[chromium]",
+    "tests/pw/test_recommend_playwright_e2e.py::test_storefront_search_triggers_recommend[chromium]",
+    "tests/pw/test_recommend_spec_price_trace.py::test_decision_trace_followup",
+    "tests/pw/test_recommend_spec_price_trace.py::test_recommend_price_and_spec_filters_api",
+    "tests/pw/test_recommend_spec_price_trace.py::test_security_escalation_on_pci_query",
+    "tests/pw/test_right_panel_and_comparison.py::test_right_side_panel_grid_and_comparison[chromium]",
+    "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_multi_attachment_combined_severity",
+    "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_vba_source_prompt_injection_and_lolbin",
+    "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_wire_transfer_pdf_bec_detection",
+    "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_xlsm_macro_lolbin_detection",
+    "tests/pw/test_sec_files_e2e.py::TestBrowserSecFilesE2E::test_browser_skipped",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_registry_returns_15_agents",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_risk_tier_filter",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_single_agent_lookup",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_unknown_agent_returns_404",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_violation_counts_flag",
+    "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_each_agent_has_required_fields",
+    "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_cv_analyze_single_image_latency",
+    "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_email_evaluate_warm_path_latency",
+    "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_maestro_boundaries_latency",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_clean_1x1_does_not_fire",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[steg-c2_beacon_simulation-apple-mac.png]",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[steg-data_exfiltration_instruction-lenovo-pro7.png]",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png]",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[steg-payment_fraud_hidden-apple-mac.png]",
+    "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[steg-prompt_injection_hidden-Dell_15_DC15255.png]",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_chat_with_admin_click_path_opens_escalation_room[chromium]",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-applied-applied the change to your cart]",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-stale_cart-cart changed since I proposed that]",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_revoked_and_expired_staff_tokens_are_rejected",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_rotated_staff_token_is_rejected_and_new_token_uses_sse[chromium]",
+    "tests/pw/test_storefront_chat_with_admin_flow.py::test_two_browser_buyer_and_authenticated_staff_exchange_messages[chromium]",
+    "tests/pw/test_storefront_frontend_smoke.py::test_storefront_shows_assistant_not_admin[chromium]",
+    "tests/pw/test_trace_sse_policy_gate.py::test_policy_gate_logged_and_visible[chromium]",
+    "tests/pw/test_trace_sse_policy_gate.py::test_trace_id_and_sse_events[chromium]",
+    "tests/pw/test_vision_triage_e2e.py::test_vision_triage_image_upload[chromium]",
+    "tests/pw/test_widget_interactions.py::test_widget_opens_and_queries[chromium]",
+    "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_describes_image",
+    "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_diffusion_image_description",
+    "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_spectral_score_vs_llava_judgement",
+    "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_high_entropy_image_flagged_suspicious",
+    "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_steg_explanations_present_when_suspicious",
+    "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_loose_threshold_flags_borderline_image",
+    "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_strict_threshold_suppresses_alert",
+    "tests/security/test_email_eval_matrix.py::test_email_eval_matrix_builds_expected_cases_when_fixtures_present",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_50_benign_queries_false_positive_rate",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_benign_vs_jailbreak_cosine_gap",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_jailbreak_seeds_have_high_mutual_cosine",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_ollama_embed_returns_vector",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_seed_cache_populated",
+    "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_semantic_variant_detected_with_ollama",
+    "tests/security/test_model_theft_ollama_probe.py::test_ollama_benign_shopping_queries_pass",
+    "tests/security/test_model_theft_ollama_probe.py::test_ollama_generates_extraction_queries_caught_by_guard",
+    "tests/security/test_model_theft_ollama_probe.py::test_ollama_high_volume_probe_triggers_rate_limit",
+    "tests/security/test_password_hashing_argon2.py::test_uses_argon2id_when_available",
+    "tests/services/test_public_market_source_fetch.py::test_live_usgs_mcs_official_sciencebase_protocol",
+    "tests/services/test_recommendation_shadow_worker.py::test_real_crash_recovery_via_xautoclaim",
+    "tests/services/test_recommendation_shadow_worker.py::test_real_malformed_dead_lettered",
+    "tests/services/test_recommendation_shadow_worker.py::test_real_poison_dead_lettered",
+    "tests/services/test_recommendation_shadow_worker.py::test_real_stream_roundtrip_processed_acked_deleted",
+    "tests/services/test_recommendation_shadow_worker.py::test_real_two_consumers_split_work_no_double_process",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_clean_apple_mac_image_benign",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_cv_analyze_returns_case_id_and_analysis",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_lenovo_image_labels_feed_recommend",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_macbook_qr_image_triggers_security_signal",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_cv_signals_populate_security_payload",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_labels_set_brand_constraint",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_qr_detected_triggers_reupload",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestMultiTurnNQE::test_budget_persists_across_turns",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_budget_question_for_vague_query",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_use_case_question",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_questions_have_options",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_selection_applies_budget_constraint",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_low_confidence_persona_triggers_use_case_fallback",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I do video editing on Premiere Pro and DaVinci Resolve-creative]",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I'm a university student looking for a laptop for assignments-student]",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[looking for a work from home setup, need Teams and Outlook-corporate]",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need a laptop for gaming, playing Valorant and Fortnite-gamer]",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need something lightweight for travel and commuting-traveler]",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestQuestionPlanContract::test_question_plan_always_present",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_matrix_includes_cv_signals_when_image_provided",
+    "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_payload_structure_on_benign_query",
+    "tests/test_fixed_image_security_pack.py::test_fixed_pack_macbook_qr_expected_signals",
+    "tests/test_fixed_image_security_pack.py::test_fixed_pack_ms_texti_expected_signals",
+    "tests/webhooks/test_webhook_signature.py::test_github_signature_replay",
+    "tests/webhooks/test_webhook_signature.py::test_slack_signature_replay",
+    "tests/webhooks/test_webhook_signature.py::test_stripe_signature_replay",
+    "tests/webhooks/test_webhook_signature.py::test_webhook_signature_replay_detected_with_redis"
+  ],
+  "identity_coverage_limit": "Identity coverage includes overlapping earlier source versions. It is not a final-source correctness certificate. Skips were not counted as executed.",
+  "browser": {
+    "spec_files": 76,
+    "unique_cases": 161,
+    "latest_outcomes": {
+      "expected": 49,
+      "skipped": 32,
+      "unexpected": 80
+    },
+    "all_observation_outcomes": {
+      "expected": 118,
+      "unexpected": 106,
+      "skipped": 33
+    },
+    "critical_latest_passed": 25,
+    "critical_source_receipt": {
+      "before": {
+        "files": 1525,
+        "sha256": "6c497402a04d391d0542ef730e13c2c9c63ab63a6c65da70b5acd900405050b5"
+      },
+      "after": {
+        "files": 1525,
+        "sha256": "6c497402a04d391d0542ef730e13c2c9c63ab63a6c65da70b5acd900405050b5"
+      },
+      "unchanged": true
+    },
+    "live_retention_exit": 0,
+    "limit": "Latest observed outcomes span recorded profiles and source versions; not one frozen all-browser release run."
+  },
+  "current_ui": {
+    "storefront_tests_passed": 407,
+    "admin_tests_passed": 50,
+    "checks": [
+      {
+        "folder": "frontend",
+        "label": "test",
+        "exit": 0
+      },
+      {
+        "folder": "frontend",
+        "label": "types",
+        "exit": 0
+      },
+      {
+        "folder": "frontend",
+        "label": "build",
+        "exit": 0
+      },
+      {
+        "folder": "src/frontend/admin-react",
+        "label": "test",
+        "exit": 0
+      },
+      {
+        "folder": "src/frontend/admin-react",
+        "label": "types",
+        "exit": 0
+      },
+      {
+        "folder": "src/frontend/admin-react",
+        "label": "build",
+        "exit": 0
+      }
+    ]
+  },
+  "static": {
+    "checks": [
+      {
+        "check": "json",
+        "exit": 0
+      },
+      {
+        "check": "source-sizes",
+        "exit": 0
+      },
+      {
+        "check": "function-sizes",
+        "exit": 0
+      },
+      {
+        "check": "linux-lock",
+        "exit": 0
+      },
+      {
+        "check": "windows-lock",
+        "exit": 0
+      },
+      {
+        "check": "undefined-names",
+        "exit": 0
+      },
+      {
+        "check": "pip-check",
+        "exit": 0
+      }
+    ],
+    "python": {
+      "files": 3062,
+      "errors": [],
+      "binary_classification_candidates": []
+    },
+    "json": {
+      "checked": 1087,
+      "strict_json_errors": []
+    },
+    "yaml": {
+      "checked": 60,
+      "helm_templates_require_render": [
+        "helm/shopsquire/templates/db-backup-cronjob.yaml",
+        "helm/shopsquire/templates/deployment.yaml",
+        "helm/shopsquire/templates/hpa.yaml",
+        "helm/shopsquire/templates/ingress.yaml",
+        "helm/shopsquire/templates/local-runtime-dependencies.yaml",
+        "helm/shopsquire/templates/migration-job.yaml",
+        "helm/shopsquire/templates/portfolio-alertmanager.yaml",
+        "helm/shopsquire/templates/service.yaml",
+        "helm/shopsquire/templates/serviceaccount.yaml"
+      ],
+      "errors": []
+    },
+    "powershell": {
+      "errors": [],
+      "files": 44,
+      "parser": "5.1.26100.9711"
+    },
+    "docker_compose_config_exit": 0,
+    "helm_lint_exit": 0
+  },
+  "dependencies": {
+    "installed_python": {
+      "packages": 18,
+      "package_advisory_findings": 105,
+      "affected": [
+        {
+          "package": "mako",
+          "version": "1.3.10",
+          "advisory_ids": [
+            "PYSEC-2026-2617",
+            "PYSEC-2026-2617"
+          ],
+          "available_fix_versions": [
+            "1.3.12"
+          ]
+        },
+        {
+          "package": "pyjwt",
+          "version": "2.11.0",
+          "advisory_ids": [
+            "PYSEC-2026-120",
+            "PYSEC-2026-120",
+            "PYSEC-2026-179",
+            "PYSEC-2026-175",
+            "PYSEC-2026-177",
+            "PYSEC-2026-178",
+            "PYSEC-2026-176",
+            "PYSEC-2026-177",
+            "PYSEC-2026-179",
+            "PYSEC-2026-176",
+            "PYSEC-2026-178",
+            "PYSEC-2026-4145",
+            "PYSEC-2026-4146",
+            "PYSEC-2026-4149",
+            "PYSEC-2026-4152",
+            "PYSEC-2026-4144",
+            "PYSEC-2026-4148",
+            "PYSEC-2026-4140",
+            "PYSEC-2026-4141",
+            "PYSEC-2026-4147",
+            "PYSEC-2026-4183"
+          ],
+          "available_fix_versions": [
+            "2.12.0",
+            "2.12.1",
+            "2.13.0",
+            "2.14.0",
+            "2.15.0"
+          ]
+        },
+        {
+          "package": "pygments",
+          "version": "2.19.2",
+          "advisory_ids": [
+            "PYSEC-2026-2987",
+            "PYSEC-2026-2987"
+          ],
+          "available_fix_versions": [
+            "2.20.0"
+          ]
+        },
+        {
+          "package": "anyio",
+          "version": "4.12.1",
+          "advisory_ids": [
+            "PYSEC-2026-4025",
+            "PYSEC-2026-4024"
+          ],
+          "available_fix_versions": [
+            "4.14.2"
+          ]
+        },
+        {
+          "package": "cryptography",
+          "version": "46.0.4",
+          "advisory_ids": [
+            "PYSEC-2026-2141",
+            "PYSEC-2026-35",
+            "PYSEC-2026-36",
+            "PYSEC-2026-36",
+            "PYSEC-2026-35",
+            "PYSEC-2026-2141",
+            "PYSEC-2026-3554",
+            "PYSEC-2026-3552",
+            "PYSEC-2026-3553",
+            "PYSEC-2026-3552",
+            "PYSEC-2026-3553",
+            "PYSEC-2026-3554",
+            "GHSA-537c-gmf6-5ccf"
+          ],
+          "available_fix_versions": [
+            "46.0.5",
+            "46.0.6",
+            "46.0.7",
+            "48.0.1",
+            "49.0.0",
+            "50.0.0"
+          ]
+        },
+        {
+          "package": "fsspec",
+          "version": "2026.2.0",
+          "advisory_ids": [
+            "PYSEC-2026-4217"
+          ],
+          "available_fix_versions": [
+            "2026.6.0"
+          ]
+        },
+        {
+          "package": "idna",
+          "version": "3.11",
+          "advisory_ids": [
+            "PYSEC-2026-215",
+            "PYSEC-2026-215"
+          ],
+          "available_fix_versions": [
+            "3.15"
+          ]
+        },
+        {
+          "package": "pip",
+          "version": "26.0.1",
+          "advisory_ids": [
+            "PYSEC-2026-2875",
+            "PYSEC-2026-2876",
+            "PYSEC-2026-196",
+            "PYSEC-2026-196",
+            "PYSEC-2026-2875",
+            "PYSEC-2026-2876",
+            "PYSEC-2026-3721",
+            "PYSEC-2026-3721"
+          ],
+          "available_fix_versions": [
+            "26.1",
+            "26.1.2",
+            "26.2",
+            "26.2.0"
+          ]
+        },
+        {
+          "package": "pytest",
+          "version": "9.0.2",
+          "advisory_ids": [
+            "PYSEC-2026-1845",
+            "PYSEC-2026-1845"
+          ],
+          "available_fix_versions": [
+            "9.0.3"
+          ]
+        },
+        {
+          "package": "python-dotenv",
+          "version": "1.2.1",
+          "advisory_ids": [
+            "PYSEC-2026-2270",
+            "PYSEC-2026-2270"
+          ],
+          "available_fix_versions": [
+            "1.2.2"
+          ]
+        },
+        {
+          "package": "python-multipart",
+          "version": "0.0.22",
+          "advisory_ids": [
+            "PYSEC-2026-3038",
+            "PYSEC-2026-3039",
+            "PYSEC-2026-3040",
+            "PYSEC-2026-3036",
+            "PYSEC-2026-3037",
+            "PYSEC-2026-3038",
+            "PYSEC-2026-3037",
+            "PYSEC-2026-3036",
+            "PYSEC-2026-3040",
+            "PYSEC-2026-3039"
+          ],
+          "available_fix_versions": [
+            "0.0.26",
+            "0.0.27",
+            "0.0.30",
+            "0.0.31"
+          ]
+        },
+        {
+          "package": "sentence-transformers",
+          "version": "5.2.3",
+          "advisory_ids": [
+            "PYSEC-2026-4164"
+          ],
+          "available_fix_versions": [
+            "5.6.0"
+          ]
+        },
+        {
+          "package": "setuptools",
+          "version": "65.5.0",
+          "advisory_ids": [
+            "PYSEC-2022-43012",
+            "PYSEC-2022-43012",
+            "PYSEC-2025-49",
+            "PYSEC-2025-49",
+            "PYSEC-2026-1918",
+            "PYSEC-2026-1918",
+            "PYSEC-2026-3447",
+            "PYSEC-2026-3447"
+          ],
+          "available_fix_versions": [
+            "65.5.1",
+            "70.0.0",
+            "78.1.1",
+            "83.0.0"
+          ]
+        },
+        {
+          "package": "starlette",
+          "version": "0.37.2",
+          "advisory_ids": [
+            "PYSEC-2026-1943",
+            "PYSEC-2026-1941",
+            "PYSEC-2026-161",
+            "PYSEC-2026-161",
+            "PYSEC-2026-2281",
+            "PYSEC-2026-2280",
+            "PYSEC-2026-249",
+            "PYSEC-2026-248",
+            "PYSEC-2026-249",
+            "PYSEC-2026-248",
+            "PYSEC-2026-1943",
+            "PYSEC-2026-1941",
+            "PYSEC-2026-2281",
+            "PYSEC-2026-2280"
+          ],
+          "available_fix_versions": [
+            "0.40.0",
+            "0.47.2",
+            "1.0.1",
+            "1.1.0",
+            "1.3.0",
+            "1.3.1"
+          ]
+        },
+        {
+          "package": "thrift",
+          "version": "0.22.0",
+          "advisory_ids": [
+            "PYSEC-2026-3926",
+            "PYSEC-2026-3927",
+            "PYSEC-2026-3925"
+          ],
+          "available_fix_versions": [
+            "0.24.0"
+          ]
+        },
+        {
+          "package": "transformers",
+          "version": "5.3.0",
+          "advisory_ids": [
+            "PYSEC-2026-2290",
+            "PYSEC-2026-3929",
+            "PYSEC-2026-4174"
+          ],
+          "available_fix_versions": [
+            "5.10.0",
+            "5.5.0"
+          ]
+        },
+        {
+          "package": "ujson",
+          "version": "5.11.0",
+          "advisory_ids": [
+            "PYSEC-2026-2291",
+            "PYSEC-2026-2292",
+            "PYSEC-2026-2293",
+            "PYSEC-2026-2294",
+            "PYSEC-2026-2292",
+            "PYSEC-2026-2291",
+            "PYSEC-2026-2294",
+            "PYSEC-2026-2293"
+          ],
+          "available_fix_versions": [
+            "5.12.0",
+            "5.12.1",
+            "5.13.0"
+          ]
+        },
+        {
+          "package": "urllib3",
+          "version": "2.7.0",
+          "advisory_ids": [
+            "PYSEC-2026-4177",
+            "PYSEC-2026-4176",
+            "PYSEC-2026-4175"
+          ],
+          "available_fix_versions": [
+            "2.8.0"
+          ]
+        }
+      ]
+    },
+    "locked_api_python": {
+      "packages": 7,
+      "package_advisory_findings": 94,
+      "affected": [
+        {
+          "package": "cryptography",
+          "version": "41.0.7",
+          "advisory_ids": [
+            "PYSEC-2026-1283",
+            "PYSEC-2026-1285",
+            "PYSEC-2024-225",
+            "PYSEC-2024-225",
+            "PYSEC-2026-2141",
+            "PYSEC-2026-35",
+            "PYSEC-2026-35",
+            "PYSEC-2026-1283",
+            "PYSEC-2026-1285",
+            "PYSEC-2026-2141",
+            "PYSEC-2026-3553",
+            "PYSEC-2026-3554",
+            "GHSA-h4gh-qq45-vh27",
+            "GHSA-537c-gmf6-5ccf"
+          ],
+          "available_fix_versions": [
+            "42.0.0",
+            "42.0.2",
+            "42.0.4",
+            "43.0.1",
+            "46.0.5",
+            "46.0.6",
+            "48.0.1",
+            "49.0.0"
+          ]
+        },
+        {
+          "package": "pillow",
+          "version": "10.4.0",
+          "advisory_ids": [
+            "PYSEC-2026-2249",
+            "PYSEC-2026-2250",
+            "PYSEC-2026-165",
+            "PYSEC-2026-2874",
+            "PYSEC-2026-2252",
+            "PYSEC-2026-165",
+            "PYSEC-2026-2250",
+            "PYSEC-2026-2253",
+            "PYSEC-2026-2255",
+            "PYSEC-2026-2257",
+            "PYSEC-2026-2256",
+            "PYSEC-2026-2254",
+            "PYSEC-2026-2252",
+            "PYSEC-2026-2249",
+            "PYSEC-2026-2874",
+            "PYSEC-2026-3453",
+            "PYSEC-2026-3451",
+            "PYSEC-2026-3493",
+            "PYSEC-2026-2254",
+            "PYSEC-2026-2253",
+            "PYSEC-2026-2256",
+            "PYSEC-2026-2255",
+            "PYSEC-2026-3454",
+            "PYSEC-2026-3451",
+            "PYSEC-2026-3494",
+            "PYSEC-2026-3495",
+            "PYSEC-2026-3496",
+            "PYSEC-2026-3453",
+            "PYSEC-2026-3454",
+            "PYSEC-2026-3495",
+            "PYSEC-2026-3496",
+            "PYSEC-2026-3494",
+            "PYSEC-2026-3493"
+          ],
+          "available_fix_versions": [
+            "12.1.1",
+            "12.2.0",
+            "12.3.0"
+          ]
+        },
+        {
+          "package": "protobuf",
+          "version": "4.25.9",
+          "advisory_ids": [
+            "PYSEC-2026-1805",
+            "PYSEC-2026-1805"
+          ],
+          "available_fix_versions": [
+            "5.29.6",
+            "6.33.5"
+          ]
+        },
+        {
+          "package": "pyjwt",
+          "version": "2.13.0",
+          "advisory_ids": [
+            "PYSEC-2026-4145",
+            "PYSEC-2026-4146",
+            "PYSEC-2026-4149",
+            "PYSEC-2026-4152",
+            "PYSEC-2026-4144",
+            "PYSEC-2026-4143",
+            "PYSEC-2026-4148",
+            "PYSEC-2026-4140",
+            "PYSEC-2026-4141",
+            "PYSEC-2026-4147",
+            "PYSEC-2026-4151",
+            "PYSEC-2026-4150",
+            "PYSEC-2026-4142",
+            "PYSEC-2026-4183"
+          ],
+          "available_fix_versions": [
+            "2.14.0",
+            "2.15.0"
+          ]
+        },
+        {
+          "package": "python-multipart",
+          "version": "0.0.9",
+          "advisory_ids": [
+            "PYSEC-2026-1851",
+            "PYSEC-2026-1852",
+            "PYSEC-2026-3038",
+            "PYSEC-2026-3039",
+            "PYSEC-2026-3040",
+            "PYSEC-2026-3036",
+            "PYSEC-2026-3037",
+            "PYSEC-2026-1852",
+            "PYSEC-2026-1851",
+            "PYSEC-2026-3038",
+            "PYSEC-2026-3037",
+            "PYSEC-2026-3036",
+            "PYSEC-2026-3040",
+            "PYSEC-2026-3039"
+          ],
+          "available_fix_versions": [
+            "0.0.18",
+            "0.0.22",
+            "0.0.26",
+            "0.0.27",
+            "0.0.30",
+            "0.0.31"
+          ]
+        },
+        {
+          "package": "starlette",
+          "version": "0.37.2",
+          "advisory_ids": [
+            "PYSEC-2026-1943",
+            "PYSEC-2026-1941",
+            "PYSEC-2026-161",
+            "PYSEC-2026-161",
+            "PYSEC-2026-2281",
+            "PYSEC-2026-2280",
+            "PYSEC-2026-249",
+            "PYSEC-2026-248",
+            "PYSEC-2026-249",
+            "PYSEC-2026-248",
+            "PYSEC-2026-1943",
+            "PYSEC-2026-1941",
+            "PYSEC-2026-2281",
+            "PYSEC-2026-2280"
+          ],
+          "available_fix_versions": [
+            "0.40.0",
+            "0.47.2",
+            "1.0.1",
+            "1.1.0",
+            "1.3.0",
+            "1.3.1"
+          ]
+        },
+        {
+          "package": "urllib3",
+          "version": "2.7.0",
+          "advisory_ids": [
+            "PYSEC-2026-4177",
+            "PYSEC-2026-4176",
+            "PYSEC-2026-4175"
+          ],
+          "available_fix_versions": [
+            "2.8.0"
+          ]
+        }
+      ]
+    },
+    "npm_storefront_findings": 0,
+    "npm_admin_findings": 0
+  },
+  "git_observation_before_report_commit": {
+    "head": "929ba5e6b3fd84a6af355f02a424ca6359f11c2e",
+    "git_status_entries": 614,
+    "tracked_changed": 302,
+    "untracked": 312,
+    "staged": 0
+  },
+  "source_checkpoint": {
+    "path": "C:\\AI\\ShopSquire-checkpoints\\20261019-after-assessment-source.zip",
+    "files": 5283,
+    "bytes": 15137915,
+    "sha256": "bec779852b5648ee53fabebd9e134a184f362d01fc57be01df6bb4207c60d7b4",
+    "head": "929ba5e6b3fd84a6af355f02a424ca6359f11c2e",
+    "scope": "Current pre-work checkpoint paths plus new eligible source; audit outputs and runtime-private artifacts excluded",
+    "hashes_verified": true
+  },
+  "unverified": "GPU/model endurance, successful current live official-requirement compilation, real supplier mailbox/payment/ERP effects, remote CI and complete release rollback.",
+  "file_ledger_sha256": "f14e273660d469a5253281a920388e166356d763af4b9206b4ba79d9a0c52470"
+}
