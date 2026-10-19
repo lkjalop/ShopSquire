@@ -2668,6 +2668,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     purchased_category_changed = buyer_category_changed(
         prior_catalog_scope, literal_buyer_turn, resolved_product_node=resolved_purchase_node,
     )
+    owned_evidence_intake = bool(
+        active_shopping_case_id
+        and isinstance(image_ocr_text_in, str) and image_ocr_text_in.strip()
+        and not image_security_posture.get("image_untrusted")
+        and not (explicit_replacement_turn or purchased_category_changed
+                 or named_workload_replacement or deterministic_workload_replacement)
+    )
+    if owned_evidence_intake:
+        # An attachment to an owned request supplies evidence for review. A
+        # model outage/switch suggestion cannot detach its proposal from that
+        # request; a literal new subject still takes the replacement boundary.
+        routed_subject_action = "continue"
+        if routed_clarification_relation == "supersede":
+            routed_clarification_relation = "none"
+            pending_clarification_consumed = False
+        routed_decision = {
+            **routed_decision, "subject_action": routed_subject_action,
+            "clarification_relation": routed_clarification_relation,
+        }
+        data["decision"] = routed_decision
     active_case_subject_replaced = bool(
         active_shopping_case_id
         and not additive_workload_receipt
