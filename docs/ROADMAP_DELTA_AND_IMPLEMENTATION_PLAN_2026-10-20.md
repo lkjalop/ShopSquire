@@ -1,5 +1,7 @@
 # ShopSquire roadmap and implementation plan for 20 October 2026
 
+Execution update: the [checkpoint after `559aea5a`](ROADMAP_EXECUTION_DELTA_2026-10-20.md) records ten application commits, current verification and the remaining gaps. The assessment figures below are the earlier baseline, not final-source release results.
+
 ShopSquire has working parts of a governed procurement system, but the complete conversational procurement journey and release gates remain open. The immediate objective is a reproducible checkout that completes external research, quantity amendments, an exact shortfall draft and cited market intelligence within one owned case. Database stalls, Python dependency findings and incomplete integration commits must be resolved alongside those user workflows.
 
 This plan uses the execution completed on 20 October 2026 in Australia/Sydney. Source anchors refer to the working tree based on `b3ac5d62a68bd97e4e46330d1b232392cc43b51a`, with **302 modified/deleted tracked paths, 307 untracked paths and no staged paths** before this document was added. Many anchors therefore describe uncommitted code. Line numbers identify current entry points; they are not proposed replacement line counts.

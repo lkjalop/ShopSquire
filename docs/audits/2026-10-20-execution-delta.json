@@ -1,0 +1,683 @@
+{
+  "checkpoint_head": "559aea5a6ae954e6895c66113b00d70859467728",
+  "assessment": "Execution checkpoint, not release certification",
+  "source_inventory": {
+    "recorded_at": "2026-10-19T23:08:33.139298+00:00",
+    "head": "559aea5a6ae954e6895c66113b00d70859467728",
+    "branch": "checkpoint/turn-state-consolidation-20260830",
+    "git_status_entries": 574,
+    "tracked_changed": 280,
+    "untracked": 294,
+    "staged": 0,
+    "files": 5648,
+    "text_lines": 973663,
+    "by_root": {
+      ".codex-logs": 23,
+      ".dockerignore": 1,
+      ".env.example": 1,
+      ".gitattributes": 1,
+      ".github": 20,
+      ".gitignore": 1,
+      ".tmp": 2,
+      ".vscode": 2,
+      "BUSINESS_CASE_AND_VALUATION.md": 1,
+      "CAREER_EVIDENCE.md": 1,
+      "CHANGES.md": 1,
+      "Dockerfile": 1,
+      "Dockerfile.kind-smoke": 1,
+      "Dockerfile.runtime": 1,
+      "Dockerfile.web": 1,
+      "EMAIL_SECURITY_SHOWCASE.md": 1,
+      "FRONTEND_WIREFRAMES_OPTIONS.md": 1,
+      "IMPLEMENTATION_PRIORITY_BUNDLE.md": 1,
+      "IMPLEMENTATION_STATUS_REPORT.md": 1,
+      "LINKEDIN_SHOWCASE.md": 1,
+      "Makefile": 1,
+      "NEXT_SPRINT_ROADMAP.md": 1,
+      "PROFESSIONAL_ASSESSMENT_REPORT.md": 1,
+      "PROGRESS_UPDATE.md": 1,
+      "PR_DESCRIPTION.md": 1,
+      "README.md": 1,
+      "SHOPSQUIRE_AGENTIC_PLATFORM_COMPREHENSIVE_ANALYSIS.md": 1,
+      "SHOPSQUIRE_COMPLIANCE_AND_SHIFT_LEFT_SECURITY.md": 1,
+      "SHOPSQUIRE_EXPANDED_AI_ML_PLAYBOOK.md": 1,
+      "SHOPSQUIRE_GAPS_AND_IMPROVEMENTS.md": 1,
+      "SHOPSQUIRE_PART1_PLATFORM_DEEP_DIVE.md": 1,
+      "SHOPSQUIRE_PART2_STRATEGY_AND_ROADMAP.md": 1,
+      "SHOPSQUIRE_PLATFORM_AUDIT.md": 1,
+      "SHOPSQUIRE_POSITIONING.md": 1,
+      "SHOPSQUIRE_PRD_v1.md": 1,
+      "SHOPSQUIRE_REPAIR_REPORT_2026-09-15.md": 1,
+      "SHOPsQUIRE_COMPREHENSIVE_ANALYSIS_JAN2026.md": 1,
+      "admin-procurement-text.json": 1,
+      "agentLUMEN v4.0.pdf": 1,
+      "agentLUMEN v4.5.pdf": 1,
+      "agentLUMEN_v4_REALISTIC_MVP.md": 1,
+      "agentLUMEN_v5_CONVERSATIONAL_MEMORY.md": 1,
+      "agentLUMEN_v5_UPDATES_SUMMARY.md": 1,
+      "alembic.ini": 1,
+      "alembic": 160,
+      "archive": 1,
+      "claude.ps1": 1,
+      "competitor_prices_template.csv": 1,
+      "config": 1013,
+      "connectors": 1,
+      "data": 20,
+      "db": 27,
+      "debug_open_ended_script.log": 1,
+      "debug_open_ended_sqlite_script.log": 1,
+      "demo_operator.ps1": 1,
+      "deploy": 1,
+      "docker-compose.dev.yml": 1,
+      "docker-compose.observability.yml": 1,
+      "docker-compose.postgres.yml": 1,
+      "docker-compose.searxng.yml": 1,
+      "docker-compose.secure.yml": 1,
+      "docker-compose.timescaledb.yml": 1,
+      "docker-compose.tls.yml": 1,
+      "docker-compose.yml": 1,
+      "docs": 514,
+      "dump": 10,
+      "env.production.template": 1,
+      "eval": 8,
+      "frontend": 322,
+      "full_pytest_after_finalfix.log": 1,
+      "full_pytest_after_fix.log": 1,
+      "full_pytest_after_flags_fix.log": 1,
+      "full_pytest_after_playbook_fix.log": 1,
+      "full_pytest_after_playbook_isolation_fix.log": 1,
+      "full_pytest_after_remaining6_fix.log": 1,
+      "full_pytest_after_trace_fallback_fix.log": 1,
+      "full_pytest_debug.log": 1,
+      "full_pytest_final.log": 1,
+      "helm": 20,
+      "infra": 15,
+      "late_suite_debug.log": 1,
+      "migration_artifacts": 3,
+      "open_ended_only.log": 1,
+      "open_ended_setup.log": 1,
+      "open_ended_sqlite.log": 1,
+      "openapi.json": 1,
+      "ops": 2,
+      "orchestrator_auto_cv_only.log": 1,
+      "out.txt": 1,
+      "pip_install_out.txt": 1,
+      "poetry.lock": 1,
+      "pretest_db_debug.txt": 1,
+      "pyproject.toml": 1,
+      "pytest.ini": 1,
+      "pytest_exit_code.txt": 1,
+      "remaining6_debug.log": 1,
+      "requirements": 6,
+      "response.json": 1,
+      "runs": 1,
+      "scripts": 281,
+      "sdk": 6,
+      "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
+      "sitecustomize.py": 1,
+      "src": 1316,
+      "start_cart_validation.ps1": 1,
+      "start_demo.ps1": 1,
+      "start_voice_pilot.ps1": 1,
+      "static": 277,
+      "terraform": 4,
+      "tests": 1506,
+      "tmp_ollama_aliases": 3,
+      "trace_unit_hang.log": 1
+    },
+    "python_syntax_errors": [],
+    "functions": 19155,
+    "production_functions_over_200": 99,
+    "broad_production_handlers": 5605,
+    "swallowed_production_handlers": 2044,
+    "blocking_candidates_in_async": 0
+  },
+  "inventory_csv_sha256": "2847edf60e044f632c2ea7adf622528d82936a6a99b77b5e798290bebc16ff95",
+  "profiles": [
+    {
+      "profile": "scheduler-complete-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 30.391,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 384323584,
+        "handles": 910,
+        "threads": 34
+      },
+      "counts": {
+        "tests": 22,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "c650e84caeac3962a768bcfcb4c4c35e36489023a1eb34532410bea730b656cd",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_incident_scheduler_ownership.py",
+        "tests/services/test_tenant_session_binding.py",
+        "tests/api/test_incident_alert_wiring.py",
+        "tests/unit/test_incident_ops_tasks.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\scheduler-complete-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "native-auth-clean-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 25.563,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 331427840,
+        "handles": 1036,
+        "threads": 34
+      },
+      "counts": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "0f038b975ca4d9b07e03d15ed803af61e30f604e0ea69316a7435fcda731eeae",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_native_buyer_tenant_enrollment.py",
+        "tests/api/test_native_buyer_surface_auth.py",
+        "tests/services/test_buyer_tenant_lookup.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-auth-clean-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "workload-continuity-complete-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 11.594,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 348811264,
+        "handles": 768,
+        "threads": 30
+      },
+      "counts": {
+        "tests": 54,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "6444fbe2f5e6c649b9e133676fdfe4260b5e364decfd317512a7a68909ed817b",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_turn_router_clarification.py",
+        "tests/services/test_router_refine.py",
+        "tests/services/test_turn_transition.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workload-continuity-complete-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "owned-evidence-clean-candidate-ready",
+      "native_exit_code": 0,
+      "elapsed_seconds": 40.36,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 339189760,
+        "handles": 886,
+        "threads": 36
+      },
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "dfd0523e7b2f5aa06f4df351ad42d9e49ddb5a2dfbf411375ede378b2b2d2e86",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_owned_evidence_intake.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned-evidence-clean-candidate-ready\\tests.xml"
+      ]
+    },
+    {
+      "profile": "dependency-clean-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 48.5,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 282374144,
+        "handles": 1257,
+        "threads": 34
+      },
+      "counts": {
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "98894885f12719eb60863874c3c1730c8af77ba6e8acbfc3a62832acc0aba2d7",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_admin_route_boundary.py",
+        "tests/api/test_native_buyer_tenant_enrollment.py",
+        "tests/api/test_native_buyer_surface_auth.py",
+        "tests/services/test_buyer_tenant_lookup.py",
+        "tests/api/test_chat_owned_evidence_intake.py",
+        "tests/services/test_incident_scheduler_ownership.py",
+        "tests/services/test_tenant_session_binding.py",
+        "tests/scripts/test_generate_runtime_requirements.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-clean-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "final-case-clean-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 40.344,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 271056896,
+        "handles": 1112,
+        "threads": 33
+      },
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "c7f3b8a0fac11224886cf8e7177cf938fe7595e8fbc4861ea8d4db0132e948b6",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_owned_evidence_intake.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\final-case-clean-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "runtime-ownership-complete-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 43.812,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 336850944,
+        "handles": 1669,
+        "threads": 38
+      },
+      "counts": {
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "9d93dca5d600d854b557d7a43d94d71f04eddaa19057dcedbae0a70447f0bc2c",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/bootstrap/test_business_background_lifecycle.py",
+        "tests/observability/test_http_metric_cardinality.py",
+        "tests/observability/test_tracing_app_ownership.py",
+        "tests/observability/test_tracing_provider_ownership.py",
+        "tests/services/test_incident_scheduler_ownership.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\runtime-ownership-clean-candidate\\tests.xml"
+      ],
+      "receipt_note": "Successful XML was initially written over the earlier failing candidate XML. Original failing/successful logs and native receipts are retained. Corrected XML and verification explanation reside in the complete profile."
+    },
+    {
+      "profile": "sqlite-ownership-complete-runtime",
+      "native_exit_code": 0,
+      "elapsed_seconds": 30.313,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 267862016,
+        "handles": 1247,
+        "threads": 35
+      },
+      "counts": {
+        "tests": 28,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "76f47a4b0e09b8d15463f3f28ffec73a7ac08a5629c9f94b558470eddba29d4b",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_sqlite_insert_integrity.py",
+        "tests/unit/test_db_upsert.py",
+        "tests/services/test_tenant_session_binding.py",
+        "tests/api/test_chat_owned_evidence_intake.py",
+        "tests/api/test_native_buyer_surface_auth.py",
+        "tests/test_security_indirect_prompt_injection.py",
+        "tests/test_security_observer_paths.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\sqlite-ownership-complete-runtime\\tests.xml"
+      ]
+    },
+    {
+      "profile": "market-delivery-clean-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 33.75,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 269111296,
+        "handles": 1082,
+        "threads": 30
+      },
+      "counts": {
+        "tests": 72,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "ca8462926c3ccef8942b22b33b861f7dfcecaf99d10f515efd0194fb88809054",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_market_context_delivery.py",
+        "tests/services/test_market_intelligence_agent.py",
+        "tests/services/test_market_analysis.py",
+        "tests/services/test_market_evidence_gate.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\market-delivery-clean-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "case-tasks-complete-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 32.391,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 271376384,
+        "handles": 1241,
+        "threads": 36
+      },
+      "counts": {
+        "tests": 31,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "receipt_sha256": "4f135b0d857d4fd97594216027a8a23f03e91fd3d694c2043f1699559ca04205",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_case_tasks.py",
+        "tests/services/test_shortfall_enquiry_preview.py",
+        "tests/api/test_native_buyer_surface_auth.py",
+        "tests/api/test_chat_owned_evidence_intake.py",
+        "tests/services/test_memory_retention_regressions.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-tasks-complete-candidate\\tests.xml"
+      ]
+    },
+    {
+      "profile": "case-tasks-npm-ci",
+      "native_exit_code": 0,
+      "elapsed_seconds": 19.031,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 408018944,
+        "handles": 395,
+        "threads": 16
+      },
+      "counts": null,
+      "receipt_sha256": "8a508db831b60b744ce93e7563b6333a666ddf4fe593ad556cb4a729c2e7adf0",
+      "command": [
+        "cmd.exe",
+        "/d",
+        "/c",
+        "npm.cmd",
+        "ci",
+        "--no-audit",
+        "--no-fund"
+      ]
+    },
+    {
+      "profile": "case-tasks-frontend-unit",
+      "native_exit_code": 0,
+      "elapsed_seconds": 8.484,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 303374336,
+        "handles": 479,
+        "threads": 78
+      },
+      "counts": null,
+      "receipt_sha256": "15381b8cbb6a69f7b10a178ec58c27163de3fc039ebc773342e8c8cbb7e5abaa",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-case-tasks\\frontend\\node_modules\\vitest\\vitest.mjs",
+        "run"
+      ]
+    },
+    {
+      "profile": "case-tasks-frontend-types",
+      "native_exit_code": 0,
+      "elapsed_seconds": 14.766,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 522260480,
+        "handles": 167,
+        "threads": 12
+      },
+      "counts": null,
+      "receipt_sha256": "562dca3ac363b4c62772ca14f031aa793b39d9bf8e684542ca323a15f44814d0",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-case-tasks\\frontend\\node_modules\\typescript\\bin\\tsc",
+        "--noEmit"
+      ]
+    },
+    {
+      "profile": "case-tasks-frontend-build",
+      "native_exit_code": 0,
+      "elapsed_seconds": 1.672,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 216137728,
+        "handles": 263,
+        "threads": 81
+      },
+      "counts": null,
+      "receipt_sha256": "a6848b822b17c693a3730aa76c66799812f97928936b13525c3301b5438dfb02",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-case-tasks\\frontend\\node_modules\\vite\\bin\\vite.js",
+        "build"
+      ]
+    },
+    {
+      "profile": "browser-live-case-task-delivery",
+      "native_exit_code": 0,
+      "elapsed_seconds": 43.625,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 332476416,
+        "handles": 1095,
+        "threads": 81
+      },
+      "counts": null,
+      "receipt_sha256": "a5b3d6635b790dabe0f02565e09c2191d80e68d4ba0bd8ec50500c7958fec710",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_live_case_tasks.py"
+      ]
+    },
+    {
+      "profile": "inventory-current-profile",
+      "native_exit_code": 0,
+      "elapsed_seconds": 60.954,
+      "resource_violation": null,
+      "peaks": {
+        "rss_bytes": 47988736,
+        "handles": 126,
+        "threads": 4
+      },
+      "counts": null,
+      "receipt_sha256": "d7b203aaa58c970aa30b85c809b43f90d3c66d6a3715ba3e0e925ffd5c6c96ac",
+      "command": [
+        "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\static_inventory_current.py"
+      ]
+    }
+  ],
+  "advisory_profiles": [
+    {
+      "profile": "api-runtime-windows",
+      "exit": 0,
+      "elapsed_seconds": 9.97,
+      "packages": 95,
+      "affected": []
+    },
+    {
+      "profile": "api-runtime",
+      "exit": 0,
+      "elapsed_seconds": 4.25,
+      "packages": 95,
+      "affected": []
+    },
+    {
+      "profile": "test-runtime-windows",
+      "exit": 0,
+      "elapsed_seconds": 4.38,
+      "packages": 37,
+      "affected": []
+    },
+    {
+      "profile": "test-runtime",
+      "exit": 0,
+      "elapsed_seconds": 2.38,
+      "packages": 36,
+      "affected": []
+    },
+    {
+      "profile": "vision-runtime-windows",
+      "exit": 0,
+      "elapsed_seconds": 7.3,
+      "packages": 45,
+      "affected": []
+    },
+    {
+      "profile": "vision-runtime",
+      "exit": 0,
+      "elapsed_seconds": 2.8,
+      "packages": 44,
+      "affected": []
+    }
+  ],
+  "live_browser": {
+    "stats": [
+      {
+        "spec": "live-research-memory-assessment",
+        "exit_code": 0,
+        "stats": {
+          "startTime": "2026-10-19T23:03:43.983Z",
+          "duration": 18852.010000000002,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      }
+    ],
+    "source": {
+      "before": {
+        "files": 1527,
+        "sha256": "91547d03308561b06fd585bdbeb6c884dc22e28daec741189f698a1ef31440b5"
+      },
+      "after": {
+        "files": 1527,
+        "sha256": "91547d03308561b06fd585bdbeb6c884dc22e28daec741189f698a1ef31440b5"
+      },
+      "unchanged": true
+    },
+    "observed_draft": "provisional 40-unit request; supplier contact and accepted selection missing",
+    "observed_market": "blocked: no_current_scoped_evidence; no citations",
+    "commercial_effects": "unchanged by tested draft/advisory requests"
+  },
+  "limitations": [
+    "Exact candidate profiles overlap. Do not sum test counts or infer a completion percentage.",
+    "Native logs and source exports are local ignored artifacts; this file retains their command/count/hash summaries.",
+    "Full final-source Python/browser/restore/endurance gates have not passed.",
+    "Fresh combined vision installation exposes multiple packages owning cv2; remediation remains open."
+  ],
+  "post_task_critical_browser": {
+    "stats": [
+      {
+        "spec": "conversational-qualification",
+        "exit_code": 0,
+        "stats": {
+          "startTime": "2026-10-19T23:09:05.875Z",
+          "duration": 31486.497,
+          "expected": 6,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      },
+      {
+        "spec": "uploaded-requirements-journey",
+        "exit_code": 0,
+        "stats": {
+          "startTime": "2026-10-19T23:09:51.962Z",
+          "duration": 16950.657,
+          "expected": 4,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      },
+      {
+        "spec": "turn-transition-revision-matrix",
+        "exit_code": 0,
+        "stats": {
+          "startTime": "2026-10-19T23:10:32.078Z",
+          "duration": 4492.6179999999995,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      },
+      {
+        "spec": "supplier-enquiry-journey",
+        "exit_code": 0,
+        "stats": {
+          "startTime": "2026-10-19T23:10:52.641Z",
+          "duration": 18058.399999999998,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        }
+      }
+    ],
+    "source": {
+      "before": {
+        "files": 1527,
+        "sha256": "91547d03308561b06fd585bdbeb6c884dc22e28daec741189f698a1ef31440b5"
+      },
+      "after": {
+        "files": 1527,
+        "sha256": "91547d03308561b06fd585bdbeb6c884dc22e28daec741189f698a1ef31440b5"
+      },
+      "unchanged": true
+    }
+  }
+}
