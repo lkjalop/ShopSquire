@@ -19,14 +19,16 @@ from packaging.utils import canonicalize_name
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "poetry.lock"
 PROFILES = ROOT / "config" / "runtime_dependency_profiles.json"
-TARGET_ENV = {
-    **default_environment(),
-    "python_version": "3.11",
-    "python_full_version": "3.11.0",
-    "sys_platform": "linux",
-    "platform_system": "Linux",
-    "platform_python_implementation": "CPython",
-}
+def target_environment(platform: str) -> dict[str,str]:
+    if platform not in {'linux','windows'}:raise ValueError('unsupported_target_platform')
+    return {**default_environment(), 'python_version':'3.11','python_full_version':'3.11.0',
+        'sys_platform':'win32' if platform=='windows' else 'linux',
+        'platform_system':'Windows' if platform=='windows' else 'Linux',
+        'os_name':'nt' if platform=='windows' else 'posix',
+        'platform_python_implementation':'CPython'}
+
+
+TARGET_ENV = target_environment('linux')
 
 
 def _marker_applies(
@@ -50,13 +52,20 @@ def _dependency_options(value: Any) -> list[dict[str, Any]]:
     return [item if isinstance(item, dict) else {"version": item} for item in raw]
 
 
-def _locked_packages() -> tuple[dict[str, dict[str, Any]], str]:
+def _locked_packages(*, group: str = "main") -> tuple[dict[str, dict[str, Any]], str]:
     raw = LOCK.read_bytes()
     body = tomllib.loads(raw.decode("utf-8"))
     packages: dict[str, dict[str, Any]] = {}
     for package in body["package"]:
         name = canonicalize_name(package["name"])
-        if not _marker_applies(package.get("markers")):
+        if group not in package.get("groups", ["main"]):
+            continue
+        expression = package.get("markers")
+        if isinstance(expression, dict):
+            # Poetry lists only group-specific conditions. A package in main
+            # with only a dev condition is unconditional for the runtime.
+            expression = expression.get(group)
+        if not _marker_applies(expression):
             continue
         existing = packages.get(name)
         if existing is not None and existing["version"] != package["version"]:
@@ -136,20 +145,28 @@ def _render(profile: str, roots: list[str], packages: dict[str, dict[str, Any]],
 
 
 def main() -> int:
+    global TARGET_ENV
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--profile", action="append", default=[])
+    parser.add_argument('--platform',choices=['linux','windows'],default='linux')
     args = parser.parse_args()
+    TARGET_ENV=target_environment(args.platform)
     definitions = json.loads(PROFILES.read_text(encoding="utf-8"))
     selected = args.profile or list(definitions)
     unknown = sorted(set(selected) - set(definitions))
     if unknown:
         raise SystemExit(f"unknown runtime profiles: {', '.join(unknown)}")
-    packages, lock_hash = _locked_packages()
+    package_sets: dict[str, tuple[dict[str, dict[str, Any]], str]] = {}
     stale: list[str] = []
     for profile in selected:
         definition = definitions[profile]
+        group = definition.get("group", "main")
+        if group not in package_sets:
+            package_sets[group] = _locked_packages(group=group)
+        packages, lock_hash = package_sets[group]
         output = ROOT / definition["output"]
+        if args.platform!='linux':output=output.with_name(output.stem+'-'+args.platform+output.suffix)
         rendered = _render(profile, definition["roots"], packages, lock_hash)
         if args.check:
             if not output.exists() or output.read_text(encoding="utf-8") != rendered:

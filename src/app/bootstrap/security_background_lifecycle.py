@@ -104,8 +104,8 @@ def register_security_background_lifecycle(app: FastAPI) -> tuple[str, ...]:
                 _record_runtime_failure(app, name, "stop", exc)
                 return None
 
-        app.add_event_handler("startup", start_handler)
-        app.add_event_handler("shutdown", stop_handler)
+        app.router.add_event_handler("startup", start_handler)
+        app.router.add_event_handler("shutdown", stop_handler)
         registered.append(registration.name)
 
     app.state.security_background_services = tuple(registered)

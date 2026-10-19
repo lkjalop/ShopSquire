@@ -11,8 +11,8 @@ from fastapi import FastAPI
 def _register_pair(
     app: FastAPI, *, name: str, start: Callable[[], object], stop: Callable[[], object],
 ) -> None:
-    app.add_event_handler("startup", start)
-    app.add_event_handler("shutdown", stop)
+    app.router.add_event_handler("startup", start)
+    app.router.add_event_handler("shutdown", stop)
     current = list(getattr(app.state, "business_background_services", ()) or ())
     current.append(name)
     app.state.business_background_services = tuple(current)

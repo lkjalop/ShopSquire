@@ -46,5 +46,23 @@
       "pytesseract",
       "pyzbar"
     ]
+  },
+  "test-runtime": {
+    "output": "requirements/test-runtime.txt",
+    "group": "dev",
+    "roots": [
+      "pytest",
+      "pytest-asyncio",
+      "pytest-cov",
+      "pytest-timeout",
+      "pytest-playwright",
+      "playwright",
+      "reportlab",
+      "qrcode",
+      "ruff",
+      "mypy",
+      "types-redis",
+      "requests"
+    ]
   }
 }

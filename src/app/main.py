@@ -2410,8 +2410,8 @@ def create_app() -> FastAPI:
                 pass
 
         try:
-            app.add_event_handler("startup", _start_inventory_worker)
-            app.add_event_handler("shutdown", _stop_inventory_worker)
+            app.router.add_event_handler("startup", _start_inventory_worker)
+            app.router.add_event_handler("shutdown", _stop_inventory_worker)
         except Exception:
             pass
     except Exception:
@@ -2446,8 +2446,10 @@ def create_app() -> FastAPI:
             pass
 
     # Register graceful shutdown handler
-    app.add_event_handler("shutdown", _on_shutdown)
+    app.router.add_event_handler("shutdown", _on_shutdown)
 
+    from src.app.security.admin_route_boundary import enforce_admin_route_boundary
+    enforce_admin_route_boundary(app)
     return app
 
 
