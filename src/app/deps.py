@@ -15,6 +15,8 @@ from src.app.security.pci import redact_pci as _redact_pci
 
 
 class DummyRedis:
+    is_shared_backend = False
+
     def get(self, *_args, **_kwargs):
         return None
 

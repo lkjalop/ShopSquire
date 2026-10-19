@@ -246,8 +246,8 @@ class TestNLPSearchAgent:
     def test_parse_budget_around(self):
         from src.app.services.nlp_search_agent import parse_query
         r = parse_query("I'm looking for something around $1000")
-        assert r.budget_min == 800  # 1000 * 0.8
-        assert r.budget_max == 1200  # 1000 * 1.2
+        assert r.budget_min is None  # No invented lower bound or spending uplift.
+        assert r.budget_max == 1000
 
     def test_parse_negation_brand(self):
         from src.app.services.nlp_search_agent import parse_query
@@ -461,15 +461,11 @@ class TestUseCaseAdvisorExtended:
 class TestEpisodicMemory:
 
     def _make_memory(self):
-        """Create a Memory with a fake Redis that stores data in-memory."""
+        """Exercise isolated local memory; shared Redis has integration tests."""
         from src.app.services.memory import Memory
         from src.app.services.episodic_memory import EpisodicMemory, Episode, UserProfile
-        store = {}
-        redis_mock = MagicMock()
-        redis_mock.get.side_effect = lambda k: store.get(k)
-        redis_mock.setex.side_effect = lambda k, ttl, v: store.__setitem__(k, v)
-        redis_mock.expire.return_value = True
-        mem = Memory(redis_mock)
+        mem = Memory(None)
+        mem._LOCAL_STORE = {}; mem._LOCAL_INDEX = {}
         return EpisodicMemory(mem), Episode, UserProfile
 
     def test_append_and_get_episodes(self):
