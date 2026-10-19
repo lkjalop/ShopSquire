@@ -2825,10 +2825,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
                 _tenant_id = _request_tenant_id(request)
                 _uid = str((payload or {}).get("uid") or "guest")[:200]
-                _requested_case_id = str((payload or {}).get("shopping_case_id") or "").strip()[:200]
-                _case_id = _requested_case_id or str(
-                    decision_trace_id or f"case-{_uuid.uuid4().hex}"
-                )[:200]
+                _requested_case_id = (
+                    str((payload or {}).get("shopping_case_id") or "").strip()[:200]
+                    if not active_case_subject_replaced else ""
+                )
+                _case_id = active_shopping_case_id or _requested_case_id or (
+                    "sc-" + str(decision_trace_id or _uuid.uuid4().hex).removeprefix("sc-")[:196]
+                )
                 _now = datetime.now(timezone.utc)
                 _case = db.execute(_select(ShoppingCase).where(
                     ShoppingCase.tenant_id == _tenant_id,
@@ -2854,6 +2857,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     created_at=_now, updated_at=_now,
                 ))
                 db.commit()
+                # Evidence intake establishes the same case identity used by
+                # later research, response projection and the canonical turn.
+                active_shopping_case_id = _case_id
+                active_shopping_case_purpose = _case.retained_purpose
                 buyer_requirement_proposal = {
                     "case_id": _case_id, "proposal_id": _proposal_id,
                     "proposal_version": 1, "status": "pending_review",
