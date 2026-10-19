@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from fastapi.responses import ORJSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from src.app.observability.http_labels import route_metric_path
 
 from src.app.routers import tickets as tickets_module
 from src.app.routers.auth import router as auth_router
@@ -242,6 +243,29 @@ def _vlm_warmup_enabled() -> bool:
         return str(raw).strip().lower() in ("1", "true", "yes", "on")
     profile = str(os.getenv("SHOPSQUIRE_RUNTIME_PROFILE", "") or "").strip().lower()
     return profile != "demo_v2"
+
+
+
+def _register_http_metrics(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def metrics_middleware(request: Request, call_next):
+        from src.app.observability.metrics import record_http_metrics
+        from src.app.observability.logging import log_request_line
+        import time
+        import logging
+
+        start = time.time()
+        response = await call_next(request)
+        try:
+            duration = time.time() - start
+            record_http_metrics(request.method, route_metric_path(request), response.status_code, duration)
+            logging.getLogger("shopsquire.http").info(
+                "%s %s %s %.3fs", request.method, request.url.path, response.status_code, duration
+            )
+            log_request_line(request.method, request.url.path, response.status_code, duration)
+        except Exception:
+            pass
+        return response
 
 
 def create_app() -> FastAPI:
@@ -666,10 +690,22 @@ def create_app() -> FastAPI:
                 _submit("faq_index_build", {})
         except Exception:
             pass
-        runtime_lifecycle.start(app)
-        yield
-        await runtime_lifecycle.stop()
-    app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse, lifespan=lifespan)
+        from src.app.bootstrap.business_background_lifecycle import managed_business_background
+        async with managed_business_background(app,runtime_lifecycle):
+            yield
+
+    @asynccontextmanager
+    async def lifespan_with_resource_cleanup(app: FastAPI):
+        try:
+            async with lifespan(app):
+                yield
+        finally:
+            # A custom ASGI lifespan does not invoke legacy shutdown handlers.
+            # Run owned-resource cleanup even when required startup fails.
+            await _on_shutdown()
+
+    app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse,
+                  lifespan=lifespan_with_resource_cleanup)
     # Bind a fresh engine using current settings to the app state so
     # tests that mutate DATABASE_URL get an engine scoped to the app.
     try:
@@ -767,8 +803,10 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
         app.state.engine = eng
+        app.state.owns_engine = eng is not existing
     except Exception:
         app.state.engine = None
+        app.state.owns_engine = False
     # Heavy initialization handled in lifespan
 
     # Instrument app with tracing + Prometheus metrics (best-effort)
@@ -1473,25 +1511,7 @@ def create_app() -> FastAPI:
         response.headers["x-request-id"] = rid
         return response
 
-    @app.middleware("http")
-    async def metrics_middleware(request: Request, call_next):
-        from src.app.observability.metrics import record_http_metrics
-        from src.app.observability.logging import log_request_line
-        import time
-        import logging
-
-        start = time.time()
-        response = await call_next(request)
-        try:
-            duration = time.time() - start
-            record_http_metrics(request.method, request.url.path, response.status_code, duration)
-            logging.getLogger("shopsquire.http").info(
-                "%s %s %s %.3fs", request.method, request.url.path, response.status_code, duration
-            )
-            log_request_line(request.method, request.url.path, response.status_code, duration)
-        except Exception:
-            pass
-        return response
+    _register_http_metrics(app)
 
     @app.get("/health")
     def health():
@@ -2426,7 +2446,7 @@ def create_app() -> FastAPI:
     async def _on_shutdown() -> None:
         try:
             eng = getattr(app.state, "engine", None)
-            if eng is not None:
+            if eng is not None and getattr(app.state, 'owns_engine', False):
                 try:
                     eng.dispose()
                 except Exception:
@@ -2437,9 +2457,12 @@ def create_app() -> FastAPI:
             # Attempt to flush tracer provider if available
             from opentelemetry import trace
             tp = trace.get_tracer_provider()
-            if hasattr(tp, "shutdown"):
+            # The provider belongs to the process and the SDK shuts it down
+            # at process exit. Closing one app must not break another app's
+            # tracing or require a replacement global provider.
+            if hasattr(tp, "force_flush"):
                 try:
-                    tp.shutdown()
+                    tp.force_flush(timeout_millis=5000)
                 except Exception:
                     pass
         except Exception:
@@ -2447,7 +2470,6 @@ def create_app() -> FastAPI:
 
     # Register graceful shutdown handler
     app.router.add_event_handler("shutdown", _on_shutdown)
-
     from src.app.security.admin_route_boundary import enforce_admin_route_boundary
     enforce_admin_route_boundary(app)
     return app

@@ -14,6 +14,9 @@ def init_tracer(service_name: str = "shopsquire-api", app=None) -> None:
     global _initialized
     if _initialized:
         return
+    if not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
+        _initialized = True
+        return
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     # Allow disabling tracing to avoid noisy test warnings
     disable = os.getenv("DISABLE_TRACING", "0").lower() in ("1", "true", "yes")
@@ -67,6 +70,10 @@ def init_tracer(service_name: str = "shopsquire-api", app=None) -> None:
         except Exception as exc:
             _logger.warning("OTel: failed to add span processor: %s", exc)
     trace.set_tracer_provider(provider)
+    if trace.get_tracer_provider() is not provider:
+        provider.shutdown()
+        _initialized = True
+        return
     try:
         if app is not None:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor

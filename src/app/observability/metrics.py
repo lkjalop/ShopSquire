@@ -75,7 +75,7 @@ http_requests_total = Counter(
 
 http_request_duration_seconds = Histogram(
     "shopsquire_http_request_duration_seconds",
-    "HTTP request latency in seconds",
+    "HTTP request latency in seconds by API resource family",
     labelnames=["method", "path"],
 )
 
@@ -354,8 +354,9 @@ def record_control_failure(control_id: str):
 
 
 def record_http_metrics(method: str, path: str, status: int, duration_seconds: float):
+    from src.app.observability.http_labels import latency_metric_path
     http_requests_total.labels(method=method, path=path, status=str(status)).inc()
-    http_request_duration_seconds.labels(method=method, path=path).observe(duration_seconds)
+    http_request_duration_seconds.labels(method=method, path=latency_metric_path(path)).observe(duration_seconds)
 
 
 def record_db_query_latency(op: str, duration_seconds: float):
