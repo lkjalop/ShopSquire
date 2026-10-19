@@ -30,23 +30,6 @@ def _register_sqlite_now(engine):
             )
         except Exception:
             pass
-    # SQLite-only: Rewrite plain INSERT into INSERT OR REPLACE so tests
-    # with duplicate primary keys do not fail. This ONLY fires on SQLite
-    # engines and should NEVER be applied to Postgres/production.
-    @event.listens_for(engine, "before_cursor_execute", retval=True)
-    def _rewrite_insert(conn, cursor, statement, parameters, context, executemany):
-        try:
-            if (
-                isinstance(statement, str)
-                and re.search(r"\bINSERT\s+INTO\b", statement, flags=re.IGNORECASE)
-                # Skip statements that already use standard ON CONFLICT — SQLite 3.24+
-                # handles those natively; rewriting would produce invalid syntax.
-                and not re.search(r"\bON\s+CONFLICT\b", statement, flags=re.IGNORECASE)
-            ):
-                statement = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", statement, flags=re.IGNORECASE)
-        except Exception:
-            pass
-        return statement, parameters
 
 
 def _register_postgres_failure_observer(engine):
@@ -127,9 +110,8 @@ def _create_engine_with_fallback(url: str):
                 try:
                     cursor = dbapi_connection.cursor()
                     cursor.execute("SET search_path TO oltp, audit, security, public")
-                    # Clear tenant GUC on every new connection from the pool so
-                    # pooled connections never carry a previous request's tenant
-                    # context into the next request (RLS safety net).
+                    # Initialise new connections. Session transactions bind tenant
+                    # with SET LOCAL; a connect hook alone cannot isolate pool reuse.
                     cursor.execute("SET app.current_tenant TO ''")
                     cursor.close()
                 except Exception:
@@ -179,12 +161,40 @@ def set_engine(new_engine):
         pass
 
 
+# Weak pool ownership avoids retaining discarded engines. A disposed engine
+# receives a new pool and must initialize its replacement connections again.
+from threading import Lock, RLock
+from weakref import WeakKeyDictionary
+
+_SQLITE_BOOTSTRAP_GUARD = Lock()
+_SQLITE_BOOTSTRAP_STATE = WeakKeyDictionary()
+
+
 def _ensure_minimal_sqlite_tables(bind):
+    """Initialize legacy SQLite compatibility once per live pool, not per request.
+
+    Production schema readiness remains migration-owned. Failed compatibility
+    initialization is observable and retryable; it is never cached as success.
+    """
+    if bind.dialect.name != "sqlite":
+        return
+    with _SQLITE_BOOTSTRAP_GUARD:
+        state = _SQLITE_BOOTSTRAP_STATE.get(bind.pool)
+        if state is None:
+            state = [RLock(), False]
+            _SQLITE_BOOTSTRAP_STATE[bind.pool] = state
+    with state[0]:
+        if not state[1]:
+            state[1] = _bootstrap_minimal_sqlite_tables(bind)
+
+
+def _bootstrap_minimal_sqlite_tables(bind):
     """Ensure minimal tables exist on a given SQLAlchemy bind for SQLite.
 
     Reused by both db_session() and get_db() to avoid visibility issues
     across different connections in tests.
     """
+    errors = []
     try:
         if "sqlite" in str(bind.dialect.name).lower():
             with bind.connect() as conn:
@@ -230,8 +240,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ))
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # R10.2 STEP 1 (additive, zero behavior change): cart identity becomes
                 # (tenant_id, customer_id). DEFAULT 'default' backfills every existing row =
                 # exactly today's single-tenant truth; reads/writes get tenant-scoped in the
@@ -250,8 +261,9 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text(
                         "CREATE INDEX IF NOT EXISTS ix_draft_orders_tenant_customer_status "
                         "ON draft_orders (tenant_id, customer_id, status)"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 conn.execute(sql_text(
                     "CREATE TABLE IF NOT EXISTS security_events (\n"
                     "  id TEXT PRIMARY KEY,\n"
@@ -342,8 +354,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at INTEGER\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # ── Autonomy-support tables (P2) ──────────────────────────────
                 # The moat's data foundation: bounded autonomy needs a full policy/
                 # exception/retry/AI-interaction trace + price/inventory history for
@@ -380,8 +393,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ):
                     try:
                         conn.execute(sql_text(_ddl))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 # Rules definitions (used by RuleStore / RuleEngine)
                 try:
                     conn.execute(
@@ -403,13 +417,15 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Backfill missing domain column for older SQLite files.
                 try:
                     conn.execute(sql_text("ALTER TABLE rule_definitions ADD COLUMN domain TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Tenant-scoped config overrides (SQLite fallback for tests/dev)
                 try:
                     conn.execute(
@@ -423,8 +439,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(
                         sql_text(
@@ -436,8 +453,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Phase 2: fusion score persistence (SQLite fallback for tests/dev)
                 try:
                     conn.execute(
@@ -454,8 +472,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Email security incidents (SQLite fallback for tests/dev)
                 try:
                     conn.execute(
@@ -482,13 +501,15 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Ensure ticket_id column exists for older environments
                 try:
                     conn.execute(sql_text("ALTER TABLE email_security_incidents ADD COLUMN ticket_id TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 for stmt in [
                     "ALTER TABLE email_security_incidents ADD COLUMN ground_truth TEXT",
                     "ALTER TABLE email_security_incidents ADD COLUMN analyst_verdict TEXT",
@@ -497,8 +518,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ]:
                     try:
                         conn.execute(sql_text(stmt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 try:
                     conn.execute(
                         sql_text(
@@ -513,8 +535,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(
                         sql_text(
@@ -532,8 +555,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # SQLite-only compatibility for migration-less unit fixtures.
                 # PostgreSQL schema remains Alembic-owned.
                 try:
@@ -565,8 +589,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(
                         sql_text(
@@ -579,8 +604,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Drift daily metrics (SQLite fallback for tests/dev)
                 try:
                     conn.execute(
@@ -599,8 +625,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(
                         sql_text(
@@ -617,8 +644,9 @@ def _ensure_minimal_sqlite_tables(bind):
                             ")"
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Ensure common columns exist on human_review_tasks for older test DBs
                 for stmt in [
                     "ALTER TABLE human_review_tasks ADD COLUMN decision_id TEXT",
@@ -630,8 +658,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ]:
                     try:
                         conn.execute(sql_text(stmt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 # Backfill missing columns for existing minimal tables
                 for stmt in [
                     "ALTER TABLE decision_logs ADD COLUMN tenant_id TEXT",
@@ -655,8 +684,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ]:
                     try:
                         conn.execute(sql_text(stmt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
 
                 try:
                     conn.execute(sql_text(
@@ -672,8 +702,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  approved_at TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
 
                 try:
                     conn.execute(sql_text(
@@ -687,8 +718,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  tenant_id TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS decision_audits (\n"
@@ -702,8 +734,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  prev_hash TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # C01: add hash chain columns if missing (migration for existing DBs)
                 for stmt in (
                     "ALTER TABLE decision_audits ADD COLUMN record_hash TEXT",
@@ -711,8 +744,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ):
                     try:
                         conn.execute(sql_text(stmt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 # Playbook execution state (SQLite fallback for tests/dev)
                 try:
                     conn.execute(sql_text(
@@ -732,8 +766,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  ended_at TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS playbook_run_steps (\n"
@@ -746,8 +781,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT NOT NULL\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Playbook action reliability tables (retry/idempotency/DLQ)
                 try:
                     conn.execute(sql_text(
@@ -764,8 +800,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT NOT NULL\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS playbook_action_dlq (\n"
@@ -779,13 +816,15 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT NOT NULL\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_playbook_action_exec_idem ON playbook_action_executions(idempotency_key)"))
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_playbook_action_dlq_run ON playbook_action_dlq(run_id, step_index)"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Immutable audit hash chain
                 try:
                     conn.execute(sql_text(
@@ -799,18 +838,21 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT NOT NULL\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_audit_log_chain_created ON audit_log_chain(created_at)"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_playbook_runs_trace ON playbook_runs(trace_id)"))
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_playbook_runs_playbook ON playbook_runs(playbook_id, playbook_version)"))
                     conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_playbook_run_steps_run ON playbook_run_steps(run_id, step_index)"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Decision trace events table for observability/testing
                 try:
                     conn.execute(sql_text(
@@ -827,21 +869,46 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE decision_trace_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
+                # Minimal customers table for SQLite tests
+                try:
+                    conn.execute(sql_text(
+                        "CREATE TABLE IF NOT EXISTS customers (\n"
+                        "  id TEXT PRIMARY KEY,\n"
+                        "  tenant_id TEXT,\n"
+                        "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
+                        "  email TEXT,\n"
+                        "  name TEXT,\n"
+                        "  phone TEXT,\n"
+                        "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
+                        ")"
+                    ))
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
+                try:
+                    conn.execute(sql_text("ALTER TABLE customers ADD COLUMN phone TEXT"))
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # PII encrypted fields (compat; plaintext columns retained for fallback)
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email_hash TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email_encrypted TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 for _stmt in (
                     "ALTER TABLE orders ADD COLUMN tenant_id TEXT",
                     "ALTER TABLE orders ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
@@ -858,34 +925,31 @@ def _ensure_minimal_sqlite_tables(bind):
                 ):
                     try:
                         conn.execute(sql_text(_stmt))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE INDEX IF NOT EXISTS idx_orders_stripe_intent ON orders(stripe_intent_id)"
                     ))
-                except Exception:
-                    pass
-                try:
-                    conn.execute(sql_text("ALTER TABLE cases ADD COLUMN guest_email_hash TEXT"))
-                except Exception:
-                    pass
-                try:
-                    conn.execute(sql_text("ALTER TABLE cases ADD COLUMN guest_email_encrypted TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE customers ADD COLUMN email_hash TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE customers ADD COLUMN email_encrypted TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE customers ADD COLUMN phone_encrypted TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Cases and CV-related tables for complaint triage
                 try:
                     conn.execute(sql_text(
@@ -902,17 +966,20 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Ensure PII columns exist on cases table (added after creation)
                 try:
                     conn.execute(sql_text("ALTER TABLE cases ADD COLUMN guest_email_hash TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text("ALTER TABLE cases ADD COLUMN guest_email_encrypted TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS cv_analyses (\n"
@@ -932,8 +999,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS customer_trust_scores (\n"
@@ -947,8 +1015,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  expires_at TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS fraud_image_hashes (\n"
@@ -959,8 +1028,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS return_labels (\n"
@@ -976,8 +1046,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  delivered_at TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Minimal catalog tables for SQLite tests
                 try:
                     conn.execute(sql_text(
@@ -997,8 +1068,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Backfill columns on existing tables if created before schema update.
                 # product_type/brand/category/attributes are the agnostic-core keystone
                 # (the brand/category cols candidate_retriever + upsell already SELECT).
@@ -1008,8 +1080,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ):
                     try:
                         conn.execute(sql_text(f"ALTER TABLE products ADD COLUMN {_col} {_type}"))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory (\n"
@@ -1020,8 +1093,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Phase 5: inventory sync (SQLite fallback for tests/dev)
                 try:
                     conn.execute(sql_text(
@@ -1040,8 +1114,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  error TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 for _sync_col, _sync_type in (
                     ("heartbeat_at", "TEXT"),
                     ("budget_deadline_at", "TEXT"),
@@ -1054,8 +1129,9 @@ def _ensure_minimal_sqlite_tables(bind):
                                 f"ADD COLUMN {_sync_col} {_sync_type}"
                             )
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory_external_stock (\n"
@@ -1069,31 +1145,14 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  raw_json TEXT\n"
                         ")"
                     ))
-                except Exception:
-                    pass
-                # Minimal customers table for SQLite tests
-                try:
-                    conn.execute(sql_text(
-                        "CREATE TABLE IF NOT EXISTS customers (\n"
-                        "  id TEXT PRIMARY KEY,\n"
-                        "  tenant_id TEXT,\n"
-                        "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
-                        "  email TEXT,\n"
-                        "  name TEXT,\n"
-                        "  phone TEXT,\n"
-                        "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
-                        ")"
-                    ))
-                except Exception:
-                    pass
-                try:
-                    conn.execute(sql_text("ALTER TABLE customers ADD COLUMN phone TEXT"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 try:
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Idempotency keys storage for write endpoint deduplication
                 try:
                     conn.execute(sql_text(
@@ -1105,8 +1164,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 for statement in (
                     "ALTER TABLE idempotency_keys ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
                     "ALTER TABLE idempotency_keys ADD COLUMN response_status INT",
@@ -1118,8 +1178,9 @@ def _ensure_minimal_sqlite_tables(bind):
                 ):
                     try:
                         conn.execute(sql_text(statement))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
                 # Per-tenant retention policy configuration
                 try:
                     conn.execute(sql_text(
@@ -1130,8 +1191,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # DREAD calibration log — stores predicted vs actual damage for Bayesian tuning
                 try:
                     conn.execute(sql_text(
@@ -1153,8 +1215,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
                 # Persistent risk register snapshots for GRC audit trail
                 try:
                     conn.execute(sql_text(
@@ -1173,10 +1236,15 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        errors.append(type(exc).__name__)
+    except Exception as exc:
+        if "duplicate column name" not in str(exc).lower():
+            errors.append(type(exc).__name__)
+    if errors:
+        logging.getLogger(__name__).warning("SQLite compatibility bootstrap incomplete: %s", sorted(set(errors)))
+    return not errors
 
 
 @contextmanager
@@ -1199,6 +1267,8 @@ def db_session():
         eng = engine
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng, future=True)
     session = SessionLocal()
+    from src.app.platform.tenant_session import bind_session_tenant
+    bind_session_tenant(session)
     # Best-effort: ensure minimal SQLite tables exist for tests that don't apply schema
     try:
         _ensure_minimal_sqlite_tables(session.bind)
@@ -1231,18 +1301,6 @@ def db_session():
 
         if s is not None:
             s = re.sub(r"\bnow\s*\(\s*\)", "CURRENT_TIMESTAMP", s, flags=re.IGNORECASE)
-            # When using the SQLite fallback during tests, many test cases
-            # insert the same primary keys across the suite. Convert plain
-            # INSERTs into INSERT OR REPLACE to avoid UNIQUE constraint
-            # failures while preserving semantics for the test harness.
-            try:
-                if (
-                    "sqlite" in str(session.bind.dialect.name).lower()
-                    and not re.search(r"\bON\s+CONFLICT\b", s, flags=re.IGNORECASE)
-                ):
-                    s = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", s, flags=re.IGNORECASE)
-            except Exception:
-                pass
             statement = sql_text(s)
         start = _time.perf_counter()
         result = orig_execute(statement, *args, **kwargs)
@@ -1368,6 +1426,8 @@ def get_db_for_request(request: Request | None = None):
         # Always create a fresh sessionmaker bound to eng (module engine)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng, future=True)
     session = SessionLocal()
+    from src.app.platform.tenant_session import bind_session_tenant
+    bind_session_tenant(session)
     try:
         # Ensure minimal tables exist for SQLite binds so route handlers using
         # Depends(get_db) can safely operate in test environments.
@@ -1460,4 +1520,3 @@ async def async_db_op(fn, *args, **kwargs):
             return fn(_db, *args, **kwargs)
 
     return await asyncio.to_thread(_run)
-

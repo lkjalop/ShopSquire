@@ -775,6 +775,8 @@ def _restore_db_engine():
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
         original_engine = get_engine()
         original_session_factory = db_module.SessionLocal
+        with _SINGLETONS_LOCK:
+            original_app_urls = set(_SINGLETONS)
     except Exception:
         yield
         return
@@ -790,6 +792,11 @@ def _restore_db_engine():
             os.environ["DATABASE_URL_RO"] = original_database_url_ro
         import src.app.models.db as db_module
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
+        # Per-test DATABASE_URLs must not retain a full app/engine forever.
+        # Apps installed by session/module fixtures before this test survive.
+        with _SINGLETONS_LOCK:
+            temporary_apps = [_SINGLETONS.pop(url) for url in list(_SINGLETONS)
+                              if url not in original_app_urls]
         engine_changed = get_engine() is not original_engine
         session_factory_changed = db_module.SessionLocal is not original_session_factory
         with _SINGLETONS_LOCK:
@@ -802,13 +809,20 @@ def _restore_db_engine():
             set_engine(original_engine)
         if session_factory_changed:
             db_module.SessionLocal = original_session_factory
+        for temporary_app in temporary_apps:
+            temporary_engine = getattr(getattr(temporary_app, 'state', None), 'engine', None)
+            if (temporary_engine is not None and temporary_engine is not original_engine
+                    and getattr(temporary_app.state, 'owns_engine', False)):
+                temporary_engine.dispose()
         if engine_changed or session_factory_changed or app_state_changed:
             # Re-align all singleton app.state.engine so that request handlers
             # use the same engine as db_session() after restoration.
             with _SINGLETONS_LOCK:
                 for _app_inst in _SINGLETONS.values():
                     try:
-                        _app_inst.state.engine = original_engine
+                        if _app_inst.state.engine is not original_engine:
+                            _app_inst.state.engine = original_engine
+                            _app_inst.state.owns_engine = False
                     except Exception:
                         pass
             # Reset one-time table-ready flags so they re-create tables on the
