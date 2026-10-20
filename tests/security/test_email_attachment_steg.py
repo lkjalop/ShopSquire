@@ -32,7 +32,7 @@ def _clean_png_bytes(width: int = 8, height: int = 8) -> bytes:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return buf.getvalue()
-    except Exception:
+    except ImportError:
         pytest.skip("Pillow not available")
 
 
@@ -44,12 +44,12 @@ def _steg_png_bytes(width: int = 64, height: int = 64) -> bytes:
         rng = np.random.default_rng(42)
         arr = rng.integers(0, 256, (height, width, 3), dtype=np.uint8)
         # Force LSBs to be fully random (maximise entropy, mimic steg tool output)
-        arr = (arr & ~1) | rng.integers(0, 2, (height, width, 3), dtype=np.uint8)
+        arr = (arr & np.uint8(0xFE)) | rng.integers(0, 2, (height, width, 3), dtype=np.uint8)
         img = Image.fromarray(arr, "RGB")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return buf.getvalue()
-    except Exception:
+    except ImportError:
         pytest.skip("numpy/Pillow not available")
 
 
@@ -58,12 +58,16 @@ def _b64(data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-#  Steg test images from dump/test-sec (used in prior assessment suite)
+#  Owned inert fixtures are generated from the committed embedding utility.
 # ---------------------------------------------------------------------------
 
-_STEG_DIR = Path(__file__).parents[2] / "dump" / "test-sec"
-_LOLBIN_IMG = _STEG_DIR / "steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png"
-_PROMPT_INJ_IMG = _STEG_DIR / "steg-prompt_injection_hidden-Dell_15_DC15255.png"
+@pytest.fixture(scope="module")
+def email_steg_corpus(tmp_path_factory):
+    from tests.image_security_fixtures import generate_steg_corpus
+
+    directory = tmp_path_factory.mktemp("email-steg-inputs") / "corpus"
+    generate_steg_corpus(directory)
+    return directory
 
 
 # ===========================================================================
@@ -113,15 +117,14 @@ class TestEmailAttachmentStegParser:
         # but score must be a valid float in [0, 1]
         assert 0.0 <= att["steg_score"] <= 1.0
 
-    @pytest.mark.skipif(not _LOLBIN_IMG.exists(), reason="steg test image not available")
-    def test_known_steg_lolbin_image_flagged(self):
+    def test_generated_steg_lolbin_image_flagged(self, email_steg_corpus):
         from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
 
-        img_bytes = _LOLBIN_IMG.read_bytes()
+        img_bytes = (email_steg_corpus / "lolbin_command_sequence.png").read_bytes()
         email = {
             "attachments": [
                 {
-                    "name": _LOLBIN_IMG.name,
+                    "name": "lolbin_command_sequence.png",
                     "content_type": "image/png",
                     "content_b64": _b64(img_bytes),
                 }
@@ -131,17 +134,16 @@ class TestEmailAttachmentStegParser:
         att = result["attachments"][0]
         assert att.get("steg_score", 0) > 0, "LOLBin steg image must have non-zero steg_score"
         # Score may or may not cross threshold per image size, but must be present
-        assert "steg_suspicious" in att
+        assert att["steg_suspicious"] is True
 
-    @pytest.mark.skipif(not _PROMPT_INJ_IMG.exists(), reason="steg test image not available")
-    def test_known_steg_prompt_injection_image_flagged(self):
+    def test_generated_steg_prompt_injection_image_flagged(self, email_steg_corpus):
         from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
 
-        img_bytes = _PROMPT_INJ_IMG.read_bytes()
+        img_bytes = (email_steg_corpus / "prompt_injection_hidden.png").read_bytes()
         email = {
             "attachments": [
                 {
-                    "name": _PROMPT_INJ_IMG.name,
+                    "name": "prompt_injection_hidden.png",
                     "content_type": "image/png",
                     "content_b64": _b64(img_bytes),
                 }
@@ -150,7 +152,7 @@ class TestEmailAttachmentStegParser:
         result = hydrate_attachments_from_bytes(email)
         att = result["attachments"][0]
         assert att.get("steg_score", 0) > 0
-        assert "steg_suspicious" in att
+        assert att["steg_suspicious"] is True
 
     def test_multiple_attachments_each_scanned(self):
         from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
@@ -203,14 +205,13 @@ class TestEmailAttachmentStegParser:
         att = result["attachments"][0]
         assert "steg_score" in att, "CID inline images must be steg-scanned"
 
-    def test_steg_explanations_present_when_suspicious(self):
+    def test_steg_explanations_present_when_suspicious(self, email_steg_corpus):
         from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
         from src.app.security.steg_detector import detect_steganography
 
-        steg_png = _steg_png_bytes(128, 128)
+        steg_png = (email_steg_corpus / "prompt_injection_hidden.png").read_bytes()
         steg_result = detect_steganography(steg_png)
-        if not steg_result.is_suspicious:
-            pytest.skip("Synthetic high-entropy image did not trigger threshold — test is vacuous")
+        assert steg_result.is_suspicious, ("Synthetic high-entropy image did not trigger threshold — test is vacuous")
 
         email = {
             "attachments": [
@@ -219,12 +220,12 @@ class TestEmailAttachmentStegParser:
         }
         result = hydrate_attachments_from_bytes(email)
         att = result["attachments"][0]
-        if att.get("steg_suspicious"):
-            assert len(att.get("steg_explanations") or []) > 0, "Suspicious image must have explanations"
-            sig = att.get("steg_signals") or {}
-            assert "lsb_entropy_r" in sig
-            assert "chi_square_p" in sig
-            assert "spa_estimate" in sig
+        assert att["steg_suspicious"] is True
+        assert len(att.get("steg_explanations") or []) > 0, "Suspicious image must have explanations"
+        sig = att.get("steg_signals") or {}
+        assert "lsb_entropy_r" in sig
+        assert "chi_square_p" in sig
+        assert "spa_estimate" in sig
 
     def test_content_b64_stripped_from_output(self):
         """Ensure raw attachment bytes are never persisted in the output dict."""
@@ -332,8 +333,8 @@ class TestPerTenantStegThreshold:
         result = detect_steganography(steg_png, threshold=0.01)
         # At threshold 0.01 any non-zero composite score should trip flag
         assert isinstance(result.steg_score, float)
-        # We can't guarantee the score is >0.01 for all synthetic images but the API must work
-        assert result is not None
+        assert result.steg_score > 0.01
+        assert result.is_suspicious is True
 
 
 # ===========================================================================
