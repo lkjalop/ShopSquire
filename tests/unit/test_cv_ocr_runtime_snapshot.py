@@ -57,6 +57,10 @@ def test_auto_snapshot_skips_paddle_when_tesseract_leg_ready(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", _spy_import)
     monkeypatch.setattr(main_mod.shutil, "which", lambda cmd: "C:/fake/tesseract.exe")
+    import importlib.util
+    original_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args: types.SimpleNamespace() if name == "pytesseract" else original_spec(name, *args))
+    monkeypatch.setattr(main_mod.subprocess, "run", lambda *args, **kwargs: types.SimpleNamespace(returncode=0))
     snap = main_mod._cv_ocr_runtime_snapshot("auto")
     assert snap.get("ready") is True
     assert "paddleocr" not in attempted
@@ -74,6 +78,9 @@ def test_cv_ocr_runtime_snapshot_tesseract_requires_binary(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", _fake_import)
     monkeypatch.setattr(main_mod.shutil, "which", lambda cmd: None)
+    import importlib.util
+    original_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args: types.SimpleNamespace() if name == "pytesseract" else original_spec(name, *args))
     snap = main_mod._cv_ocr_runtime_snapshot("tesseract")
     assert snap.get("provider") == "tesseract"
     assert snap.get("ready") is False

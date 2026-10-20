@@ -19,6 +19,8 @@ def local_paddle_models():
         if path.stat().st_size > 65536:
             raise ValueError('manifest too large')
         manifest = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(manifest, dict):
+            raise ValueError('manifest mapping required')
         result = {}
         for kind, prefix in (('detector', 'text_detection'), ('recognizer', 'text_recognition')):
             item = manifest[kind]
@@ -27,6 +29,8 @@ def local_paddle_models():
                 raise ValueError('invalid model identity')
             directory = Path(item['directory']).resolve(strict=True)
             files = item['files']
+            if not isinstance(files, dict):
+                raise ValueError('model file mapping required')
             if not directory.is_dir() or set(files) != {'inference.json', 'inference.pdiparams', 'inference.yml'}:
                 raise ValueError('complete model files required')
             total = 0
