@@ -155,6 +155,14 @@ def pytest_runtest_logfinish(nodeid, location):  # noqa: ARG001
 
 _SINGLETONS: dict[str, object] = {}
 _SINGLETONS_LOCK = threading.Lock()
+_BOOTSTRAP_DATABASE_DIRECTORY = None
+
+
+def _session_applications():
+    """Include the public module app, even if a test evicted its cache entry."""
+    import src.app.main as main_module
+
+    return list({id(app): app for app in [main_module.app, *_SINGLETONS.values()]}.values())
 
 
 def _get_or_create_app_for_url() -> object:
@@ -174,6 +182,14 @@ def _get_or_create_app_for_url() -> object:
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """Install the per-URL singleton factory before any test module is imported."""
+    # Importing main constructs its public app. Own that bootstrap database
+    # before .env loading can direct schema initialization at a developer DB.
+    global _BOOTSTRAP_DATABASE_DIRECTORY
+    if os.getenv("TEST_USE_PROVIDED_DATABASE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        _BOOTSTRAP_DATABASE_DIRECTORY = tempfile.TemporaryDirectory(prefix="shopsquire-pytest-bootstrap-")
+        bootstrap_url = "sqlite+pysqlite:///" + str(Path(_BOOTSTRAP_DATABASE_DIRECTORY.name) / "bootstrap.sqlite")
+        os.environ["DATABASE_URL"] = bootstrap_url
+        os.environ["DATABASE_URL_RO"] = bootstrap_url
     # Collection-time app creation must also use disposable flags. Never repair
     # the developer's tracked/runtime configuration as a side effect of pytest.
     isolated_flags = Path(tempfile.mkdtemp(prefix="shopsquire-pytest-flags-")) / "flags.json"
@@ -438,22 +454,25 @@ def pytest_sessionstart(session):
         from src.app.models.db import set_engine as _set_engine
         _session_eng = _create_engine(session_db_url, pool_pre_ping=True, future=True)
         _set_engine(_session_eng)
-        # Pre-populate the singleton for the session URL so the first
-        # create_app() call reuses this engine rather than creating a new one.
+        # The public module app is also used directly by integration tests.
+        # Rebind it before collection, and reuse it as the session singleton.
+        import src.app.main as _m  # noqa: PLC0415
         with _SINGLETONS_LOCK:
-            if session_db_url not in _SINGLETONS:
-                import src.app.main as _m  # noqa: PLC0415
-                _SINGLETONS[session_db_url] = _m._original_create_app()
+            _SINGLETONS[session_db_url] = _m.app
         # Align ALL singleton apps' app.state.engine so that db_session()
         # inside request handlers uses the session DB engine.
         # Tests with their own module-specific engines (e.g. StaticPool) should
         # override app.state.engine in their own test bodies and restore it when done.
         with _SINGLETONS_LOCK:
-            for _app_inst in _SINGLETONS.values():
-                try:
-                    _app_inst.state.engine = _session_eng
-                except Exception:
-                    pass
+            for _app_inst in _session_applications():
+                previous_engine = getattr(_app_inst.state, "engine", None)
+                if previous_engine is not _session_eng and getattr(_app_inst.state, "owns_engine", False):
+                    previous_engine.dispose()
+                _app_inst.state.engine = _session_eng
+                _app_inst.state.owns_engine = False
+        _set_engine(_session_eng)
+        if _BOOTSTRAP_DATABASE_DIRECTORY is not None:
+            _BOOTSTRAP_DATABASE_DIRECTORY.cleanup()
         # Also ensure the schema exists in the session DB (the stale singleton's
         # ensure_metadata() may have run against a different engine).
         try:
@@ -850,7 +869,7 @@ def _restore_db_engine():
             app_state_changed = any(
                 getattr(getattr(_app_inst, "state", None), "engine", None)
                 is not original_engine
-                for _app_inst in _SINGLETONS.values()
+                for _app_inst in _session_applications()
             )
         if engine_changed:
             set_engine(original_engine)
@@ -865,7 +884,7 @@ def _restore_db_engine():
             # Re-align all singleton app.state.engine so that request handlers
             # use the same engine as db_session() after restoration.
             with _SINGLETONS_LOCK:
-                for _app_inst in _SINGLETONS.values():
+                for _app_inst in _session_applications():
                     try:
                         if _app_inst.state.engine is not original_engine:
                             _app_inst.state.engine = original_engine
