@@ -52,7 +52,7 @@ def test_explicit_consent_is_forwarded_without_restoring_v1_authority(monkeypatc
 
     captured = {}
 
-    def fake_v2_compatibility(*, request, params, redis, db, role):
+    def fake_v2_compatibility(*, request, params, redis, db, role, response):
         captured.update(params)
         return {
             "assistant_message": "V2 compatibility response",

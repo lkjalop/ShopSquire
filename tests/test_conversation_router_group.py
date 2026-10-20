@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.bootstrap.conversation_router_group import register_conversation_router_group
 
@@ -6,7 +7,7 @@ from src.app.bootstrap.conversation_router_group import register_conversation_ro
 def test_conversation_group_registers_required_surfaces_without_silent_skip() -> None:
     app = FastAPI()
     registered = register_conversation_router_group(app)
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_route_contexts(app.routes)}
 
     assert registered == (
         "support_complaints", "chat", "chat_stream", "safe_links",

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 
@@ -6,7 +7,7 @@ from src.app.bootstrap.intelligence_router_group import register_intelligence_ro
 def test_intelligence_router_group_registers_expected_surfaces():
     app = FastAPI()
     registered = register_intelligence_router_group(app)
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_route_contexts(app.routes)}
     assert "session_events" in registered
     assert "hippograph" in registered
     assert "market_ingestion_admin" in registered

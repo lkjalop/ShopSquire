@@ -184,7 +184,9 @@ def test_cart_age_warm_when_carried_over(client_with_stock):
     from src.app.models.db import db_session
 
     uid = "age-carried-user"
-    client_with_stock.post("/api/v1/cart/items", json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 1})
+    added = client_with_stock.post("/api/v1/cart/items", json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 1})
+    assert added.status_code == 200, added.text
+    assert any(item["sku"] == "SKU-INSTOCK-5" and item["quantity"] == 1 for item in added.json()["items"])
     ts = (datetime.utcnow() - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
     with db_session() as db:
         db.execute("UPDATE draft_orders SET updated_at = :ts WHERE customer_id = :uid", {"ts": ts, "uid": uid})

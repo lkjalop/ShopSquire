@@ -1,9 +1,6 @@
 from fastapi.testclient import TestClient
-import json
-import os
 from tests.utils import default_headers
 
-import pytest
 
 from src.app.main import create_app
 
@@ -12,26 +9,6 @@ app = create_app()
 
 
 client = TestClient(app, headers=default_headers())
-
-
-_FLAGS_PATH = os.path.join("config", "feature_flags.json")
-try:
-    with open(_FLAGS_PATH, "r", encoding="utf-8") as _f:
-        _ORIGINAL_FLAGS = _f.read()
-except Exception:
-    _ORIGINAL_FLAGS = ""
-
-
-def _write_flags(flags: dict):
-    with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
-        json.dump(flags, f, ensure_ascii=False, indent=2)
-
-
-@pytest.fixture(autouse=True)
-def _restore_flags():
-    yield
-    with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
-        f.write(_ORIGINAL_FLAGS)
 
 
 def test_kill_switch_blocks_pricing(monkeypatch):

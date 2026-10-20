@@ -1,7 +1,7 @@
-import asyncio
 from types import SimpleNamespace
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from src.app.bootstrap import security_background_lifecycle as lifecycle
 
@@ -18,15 +18,17 @@ def test_background_lifecycle_records_registration_and_runtime_failure(monkeypat
     monkeypatch.setattr(lifecycle, "SECURITY_BACKGROUND_SERVICES", (
         lifecycle.BackgroundServiceRegistration("one", "fake.module", "start", "stop"),
     ))
+    original_import = lifecycle.importlib.import_module
     monkeypatch.setattr(
         lifecycle.importlib, "import_module",
-        lambda _name: SimpleNamespace(start=start, stop=stop),
+        lambda name, *a, **kw: (SimpleNamespace(start=start, stop=stop)
+                              if name == "fake.module" else original_import(name, *a, **kw)),
     )
     app = FastAPI()
 
     assert lifecycle.register_security_background_lifecycle(app) == ("one",)
-    asyncio.run(app.router.startup())
-    asyncio.run(app.router.shutdown())
+    with TestClient(app):
+        pass
 
     assert calls == [("start", app)]
     assert app.state.security_background_import_failures == ()

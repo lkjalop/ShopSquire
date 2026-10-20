@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.bootstrap.operational_router_group import register_operational_router_group
 
@@ -7,7 +8,7 @@ def test_operational_router_group_registers_required_surfaces():
     app = FastAPI()
 
     registered = register_operational_router_group(app)
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_route_contexts(app.routes)}
 
     assert registered == (
         "query", "audit", "posthoc", "health", "api_version",
