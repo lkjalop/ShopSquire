@@ -129,6 +129,21 @@ class ShoppingCase(Base):
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
+class ShoppingCaseContractSelection(Base):
+    __tablename__ = "shopping_case_contract_selections"
+    __table_args__ = (UniqueConstraint("tenant_id", "case_id", "case_revision", name="uq_case_contract_revision"),)
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    uid: Mapped[str] = mapped_column(Text)
+    case_revision: Mapped[int] = mapped_column(Integer)
+    contract_id: Mapped[str] = mapped_column(Text)
+    contract_revision: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[dict] = mapped_column(JSON)
+    selected_at: Mapped[str] = mapped_column(TIMESTAMP)
+    revoked_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
 class ShoppingCaseInterpretationJob(Base):
     """Durable, revision-bound advisory interpretation work."""
 
@@ -296,6 +311,7 @@ class ShoppingCaseFulfillmentSelection(Base):
     available_now: Mapped[int] = mapped_column(Integer)
     offers_json: Mapped[list] = mapped_column(JSON)
     selection_idempotency_key: Mapped[str] = mapped_column(Text)
+    request_digest: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_offer_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     confirmation_idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     cart_plan_id: Mapped[str | None] = mapped_column(Text, nullable=True)

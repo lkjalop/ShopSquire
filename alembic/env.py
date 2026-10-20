@@ -21,7 +21,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 # Interpret the config file for Python logging.
-fileConfig(config.config_file_name)
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Prefer DATABASE_URL from environment or application settings
 db_url = os.getenv("DATABASE_URL")
@@ -53,6 +53,29 @@ for import_path in (
                 break
     except Exception:
         continue
+
+
+def assert_preserving_downgrade(current_heads):
+    """Reject protected plans before SQLite can commit any destructive DDL."""
+    from alembic.script import ScriptDirectory
+    from alembic.script.revision import RangeNotAncestorError
+    from alembic.util import CommandError
+
+    if not current_heads:
+        return
+    script = ScriptDirectory.from_config(config)
+    try:
+        planned = list(script.iterate_revisions(
+            current_heads, context.get_revision_argument(), select_for_downgrade=True,
+        ))
+    except RangeNotAncestorError:
+        # The destination is newer than the database: this is an upgrade.
+        return
+    protected = [revision.revision for revision in planned
+                 if getattr(revision.module, 'preserve_history_on_downgrade', False)]
+    if protected:
+        raise CommandError('Downgrade requires a reviewed data-preserving recovery plan; '
+                           'no downgrade steps started. Protected revisions: ' + ', '.join(protected))
 
 
 def run_migrations_offline():
@@ -113,6 +136,7 @@ def run_migrations_online():
         )
 
         with context.begin_transaction():
+            assert_preserving_downgrade(context.get_context().get_current_heads())
             context.run_migrations()
         # Run post-migration hook if present
         try:
