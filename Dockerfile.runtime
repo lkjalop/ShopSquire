@@ -1,13 +1,19 @@
 # Deployable runtime profiles. The API target deliberately excludes local ML
 # training/evaluation and OCR engines; vision workloads use the vision target.
-FROM python:3.11-slim AS api-runtime
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS api-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DEFAULT_TIMEOUT=120
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements /app/requirements
-RUN pip install --no-cache-dir --retries 5 -r /app/requirements/api-runtime.txt
+COPY pyproject.toml poetry.lock /app/
+COPY config/runtime_dependency_profiles.json /app/config/runtime_dependency_profiles.json
+COPY scripts/generate_runtime_requirements.py /app/scripts/generate_runtime_requirements.py
+RUN python -m pip install --disable-pip-version-check --no-cache-dir --retries 5 -r /app/requirements/bootstrap-runtime.txt \
+    && python -m pip install --disable-pip-version-check --no-cache-dir --retries 5 -r /app/requirements/api-runtime.txt \
+    && python /app/scripts/generate_runtime_requirements.py --platform linux --profile api-runtime --check \
+    && python -m pip check
 RUN addgroup --system shopsquire \
     && adduser --system --uid 1000 --ingroup shopsquire shopsquire
 COPY --chown=shopsquire:shopsquire src /app/src
@@ -18,7 +24,8 @@ COPY --chown=shopsquire:shopsquire db /app/db
 COPY --chown=shopsquire:shopsquire data /app/data
 COPY --chown=shopsquire:shopsquire scripts /app/scripts
 COPY --chown=shopsquire:shopsquire static /app/static
-RUN chmod +x /app/scripts/docker_entrypoint.sh
+RUN sed -i 's/\r$//' /app/scripts/docker_entrypoint.sh \
+    && chmod +x /app/scripts/docker_entrypoint.sh
 USER shopsquire
 EXPOSE 8080
 ENTRYPOINT ["/app/scripts/docker_entrypoint.sh"]
@@ -32,7 +39,10 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng libzbar0 libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir --retries 5 -r /app/requirements/vision-runtime.txt
+RUN python -m pip install --disable-pip-version-check --no-cache-dir --retries 5 -r /app/requirements/vision-runtime.txt \
+    && python /app/scripts/generate_runtime_requirements.py --platform linux --profile vision-runtime --check \
+    && python -m pip check
+ENV HOME=/tmp/shopsquire-home PADDLE_PDX_CACHE_HOME=/tmp/paddlex XDG_CACHE_HOME=/tmp/.cache
 USER shopsquire
 
 FROM vision-runtime-root AS vision-runtime

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 # Docker entrypoint for ShopSquire API.
 # - Runs Alembic migrations on startup (configurable)
