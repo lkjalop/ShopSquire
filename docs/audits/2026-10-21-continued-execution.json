@@ -1,0 +1,1424 @@
+{
+  "recorded_at": "2026-10-20T13:09:44.599342+00:00",
+  "checkpoint_head": "f0ec1e74f4341ebed2a298ddf2778d8b0e6b9f79",
+  "assessment": "Execution continues; release is not certified",
+  "commits": [
+    "f0ec1e74 fix(privacy): scope redaction and report interrupted or incomplete work",
+    "4929bc4d test(browser): isolate the backend process and explicit checkout profiles",
+    "2b007d9f test(routes): inspect effective contexts for nested router ownership",
+    "645e8f78 test(runtime): release unreachable app cycles after fixture ownership cleanup",
+    "8cc6c3ea fix(citations): scope claim learning and optional admin reads by tenant",
+    "f5368104 build(runtime): install pinned profiles and verify owned HTTP in CI",
+    "e032bee3 fix(privacy): match decision ownership by exact JSON subject",
+    "85e7513d fix(ocr): verify provider prerequisites without loading inference in readiness",
+    "0a5abf68 fix(deps): upgrade vulnerable evaluator transitives with verified NumPy 2 profiles",
+    "8ca02b42 test: register one owned security runtime before cross-directory collection",
+    "9fb2215c test(security): own the migrated HTTP runtime without replacing parent state",
+    "2de7d989 fix(privacy): isolate controller state and reject unacknowledged storage",
+    "77b2787b docs: record runtime OCR browser evidence and remaining dependency gaps",
+    "18e3f469 fix: preserve UTF-8 application factory diagnostics",
+    "5a84ac43 fix(runtime): bound observer workers and retain shutdown ownership",
+    "8adeddf2 fix(vision): pin one OpenCV owner and verify isolated Paddle CPU inference",
+    "f24159df test(security): remove collection-time database engine replacement",
+    "ab4b7296 fix(security): isolate observer transactions from request business work",
+    "ea4442a6 Rebuild case task display snapshots from canonical facts instead of saved views",
+    "5262e30d Record verified roadmap execution delta and remaining release gates",
+    "559aea5a Deliver owned case email drafts and cited market reads without advancing material revisions",
+    "037a9028 Deliver scoped current market citations and expose provider failures",
+    "36007573 Initialize SQLite schema once per owned pool and preserve insert integrity",
+    "b590323d Own ASGI worker cleanup and bound HTTP metric resource usage",
+    "cd7df1e8 Bind first and replacement upload proposals to the final owned case",
+    "3c19dd49 Upgrade pinned runtime and test profiles with nested admin authorization compatibility",
+    "0474709b Keep trusted evidence review bound to its owned shopping case",
+    "ec383e17 Preserve pending workload and evidence intake continuity during router outages",
+    "da532ace Integrate tenant-scoped native buyer access with verified frontend type prerequisites",
+    "1d9a1408 Release incident transactions before alert writes and own scheduler workers"
+  ],
+  "committed_source_delta": {
+    "production": {
+      "files": 32,
+      "insertions": 1594,
+      "deletions": 695
+    },
+    "tests": {
+      "files": 50,
+      "insertions": 2787,
+      "deletions": 508
+    },
+    "frontend": {
+      "files": 15,
+      "insertions": 76,
+      "deletions": 14
+    }
+  },
+  "inventory": {
+    "recorded_at": "2026-10-20T13:07:46.226184+00:00",
+    "head": "f0ec1e74f4341ebed2a298ddf2778d8b0e6b9f79",
+    "branch": "checkpoint/turn-state-consolidation-20260830",
+    "git_status_entries": 567,
+    "tracked_changed": 277,
+    "untracked": 290,
+    "staged": 0,
+    "files": 5665,
+    "text_lines": 974500,
+    "by_root": {
+      ".codex-logs": 23,
+      ".dockerignore": 1,
+      ".env.example": 1,
+      ".gitattributes": 1,
+      ".github": 20,
+      ".gitignore": 1,
+      ".tmp": 2,
+      ".vscode": 2,
+      "BUSINESS_CASE_AND_VALUATION.md": 1,
+      "CAREER_EVIDENCE.md": 1,
+      "CHANGES.md": 1,
+      "Dockerfile": 1,
+      "Dockerfile.kind-smoke": 1,
+      "Dockerfile.runtime": 1,
+      "Dockerfile.web": 1,
+      "EMAIL_SECURITY_SHOWCASE.md": 1,
+      "FRONTEND_WIREFRAMES_OPTIONS.md": 1,
+      "IMPLEMENTATION_PRIORITY_BUNDLE.md": 1,
+      "IMPLEMENTATION_STATUS_REPORT.md": 1,
+      "LINKEDIN_SHOWCASE.md": 1,
+      "Makefile": 1,
+      "NEXT_SPRINT_ROADMAP.md": 1,
+      "PROFESSIONAL_ASSESSMENT_REPORT.md": 1,
+      "PROGRESS_UPDATE.md": 1,
+      "PR_DESCRIPTION.md": 1,
+      "README.md": 1,
+      "SHOPSQUIRE_AGENTIC_PLATFORM_COMPREHENSIVE_ANALYSIS.md": 1,
+      "SHOPSQUIRE_COMPLIANCE_AND_SHIFT_LEFT_SECURITY.md": 1,
+      "SHOPSQUIRE_EXPANDED_AI_ML_PLAYBOOK.md": 1,
+      "SHOPSQUIRE_GAPS_AND_IMPROVEMENTS.md": 1,
+      "SHOPSQUIRE_PART1_PLATFORM_DEEP_DIVE.md": 1,
+      "SHOPSQUIRE_PART2_STRATEGY_AND_ROADMAP.md": 1,
+      "SHOPSQUIRE_PLATFORM_AUDIT.md": 1,
+      "SHOPSQUIRE_POSITIONING.md": 1,
+      "SHOPSQUIRE_PRD_v1.md": 1,
+      "SHOPSQUIRE_REPAIR_REPORT_2026-09-15.md": 1,
+      "SHOPsQUIRE_COMPREHENSIVE_ANALYSIS_JAN2026.md": 1,
+      "admin-procurement-text.json": 1,
+      "agentLUMEN v4.0.pdf": 1,
+      "agentLUMEN v4.5.pdf": 1,
+      "agentLUMEN_v4_REALISTIC_MVP.md": 1,
+      "agentLUMEN_v5_CONVERSATIONAL_MEMORY.md": 1,
+      "agentLUMEN_v5_UPDATES_SUMMARY.md": 1,
+      "alembic.ini": 1,
+      "alembic": 160,
+      "archive": 1,
+      "claude.ps1": 1,
+      "competitor_prices_template.csv": 1,
+      "config": 1013,
+      "connectors": 1,
+      "data": 20,
+      "db": 27,
+      "debug_open_ended_script.log": 1,
+      "debug_open_ended_sqlite_script.log": 1,
+      "demo_operator.ps1": 1,
+      "deploy": 1,
+      "docker-compose.dev.yml": 1,
+      "docker-compose.observability.yml": 1,
+      "docker-compose.postgres.yml": 1,
+      "docker-compose.searxng.yml": 1,
+      "docker-compose.secure.yml": 1,
+      "docker-compose.timescaledb.yml": 1,
+      "docker-compose.tls.yml": 1,
+      "docker-compose.yml": 1,
+      "docs": 515,
+      "dump": 10,
+      "env.production.template": 1,
+      "eval": 8,
+      "frontend": 322,
+      "full_pytest_after_finalfix.log": 1,
+      "full_pytest_after_fix.log": 1,
+      "full_pytest_after_flags_fix.log": 1,
+      "full_pytest_after_playbook_fix.log": 1,
+      "full_pytest_after_playbook_isolation_fix.log": 1,
+      "full_pytest_after_remaining6_fix.log": 1,
+      "full_pytest_after_trace_fallback_fix.log": 1,
+      "full_pytest_debug.log": 1,
+      "full_pytest_final.log": 1,
+      "helm": 20,
+      "infra": 15,
+      "late_suite_debug.log": 1,
+      "migration_artifacts": 3,
+      "open_ended_only.log": 1,
+      "open_ended_setup.log": 1,
+      "open_ended_sqlite.log": 1,
+      "openapi.json": 1,
+      "ops": 2,
+      "orchestrator_auto_cv_only.log": 1,
+      "out.txt": 1,
+      "pip_install_out.txt": 1,
+      "poetry.lock": 1,
+      "pretest_db_debug.txt": 1,
+      "pyproject.toml": 1,
+      "pytest.ini": 1,
+      "pytest_exit_code.txt": 1,
+      "remaining6_debug.log": 1,
+      "requirements": 8,
+      "response.json": 1,
+      "runs": 1,
+      "scripts": 281,
+      "sdk": 6,
+      "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
+      "sitecustomize.py": 1,
+      "src": 1320,
+      "start_cart_validation.ps1": 1,
+      "start_demo.ps1": 1,
+      "start_voice_pilot.ps1": 1,
+      "static": 277,
+      "terraform": 4,
+      "tests": 1516,
+      "tmp_ollama_aliases": 3,
+      "trace_unit_hang.log": 1
+    },
+    "python_syntax_errors": [],
+    "functions": 19253,
+    "production_functions_over_200": 99,
+    "broad_production_handlers": 5590,
+    "swallowed_production_handlers": 2034,
+    "blocking_candidates_in_async": 0
+  },
+  "source_map": [
+    {
+      "work_package": "W01",
+      "path": "src/app/main.py",
+      "symbol": "create_app",
+      "line": 186,
+      "function_lines": 2215,
+      "file_lines": 2410,
+      "git_state": "committed",
+      "sha256": "6945ff27d344cc226a6a1220afb0cf5e5aa13e87422fa37dd8645c9fbbc751cb",
+      "remaining": "remaining startup/error paths and scheduler owners"
+    },
+    {
+      "work_package": "W01",
+      "path": "src/app/models/db.py",
+      "symbol": "db_session",
+      "line": 1251,
+      "function_lines": 145,
+      "file_lines": 1551,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "f3bdf03f16544de96019eec541543ede7984e3b5acf95e4380ec262836a0678f",
+      "remaining": "competing transactions, fault recovery and endurance"
+    },
+    {
+      "work_package": "W02",
+      "path": "scripts/generate_runtime_requirements.py",
+      "symbol": "main",
+      "line": 158,
+      "function_lines": 35,
+      "file_lines": 196,
+      "git_state": "committed",
+      "sha256": "bba3d2a36570027429d3a3453f397c974b0c855eff764ecf7945e0dadae13800",
+      "remaining": "default Compose/image capability equivalence and optional dependency risk"
+    },
+    {
+      "work_package": "W03/W05",
+      "path": "src/app/routers/chat.py",
+      "symbol": "_chat_query_impl",
+      "line": 288,
+      "function_lines": 4527,
+      "file_lines": 4890,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "8f487ec594bf8e4becfb3df8c243bb7d3e1e2cc5e8da2fbe5bbd037900a93139",
+      "remaining": "stale intake responses, exact stock-to-draft browser handoff"
+    },
+    {
+      "work_package": "W04",
+      "path": "src/app/services/turn_transition.py",
+      "symbol": "derive_turn_transition",
+      "line": 124,
+      "function_lines": 33,
+      "file_lines": 268,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "f8a686cb7486994076eb5fcb79ddba461a12eac77991ecf70433675f3551028d",
+      "remaining": "refinement, replacement, repeat and reload matrix"
+    },
+    {
+      "work_package": "W05",
+      "path": "src/app/services/supplier_enquiry_journey.py",
+      "symbol": "create",
+      "line": 72,
+      "function_lines": 25,
+      "file_lines": 202,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "780204cf23ca499dd92b5ecfecc9b03ad40254cf2adeef03efee3070c978986e",
+      "remaining": "complete dependency-group integration and exact revised shortfall"
+    },
+    {
+      "work_package": "W06",
+      "path": "src/app/services/market_intelligence_agent.py",
+      "symbol": "gather_market_context",
+      "line": 213,
+      "function_lines": 64,
+      "file_lines": 276,
+      "git_state": "committed",
+      "sha256": "20109cdfa927d8ea849994731dea107806b30a7bc646ec62d3d9191cd7bbd145",
+      "remaining": "useful current cited live observations"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/services/conversation_case_state.py",
+      "symbol": "ensure_case_state",
+      "line": 514,
+      "function_lines": 53,
+      "file_lines": 1094,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "4551a06f6447dfb0b1a144aa246a644dcba264cb72dcc3804d8a10727a0640e4",
+      "remaining": "canonical SQL state erasure and worker recovery"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/routers/privacy.py",
+      "symbol": "_subject_decisions",
+      "line": 81,
+      "function_lines": 26,
+      "file_lines": 671,
+      "git_state": "committed",
+      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "remaining": "indexed exact legacy ownership and large-controller performance"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/routers/privacy.py",
+      "symbol": "delete_user_data",
+      "line": 247,
+      "function_lines": 126,
+      "file_lines": 671,
+      "git_state": "committed",
+      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "remaining": "every retained SQL plane, failure resume and restore policy"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/routers/privacy.py",
+      "symbol": "redact_user_data",
+      "line": 615,
+      "function_lines": 57,
+      "file_lines": 671,
+      "git_state": "committed",
+      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "remaining": "remaining data planes and durable partial-work recovery"
+    },
+    {
+      "work_package": "W08",
+      "path": "src/app/services/inventory_transactions.py",
+      "symbol": "reserve",
+      "line": 134,
+      "function_lines": 22,
+      "file_lines": 208,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "a2fa1912cb8488f3734b479fc0acf79b35f065c1e57117f5706772bbb27ab5d5",
+      "remaining": "migration, contention, expiry and conservation"
+    },
+    {
+      "work_package": "W09",
+      "path": "src/app/services/fulfillment/person_approval.py",
+      "symbol": "validate",
+      "line": 93,
+      "function_lines": 25,
+      "file_lines": 134,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad",
+      "remaining": "complete approval/effect sink matrix"
+    },
+    {
+      "work_package": "W10",
+      "path": "src/app/services/fulfillment/operator_recovery.py",
+      "symbol": "resolve",
+      "line": 23,
+      "function_lines": 32,
+      "file_lines": 54,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "3fb84fc402dfd2f2f724ec1aa542bb40f87a25d263b95301e5d1a21fadaa9cc6",
+      "remaining": "crash windows, reviewed recovery and restore/rollback"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/services/citation_memory.py",
+      "symbol": "get_trusted_claims",
+      "line": 197,
+      "function_lines": 34,
+      "file_lines": 272,
+      "git_state": "committed",
+      "sha256": "e76b215d3b540e641008528ca39ffa97a95e4d7087e13c7517125267dfe95225",
+      "remaining": "remaining runtime DDL/global table readiness ownership"
+    },
+    {
+      "work_package": "W12/W15",
+      "path": "tests/owned_security_runtime.py",
+      "symbol": "_owned_runtime",
+      "line": 48,
+      "function_lines": 84,
+      "file_lines": 162,
+      "git_state": "committed",
+      "sha256": "370b37f44806e353f642a9d0aeb3a505bd4f8c635f4036dcc7b81cee8c9eb0e4",
+      "remaining": "required profiles with isolated processes and persisted detection"
+    },
+    {
+      "work_package": "W13/W15",
+      "path": "tests/conftest.py",
+      "symbol": "_restore_db_engine",
+      "line": 806,
+      "function_lines": 102,
+      "file_lines": 1041,
+      "git_state": "committed",
+      "sha256": "a9b187c182d682eb7a1606076b220656a3dec332f347ce3a18a5c1ee36a0343a",
+      "remaining": "full-run resource validation; not production endurance proof"
+    }
+  ],
+  "targeted_receipts": {
+    "privacy-scope-candidate": {
+      "receipt_sha256": "769182efd79f4b15db11ad1e8fd5e281a07d676ac9a5a5717eb74c9756c2966c",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_privacy_store_scope.py",
+        "tests/services/test_user_data_inventory.py",
+        "tests/api/test_privacy_consent_requests.py",
+        "tests/services/test_memory_scope_contract.py",
+        "tests/services/test_memory_retention_regressions.py",
+        "tests/services/test_semantic_cache_guardrails.py",
+        "tests/services/test_temporal_cache_lifecycle.py",
+        "tests/api/test_chat_case_tasks.py",
+        "-q",
+        "--timeout=45",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-scope-candidate\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-privacy-scope",
+      "native_exit_code": 0,
+      "elapsed_seconds": 49.204,
+      "peaks": {
+        "rss_bytes": 346001408,
+        "handles": 1633,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 53,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "security-owned-runtime-candidate": {
+      "receipt_sha256": "16f723fac9146df6b0f5fd4156a95e8a18215062594b18c5b5dd66f5c333ed7c",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_security_owned_candidate.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-security-owned-runtime",
+      "native_exit_code": 0,
+      "elapsed_seconds": 52.875,
+      "peaks": {
+        "rss_bytes": 341708800,
+        "handles": 1479,
+        "threads": 35
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 23,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "numpy2-verified-candidate": {
+      "receipt_sha256": "be9ab732143ed2693a38d313a9cd7f63e8e3382433ea69d69a16ea27c5b9a4a6",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_numpy2_verified.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-numpy2-verified",
+      "native_exit_code": 0,
+      "elapsed_seconds": 57.406,
+      "peaks": {
+        "rss_bytes": 516648960,
+        "handles": 2879,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 177,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "ocr-readiness-complete-candidate": {
+      "receipt_sha256": "aa5601c91537ef56b3fa9f548fe809e97e6e7b721b30061e742a4db6a5e3c073",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_ocr_readiness_complete.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-ocr-readiness",
+      "native_exit_code": 0,
+      "elapsed_seconds": 62.922,
+      "peaks": {
+        "rss_bytes": 508030976,
+        "handles": 2885,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 186,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "container-image-build": {
+      "receipt_sha256": "e0098bf420cf7fa9257aee89beafe7063a3d8d58659c6698673fb0d5d06ea9e1",
+      "command": [
+        "docker",
+        "build",
+        "--progress=plain",
+        "--target",
+        "vision-runtime",
+        "-f",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\container-install-candidate\\Dockerfile.runtime",
+        "-t",
+        "shopsquire-roadmap:vision-85e7513d",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\container-install-candidate"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 142.609,
+      "peaks": {
+        "rss_bytes": 80355328,
+        "handles": 239,
+        "threads": 25
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "privacy-decision-complete": {
+      "receipt_sha256": "626dded44b39b73a24e264f47d544772a9b6818c2046f98cd04ad67cac6ec895",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_privacy_decision_subject.py",
+        "tests/services/test_privacy_store_scope.py",
+        "tests/services/test_user_data_inventory.py",
+        "tests/api/test_privacy_consent_requests.py",
+        "tests/services/test_memory_scope_contract.py",
+        "tests/services/test_semantic_cache_guardrails.py",
+        "tests/migrations/test_privacy_deletion_jobs_migration.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-decision-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-decision-complete-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 24.125,
+      "peaks": {
+        "rss_bytes": 326627328,
+        "handles": 1435,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 38,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "citation-tenant-complete": {
+      "receipt_sha256": "8f4d71783daa2b89a14d59084c390d30ea0a3150ec72d5251a26f91b25f0aef5",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_admin_repair_contracts.py",
+        "tests/services/test_release_integrity.py",
+        "tests/services/test_market_context_delivery.py",
+        "tests/api/test_privacy_consent_requests.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\citation-tenant-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\citation-tenant-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 26.344,
+      "peaks": {
+        "rss_bytes": 328843264,
+        "handles": 1395,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "test-owner-cycles-green": {
+      "receipt_sha256": "833b634a2c829b6d13150971dd9031face5b106bd0ad2359bb61d562a843eb3d",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_pytest_app_cache_lifecycle.py",
+        "tests/unit/test_pytest_resource_collection.py",
+        "tests/bootstrap/test_business_background_lifecycle.py",
+        "tests/unit/test_cv_ocr_runtime_snapshot.py",
+        "tests/api/test_admin_repair_contracts.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\test-owner-cycles-green\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\test-owner-cycles-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 24.672,
+      "peaks": {
+        "rss_bytes": 281853952,
+        "handles": 1081,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "route-context-complete": {
+      "receipt_sha256": "ff0c8cb83f22dac019f7902a79b8d5780d48f63ba49499bed38160ae41efb202",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/architecture/test_core_router_registration.py",
+        "tests/architecture/test_fulfillment_outbound_registration.py",
+        "tests/architecture/test_recommend_aux_router.py",
+        "tests/architecture/test_storefront_router_registration.py",
+        "tests/api/test_admin_repair_contracts.py",
+        "tests/services/test_operator_tenant_membership.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\route-context-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\route-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 22.843,
+      "peaks": {
+        "rss_bytes": 283811840,
+        "handles": 1057,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "browser-owner-ui-complete": {
+      "receipt_sha256": "c1e9123623a7ed61de3435f7d190a6e5a6ae1dea4f64ee5577a7565bb6d2027f",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-c",
+        "import os,pytest;os.environ['PLAYWRIGHT_BROWSERS_PATH']='C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\owned-python-playwright-browsers';os.environ['SECURITY_SERVER_SPAWN']='1';raise SystemExit(pytest.main(['tests/unit/test_browser_runtime_ownership.py','tests/security/test_owned_security_runtime.py','tests/unit/test_pytest_app_cache_lifecycle.py','tests/unit/test_pytest_resource_collection.py','tests/api/test_admin_repair_contracts.py','tests/browser/test_checkout_flow.py','tests/browser/test_storefront_smoke.py','-q','--junitxml=C:/AI/ShopSquire/.artifacts/roadmap-execution-2026-10-20/browser-owner-ui-complete/tests.xml']))"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\browser-owner-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 55.0,
+      "peaks": {
+        "rss_bytes": 294150144,
+        "handles": 1165,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "privacy-redaction-verified": {
+      "receipt_sha256": "c721d1ff572feb953a60ad0d18542d8a134f83f51c37cf77b5110d2e07998edc",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_privacy_decision_subject.py",
+        "tests/services/test_privacy_store_scope.py",
+        "tests/services/test_user_data_inventory.py",
+        "tests/api/test_privacy_consent_requests.py",
+        "tests/services/test_memory_scope_contract.py",
+        "tests/services/test_semantic_cache_guardrails.py",
+        "tests/migrations/test_privacy_deletion_jobs_migration.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-redaction-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-redaction-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 32.921,
+      "peaks": {
+        "rss_bytes": 321499136,
+        "handles": 1454,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 48,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "api_ci": {
+    "uid": 1000,
+    "pytest_exit": 0,
+    "network": "disconnected before checks",
+    "root_filesystem": "read-only",
+    "profiles": [
+      "bootstrap-runtime",
+      "api-runtime",
+      "test-runtime"
+    ]
+  },
+  "nonroot_native_ocr": {
+    "elapsed_seconds": 3.25,
+    "provider": "paddle",
+    "error": null,
+    "text": "Minimum RAM: 32 GB Storage: 1000 GB SSD",
+    "confidence": 0.988609105348587,
+    "boxes": 2,
+    "input_sha256": "bcf93244806fe2ef924c02999925d6231e9d2f40ff352b50b96c41813b2bcdf2",
+    "model_manifest_sha256": "e96ee2ef54b9c790c85d71480f853c1b63df6cffc57af9403593bcd370bf0de7"
+  },
+  "nonroot_native_runtime": {
+    "uid": 1000,
+    "installed_pins": 138,
+    "pin_mismatches": {},
+    "readiness": {
+      "provider": "paddle",
+      "ready": true,
+      "deps": {
+        "pyzbar": true,
+        "paddleocr": true,
+        "paddle": true,
+        "cv2": true
+      },
+      "runtime": {
+        "tesseract_path": "/usr/bin/tesseract",
+        "tesseract_bin": true,
+        "pyzbar_runtime": true,
+        "paddle_model_assets": true
+      },
+      "reasons": []
+    },
+    "network": "none",
+    "root_filesystem": "read-only",
+    "cache_root": "/tmp/paddlex",
+    "umask_file_mode": "0600"
+  },
+  "all_lock_audit": {
+    "recorded_at": "2026-10-20T08:01:55.776496+00:00",
+    "lock_sha256": "de6adc81c7c0de9ce7b99a98a4ee3fd84896cf615c270953d9333f4ad06afc6d",
+    "locked_package_versions": 261,
+    "package_advisory_matches": 4,
+    "affected": [
+      {
+        "name": "diskcache",
+        "version": "5.6.3",
+        "skipped": false,
+        "skip_reason": null,
+        "vulnerabilities": [
+          {
+            "id": "PYSEC-2026-2447",
+            "aliases": [
+              "CVE-2025-69872",
+              "GHSA-w8v5-vhqr-4h9v"
+            ],
+            "fix_versions": []
+          },
+          {
+            "id": "PYSEC-2026-2447",
+            "aliases": [
+              "CVE-2025-69872",
+              "GHSA-w8v5-vhqr-4h9v"
+            ],
+            "fix_versions": []
+          }
+        ]
+      },
+      {
+        "name": "ragas",
+        "version": "0.4.3",
+        "skipped": false,
+        "skip_reason": null,
+        "vulnerabilities": [
+          {
+            "id": "PYSEC-2026-3046",
+            "aliases": [
+              "CVE-2026-6587",
+              "GHSA-95ww-475f-pr4f"
+            ],
+            "fix_versions": []
+          },
+          {
+            "id": "PYSEC-2026-3046",
+            "aliases": [
+              "CVE-2026-6587",
+              "GHSA-95ww-475f-pr4f"
+            ],
+            "fix_versions": []
+          }
+        ]
+      }
+    ],
+    "errors_or_skips": []
+  },
+  "first_full_diagnostic": {
+    "reported_phases": 851,
+    "outcomes": {
+      "passed": 604,
+      "skipped": 115,
+      "failed": 132
+    },
+    "failed_tests": [
+      {
+        "nodeid": "tests/api/test_admin_repair_contracts.py::test_trusted_claims_optional_filters_return_typed_envelope",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/architecture/test_core_router_registration.py::test_required_router_group_registers_every_route_in_order",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/architecture/test_fulfillment_outbound_registration.py::test_outbound_routes_have_one_owned_handler_and_keep_operator_boundary",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/architecture/test_recommend_aux_router.py::test_narration_and_cf_routes_have_one_nonlegacy_owner",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/architecture/test_source_file_size_guard.py::test_no_new_source_file_exceeds_two_thousand_lines",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/architecture/test_storefront_router_registration.py::test_storefront_router_group_registers_buyer_and_post_order_surfaces",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/bootstrap/test_admin_access_router_group.py::test_admin_access_router_group_records_optional_registration_truth",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/browser/test_checkout_flow.py::test_add_to_cart_from_product_detail[chromium]",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/browser/test_checkout_flow.py::test_checkout_validation[chromium]",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/browser/test_storefront_smoke.py::test_storefront_loads[chromium]",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/browser/test_storefront_smoke.py::test_product_detail_from_storefront[chromium]",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/browser/test_storefront_smoke.py::test_widget_opens[chromium]",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/chaos/test_backpressure_concurrency.py::test_concurrency_backpressure_returns_503",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/chaos/test_erp_connector_chaos_matrix.py::test_admin_sync_rejects_unhealthy_erp_connector",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/chaos/test_fault_injection.py::test_randomized_endpoint_mix_under_faults",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/chaos/test_resilience_matrix.py::test_chaos_matrix_queue_backlog_alert_assertion",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/chaos/test_resilience_matrix.py::test_chaos_matrix_erp_degradation_assertions[429-provider_rate_limited]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/chaos/test_resilience_matrix.py::test_chaos_matrix_erp_degradation_assertions[503-provider_5xx]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/ci/test_dmarc_and_dispatcher_ci.py::test_dmarc_ingest_and_summary",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/cv/test_cv_upload_ownership.py::test_upload_ownership_enforced_customer_id",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/cv/test_cv_upload_ownership.py::test_upload_ownership_mismatch",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/cv/test_cv_upload_ownership.py::test_upload_ownership_missing_info",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/e2e/test_returns_adversarial_playwright.py::test_adversarial_cv_upload_mixed_images_and_trace",
+        "phase": "setup"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_benchmark_pack.py::test_adversarial_generate_and_external_benchmark_run",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_connectors_dashboard_replay.py::test_connectors_dashboard_and_batch_replay",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_console_pages.py::test_connector_console_page_renders",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_console_pages.py::test_connector_registry_json_renders_targets",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_console_pages.py::test_privacy_console_page_renders",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_console_pages.py::test_privacy_review_json_renders_summary_shape",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_dashboard.py::test_email_incident_visible_in_admin_lists",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_lab_profile.py::test_connectors_lab_profile_endpoint",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_lab_profile.py::test_connectors_lab_profile_rejects_unknown",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_policy_pack_release.py::test_policy_pack_release_create_list_get_verify",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_runbook_feedback_reliability.py::test_demo_runbook_execute_and_walkthrough",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_runbook_feedback_reliability.py::test_bulk_feedback_label_and_summary",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_runbook_feedback_reliability.py::test_connector_reliability_and_dlq_routes",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_runbook_feedback_reliability.py::test_ops_readiness_dashboard_metrics",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_admin_email_security_url_recheck.py::test_admin_url_recheck_endpoints_process_deferred_jobs",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_dmarc_admin.py::test_dmarc_ingest_and_summary_xml",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_dmarc_admin.py::test_dmarc_ingest_zip_and_summary",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_email_security_end_to_end.py::test_email_security_api_evaluate_basic_info_severity",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_email_security_lab_html.py::test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_email_security_lab_html.py::test_email_security_replay_event_endpoint_accepts_normalized_event",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_email_security_reference_and_pdf_qr.py::test_homoglyph_sample_api_returns_lookalike_domain",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/email/test_email_signal_feedback_and_threshold_tuning.py::test_bulk_label_persists_ground_truth_and_triggers_tuning",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_context_rot.py::test_carried_gpu_slot_does_not_hijack_a_work_query",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_context_rot.py::test_legacy_unscoped_gpu_slot_is_not_promoted_into_v2_authority",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_bulk_qty_returns_products_and_qty[can i get help with 15 work laptops at 1000 to 1400 each? which to get?-15]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_bulk_qty_returns_products_and_qty[what laptops for work at 1000 to 1400 each? I need about 25-25]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_bulk_qty_returns_products_and_qty[can i get help with 30 or so laptops for work at 1000 to 1400 each?-30]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_bulk_qty_returns_products_and_qty[bulk office laptops priced 1000 to 1400 each, need 18-18]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_model_and_spec_numbers_are_not_quantities[dell 15 laptop under 1400]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_model_and_spec_numbers_are_not_quantities[15 inch laptops for work under 1400]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_budget_cut_revision_parses_as_ceiling",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_grand_and_k_suffixes_parse",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_spec_units_never_become_money",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_absurd_quantity_gets_honest_refusal_not_silence",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_contradiction_total_cap_gets_plain_words",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_purchase_phrasing_not_hijacked_by_inventory_lane",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_presales_policy_question_is_not_a_support_claim",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_broken_item_return_IS_a_support_claim",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/eval/test_conversation_battery.py::test_split_offer_shape_and_arithmetic",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_attribution_capture.py::test_order_attributes_to_decision",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_attribution_capture.py::test_e0_records_bandit_arm_not_ab_variant",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_additive_workload_continuation.py::test_bg3_budget_then_emulate3d_as_well_retains_shared_budget_and_combines_case",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_history_api.py::test_chat_query_persists_messages_and_history_reads",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_history_api.py::test_chat_query_applies_copywriting_when_requested",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_history_api.py::test_chat_query_preserves_buyer_safe_procurement_projection",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_unscoped_image_result_is_held_and_emits_multimodal_trace",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_chat_with_voice_emits_multimodal_provenance_without_image",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_trusted_ocr_proposes_unverified_requirements_without_granting_authority",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_untrusted_ocr_cannot_propose_requirements",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_empty_search_without_a_material_concept_does_not_launch_publisher_discovery",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_chat_query_forwards_narration_job_id",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_unresolved_subject_does_not_republish_prior_commercial_slots",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_nested_semantic_resolution_is_rebound_to_the_terminal_contract",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_no_match_followups_do_not_contradict_brand_exclusion",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_chat_projects_authoritative_facade_lane",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_narration_forwarding.py::test_temporary_chat_is_not_written_to_history",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_nqe_option_value_contract.py::test_chat_nqe_option_value_is_forwarded_to_recommend",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_nqe_option_value_contract.py::test_chat_forwards_qr_cv_signals_from_image_security_payload",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_nqe_option_value_contract.py::test_chat_recommend_timeout_returns_typed_degradation",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_recommend_integration.py::test_suggest_compatibility_route_keeps_canonical_contract",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_decision_spawn.py::test_v2_recommend_surfaces_decision_and_feedback_trace",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_drift_daily_metrics_api.py::test_drift_daily_metrics_recompute_and_query",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestLowRiskHumanAuthorization::test_low_score_without_order_requires_human",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestRequireHuman::test_mid_score_requires_human",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestEscalateSecurity::test_high_score_escalates",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestDecisionLogPersistence::test_decision_logged",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestThresholdBoundary::test_score_exactly_30_requires_human",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestThresholdBoundary::test_score_exactly_70_escalates",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_escalation_threshold_bands.py::TestThresholdBoundary::test_score_just_below_30_still_requires_order_evidence",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_top_level_contract[0-laptop for work under 1500]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_top_level_contract[1-thinkpad work laptop]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_top_level_contract[2-show me an office laptop]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_product_item_contract",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_trace_id_always_resolvable",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_next_questions_option_shape",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_e0_capture_records_decision_row",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_frontend_backend_parity.py::test_oos_product_not_cart_eligible",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_strict_buyer_boundary_hides_foreign_cases",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_open_assess_commit_flow_over_http",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_commit_auto_drafts_internal_rfq_when_flag_enabled",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_commit_records_pending_retry_when_internal_draft_fails",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_illegal_command_returns_409",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_demo_reply_gated_off_by_default",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_buyer_view_redacts_supplier_private_fields",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_po_endpoints_wired_and_guard_illegal_state",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_po_endpoints_on_unknown_case_404",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_economics_endpoint_operator_and_empty_before_quote",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_rfq_fanout_endpoint_wired_and_shaped",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_compare_quotes_endpoint_ranks_and_recommends",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_decision_intelligence_route_reports_unmaterialized_evidence_explicitly",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_by_trace_links_case_to_decision_trace",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_by_trace_query_string_cannot_escalate_to_operator_view",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_closed_loop_trace_survives_confirmation_and_rfq_redraft",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_market_refresh_and_state_follow_request_tenant",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_demo_demand_signal_is_gated_and_replaces_conflicting_state",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_edit_draft_and_asof_routes_wired",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_experiment_console_promote_observe_revert",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_fulfillment_api.py::test_market_replay_gated_then_advances",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_hippograph_feedback_wiring.py::test_feedback_reaches_response_without_becoming_v2_ranking_authority",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_maestro_observability.py::test_safe_recommend_trace_contains_maestro_guardrail_events",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_maestro_observability.py::test_blocked_recommend_exposes_audit_refs_and_security_event_lookup",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_metrics_increment.py::test_query_cluster_increments_metric",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_metrics_increment.py::test_ragas_summary_endpoint",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_nqe_complex_query.py::test_complex_query_triggers_tier_decision_and_nqe",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_ranking_nudge_wiring.py::test_treatment_user_is_nudged",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_ranking_nudge_wiring.py::test_control_user_is_untouched",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_recommend_contract_stability.py::test_spine_present_on_every_shape",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_recommend_contract_stability.py::test_success_shape_full_ui_contract",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_recommend_contract_stability.py::test_zero_results_preserves_message_alias_and_universal_assistant_message",
+        "phase": "call"
+      }
+    ],
+    "receipt": {
+      "native_exit_code": -15,
+      "elapsed_seconds": 367.221,
+      "resource_violation": "process_rss_over_2GiB",
+      "peaks": {
+        "process_rss_bytes": 2149957632,
+        "process_fds": 97,
+        "process_threads": 20
+      },
+      "source_fingerprint": "593c7303432a7e95d02a9a4955a43c53939a6cae5aa765af0160a988ca3e177a",
+      "source_changes_in_disposable_copy": []
+    },
+    "complete": false
+  },
+  "second_full_diagnostic": {
+    "reported_phases": 426,
+    "outcomes": {
+      "passed": 406,
+      "skipped": 20
+    },
+    "failed_tests": [],
+    "source": {
+      "source_fingerprint": "3c7b9d64060e619e6e8d2adf54ab931aa716b7675aac373a24094cce8b2b76e7",
+      "head": "4929bc4d84a6776416afa1492c3ac529d07648e3",
+      "file_count": 5638,
+      "command": [
+        "/usr/local/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--junitxml=/evidence/tests.xml"
+      ],
+      "network": "none",
+      "uid": 1000,
+      "diagnostic_gc_interval": 0,
+      "selected": "all tests directory",
+      "release_gate": false
+    },
+    "state": "running; partial outcomes only; before f0ec1e74 redaction correction"
+  },
+  "offline_browser_matrix": {
+    "specs_selected": 76,
+    "specs_completed": 37,
+    "counts": {
+      "expected": 20,
+      "unexpected": 43,
+      "skipped": 16,
+      "flaky": 0
+    },
+    "state": "running; reused synthetic evidence expired; live profiles are separate requirements"
+  },
+  "fresh_synthetic_qualification": {
+    "stats": {
+      "startTime": "2026-10-20T13:05:30.020Z",
+      "duration": 42186.162,
+      "expected": 5,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "assessment": "Five passed; accessory quantity UI remains failing. No real evidence refreshed or freshness threshold relaxed."
+  },
+  "undefined_names": {
+    "command": [
+      "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+      "-m",
+      "ruff",
+      "check",
+      "src",
+      "scripts",
+      "tests",
+      "alembic",
+      "sdk",
+      "--select",
+      "F821,F823",
+      "--output-format",
+      "json"
+    ],
+    "native_exit_code": 0,
+    "findings": []
+  }
+}

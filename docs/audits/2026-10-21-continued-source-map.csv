@@ -1,0 +1,18 @@
+work_package,path,symbol,line,function_lines,file_lines,git_state,sha256,remaining
+W01,src/app/main.py,create_app,186,2215,2410,committed,6945ff27d344cc226a6a1220afb0cf5e5aa13e87422fa37dd8645c9fbbc751cb,remaining startup/error paths and scheduler owners
+W01,src/app/models/db.py,db_session,1251,145,1551,working-tree changes or untracked prerequisite,f3bdf03f16544de96019eec541543ede7984e3b5acf95e4380ec262836a0678f,"competing transactions, fault recovery and endurance"
+W02,scripts/generate_runtime_requirements.py,main,158,35,196,committed,bba3d2a36570027429d3a3453f397c974b0c855eff764ecf7945e0dadae13800,default Compose/image capability equivalence and optional dependency risk
+W03/W05,src/app/routers/chat.py,_chat_query_impl,288,4527,4890,working-tree changes or untracked prerequisite,8f487ec594bf8e4becfb3df8c243bb7d3e1e2cc5e8da2fbe5bbd037900a93139,"stale intake responses, exact stock-to-draft browser handoff"
+W04,src/app/services/turn_transition.py,derive_turn_transition,124,33,268,working-tree changes or untracked prerequisite,f8a686cb7486994076eb5fcb79ddba461a12eac77991ecf70433675f3551028d,"refinement, replacement, repeat and reload matrix"
+W05,src/app/services/supplier_enquiry_journey.py,create,72,25,202,working-tree changes or untracked prerequisite,780204cf23ca499dd92b5ecfecc9b03ad40254cf2adeef03efee3070c978986e,complete dependency-group integration and exact revised shortfall
+W06,src/app/services/market_intelligence_agent.py,gather_market_context,213,64,276,committed,20109cdfa927d8ea849994731dea107806b30a7bc646ec62d3d9191cd7bbd145,useful current cited live observations
+W07,src/app/services/conversation_case_state.py,ensure_case_state,514,53,1094,working-tree changes or untracked prerequisite,4551a06f6447dfb0b1a144aa246a644dcba264cb72dcc3804d8a10727a0640e4,canonical SQL state erasure and worker recovery
+W07,src/app/routers/privacy.py,_subject_decisions,81,26,671,committed,dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c,indexed exact legacy ownership and large-controller performance
+W07,src/app/routers/privacy.py,delete_user_data,247,126,671,committed,dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c,"every retained SQL plane, failure resume and restore policy"
+W07,src/app/routers/privacy.py,redact_user_data,615,57,671,committed,dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c,remaining data planes and durable partial-work recovery
+W08,src/app/services/inventory_transactions.py,reserve,134,22,208,working-tree changes or untracked prerequisite,a2fa1912cb8488f3734b479fc0acf79b35f065c1e57117f5706772bbb27ab5d5,"migration, contention, expiry and conservation"
+W09,src/app/services/fulfillment/person_approval.py,validate,93,25,134,working-tree changes or untracked prerequisite,5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad,complete approval/effect sink matrix
+W10,src/app/services/fulfillment/operator_recovery.py,resolve,23,32,54,working-tree changes or untracked prerequisite,3fb84fc402dfd2f2f724ec1aa542bb40f87a25d263b95301e5d1a21fadaa9cc6,"crash windows, reviewed recovery and restore/rollback"
+W11,src/app/services/citation_memory.py,get_trusted_claims,197,34,272,committed,e76b215d3b540e641008528ca39ffa97a95e4d7087e13c7517125267dfe95225,remaining runtime DDL/global table readiness ownership
+W12/W15,tests/owned_security_runtime.py,_owned_runtime,48,84,162,committed,370b37f44806e353f642a9d0aeb3a505bd4f8c635f4036dcc7b81cee8c9eb0e4,required profiles with isolated processes and persisted detection
+W13/W15,tests/conftest.py,_restore_db_engine,806,102,1041,committed,a9b187c182d682eb7a1606076b220656a3dec332f347ce3a18a5c1ee36a0343a,full-run resource validation; not production endurance proof

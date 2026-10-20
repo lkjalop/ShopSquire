@@ -1,5 +1,7 @@
 # Execution checkpoint - 20 October 2026
 
+Later execution is recorded in the [21 October checkpoint](ROADMAP_EXECUTION_STATUS_2026-10-21.md). The figures below describe this earlier snapshot.
+
 Execution continues against the [complete roadmap](ROADMAP_DELTA_AND_IMPLEMENTATION_PLAN_2026-10-20.md). Through `18e3f469`, seventeen local commits follow `0d551213`: sixteen implementation/test commits and one documentation checkpoint. The production-source delta is 26 files, 1,341 insertions and 492 deletions; tests change 26 files, with 1,876 insertions and 220 deletions. Frontend changes span 15 files, with 76 insertions and 14 deletions. Lockfiles, generated requirements and documentation add further text changes. None of these figures measures feature completion. The release gate remains **red**.
 
 The [execution manifest](audits/2026-10-20-execution-delta.json) records commands, native exits, resource peaks and receipt hashes. Exact-source profiles overlap; do not sum their passes.
