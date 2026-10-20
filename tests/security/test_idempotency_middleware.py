@@ -80,7 +80,11 @@ def test_chat_sse_bypasses_response_capture():
     )
     assert response.status_code == 200
     assert "event: thinking" in response.text
-    middleware = app.middleware_stack.app
+    middleware = app.middleware_stack
+    for _ in range(20):
+        if isinstance(middleware, IdempotencyMiddleware):
+            break
+        middleware = getattr(middleware, "app", None)
     assert isinstance(middleware, IdempotencyMiddleware)
     assert middleware.cache == {}
 
