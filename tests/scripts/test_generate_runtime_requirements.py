@@ -1,4 +1,5 @@
 from scripts.generate_runtime_requirements import ROOT, _locked_packages, _render
+import pytest
 
 
 def test_committed_runtime_profiles_match_poetry_lock() -> None:
@@ -73,3 +74,46 @@ markers = {dev = 'python_version >= "3.10"'}
     dev_packages, _ = generator._locked_packages(group='dev')
     assert 'dev-only' in dev_packages
     assert 'api-root' not in dev_packages
+
+
+@pytest.mark.parametrize('suffix', ['', '-windows'])
+def test_vision_profile_has_one_owner_of_the_cv2_binary_namespace(suffix):
+    packages = {
+        line.split('==')[0] for line in
+        (ROOT / f'requirements/vision-runtime{suffix}.txt').read_text(encoding='utf-8').splitlines()
+        if line and not line.startswith('#')
+    }
+    owners = packages & {'opencv-python', 'opencv-python-headless',
+                         'opencv-contrib-python', 'opencv-contrib-python-headless'}
+    assert len(owners) == 1, f'Competing distributions own cv2: {sorted(owners)}'
+
+
+def test_unrequested_ambiguous_packages_do_not_break_a_cpu_profile(tmp_path, monkeypatch):
+    import scripts.generate_runtime_requirements as generator
+    lock = tmp_path / 'poetry.lock'
+    lock.write_text('''[[package]]
+name = "api-root"
+version = "1.0.0"
+groups = ["main"]
+[[package]]
+name = "unrequested-gpu"
+version = "1.0.0"
+groups = ["main"]
+[[package]]
+name = "unrequested-gpu"
+version = "2.0.0"
+groups = ["main"]
+''', encoding='utf-8')
+    monkeypatch.setattr(generator, 'LOCK', lock)
+    packages, digest = generator._locked_packages()
+    assert '\napi-root==1.0.0\n' in generator._render('api-runtime', ['api-root'], packages, digest)
+    with pytest.raises(RuntimeError, match='ambiguous locked versions for unrequested-gpu'):
+        generator._render('gpu-runtime', ['unrequested-gpu'], packages, digest)
+
+
+@pytest.mark.parametrize('platform,machine', [('linux', 'x86_64'), ('windows', 'AMD64')])
+def test_target_architecture_is_independent_of_the_generator_host(monkeypatch, platform, machine):
+    import scripts.generate_runtime_requirements as generator
+    original = generator.default_environment
+    monkeypatch.setattr(generator, 'default_environment', lambda: {**original(), 'platform_machine': 'ARM64'})
+    assert generator.target_environment(platform)['platform_machine'] == machine

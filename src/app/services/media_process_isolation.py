@@ -46,6 +46,7 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
 
 def run_isolated_media_call(
     *, module_name: str, function_name: str, kwargs: dict[str, Any], timeout_s: float,
+    worker_env: dict[str, str] | None = None,
 ) -> IsolatedMediaResult:
     """Execute a top-level callable in a disposable interpreter process.
 
@@ -72,7 +73,7 @@ def run_isolated_media_call(
         encoding="utf-8",
         start_new_session=os.name != "nt",
         creationflags=creationflags,
-        env=os.environ.copy(),
+        env={**os.environ, **(worker_env or {})},
     )
     try:
         stdout, stderr = process.communicate(request, timeout=max(0.01, float(timeout_s)))

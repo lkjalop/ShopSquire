@@ -25,7 +25,8 @@ def target_environment(platform: str) -> dict[str,str]:
         'sys_platform':'win32' if platform=='windows' else 'linux',
         'platform_system':'Windows' if platform=='windows' else 'Linux',
         'os_name':'nt' if platform=='windows' else 'posix',
-        'platform_python_implementation':'CPython'}
+        'platform_python_implementation':'CPython',
+        'platform_machine':'x86_64' if platform=='linux' else 'AMD64'}
 
 
 TARGET_ENV = target_environment('linux')
@@ -68,8 +69,16 @@ def _locked_packages(*, group: str = "main") -> tuple[dict[str, dict[str, Any]],
         if not _marker_applies(expression):
             continue
         existing = packages.get(name)
-        if existing is not None and existing["version"] != package["version"]:
-            raise RuntimeError(f"ambiguous locked versions for {name}")
+        if existing is not None:
+            versions = existing.get('ambiguous_versions', [existing.get('version')])
+            if package['version'] not in versions:
+                # CUDA extras can have overlapping lock markers even though
+                # no deployed CPU profile requests them. Reject ambiguity only
+                # if that name is reached; never silently choose a version.
+                packages[name] = {'name': name, 'ambiguous_versions': sorted([*versions, package['version']])}
+                continue
+            if 'ambiguous_versions' in existing:
+                continue
         packages[name] = package
     return packages, hashlib.sha256(raw).hexdigest()
 
@@ -100,6 +109,8 @@ def _closure(roots: list[str], packages: dict[str, dict[str, Any]]) -> list[str]
     while queue:
         name = queue.popleft()
         package = packages[name]
+        if 'ambiguous_versions' in package:
+            raise RuntimeError(f"ambiguous locked versions for {name}: {package['ambiguous_versions']}")
         extras = requested_extras[name]
         signature = frozenset(extras)
         if visited_extras.get(name) == signature:

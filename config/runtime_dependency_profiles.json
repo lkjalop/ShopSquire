@@ -40,11 +40,12 @@
   "vision-runtime": {
     "output": "requirements/vision-runtime.txt",
     "roots": [
-      "opencv-python-headless",
+      "opencv-contrib-python",
       "paddleocr",
       "pypdfium2",
       "pytesseract",
-      "pyzbar"
+      "pyzbar",
+      "paddlepaddle"
     ]
   },
   "test-runtime": {
@@ -63,6 +64,15 @@
       "mypy",
       "types-redis",
       "requests"
+    ]
+  },
+  "bootstrap-runtime": {
+    "output": "requirements/bootstrap-runtime.txt",
+    "group": "dev",
+    "roots": [
+      "pip",
+      "setuptools",
+      "wheel"
     ]
   }
 }
