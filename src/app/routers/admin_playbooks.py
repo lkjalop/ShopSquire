@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import text
 
 from src.app.models.db import db_session
 from src.app.routers.approvals import enqueue_approval
@@ -39,16 +40,16 @@ def _approval_status(approval_id: str) -> Optional[Dict[str, Any]]:
     try:
         with db_session() as db:
             row = db.execute(
-                """
-                SELECT id, capability, status
+                text("""
+                SELECT id, capability, status, payload
                 FROM approvals
                 WHERE id = :id
-                """,
+                """),
                 {"id": approval_id},
             ).fetchone()
         if not row:
             return None
-        return {"id": row[0], "capability": row[1], "status": row[2]}
+        return {"id": row[0], "capability": row[1], "status": row[2], "payload": row[3]}
     except Exception:
         return None
 
@@ -70,6 +71,19 @@ def _ensure_change_approval(
         raise HTTPException(status_code=400, detail="approval_capability_mismatch")
     if str(st.get("status") or "").lower() != "approved":
         raise HTTPException(status_code=409, detail="approval_not_granted")
+    try:
+        reviewed = st.get("payload")
+        if isinstance(reviewed, str):
+            reviewed = json.loads(reviewed)
+        if not isinstance(reviewed, dict):
+            raise ValueError("reviewed_object_required")
+        canonical = dict(sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        reviewed_json = json.dumps(reviewed, **canonical)
+        requested_json = json.dumps(approval_payload, **canonical)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="approval_payload_invalid") from None
+    if reviewed_json != requested_json:
+        raise HTTPException(status_code=409, detail="approval_payload_mismatch")
     return {"status": "approved", "approval_id": approval_id}
 
 
