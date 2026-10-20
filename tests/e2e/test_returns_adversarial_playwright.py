@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("playwright", reason="Playwright not installed")
-from playwright.sync_api import sync_playwright
 import requests
 
 
@@ -143,7 +142,7 @@ def _submit_case_via_api(runtime: dict, files: list[str], user_msg: str) -> tupl
     sys.platform.startswith("win") and os.getenv("FORCE_PLAYWRIGHT_TESTS", "0").lower() not in ("1", "true", "yes"),
     reason="Set FORCE_PLAYWRIGHT_TESTS=1 to run browser e2e on Windows",
 )
-def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
+def test_adversarial_cv_upload_mixed_images_and_trace(live_stack, browser):
     """Comprehensive browser flow for mixed-image return + adversarial text."""
     import qrcode
 
@@ -172,9 +171,10 @@ def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
     ui_variant = "unknown"
     ui_security_matrix_asserted = False
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1440, "height": 1080})
+    # The pytest browser owns its driver/event loop. Own only this context so
+    # this scenario can follow other Playwright tests in the same process.
+    with browser.new_context(viewport={"width": 1440, "height": 1080}) as context:
+        page = context.new_page()
         # Vite/HMR can keep background network activity open; avoid `networkidle` flakiness.
         page.goto(live_stack["ui_base_url"], wait_until="domcontentloaded", timeout=60000)
         ask_me = page.get_by_role("button", name="Ask Me!")
@@ -237,7 +237,6 @@ def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
         # Snapshot the browser view for manual UX review.
         runs_dir = live_stack["directory"]
         page.screenshot(path=str(runs_dir / "playwright_adversarial_cv.png"), full_page=True)
-        browser.close()
 
     assert verdict is not None and verdict != ""
     assert decision_id is not None and decision_id != ""
