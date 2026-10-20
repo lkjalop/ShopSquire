@@ -4549,9 +4549,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             pending_action = "retain"
                         workload_labels: list[str] = []
                         if isinstance(additive_workload_receipt, dict):
-                            label = str(additive_workload_receipt.get("added_workload") or "").strip()
-                            if label:
-                                workload_labels.append(label)
+                            for field in ("prior_purpose", "added_buyer_turn"):
+                                label = str(additive_workload_receipt.get(field) or "").strip()
+                                if label and label not in workload_labels:
+                                    workload_labels.append(label)
                         semantic_out = out.get("semantic_resolution")
                         if isinstance(semantic_out, dict):
                             for item in list(semantic_out.get("workload_hypotheses") or []):

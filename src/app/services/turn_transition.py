@@ -187,6 +187,10 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int) -> RevisionBound
         existing_message=commit.assistant_message,
         subject_role=commit.subject_role,
     ) if outcome.failure_code == "requirements_incomplete" else commit.assistant_message
+    if commit.transition == TurnTransition.ADD_WORKLOAD and commit.workloads:
+        workload_context = "Requested workloads: " + "; ".join(commit.workloads) + "."
+        if not message.startswith(workload_context):
+            message = workload_context + " " + message
     return RevisionBoundTurnReadModel(
         case_id=commit.case_id,
         operation_id=commit.operation_id,
