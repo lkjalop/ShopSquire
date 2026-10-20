@@ -4,6 +4,7 @@
     "roots": [
       "alembic",
       "argon2-cffi",
+      "beautifulsoup4",
       "celery",
       "cryptography",
       "dnspython",
