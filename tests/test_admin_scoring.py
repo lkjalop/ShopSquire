@@ -10,7 +10,15 @@ app = create_app()
 client = TestClient(app, headers={"x-api-key": os.getenv("OWNER_API_KEY", "local-owner-key")})
 
 
-def test_scoring_versioning_and_diff_and_rollback():
+def test_scoring_versioning_and_diff_and_rollback(tmp_path, monkeypatch):
+    from pathlib import Path
+    from src.app.routers import admin as routes
+    policy = tmp_path / "risk_correlation_policy.json"
+    policy.write_bytes(Path(routes._policy_path()).read_bytes())
+    versions_directory = tmp_path / "versions"
+    versions_directory.mkdir()
+    monkeypatch.setattr(routes, "_policy_path", lambda: str(policy))
+    monkeypatch.setattr(routes, "_versions_dir", lambda: str(versions_directory))
     # Create a new version
     payload = {"bands": {"warn": 10, "high": 40, "critical": 70}}
     r = client.post("/api/v1/admin/scoring/update", json=payload)
@@ -33,5 +41,5 @@ def test_scoring_versioning_and_diff_and_rollback():
 
     # Rollback to the created version
     rr = client.post("/api/v1/admin/scoring/rollback", json={"version_file": versions[-1]})
-    assert rr.status_code == 200
+    assert rr.status_code == 200, rr.text
     assert rr.json().get("rolled_back") is True

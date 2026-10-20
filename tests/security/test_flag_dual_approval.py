@@ -8,14 +8,16 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-def test_flag_dual_approval_flow(monkeypatch):
+def test_flag_dual_approval_flow(monkeypatch, tmp_path):
     monkeypatch.setenv("FLAG_DUAL_APPROVAL_ENABLED", "1")
-    monkeypatch.setenv("FLAG_APPROVALS_PATH", "tmp/flag_change_approvals.test.json")
+    monkeypatch.setenv("FLAG_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+    flags_path = tmp_path / "feature_flags.json"
+    flags_path.write_bytes(Path("config/feature_flags.json").read_bytes())
+    monkeypatch.setenv("FEATURE_FLAGS_PATH", str(flags_path))
 
     app = create_app()
     client = TestClient(app)
 
-    flags_path = Path("config/feature_flags.json")
     original = flags_path.read_text(encoding="utf-8").strip()
 
     try:

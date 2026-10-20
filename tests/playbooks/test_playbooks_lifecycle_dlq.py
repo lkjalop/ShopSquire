@@ -20,25 +20,18 @@ _PLAYBOOKS_PATH = Path("config") / "security" / "cv_playbooks.json"
 
 
 @pytest.fixture(autouse=True)
-def _restore_playbooks_registry_after_test():
-    original = None
-    if _PLAYBOOKS_PATH.exists():
-        original = _PLAYBOOKS_PATH.read_text(encoding="utf-8")
+def _restore_playbooks_registry_after_test(tmp_path, monkeypatch):
+    from src.app.services import playbook_engine as engine
+    import sys
+    isolated = tmp_path / "cv_playbooks.json"
+    isolated.write_bytes(_PLAYBOOKS_PATH.read_bytes())
+    monkeypatch.setattr(sys.modules[__name__], "_PLAYBOOKS_PATH", isolated)
+    monkeypatch.setattr(engine, "_playbooks_path", lambda: isolated)
+    monkeypatch.setattr(engine, "_playbook_versions_path", lambda: tmp_path / "versions")
+    load_playbook_config(force_reload=True)
     yield
-    if original is None:
-        try:
-            if _PLAYBOOKS_PATH.exists():
-                _PLAYBOOKS_PATH.unlink()
-        except Exception:
-            pass
-    else:
-        _PLAYBOOKS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _PLAYBOOKS_PATH.write_text(original, encoding="utf-8")
-    # Ensure selector cache sees restored file for subsequent tests.
-    try:
-        load_playbook_config(force_reload=True)
-    except Exception:
-        pass
+    with engine._CFG_CACHE_LOCK:
+        engine._CFG_CACHE.clear()
 
 
 def _write_playbooks_config(tmp_pb_id: str) -> None:
@@ -68,7 +61,7 @@ def _write_playbooks_config(tmp_pb_id: str) -> None:
         "signal_map": {"email_security": [tmp_pb_id]},
         "tag_map": {"dmarc_fail": [tmp_pb_id]},
     }
-    path = os.path.join("config", "security", "cv_playbooks.json")
+    path = os.fspath(_PLAYBOOKS_PATH)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -100,7 +93,7 @@ def test_playbook_publish_rollback_and_diff(tmp_path):
     # Approve in DB then publish
     with db_session() as db:
         db.execute(
-            "INSERT INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id,:cap,:p,:r,:s,:cb)",
+            "UPDATE approvals SET status=:s WHERE id=:id",
             {
                 "id": approval_id,
                 "cap": "playbook_publish",
@@ -142,7 +135,7 @@ def test_playbook_publish_rollback_and_diff(tmp_path):
     assert rb_approval_id
     with db_session() as db:
         db.execute(
-            "INSERT INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id,:cap,:p,:r,:s,:cb)",
+            "UPDATE approvals SET status=:s WHERE id=:id",
             {
                 "id": rb_approval_id,
                 "cap": "playbook_rollback",
