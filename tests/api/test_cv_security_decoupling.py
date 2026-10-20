@@ -8,12 +8,11 @@ silently failing OPEN on QR/SSN-exfil. This proves QR survives a tier2 timeout.
 from __future__ import annotations
 
 import base64
-import os
-import time
+import io
+import threading
+import qrcode
 
-import pytest
 
-IMG = "dump/test-cv/msi-SSN.png"  # contains a real QR (https://scanned.page/p/...)
 
 
 def _find(obj, key):
@@ -31,7 +30,6 @@ def _find(obj, key):
     return out
 
 
-@pytest.mark.skipif(not os.path.exists(IMG), reason="test image not present")
 def test_qr_survives_vision_llm_timeout(monkeypatch):
     monkeypatch.setenv("CV_STRICT_RUNTIME_DEPS", "0")
     monkeypatch.setenv("CV_ANALYZE_TIMEOUT_SEC", "2")   # tier2/consistency budget
@@ -39,23 +37,36 @@ def test_qr_survives_vision_llm_timeout(monkeypatch):
 
     import src.app.routers.cv as cvmod
     # Make the heavy vision task hang well past its budget (simulates Ollama/model stall).
-    monkeypatch.setattr(cvmod, "run_tier2", lambda *a, **k: (time.sleep(10), {})[1])
+    started = threading.Event()
+    release = threading.Event()
+    def stalled_tier2(*args, **kwargs):
+        started.set()
+        release.wait(timeout=10)
+        return {}
+    monkeypatch.setattr(cvmod, "run_tier2", stalled_tier2)
 
     from fastapi.testclient import TestClient
     from src.app.main import create_app
 
     client = TestClient(create_app())
-    b64 = base64.b64encode(open(IMG, "rb").read()).decode()
-    r = client.post(
-        "/api/v1/cv/analyze",
-        headers={"x-api-key": "local-owner-key"},
-        json={"case_id": "qr-decouple", "images_b64": [b64]},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
+    image = io.BytesIO()
+    qrcode.make("https://example.invalid/owned-qr-timeout-fixture").save(image, format="PNG")
+    b64 = base64.b64encode(image.getvalue()).decode()
+    try:
+        r = client.post(
+            "/api/v1/cv/analyze",
+            headers={"x-api-key": "local-owner-key"},
+            json={"case_id": "qr-decouple", "images_b64": [b64]},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
 
-    qr_flags = _find(body, "qr_code_detected")
-    assert any(bool(v) for v in qr_flags), (
-        f"QR not surfaced despite a real QR present — fail-open regression. "
-        f"qr_code_detected={qr_flags}, top-level keys={list(body)[:20]}"
-    )
+        qr_flags = _find(body, "qr_code_detected")
+        assert any(bool(v) for v in qr_flags), (
+            f"QR not surfaced despite a real QR present — fail-open regression. "
+            f"qr_code_detected={qr_flags}, top-level keys={list(body)[:20]}"
+        )
+
+        assert started.is_set(), "The controlled tier2 stall must actually execute"
+    finally:
+        release.set()
