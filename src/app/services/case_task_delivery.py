@@ -12,6 +12,11 @@ _DRAFT = re.compile(r'\b(?:draft|compose|prepare|write)\b.{0,100}\b(?:email|e-ma
 _MARKET = re.compile(r'\b(?:market\s+(?:intelligence|analysis)|supply\s+outlook)\b', re.I)
 _AMENDMENT = re.compile(r'\b(?:make\s+(?:it|that)|change|increase|decrease|amend|replace|instead|start\s+over|new\s+(?:request|search)|forget|add\s+\d)\b', re.I)
 _ENQUIRY_SCOPE = re.compile(r'\b(?:shortfall|supplier|stock|quantity|units?|procurement|current\s+(?:request|case|order))\b', re.I)
+_COUNT_WORD = r'(?:\d[\d,]*|[a-z]+(?:-[a-z]+)?)'
+_SHORTFALL_COUNT = re.compile(
+    rf'\b(?:{_COUNT_WORD}\s*[- ]\s*(?:units?|items?)\s+(?:stock\s+)?(?:shortfall|shortage)'
+    rf'|(?:shortfall|shortage)\s+(?:of\s+)?{_COUNT_WORD}\s+(?:units?|items?)'
+    rf'|remaining\s+{_COUNT_WORD}\s+(?:units?|items?))\b', re.I)
 
 
 def case_task_intent(query):
@@ -26,9 +31,13 @@ def is_case_task_read(query, state):
     """Mixed amendments use the normal reducer before any task is delivered."""
     if not case_task_intent(query) or _AMENDMENT.search(str(query or '')):
         return False
+    # A count explicitly naming the shortage is task context, not the buyer's
+    # total requested quantity. Delivery still calculates the real shortage
+    # from accepted selection and inventory; this prose grants no authority.
+    quantity_query = _SHORTFALL_COUNT.sub(' ', str(query or ''))
     from src.app.services.bulk_intent import extract_quantity_span
-    quantity = extract_quantity_span(str(query or ''), unit_nouns={'unit', 'units', 'item', 'items'})
-    if quantity is None and re.search(r'\b\d[\d,]*\s+(?:units?|items?)\b', str(query or ''), re.I):
+    quantity = extract_quantity_span(quantity_query, unit_nouns={'unit', 'units', 'item', 'items'})
+    if quantity is None and re.search(r'\b\d[\d,]*\s+(?:units?|items?)\b', quantity_query, re.I):
         return False
     return not quantity or quantity[0] == state.get('requested_quantity')
 

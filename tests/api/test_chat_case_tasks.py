@@ -137,7 +137,7 @@ def test_draft_read_keeps_the_accepted_selection_and_case_revision(owned_task_ca
 @pytest.mark.parametrize('query,expected', [
     ('Draft an email for the unit quantity shortfall.', True),
     ('Make it 50 units and draft an email for the shortfall.', False),
-    ('Draft an email for a 50 unit shortfall.', False),
+    ('Draft an email for a 50 unit shortfall.', True),
     ('Write an email to reset my password.', False),
 ])
 def test_task_read_never_consumes_a_quantity_amendment_or_unrelated_email(query, expected):
