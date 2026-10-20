@@ -6,8 +6,20 @@ from src.app.services import recommendation_facade as F
 from src.app.services.recommendation_core.envelope import CoreResponse, ProductCard
 
 
-class _Redis:
-    def __init__(self): self.store, self.lists = {}, {}
+@pytest.fixture(autouse=True)
+def isolated_local_memory(monkeypatch):
+    from src.app.services.memory import Memory
+    monkeypatch.setattr(Memory,'_LOCAL_STORE',{})
+    monkeypatch.setattr(Memory,'_LOCAL_INDEX',{})
+
+
+from tests.services.test_memory_scope_contract import _Redis as _MemoryRedis
+
+
+class _Redis(_MemoryRedis):
+    def __init__(self):
+        super().__init__()
+        self.store, self.lists = self.data, {}
     def get(self, k): return self.store.get(k)
     def lpush(self, k, v): self.lists.setdefault(k, []).insert(0, v)
     def ltrim(self, k, a, b): self.lists[k] = self.lists.get(k, [])[a:b + 1]
@@ -332,7 +344,7 @@ def test_typed_ingress_blocks_quota_before_core(monkeypatch):
     monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _must_not_run)
     monkeypatch.setattr(
         "src.app.services.token_budget.TokenBudget.check_budget",
-        lambda *args, **kwargs: (False, "daily_token_limit", 0),
+        lambda *args, **kwargs: (False, "daily_token_limit", {"tokens_remaining": 0, "cost_remaining_usd": 0.0}),
     )
     outcome = F.dispatch_recommendation_core_typed(
         db=object(), redis=_Redis(), query="gaming laptop", uid="u1", tenant_id="t1",
@@ -352,7 +364,7 @@ def test_typed_default_finalizer_persists_canonical_trace(monkeypatch):
     monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _rec())
     monkeypatch.setattr(
         "src.app.services.token_budget.TokenBudget.check_budget",
-        lambda *args, **kwargs: (True, "ok", 999),
+        lambda *args, **kwargs: (True, "ok", {"tokens_remaining": 999, "cost_remaining_usd": 1.0}),
     )
     events = []
     decisions = []
@@ -389,7 +401,7 @@ def test_typed_facade_records_quota_once_for_served_response(monkeypatch):
     recorded = []
     monkeypatch.setattr(
         "src.app.services.token_budget.TokenBudget.check_budget",
-        lambda *args, **kwargs: (True, "ok", 999),
+        lambda *args, **kwargs: (True, "ok", {"tokens_remaining": 999, "cost_remaining_usd": 1.0}),
     )
     monkeypatch.setattr(
         "src.app.services.token_budget.TokenBudget.record_usage",

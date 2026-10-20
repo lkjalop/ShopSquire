@@ -1,36 +1,18 @@
-import os
+"""Pricing uses the same real startup-bound token-budget profile."""
+
 import uuid
 import requests
-import pytest
-
-BASE_URL = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8082").rstrip("/")
-MERCHANT_KEY = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
-
-hdr = {"x-api-key": MERCHANT_KEY}
-
-# Live-server tests: skip when no running API is available.
-def _server_up() -> bool:
-    try:
-        return requests.get(BASE_URL + "/healthz", timeout=1).status_code == 200
-    except Exception:
-        return False
-
-if not _server_up():
-    pytest.skip(
-        f"Pricing rate-limit E2E tests require a running API at {BASE_URL}",
-        allow_module_level=True,
-    )
+from tests.security.test_rate_limits import admitted_budget_runtime
 
 
-@pytest.mark.xfail(reason="Server may not expose rate-limit headers until restarted")
-def test_pricing_rate_limit_headers_present():
-    uid = f"guest-{uuid.uuid4().hex[:6]}"
+def test_pricing_rate_limit_headers_present(admitted_budget_runtime):
     r = requests.get(
-        f"{BASE_URL}/api/v1/pricing/suggest",
-        headers=hdr,
-        params={"uid": uid, "cart_total_cents": 12345},
-        timeout=10,
+        admitted_budget_runtime["base_url"] + "/api/v1/pricing/suggest",
+        headers={"x-api-key": "local-merchant-key"},
+        params={"uid": "guest-" + uuid.uuid4().hex, "cart_total_cents": 12345},
+        timeout=15,
     )
-    assert "X-Rate-Limit-Tokens-Remaining" in r.headers
-    assert "X-Rate-Limit-Cost-Remaining-USD" in r.headers
-    assert "X-Rate-Limit-Reason" in r.headers
+    assert r.status_code == 200, r.text[:500]
+    assert r.headers["X-Rate-Limit-Reason"] == "ok"
+    assert float(r.headers["X-Rate-Limit-Tokens-Remaining"]) == 10000
+    assert float(r.headers["X-Rate-Limit-Cost-Remaining-USD"]) == 1

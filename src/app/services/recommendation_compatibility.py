@@ -396,6 +396,7 @@ def serve_v2_compatibility(
     redis: Any,
     db: Any,
     role: str,
+    response: Any = None,
 ) -> Dict[str, Any]:
     from src.app.observability.metrics import (
         record_recommend_compatibility_request,
@@ -538,6 +539,19 @@ def serve_v2_compatibility(
         compatibility_cutover=True,
         cancellation=compatibility_cancellation,
     )
+    quota_admission = (outcome.diagnostics or {}).get("quota_admission") or {}
+    quota_headers = {
+        header: str(quota_admission[field])
+        for header, field in (
+            ("X-Rate-Limit-Reason", "reason"),
+            ("X-Rate-Limit-Tokens-Remaining", "tokens_remaining"),
+            ("X-Rate-Limit-Cost-Remaining-USD", "cost_remaining_usd"),
+        )
+        if field in quota_admission
+    }
+    if response is not None:
+        response.headers.update(quota_headers)
+
     if outcome.served:
         record_recommendation_dispatch(
             outcome="v2_served",
@@ -717,6 +731,7 @@ def serve_v2_compatibility(
             return blocked_payload
         raise HTTPException(
             status_code=429 if outcome.reason.startswith("quota:") else 403,
+            headers=quota_headers,
             detail={
                 "message": "Request blocked by recommendation guard",
                 "reason": outcome.reason,

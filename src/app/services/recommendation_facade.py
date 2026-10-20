@@ -966,6 +966,7 @@ def dispatch_recommendation_core_typed(
     quota_budget = None
     quota_estimated = 0
     quota_recorded = False
+    quota_admission = None
     core_invocation_count = 0
     active_core = None
     tenant = tenant_id or "default"
@@ -1091,6 +1092,7 @@ def dispatch_recommendation_core_typed(
             },
             execution_evidence=evidence,
             diagnostics={
+                "quota_admission": quota_admission,
                 "requested_quantity": facts.get("quantity"),
                 "bulk_budget": extras.get("bulk") if isinstance(extras.get("bulk"), dict) else None,
                 "router_outcome": router or None,
@@ -1114,6 +1116,7 @@ def dispatch_recommendation_core_typed(
         allowed, quota_reason, _remaining = quota_budget.check_budget(
             uid or "anonymous", infer_tier(uid or "anonymous"), quota_estimated,
         )
+        quota_admission = {"reason": quota_reason, **_remaining}
         if not allowed:
             return outcome("blocked", reason=f"quota:{quota_reason}")
     except Exception as exc:

@@ -81,4 +81,5 @@ def suggest(
         redis=redis,
         db=db,
         role=role,
+        response=response,
     )

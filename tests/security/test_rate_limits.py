@@ -1,63 +1,66 @@
+"""HTTP token admission against an owned API with startup-bound limits."""
+
 import os
 import uuid
-import requests
+
 import pytest
+import requests
 
-BASE_URL = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8082").rstrip("/")
-MERCHANT_KEY = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
-
-hdr = {"x-api-key": MERCHANT_KEY}
-
-# Live-server tests: skip when no running API is available.
-def _server_up() -> bool:
-    try:
-        return requests.get(BASE_URL + "/healthz", timeout=1).status_code == 200
-    except Exception:
-        return False
-
-if not _server_up():
-    pytest.skip(
-        f"Rate-limit E2E tests require a running API at {BASE_URL}",
-        allow_module_level=True,
-    )
+from tests.owned_security_runtime import _owned_runtime
 
 
-@pytest.mark.xfail(reason="Server may not expose rate-limit headers until restarted")
-def test_rate_limit_headers_present():
-    uid = f"guest-{uuid.uuid4().hex[:6]}"
+@pytest.fixture(scope="module")
+def admitted_budget_runtime(pytestconfig, tmp_path_factory):
+    parent = {key: value for key, value in os.environ.items() if key.startswith("TOKEN_BUDGET_")}
+    directory = tmp_path_factory.mktemp("budget-parent") / "admitted"
+    with _owned_runtime(
+        pytestconfig,
+        artifact_directory=directory,
+        publish_base_url=False,
+        env_overrides={
+            "TOKEN_BUDGET_ENABLED": "1",
+            "TOKEN_BUDGET_GUEST_DAILY_TOKENS": "10000",
+            "TOKEN_BUDGET_GUEST_DAILY_USD": "1",
+        },
+    ) as runtime:
+        yield runtime
+    assert {
+        key: value for key, value in os.environ.items() if key.startswith("TOKEN_BUDGET_")
+    } == parent
+
+
+def test_rate_limit_headers_present(admitted_budget_runtime):
     r = requests.get(
-        f"{BASE_URL}/api/v1/recommend/suggest",
-        headers=hdr,
-        params={"uid": uid, "query": "short"},
-        timeout=10,
+        admitted_budget_runtime["base_url"] + "/api/v1/recommend/suggest",
+        headers={"x-api-key": "local-merchant-key"},
+        params={"uid": "guest-" + uuid.uuid4().hex, "query": "laptop"},
+        timeout=15,
     )
-    # Headers should always be present regardless of allow/exceed state
-    assert "X-Rate-Limit-Tokens-Remaining" in r.headers
-    assert "X-Rate-Limit-Cost-Remaining-USD" in r.headers
-    assert "X-Rate-Limit-Reason" in r.headers
+    assert r.status_code == 200, r.text[:500]
+    assert r.headers["X-Rate-Limit-Reason"] == "ok"
+    assert float(r.headers["X-Rate-Limit-Tokens-Remaining"]) == 10000
+    assert float(r.headers["X-Rate-Limit-Cost-Remaining-USD"]) == 1
 
 
-@pytest.mark.xfail(reason="Server env limits are not controlled by test runner")
-def test_budget_exceeded_when_limits_low(monkeypatch):
-    # These env vars affect only the test process, not the server.
-    os.environ["TOKEN_BUDGET_ENABLED"] = "true"
-    os.environ["TOKEN_BUDGET_GUEST_DAILY_TOKENS"] = "50"
-    os.environ["TOKEN_BUDGET_GUEST_DAILY_USD"] = "0.00001"
-
-    uid = f"guest-{uuid.uuid4().hex[:6]}"
-    exceeded = False
-    for _ in range(20):
+def test_budget_exceeded_when_limits_low(pytestconfig, tmp_path):
+    with _owned_runtime(
+        pytestconfig,
+        artifact_directory=tmp_path / "denied",
+        publish_base_url=False,
+        env_overrides={
+            "TOKEN_BUDGET_ENABLED": "1",
+            "TOKEN_BUDGET_GUEST_DAILY_TOKENS": "50",
+            "TOKEN_BUDGET_GUEST_DAILY_USD": "0.00001",
+        },
+    ) as runtime:
         r = requests.get(
-            f"{BASE_URL}/api/v1/recommend/suggest",
-            headers=hdr,
-            params={"uid": uid, "query": "short"},
-            timeout=10,
+            runtime["base_url"] + "/api/v1/recommend/suggest",
+            headers={"x-api-key": "local-merchant-key"},
+            params={"uid": "guest-" + uuid.uuid4().hex, "query": "laptop"},
+            timeout=15,
         )
-        try:
-            body = r.json()
-        except Exception:
-            body = {}
-        if body.get("status") == "budget_exceeded":
-            exceeded = True
-            break
-    assert exceeded, "Expected budget_exceeded with low limits"
+        assert r.status_code == 429, r.text[:500]
+        assert r.json()["detail"]["reason"] == "quota:daily_token_limit"
+        assert r.headers["X-Rate-Limit-Reason"] == "daily_token_limit"
+        assert float(r.headers["X-Rate-Limit-Tokens-Remaining"]) == 50
+        assert not r.json().get("products")
