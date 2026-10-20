@@ -39,3 +39,48 @@ def test_required_security_runtime_persists_detection_in_its_owned_database(secu
         rows = db.execute("SELECT details FROM security_events WHERE path='/api/v1/recommend/suggest'").fetchall()
     assert any('LLM01:PromptInjection' in json.loads(row[0]).get('analysis', {}).get('owasp_llm_top10', [])
                for row in rows), 'The required HTTP profile must exercise persisted detection, not only readiness'
+
+
+def test_owned_security_child_cannot_inherit_message_connector_credentials(pytestconfig, tmp_path, monkeypatch):
+    from tests import owned_security_runtime as runtime
+
+    inherited = {
+        'JIRA_BASE_URL': 'https://jira.example.invalid',
+        'JIRA_API_TOKEN': 'owned-synthetic-jira-token',
+        'JIRA_API_TOKEN_REF': 'vault://owned-synthetic-jira',
+        'SN_INSTANCE_URL': 'https://incident.example.invalid',
+        'SN_PASSWORD': 'owned-synthetic-password',
+        'SMTP_PASSWORD': 'owned-synthetic-smtp',
+        'SLACK_WEBHOOK_URL': 'https://hooks.example.invalid',
+        'SECRETS_PROVIDER': 'vault',
+        'INCIDENT_ALERTS_ENABLED': '1',
+    }
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
+    child_environments = []
+
+    class Child:
+        pid = 99999997
+
+        def __init__(self, command, **kwargs):
+            child_environments.append(kwargs['env'])
+            self.stopped = False
+
+        def poll(self):
+            return 0 if self.stopped else None
+
+        def terminate(self):
+            self.stopped = True
+
+        def wait(self, **kwargs):
+            return 0
+
+    monkeypatch.setattr(runtime.subprocess, 'Popen', Child)
+    monkeypatch.setattr(runtime.subprocess, 'run', lambda *args, **kwargs: None)
+    monkeypatch.setattr(runtime, '_wait_ready', lambda *args, **kwargs: True)
+    with runtime._owned_runtime(pytestconfig, artifact_directory=tmp_path/'runtime', publish_base_url=False):
+        child = child_environments[0]
+        for key in inherited:
+            expected = 'env' if key == 'SECRETS_PROVIDER' else '0' if key == 'INCIDENT_ALERTS_ENABLED' else ''
+            assert child.get(key) == expected, key
+        assert {key: os.environ[key] for key in inherited} == inherited

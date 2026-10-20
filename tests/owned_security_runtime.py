@@ -84,7 +84,8 @@ def _owned_runtime(config, *, artifact_directory=None, env_overrides=None, publi
         SECURITY_OBSERVER_SYNC="1", FAQ_INDEX_ON_STARTUP="0", VISUAL_SEARCH_INDEX_ON_STARTUP="0",
         OLLAMA_PREWARM_DISABLED="1", VLM_WARMUP_ON_START="0", CV_WARMUP_ON_START="0",
         WEBHOOK_DISPATCHER_WORKER_ENABLED="0", TASK_CONSUMER_ENABLED="0",
-        PAYMENT_EXECUTION_ENABLED="0", ALLOW_DEMO_CHECKOUT="0",
+        PAYMENT_EXECUTION_ENABLED="0", ALLOW_DEMO_CHECKOUT="0", INCIDENT_ALERTS_ENABLED="0",
+        SECRETS_PROVIDER="env", SECRETS_PROVIDER_STRICT="0",
         FULFILLMENT_SUPPLIER_TRANSPORT="sandbox", FULFILLMENT_PO_TRANSPORT="sandbox",
         CUDA_VISIBLE_DEVICES="-1", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     for key in ("OLLAMA_URL", "OLLAMA_BASE_URL", "OLLAMA_HOST"):
@@ -94,6 +95,16 @@ def _owned_runtime(config, *, artifact_directory=None, env_overrides=None, publi
     for key in ("STRIPE_API_KEY", "STRIPE_API_KEY_REF", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_ID_REF",
                 "PAYPAL_CLIENT_SECRET", "PAYPAL_CLIENT_SECRET_REF", "ERP_PO_URL", "ERP_API_KEY", "REDIS_URL_REF"):
         env[key] = ""
+    # An owned API must not inherit authority to send messages or create real
+    # incidents. Explicit test-owned adapters may be supplied through overrides.
+    for key in list(env):
+        if key.startswith(("JIRA_", "SN_", "SMTP_", "SENDGRID_", "SLACK_", "TEAMS_", "VAULT_")):
+            env[key] = ""
+    for key in ("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_API_TOKEN", "JIRA_USER", "JIRA_EMAIL",
+                "SN_INSTANCE_URL", "SN_USERNAME", "SN_PASSWORD", "SN_TOKEN", "SMTP_PASSWORD",
+                "SLACK_WEBHOOK_URL", "TEAMS_WEBHOOK_URL", "SENDGRID_API_KEY"):
+        env[key] = ""
+        env[key + "_REF"] = ""
     env.update(env_overrides or {})
 
     proc = None

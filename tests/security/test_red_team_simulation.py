@@ -5,6 +5,7 @@ import json
 import uuid
 import pytest
 import requests
+from tests.owned_security_runtime import _owned_runtime
 
 BASE_URL = (
     os.getenv("E2E_BASE_URL")
@@ -32,7 +33,13 @@ def _health_ok() -> bool:
         return False
 
 if not _health_ok():
-    pytest.skip(f"Red-team E2E tests: API not reachable at {BASE_URL} (health check failed).", allow_module_level=True)
+    raise RuntimeError(f"Required red-team API is not ready at {BASE_URL}")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_owned_api(security_test_server):
+    assert security_test_server and security_test_server.get("owned") is True
+    assert security_test_server["base_url"] == BASE_URL
 
 
 def _get(url, headers=None, params=None):
@@ -57,12 +64,7 @@ def test_path_traversal_scoring_diff_attempt():
     # Attempt to read files outside versions dir via relative segments
     params = {"a": "../../pyproject.toml", "b": "../../README.md"}
     code, body = _get(f"{BASE_URL}/api/v1/admin/scoring/diff", headers=hdr_owner, params=params)
-    # If server returns 200, it's likely susceptible to path traversal under OWNER role
-    # We mark xfail to avoid build break but record outcome
-    if code == 200:
-        pytest.xfail("Potential path traversal: admin/scoring/diff reads arbitrary files via relative paths")
-    else:
-        assert code in (400, 404, 500)
+    assert code in (400, 404), body
 
 
 @pytest.mark.order(3)
@@ -83,36 +85,40 @@ def test_prompt_injection_recommend_input():
 
 @pytest.mark.order(4)
 def test_security_events_recorded_for_recommend():
-    # Read security events; prefer presence but xfail if observer endpoints are skipped
+    # The required profile enables the observer; absence must fail this gate.
     code, body = _get(f"{BASE_URL}/api/v1/admin/security/events", headers=hdr_dev, params={"limit": 100})
     assert code == 200
     events = (body or {}).get("events") or []
     paths = {e.get("path") for e in events if isinstance(e, dict)}
-    if not any(isinstance(p, str) and p.startswith("/api/v1/recommend") for p in paths):
-        pytest.xfail("Observer may be configured to skip recommend endpoints; event not present")
+    assert any(isinstance(p, str) and p.startswith("/api/v1/recommend") for p in paths), body
 
 
 @pytest.mark.order(5)
-def test_budget_backpressure_on_recommend():
-    uid = f"load-{uuid.uuid4().hex[:8]}"
-    # Hit recommend in a tight loop to trigger budget exceeded
-    exceeded = False
-    for i in range(30):
-        code, body = _get(f"{BASE_URL}/api/v1/recommend/suggest", headers=hdr_merchant, params={"uid": uid, "query": f"q{i}"})
-        if code == 200 and isinstance(body, dict) and body.get("status") == "budget_exceeded":
-            exceeded = True
-            break
-        time.sleep(0.05)
-    if not exceeded:
-        pytest.xfail("Budget may be configured high; no exceed under test load")
+def test_budget_backpressure_on_recommend(pytestconfig, tmp_path):
+    with _owned_runtime(pytestconfig, artifact_directory=tmp_path/"quota", publish_base_url=False,
+            env_overrides={"TOKEN_BUDGET_ENABLED": "1", "TOKEN_BUDGET_GUEST_DAILY_TOKENS": "50",
+                           "TOKEN_BUDGET_GUEST_DAILY_USD": "0.00001"}) as runtime:
+        response = requests.get(runtime["base_url"] + "/api/v1/recommend/suggest",
+            headers=hdr_merchant, params={"uid": "guest-" + uuid.uuid4().hex, "query": "laptop"}, timeout=15)
+    assert response.status_code == 429, response.text
+    assert response.json()["detail"]["reason"] == "quota:daily_token_limit"
+    assert response.headers["X-Rate-Limit-Reason"] == "daily_token_limit"
+    assert not response.json().get("products")
 
 
 @pytest.mark.order(6)
-def test_ticketing_agent_direct_create_ticket():
+def test_unconfigured_ticketing_reports_no_external_creation():
     code, body = _post(f"{BASE_URL}/api/v1/incident/ticket", headers=hdr_dev, params={"topic": "security", "title": "RedTeam", "description": "Test incident from red-team", "priority": "p2"})
     assert code == 200
-    assert (body or {}).get("created") is True
-    assert (body or {}).get("system") == "jira"
+    assert (body or {}).get("created") is False
+    assert (body or {}).get("system") == "none"
+    assert (body or {}).get("key") is None
+
+
+def test_ticket_creation_requires_authentication():
+    code, body = _post(f"{BASE_URL}/api/v1/incident/ticket", params={"topic": "security",
+        "title": "Owned authentication control", "description": "No external connector is configured"})
+    assert code == 401, body
 
 
 @pytest.mark.order(7)
