@@ -495,10 +495,12 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
             _session_mem = export_redis(redis, uid)
             if _session_mem:
                 export["session_memory"] = _session_mem
-        except Exception:
-            pass
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail='privacy_memory_export_unavailable') from exc
         sanitized, _hits = dlp_sanitize_export_value(export)
         return sanitized if isinstance(sanitized, dict) else {"export": sanitized}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

@@ -1,14 +1,10 @@
-"""UserDataInventory — the single source of truth for every user-linked Redis key.
+"""Inventory for indexed conversation memory and declared legacy Redis families.
 
-DSR (data-subject request) gap fix (0.2): the privacy delete/export/redact paths
-historically hard-coded only 2-3 of the session keys, so a deletion left behind
-product preferences, observation logs/summaries, structured state, agent steps,
-and all typed session artifacts. That is a GDPR/APP right-to-erasure gap.
-
-This module enumerates ALL user-linked Redis keys by REFERENCING the key
-definitions in `memory.py` and `session_artifacts.py` — so when a new memory key
-is added there, erasure/export automatically covers it (no drift). Route every
-privacy delete/export/redact through here.
+New scoped memory uses its subject index. UID-only cleanup is retained only for
+default-controller compatibility; named controllers cannot borrow those keys.
+This compatibility rule is not ownership evidence for unattributed legacy data.
+Legacy families must be registered here when their definitions change. This
+inventory does not certify export or erasure of the separate SQL data planes.
 """
 from __future__ import annotations
 
@@ -17,13 +13,14 @@ from typing import Any
 
 from src.app.services import memory as _memory
 from src.app.services import session_artifacts as _artifacts
+from src.app.platform.tenant_context import DEFAULT_TENANT
 
 
 def all_redis_key_templates() -> list[str]:
     """Every user-scoped Redis key TEMPLATE ("session:{uid}:...").
 
-    Pulled live from the memory + session-artifact modules so this list cannot
-    silently fall out of sync with the stores it is meant to erase.
+    These references track existing definitions; new legacy families still need
+    explicit registration. New scoped memory is discovered through its index.
     """
     memory_keys = [
         _memory.SUMMARY_KEY,
@@ -47,9 +44,11 @@ def all_redis_key_templates() -> list[str]:
 
 
 def all_redis_keys(uid: str) -> list[str]:
-    """Concrete user-scoped Redis keys for a given uid."""
+    """Current privacy state plus default-only legacy compatibility candidates."""
     from src.app.services.privacy_state_store import privacy_key
-    return [tpl.format(uid=uid) for tpl in all_redis_key_templates()] + [
+    legacy = ([tpl.format(uid=uid) for tpl in all_redis_key_templates()]
+              if _memory.MemoryScope.resolve(uid).tenant_id == DEFAULT_TENANT else [])
+    return legacy + [
         privacy_key(uid, 'consent'), privacy_key(uid, 'requests'),
     ]
 
@@ -108,20 +107,18 @@ def erase_redis(redis, uid: str) -> dict[str, Any]:
 
 
 def export_redis(redis, uid: str) -> dict[str, Any]:
-    """Export the contents of EVERY user-linked Redis key (json-safe)."""
+    """Read this controller's inventory, or report an incomplete storage export."""
+    if getattr(redis, 'is_shared_backend', True) is False:
+        raise RuntimeError('privacy_memory_export_incomplete')
     out: dict[str, Any] = {}
-    for key in all_redis_keys(uid):
-        try:
-            val = redis.get(key)
-        except Exception:
-            val = None
-        if val is not None:
-            # Strip the "session:{uid}:" prefix for a clean export shape.
-            short = ('privacy:' + key.rsplit(':', 1)[-1]
-                     if key.startswith('privacy:v2:') else key.split(":", 2)[-1])
-            out[short] = _safe_json(val)
-    # Export every indexed v2 epoch without scanning other tenants/subjects.
     try:
+        for key in all_redis_keys(uid):
+            val = redis.get(key)
+            if val is not None:
+                short = ('privacy:' + key.rsplit(':', 1)[-1]
+                         if key.startswith('privacy:v2:') else key.split(":", 2)[-1])
+                out[short] = _safe_json(val)
+        # Export every indexed v2 epoch without scanning other tenants/subjects.
         scope = _memory.Memory(redis).scope(
             uid, subject_id=uid, session_epoch="export-index"
         )
@@ -131,8 +128,8 @@ def export_redis(redis, uid: str) -> dict[str, Any]:
             value = redis.get(key)
             if value is not None:
                 out[f"v2:{key.rsplit(':', 1)[-1]}:{key}"] = _safe_json(value)
-    except Exception:
-        pass
+    except Exception as error:
+        raise RuntimeError('privacy_memory_export_incomplete') from error
     return out
 
 
