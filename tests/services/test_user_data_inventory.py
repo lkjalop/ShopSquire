@@ -5,15 +5,13 @@ from src.app.services import user_data_inventory as udi
 from src.app.services import memory as _memory
 
 
-class _FakeRedis:
+from tests.services.test_memory_scope_contract import _Redis
+
+
+class _FakeRedis(_Redis):
     def __init__(self):
-        self.store: dict[str, str] = {}
-
-    def get(self, k):
-        return self.store.get(k)
-
-    def delete(self, k):
-        self.store.pop(k, None)
+        super().__init__()
+        self.store = self.data
 
 
 def _seed(uid: str) -> _FakeRedis:
@@ -32,6 +30,32 @@ def test_inventory_covers_all_eight_memory_families():
         _memory.OBSERVATION_SUMMARY_KEY,
     ):
         assert k in templates
+
+
+def test_privacy_state_erasure_is_scoped_to_the_current_controller():
+    from src.app.services.privacy_state_store import privacy_key
+    from src.app.platform.tenant_context import set_active_tenant_id, reset_active_tenant_id
+    backend = _FakeRedis()
+    uid = 'same-subject'
+    keys = {}
+    for tenant in ('controller-a', 'controller-b'):
+        token = set_active_tenant_id(tenant)
+        try:
+            keys[tenant] = [privacy_key(uid, kind) for kind in ('consent', 'requests')]
+            for key in keys[tenant]:
+                backend.store[key] = '{"retention_opt_in":true}'
+        finally:
+            reset_active_tenant_id(token)
+    token = set_active_tenant_id('controller-a')
+    try:
+        exported = udi.export_redis(backend, uid)
+        assert set(exported) == {'privacy:consent', 'privacy:requests'}
+        result = udi.erase_redis(backend, uid)
+    finally:
+        reset_active_tenant_id(token)
+    assert result['complete'] is True
+    assert all(key not in backend.store for key in keys['controller-a'])
+    assert all(key in backend.store for key in keys['controller-b'])
 
 
 def test_erase_leaves_nothing_behind():

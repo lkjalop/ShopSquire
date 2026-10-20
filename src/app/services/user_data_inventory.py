@@ -48,7 +48,10 @@ def all_redis_key_templates() -> list[str]:
 
 def all_redis_keys(uid: str) -> list[str]:
     """Concrete user-scoped Redis keys for a given uid."""
-    return [tpl.format(uid=uid) for tpl in all_redis_key_templates()]
+    from src.app.services.privacy_state_store import privacy_key
+    return [tpl.format(uid=uid) for tpl in all_redis_key_templates()] + [
+        privacy_key(uid, 'consent'), privacy_key(uid, 'requests'),
+    ]
 
 
 def _safe_json(raw: Any) -> Any:
@@ -114,7 +117,8 @@ def export_redis(redis, uid: str) -> dict[str, Any]:
             val = None
         if val is not None:
             # Strip the "session:{uid}:" prefix for a clean export shape.
-            short = key.split(":", 2)[-1]
+            short = ('privacy:' + key.rsplit(':', 1)[-1]
+                     if key.startswith('privacy:v2:') else key.split(":", 2)[-1])
             out[short] = _safe_json(val)
     # Export every indexed v2 epoch without scanning other tenants/subjects.
     try:

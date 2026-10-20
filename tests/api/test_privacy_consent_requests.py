@@ -4,6 +4,8 @@ from sqlalchemy.orm import sessionmaker
 
 from src.app.main import create_app
 from src.app.models.db import set_engine
+from src.app.deps import get_redis
+from tests.privacy_store_fakes import SharedStore
 
 
 def _client(tmp_path, monkeypatch):
@@ -17,7 +19,10 @@ def _client(tmp_path, monkeypatch):
         dbmod.SessionLocal = sessionmaker(bind=eng, future=True)
     except Exception:
         pass
-    return TestClient(create_app())
+    app = create_app()
+    store = SharedStore()
+    monkeypatch.setitem(app.dependency_overrides, get_redis, lambda: store)
+    return TestClient(app)
 
 
 def test_privacy_consent_set_and_get(tmp_path, monkeypatch):

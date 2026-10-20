@@ -21,7 +21,10 @@ from src.app.services.decision_log import log_trace_event
 from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2: erasure/export per tenant-controller
 
 router = APIRouter(prefix="/api/v1/privacy", tags=["privacy"])
-_PRIVACY_FALLBACK: Dict[str, str] = {}
+from src.app.services.privacy_state_store import (
+    PrivacyStoreUnavailable, privacy_key,
+    load_privacy_value as _kv_get, store_privacy_value as _kv_set,
+)
 
 
 class PrivacyConsentPayload(BaseModel):
@@ -101,28 +104,11 @@ def _in_clause(prefix: str, values: List[str]) -> tuple[str, Dict[str, str]]:
 
 
 def _consent_key(uid: str) -> str:
-    return f"privacy:{uid}:consent"
+    return privacy_key(uid, 'consent')
 
 
 def _request_key(uid: str) -> str:
-    return f"privacy:{uid}:requests"
-
-
-def _kv_get(redis, key: str):
-    try:
-        val = redis.get(key)
-        if val is None:
-            return _PRIVACY_FALLBACK.get(key)
-        return val
-    except Exception:
-        return _PRIVACY_FALLBACK.get(key)
-
-
-def _kv_set(redis, key: str, value: str) -> None:
-    try:
-        redis.set(key, value)
-    except Exception:
-        _PRIVACY_FALLBACK[key] = value
+    return privacy_key(uid, 'requests')
 
 
 @router.get("/consent/{uid}")
@@ -141,6 +127,8 @@ def get_consent(
             "uid_hash": hash_uid(uid),
             "consent": payload,
         }
+    except PrivacyStoreUnavailable:
+        raise HTTPException(status_code=503, detail="privacy_backend_unavailable") from None
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -184,6 +172,8 @@ def set_consent(
         except Exception:
             pass
         return {"ok": True, "uid": uid, "uid_hash": hash_uid(uid), "consent": payload}
+    except PrivacyStoreUnavailable:
+        raise HTTPException(status_code=503, detail="privacy_backend_unavailable") from None
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -234,6 +224,8 @@ def create_privacy_request(
         except Exception:
             pass
         return {"ok": True, "request": entry}
+    except PrivacyStoreUnavailable:
+        raise HTTPException(status_code=503, detail="privacy_backend_unavailable") from None
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
