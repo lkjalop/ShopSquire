@@ -1,8 +1,11 @@
 {
-  "recorded_at": "2026-10-20T19:46:33.862484+00:00",
-  "checkpoint_head": "d4eb4de09e25d4f806d0d4c0e68b9fb4fe7f4210",
+  "recorded_at": "2026-10-20T22:19:37.325352+00:00",
+  "checkpoint_head": "8c397ee4d5af24be03a0b7f495b6ccb222ecf872",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "8c397ee4 Integrate person-bound supplier enquiries and fence uncertain outbound attempts",
+    "99425cab Isolate named-controller privacy inventory and reject incomplete memory exports",
+    "32d760f6 Record shared effect policy, webhook responsiveness and honest native payment capability gaps",
     "d4eb4de0 Require usable native payment interfaces before reporting configured checkout readiness",
     "81d15f21 Offload synchronous payment webhook transactions while preserving request database ownership",
     "b30ce4d1 Enforce shared payment execution policy before HTTP and SDK provider dispatch",
@@ -89,14 +92,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 82,
-      "insertions": 3540,
-      "deletions": 1177
+      "files": 89,
+      "insertions": 4206,
+      "deletions": 1298
     },
     "tests": {
-      "files": 129,
-      "insertions": 7170,
-      "deletions": 1228
+      "files": 143,
+      "insertions": 8002,
+      "deletions": 1242
     },
     "frontend": {
       "files": 16,
@@ -105,15 +108,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T19:44:54.307816+00:00",
-    "head": "d4eb4de09e25d4f806d0d4c0e68b9fb4fe7f4210",
+    "recorded_at": "2026-10-20T22:18:58.615394+00:00",
+    "head": "8c397ee4d5af24be03a0b7f495b6ccb222ecf872",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 498,
-    "tracked_changed": 247,
-    "untracked": 251,
+    "git_status_entries": 483,
+    "tracked_changed": 238,
+    "untracked": 245,
     "staged": 0,
-    "files": 5701,
-    "text_lines": 977832,
+    "files": 5706,
+    "text_lines": 978343,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -224,18 +227,106 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1540,
+      "tests": 1545,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19465,
+    "functions": 19506,
     "production_functions_over_200": 99,
-    "broad_production_handlers": 5589,
-    "swallowed_production_handlers": 2030,
+    "broad_production_handlers": 5587,
+    "swallowed_production_handlers": 2028,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W07",
+      "path": "src/app/services/user_data_inventory.py",
+      "symbol": "export_redis",
+      "line": 109,
+      "function_lines": 25,
+      "file_lines": 140,
+      "git_state": "committed",
+      "sha256": "c66632e5780fed1a5ff6460f11f75a77a23c9e75ff556aba66ca2957de327cef",
+      "remaining": "default legacy ownership, canonical SQL planes and distributed recovery"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/services/user_data_inventory.py",
+      "symbol": "erase_redis",
+      "line": 68,
+      "function_lines": 39,
+      "file_lines": 140,
+      "git_state": "committed",
+      "sha256": "c66632e5780fed1a5ff6460f11f75a77a23c9e75ff556aba66ca2957de327cef",
+      "remaining": "all-plane erasure, concurrent workers and failed-job resume"
+    },
+    {
+      "work_package": "W07",
+      "path": "src/app/routers/privacy.py",
+      "symbol": "export_user_data",
+      "line": 390,
+      "function_lines": 116,
+      "file_lines": 673,
+      "git_state": "committed",
+      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+      "remaining": "actual signed HTTP identity binding and complete data-plane exports"
+    },
+    {
+      "work_package": "W05/W09",
+      "path": "src/app/services/supplier_enquiry_journey.py",
+      "symbol": "_current",
+      "line": 61,
+      "function_lines": 11,
+      "file_lines": 217,
+      "git_state": "committed",
+      "sha256": "0eb05deb4e9e233fa782562901af322ec9181adbb291e6258586262883efe6f1",
+      "remaining": "authenticated browser selection/contact integration and all mutation races"
+    },
+    {
+      "work_package": "W05/W09",
+      "path": "src/app/services/supplier_enquiry_journey.py",
+      "symbol": "dispatch",
+      "line": 126,
+      "function_lines": 13,
+      "file_lines": 217,
+      "git_state": "committed",
+      "sha256": "0eb05deb4e9e233fa782562901af322ec9181adbb291e6258586262883efe6f1",
+      "remaining": "person enrollment/authentication and all real delivery sinks"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/services/fulfillment/outbound_queue.py",
+      "symbol": "_update_claim",
+      "line": 273,
+      "function_lines": 4,
+      "file_lines": 587,
+      "git_state": "committed",
+      "sha256": "753c6acf8adef79cfa6a6bc533b0c53f6c6857edcb0c928e2a407b1bdccb41d8",
+      "remaining": "reviewed uncertain-outcome recovery and complete crash windows"
+    },
+    {
+      "work_package": "W01/W10",
+      "path": "src/app/services/fulfillment/outbound_queue.py",
+      "symbol": "_utc_sql",
+      "line": 240,
+      "function_lines": 14,
+      "file_lines": 587,
+      "git_state": "committed",
+      "sha256": "753c6acf8adef79cfa6a6bc533b0c53f6c6857edcb0c928e2a407b1bdccb41d8",
+      "remaining": "query-plan/load validation and all legacy timestamp formats"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "tests/chaos/test_outbound_dispatch_postgres.py",
+      "symbol": "test_two_workers_observing_the_same_pending_message_only_send_once",
+      "line": 75,
+      "function_lines": 31,
+      "file_lines": 151,
+      "git_state": "committed",
+      "sha256": "0f7b0664136dfbdb2dc61c537a93851f426b34d97b14afc0062c47fa420812af",
+      "remaining": "complete deployed worker and real provider recovery matrix"
+    },
     {
       "work_package": "W09/W11",
       "path": "src/app/services/payment_execution_policy.py",
@@ -669,11 +760,11 @@
       "work_package": "W05",
       "path": "src/app/services/supplier_enquiry_journey.py",
       "symbol": "create",
-      "line": 72,
+      "line": 77,
       "function_lines": 25,
-      "file_lines": 202,
-      "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "780204cf23ca499dd92b5ecfecc9b03ad40254cf2adeef03efee3070c978986e",
+      "file_lines": 217,
+      "git_state": "committed",
+      "sha256": "0eb05deb4e9e233fa782562901af322ec9181adbb291e6258586262883efe6f1",
       "remaining": "complete dependency-group integration and exact revised shortfall"
     },
     {
@@ -704,9 +795,9 @@
       "symbol": "_subject_decisions",
       "line": 81,
       "function_lines": 26,
-      "file_lines": 671,
+      "file_lines": 673,
       "git_state": "committed",
-      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
       "remaining": "indexed exact legacy ownership and large-controller performance"
     },
     {
@@ -715,20 +806,20 @@
       "symbol": "delete_user_data",
       "line": 247,
       "function_lines": 126,
-      "file_lines": 671,
+      "file_lines": 673,
       "git_state": "committed",
-      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
       "remaining": "every retained SQL plane, failure resume and restore policy"
     },
     {
       "work_package": "W07",
       "path": "src/app/routers/privacy.py",
       "symbol": "redact_user_data",
-      "line": 615,
+      "line": 617,
       "function_lines": 57,
-      "file_lines": 671,
+      "file_lines": 673,
       "git_state": "committed",
-      "sha256": "dcc063a86d12738b5ba464e1a55d12f4ad792592c0bff47c8b593c8dc93a596c",
+      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
       "remaining": "remaining data planes and durable partial-work recovery"
     },
     {
@@ -749,7 +840,7 @@
       "line": 93,
       "function_lines": 25,
       "file_lines": 134,
-      "git_state": "working-tree changes or untracked prerequisite",
+      "git_state": "committed",
       "sha256": "5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad",
       "remaining": "complete approval/effect sink matrix"
     },
@@ -2974,13 +3065,14 @@
       "scripts",
       "tests",
       "alembic",
+      "sdk",
       "--select",
       "F821,F823",
       "--output-format",
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.125,
+    "seconds": 0.281,
     "findings": 0,
     "stderr": ""
   },
@@ -6911,14 +7003,14 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 82,
-      "added": 3540,
-      "removed": 1177
+      "files": 89,
+      "added": 4206,
+      "removed": 1298
     },
     "Tests": {
-      "files": 129,
-      "added": 7170,
-      "removed": 1228
+      "files": 143,
+      "added": 8002,
+      "removed": 1242
     },
     "Frontend": {
       "files": 16,
@@ -6942,14 +7034,14 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 27105,
+      "added": 27492,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 278,
-    "added": 41102,
-    "removed": 4875
+    "files": 299,
+    "added": 42987,
+    "removed": 5010
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -7931,5 +8023,380 @@
     "working_bytes_unchanged": true,
     "staged_changes": false,
     "scope": "Index stat refresh only; no Docker build or dependency alignment repair."
+  },
+  "privacy_inventory_boundaries": {
+    "integration_commit": "99425cab",
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_privacy_redis_boundaries.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-redis-boundaries-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-redis-boundaries-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 31.359,
+      "peaks": {
+        "rss_bytes": 269582336,
+        "handles": 885,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 7,
+        "failures": 7,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_privacy_redis_boundaries.py",
+        "tests/services/test_user_data_inventory.py",
+        "tests/services/test_privacy_decision_subject.py",
+        "tests/services/test_privacy_store_scope.py",
+        "tests/services/test_memory_scope_contract.py",
+        "tests/api/test_privacy_consent_requests.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-redis-boundaries-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-redis-boundaries-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 38.687,
+      "peaks": {
+        "rss_bytes": 280330240,
+        "handles": 1217,
+        "threads": 35
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 51,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "owned_redis": {
+      "complete": true,
+      "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+      "corrected": {
+        "exit_code": 0,
+        "counts": {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "unrelated_canary_retained": true,
+        "remaining_test_namespace_keys": 0
+      },
+      "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "actual_redis_ping": true,
+      "native_controller_and_legacy_canaries": true,
+      "private_namespace_cleanup": true,
+      "failed_value_read_rejected": true,
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 18.829
+    },
+    "resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\verify_privacy_controller_owned_redis.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 19.829,
+      "peaks": {
+        "rss_bytes": 260333568,
+        "handles": 882,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "source": {
+      "base": "32d760f69dbd797cb359c86fd890330822452b2b",
+      "files": {
+        "src/app/services/user_data_inventory.py": "c66632e5780fed1a5ff6460f11f75a77a23c9e75ff556aba66ca2957de327cef",
+        "src/app/routers/privacy.py": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+        "tests/services/test_privacy_redis_boundaries.py": "f1cc4a2615859c595d0b22c63d0231253e5d714c4b4fd17753b5dd3b85491624",
+        "tests/integration/test_privacy_controller_redis.py": "ebc50579daf10bd5ab65212f38a42894729c3da67f4377b18068b15d9ed4291e"
+      },
+      "scope": "Named controller isolation, indexed memory and fail-closed storage export. Default legacy compatibility is retained, not authoritative ownership; SQL planes and full distributed recovery remain separate."
+    },
+    "limitations": "Named controllers exclude unattributed UID-only legacy keys. Default compatibility does not prove legacy ownership. Helper/direct Redis controls do not establish actual signed HTTP identity binding, all canonical SQL exports/erasure or distributed worker recovery."
+  },
+  "supplier_enquiry_boundaries": {
+    "integration_commit": "8c397ee4",
+    "original_candidate": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_supplier_enquiry_journey.py",
+        "tests/services/fulfillment/test_person_approval.py",
+        "tests/services/fulfillment/test_outbound_queue.py",
+        "tests/services/fulfillment/test_approval_policy.py",
+        "tests/services/fulfillment/test_transport.py",
+        "tests/services/fulfillment/test_transport_health.py",
+        "tests/services/test_communication_lifecycle.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate-baseline\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 50.579,
+      "peaks": {
+        "rss_bytes": 270942208,
+        "handles": 1088,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 86,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "fencing_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-fencing-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 19.297,
+      "peaks": {
+        "rss_bytes": 264732672,
+        "handles": 888,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 8,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "authority_clock_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_supplier_enquiry_current_authority.py",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-authority-clock-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 20.375,
+      "peaks": {
+        "rss_bytes": 265367552,
+        "handles": 947,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 17,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "legacy_clock_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py::test_existing_offset_window_cannot_make_a_future_message_due",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py::test_existing_offset_claim_is_not_stale_when_its_utc_age_is_one_minute",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-legacy-clock-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 20.734,
+      "peaks": {
+        "rss_bytes": 264474624,
+        "handles": 886,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "first_broad": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_supplier_enquiry_journey.py",
+        "tests/services/test_supplier_enquiry_current_authority.py",
+        "tests/services/fulfillment",
+        "tests/services/test_communication_lifecycle.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-integrated-first\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 140.781,
+      "peaks": {
+        "rss_bytes": 273072128,
+        "handles": 1812,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 419,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_supplier_enquiry_journey.py",
+        "tests/services/test_supplier_enquiry_current_authority.py",
+        "tests/services/fulfillment",
+        "tests/services/test_communication_lifecycle.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-integrated-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 141.843,
+      "peaks": {
+        "rss_bytes": 272023552,
+        "handles": 1816,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 421,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "postgresql": {
+      "purpose": "Disposable PostgreSQL outbound claim and reconciliation races; fake effects only",
+      "complete": true,
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 0,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/services/supplier_enquiry_journey.py": "0eb05deb4e9e233fa782562901af322ec9181adbb291e6258586262883efe6f1",
+        "src/app/services/fulfillment/person_approval.py": "5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad",
+        "src/app/services/fulfillment/effect_contract.py": "2627a2dc752e2a059bd94d48eaa67ff4f0822cd37ca9a1dc575d0acf037cd94b",
+        "src/app/services/fulfillment/outbound_queue.py": "753c6acf8adef79cfa6a6bc533b0c53f6c6857edcb0c928e2a407b1bdccb41d8",
+        "src/app/services/fulfillment/approval_policy.py": "f08616f934dc0f5c30523b54e13f75a423239db72d7e4ae1fae16928fd0428f4",
+        "src/app/services/fulfillment/transport.py": "557544a977ae0cbebf198ec3d6443d8786fb1b09eeead5f20e18f4effc284e0e",
+        "src/app/services/communication_lifecycle.py": "2df7df16f8af2dbb3b9d9c118537926fe9fa30f24cb5843a75535797c329c353",
+        "tests/migration_helpers.py": "7f41f62d7db5ccb45917a1d62eb4978c0b98d281f93e6f757c1c2d12a165d945",
+        "tests/services/fulfillment/test_person_approval.py": "da75c36340c46391a7174dffa930cb8352015a46c384db9f8b906c7850872706",
+        "tests/services/test_supplier_enquiry_journey.py": "5ff0af19d74ed56c4b6aec1e9eed1b77bb32ae1bc61edd0506ca54e118e0635a",
+        "tests/services/fulfillment/test_outbound_queue.py": "6ab38cd6c7273ff4b976c311b4fe61f1af206975b44b5e4f12559a3d17f11c3b",
+        "tests/services/fulfillment/test_approval_policy.py": "b33c335c8ea5b5ce5baeed09df4c0bdc4c6e9a17a6d3108344075b10291350b5",
+        "tests/services/fulfillment/test_transport.py": "1dfe830eeb7241d65acff02ecb7caba39550e04a6124643d149f31cc73b942a2",
+        "tests/services/fulfillment/test_transport_health.py": "b6332b6acb6eb851af446f91684f8bc3d2d5e4b686cbf1700f0911ddd9ccba0d",
+        "tests/services/test_communication_lifecycle.py": "76fc9b79bcd6d2f55974b344432299d87b0bd79bad94be97947dc374c16a0233",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py": "809ad84551d626ba93c7a3b816ac7257f92eaf17480a6cb8b1bc17196a0d7be5",
+        "tests/services/test_supplier_enquiry_current_authority.py": "196b14679d1963f1c9e5ee1bbb23e7dc92fcfc1c6f22e9e8a3ca0c8e1a62925a",
+        "tests/services/fulfillment/test_external_comms.py": "97b5c3c7c676949b2c1131f667fc476f6bc2ba9403f19f2ef407e8b7782ea73b",
+        "tests/chaos/test_outbound_dispatch_postgres.py": "0f7b0664136dfbdb2dc61c537a93851f426b34d97b14afc0062c47fa420812af"
+      },
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 29.687
+    },
+    "postgresql_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_supplier_enquiry_postgres.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 30.297,
+      "peaks": {
+        "rss_bytes": 264224768,
+        "handles": 912,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "source": {
+      "base": "99425cabb56f8eea5d7261f2682448709bde5704",
+      "candidate": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "sha256": {
+        "src/app/services/supplier_enquiry_journey.py": "0eb05deb4e9e233fa782562901af322ec9181adbb291e6258586262883efe6f1",
+        "src/app/services/fulfillment/person_approval.py": "5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad",
+        "src/app/services/fulfillment/effect_contract.py": "2627a2dc752e2a059bd94d48eaa67ff4f0822cd37ca9a1dc575d0acf037cd94b",
+        "src/app/services/fulfillment/outbound_queue.py": "753c6acf8adef79cfa6a6bc533b0c53f6c6857edcb0c928e2a407b1bdccb41d8",
+        "src/app/services/fulfillment/approval_policy.py": "f08616f934dc0f5c30523b54e13f75a423239db72d7e4ae1fae16928fd0428f4",
+        "src/app/services/fulfillment/transport.py": "557544a977ae0cbebf198ec3d6443d8786fb1b09eeead5f20e18f4effc284e0e",
+        "src/app/services/communication_lifecycle.py": "2df7df16f8af2dbb3b9d9c118537926fe9fa30f24cb5843a75535797c329c353",
+        "tests/migration_helpers.py": "7f41f62d7db5ccb45917a1d62eb4978c0b98d281f93e6f757c1c2d12a165d945",
+        "tests/services/fulfillment/test_person_approval.py": "da75c36340c46391a7174dffa930cb8352015a46c384db9f8b906c7850872706",
+        "tests/services/test_supplier_enquiry_journey.py": "5ff0af19d74ed56c4b6aec1e9eed1b77bb32ae1bc61edd0506ca54e118e0635a",
+        "tests/services/fulfillment/test_outbound_queue.py": "6ab38cd6c7273ff4b976c311b4fe61f1af206975b44b5e4f12559a3d17f11c3b",
+        "tests/services/fulfillment/test_approval_policy.py": "b33c335c8ea5b5ce5baeed09df4c0bdc4c6e9a17a6d3108344075b10291350b5",
+        "tests/services/fulfillment/test_transport.py": "1dfe830eeb7241d65acff02ecb7caba39550e04a6124643d149f31cc73b942a2",
+        "tests/services/fulfillment/test_transport_health.py": "b6332b6acb6eb851af446f91684f8bc3d2d5e4b686cbf1700f0911ddd9ccba0d",
+        "tests/services/test_communication_lifecycle.py": "76fc9b79bcd6d2f55974b344432299d87b0bd79bad94be97947dc374c16a0233",
+        "tests/services/fulfillment/test_outbound_dispatch_fencing.py": "809ad84551d626ba93c7a3b816ac7257f92eaf17480a6cb8b1bc17196a0d7be5",
+        "tests/services/test_supplier_enquiry_current_authority.py": "196b14679d1963f1c9e5ee1bbb23e7dc92fcfc1c6f22e9e8a3ca0c8e1a62925a",
+        "tests/services/fulfillment/test_external_comms.py": "97b5c3c7c676949b2c1131f667fc476f6bc2ba9403f19f2ef407e8b7782ea73b",
+        "tests/chaos/test_outbound_dispatch_postgres.py": "0f7b0664136dfbdb2dc61c537a93851f426b34d97b14afc0062c47fa420812af"
+      }
+    },
+    "limitations": "Internal trusted principals, generated memberships and fake transports. Legacy permit-free messages remain contained by the default transport hold. This is not authenticated browser independent-person approval, real SMTP, every effect sink, or reviewed distributed crash recovery."
   }
 }
