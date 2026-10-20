@@ -1,8 +1,14 @@
 {
-  "recorded_at": "2026-10-20T18:37:42.901609+00:00",
-  "checkpoint_head": "00515e0eee16749a3bf96d83d9d7cfed7915c45a",
+  "recorded_at": "2026-10-20T19:07:15.273466+00:00",
+  "checkpoint_head": "518cd5ff824c4d6d0a292245d9ecf79bd779a61d",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "518cd5ff Map formerly skipped NumPy, task authentication and PostgreSQL races to strict execution evidence",
+    "ab31dccc Bind reservation expiry workers to their app database and retain failed shutdown ownership",
+    "bf680e4f Integrate atomic inventory reservations and expiry with ordered PostgreSQL transfer locks",
+    "23f89431 Authenticate Celery broker frames at worker intake and fail closed without signing material",
+    "3debb90b Make email attachment security fixtures execute under NumPy 2 and require measured detection",
+    "700c0c40 Record complete line deltas, required profile execution and remaining roadmap gates",
     "00515e0e Add a reproducible image security gate with owned process and resource cleanup",
     "609f5f91 Inventory all 246 skipped diagnostic cases and their remaining execution requirements",
     "ba86d9e9 Bind cached image analysis to tenant, case context and detector policy",
@@ -75,14 +81,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 64,
-      "insertions": 2768,
-      "deletions": 929
+      "files": 68,
+      "insertions": 3181,
+      "deletions": 1065
     },
     "tests": {
-      "files": 111,
-      "insertions": 5558,
-      "deletions": 1159
+      "files": 119,
+      "insertions": 6300,
+      "deletions": 1222
     },
     "frontend": {
       "files": 16,
@@ -91,15 +97,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T18:36:19.664286+00:00",
-    "head": "00515e0eee16749a3bf96d83d9d7cfed7915c45a",
+    "recorded_at": "2026-10-20T19:06:17.266912+00:00",
+    "head": "518cd5ff824c4d6d0a292245d9ecf79bd779a61d",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 522,
-    "tracked_changed": 260,
-    "untracked": 262,
+    "git_status_entries": 514,
+    "tracked_changed": 258,
+    "untracked": 256,
     "staged": 0,
-    "files": 5691,
-    "text_lines": 976704,
+    "files": 5694,
+    "text_lines": 977117,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -204,24 +210,90 @@
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1323,
+      "src": 1324,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1533,
+      "tests": 1535,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19376,
+    "functions": 19411,
     "production_functions_over_200": 99,
-    "broad_production_handlers": 5590,
-    "swallowed_production_handlers": 2032,
+    "broad_production_handlers": 5589,
+    "swallowed_production_handlers": 2031,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W11",
+      "path": "src/app/workers/task_signing.py",
+      "symbol": "configure_hmac_signing",
+      "line": 39,
+      "function_lines": 32,
+      "file_lines": 70,
+      "git_state": "committed",
+      "sha256": "ba41dd919db750bec78ca51d5252171a2d6790e2059472f5ec6d8df159911a08",
+      "remaining": "coordinated publisher/worker rollout, legacy backlog handling, x509 and distributed worker certification"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/workers/task_signing.py",
+      "symbol": "_digest",
+      "line": 16,
+      "function_lines": 7,
+      "file_lines": 70,
+      "git_state": "committed",
+      "sha256": "ba41dd919db750bec78ca51d5252171a2d6790e2059472f5ec6d8df159911a08",
+      "remaining": "effect idempotence and durable replay protection are separate from message authentication"
+    },
+    {
+      "work_package": "W11",
+      "path": "tests/integration/test_celery_task_signing_runtime.py",
+      "symbol": "test_celery_runtime_rejects_unsigned_and_bad_signature",
+      "line": 12,
+      "function_lines": 89,
+      "file_lines": 100,
+      "git_state": "committed",
+      "sha256": "0f82fa9eb8157f18a907ff7c7493ba75588113bdfc192b52f41454a73e1a483c",
+      "remaining": "production pool/x509/deployment and effect recovery profiles"
+    },
+    {
+      "work_package": "W08",
+      "path": "src/app/services/inventory_transactions.py",
+      "symbol": "move_stock",
+      "line": 37,
+      "function_lines": 44,
+      "file_lines": 218,
+      "git_state": "committed",
+      "sha256": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+      "remaining": "legacy reconciliation, batch lock ordering and complete inventory consumer/restore matrix"
+    },
+    {
+      "work_package": "W01/W08",
+      "path": "src/app/services/inventory_expiry_scheduler.py",
+      "symbol": "start_inventory_expiry_scheduler",
+      "line": 46,
+      "function_lines": 24,
+      "file_lines": 80,
+      "git_state": "committed",
+      "sha256": "15c784b99fd3bf1051dc166a808c0d8d5e1647298a1b770b881a1f62d9705413",
+      "remaining": "broader scheduler/app database ownership, distributed API recovery and endurance"
+    },
+    {
+      "work_package": "W08",
+      "path": "tests/chaos/test_inventory_transactions_postgres.py",
+      "symbol": "test_opposite_transfers_complete_without_database_deadlock",
+      "line": 149,
+      "function_lines": 31,
+      "file_lines": 179,
+      "git_state": "committed",
+      "sha256": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152",
+      "remaining": "full integration and remaining supplier/stock recovery coverage"
+    },
     {
       "work_package": "W12/W15",
       "path": "scripts/run_image_security_profile.py",
@@ -534,12 +606,12 @@
       "work_package": "W08",
       "path": "src/app/services/inventory_transactions.py",
       "symbol": "reserve",
-      "line": 134,
+      "line": 144,
       "function_lines": 22,
-      "file_lines": 208,
-      "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "a2fa1912cb8488f3734b479fc0acf79b35f065c1e57117f5706772bbb27ab5d5",
-      "remaining": "migration, contention, expiry and conservation"
+      "file_lines": 218,
+      "git_state": "committed",
+      "sha256": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+      "remaining": "legacy migration/reconciliation, all consumer/location and restore profiles"
     },
     {
       "work_package": "W09",
@@ -2779,7 +2851,7 @@
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.11,
+    "seconds": 0.141,
     "findings": 0,
     "stderr": ""
   },
@@ -5555,6 +5627,293 @@
         "errors": 0,
         "skipped": 0
       }
+    },
+    "celery": {
+      "negative_control": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/integration/test_celery_task_signing_runtime.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\celery-signing-strict-red\\tests.xml"
+        ],
+        "cwd": "C:\\AI\\ShopSquire",
+        "native_exit_code": 1,
+        "elapsed_seconds": 27.906,
+        "peaks": {
+          "rss_bytes": 269959168,
+          "handles": 961,
+          "threads": 31
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 2,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "memory": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/integration/test_celery_task_signing_runtime.py",
+          "tests/workers/test_celery_hmac_boundaries.py",
+          "tests/workers/test_celery_security_schedule.py",
+          "tests/test_celery_task_registration.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\celery-signing-memory-verified\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\celery-signing-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 65.063,
+        "peaks": {
+          "rss_bytes": 262238208,
+          "handles": 983,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "owned_redis": {
+        "complete": true,
+        "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+        "corrected": {
+          "exit_code": 0,
+          "counts": {
+            "tests": 17,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "unrelated_canary_retained": true,
+          "remaining_test_namespace_keys": 0
+        },
+        "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+        "actual_redis_ping": true,
+        "signed_headers_body_and_callbacks": true,
+        "private_namespace_cleanup": true,
+        "unsigned_forgery_and_payload_tampering_rejected": true,
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "elapsed_seconds": 47.594
+      },
+      "redis_resources": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\verify_celery_owned_redis_v2.py"
+        ],
+        "cwd": "C:\\AI\\ShopSquire",
+        "native_exit_code": 0,
+        "elapsed_seconds": 48.187,
+        "peaks": {
+          "rss_bytes": 263704576,
+          "handles": 1020,
+          "threads": 34
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "tested_source": {
+        "head": "3debb90b8432437869b8f6608e7b0fd1b14d96ef",
+        "files": {
+          "src/app/workers/celery_app.py": "011d08509bc975707e3763f218797fa8eaa0c4595510bbffd69221815e55d6d6",
+          "src/app/workers/task_signing.py": "ba41dd919db750bec78ca51d5252171a2d6790e2059472f5ec6d8df159911a08",
+          "tests/integration/test_celery_task_signing_runtime.py": "0f82fa9eb8157f18a907ff7c7493ba75588113bdfc192b52f41454a73e1a483c",
+          "tests/workers/test_celery_hmac_boundaries.py": "1aeea1c7facd981d648f46fba9d0e92c3d1e302f88038af47b408a48ec2ea9bb"
+        }
+      },
+      "limitations": "Solo workers on memory/owned Redis. This authenticates messages, not exactly-once effects or durable replay. X509/multiple process pools and deployment are separate. Old HMAC message format is incompatible: coordinate publishers/workers and drain or quarantine reviewed legacy backlog."
+    },
+    "canonical_inventory": {
+      "deadlock_negative_control": {
+        "purpose": "Disposable PostgreSQL inventory/effect contention; no real commercial effects",
+        "complete": false,
+        "counts": {
+          "tests": 12,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        "exit_code": 1,
+        "changed_inputs": [],
+        "source_inputs": {
+          "src/app/services/inventory_transactions.py": "a2fa1912cb8488f3734b479fc0acf79b35f065c1e57117f5706772bbb27ab5d5",
+          "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+          "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+          "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+          "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+        },
+        "error": "AssertionError: {'tests': 12, 'failures': 1, 'errors': 0, 'skipped': 0}",
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "elapsed_seconds": 19.234
+      },
+      "postgresql": {
+        "purpose": "Disposable PostgreSQL inventory/effect contention; no real commercial effects",
+        "complete": true,
+        "counts": {
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "exit_code": 0,
+        "changed_inputs": [],
+        "source_inputs": {
+          "src/app/services/inventory_transactions.py": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+          "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+          "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+          "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+          "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+        },
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "elapsed_seconds": 18.047
+      },
+      "postgresql_resources": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_inventory_postgres_repaired.py"
+        ],
+        "cwd": "C:\\AI\\ShopSquire",
+        "native_exit_code": 0,
+        "elapsed_seconds": 18.656,
+        "peaks": {
+          "rss_bytes": 263294976,
+          "handles": 940,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "sqlite": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_inventory_transactions.py",
+          "tests/services/test_inventory_stock_movements.py",
+          "tests/services/test_inventory_expiry.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-core-sqlite-final\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-core-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.734,
+        "peaks": {
+          "rss_bytes": 267087872,
+          "handles": 916,
+          "threads": 29
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "tested_source": {
+        "base": "23f89431ce2d9365fe77180fc5cc7ce14d2fd3e6",
+        "files": {
+          "src/app/services/inventory_transactions.py": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+          "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+          "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+          "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+          "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+        },
+        "candidate_archive_base": "3debb90b8432437869b8f6608e7b0fd1b14d96ef",
+        "publication_head": "23f89431ce2d9365fe77180fc5cc7ce14d2fd3e6"
+      },
+      "scheduler_negative_control": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_inventory_expiry_scheduler.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-owner-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 17.688,
+        "peaks": {
+          "rss_bytes": 268808192,
+          "handles": 890,
+          "threads": 29
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 5,
+          "failures": 3,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "scheduler": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_inventory_expiry_scheduler.py",
+          "tests/bootstrap/test_business_background_lifecycle.py",
+          "tests/services/test_incident_scheduler_ownership.py",
+          "tests/services/test_inventory_transactions.py",
+          "tests/services/test_inventory_stock_movements.py",
+          "tests/services/test_inventory_expiry.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-integration-complete\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 20.984,
+        "peaks": {
+          "rss_bytes": 268996608,
+          "handles": 963,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 40,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "scheduler_tested_source": {
+        "base": "bf680e4f326ce63889f6e1aec54efb5534b36376",
+        "files": {
+          "src/app/services/inventory_expiry_scheduler.py": "15c784b99fd3bf1051dc166a808c0d8d5e1647298a1b770b881a1f62d9705413",
+          "tests/services/test_inventory_expiry_scheduler.py": "6380028301c74e7752c47ad4b162633dcd695045d3731e84ebc0104f25733aa0",
+          "src/app/bootstrap/business_background_lifecycle.py": "1420af7436910ebb69e686228ec4f1bb214daa8f9e496898bdb42b27d310b253",
+          "tests/bootstrap/test_business_background_lifecycle.py": "5dfa328a990f9b6990ecfb7fc7d671dcec0ab8c4cce118f29cd7b22dcf39388a"
+        }
+      },
+      "limitations": "Direct canonical service and schema-isolated PostgreSQL races with fake providers; app-owned scheduler SQL on SQLite. Not every HTTP consumer, historical stock reconciliation, distributed recovery or full release."
     }
   },
   "image_cache_context": {
@@ -5777,12 +6136,16 @@
     "source": "partitioned v4, 591f4e1d",
     "skipped_test_ids": 246,
     "normalized_reason_groups": 63,
-    "later_executed_ids": 5,
+    "later_executed_ids": 15,
     "unchanged_history": true,
     "collection_skipped_modules_are_separate": true,
     "archived_v1": 21,
     "disabled_standard_playwright": 86,
     "disabled_live_playwright": 3,
+    "latest_additional_exact_ids": 9,
+    "latest_expanded_successor_ids": 1,
+    "original_ids_and_reasons_preserved": true,
+    "latest_note": "14 exact original IDs mapped plus the Celery original ID mapped to eight strict successor cases. Separate snapshot/profile passes are not one final-source gate.",
     "path": "docs/audits/2026-10-21-required-profile-skip-ledger.csv",
     "normalized_reasons": {
       "total": 246,
@@ -6416,14 +6779,14 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 64,
-      "added": 2768,
-      "removed": 929
+      "files": 68,
+      "added": 3181,
+      "removed": 1065
     },
     "Tests": {
-      "files": 111,
-      "added": 5558,
-      "removed": 1159
+      "files": 119,
+      "added": 6300,
+      "removed": 1222
     },
     "Frontend": {
       "files": 16,
@@ -6447,14 +6810,14 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 24666,
+      "added": 26064,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 242,
-    "added": 36279,
-    "removed": 4558
+    "files": 254,
+    "added": 38832,
+    "removed": 4757
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -6555,5 +6918,331 @@
         "skipped": 0
       }
     }
+  },
+  "email_attachment_fixture_correction": {
+    "baseline": {
+      "outcome": "skip",
+      "reason": "numpy/Pillow not available"
+    },
+    "cause": {
+      "type": "OverflowError",
+      "message": "Python integer -2 out of bounds for uint8"
+    },
+    "candidate": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_email_attachment_steg.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\email-steg-generated-strict\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\celery-signing-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 25.266,
+      "peaks": {
+        "rss_bytes": 462602240,
+        "handles": 1157,
+        "threads": 58
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "sha256": "133966159bd6964c5921129dc981dd3ce2665174dd799175602ee2653bc1f562",
+    "scope": "Generated inert payloads replace personal dump dependencies in two renamed cases; not a real-image benchmark."
+  },
+  "celery_task_authentication": {
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_celery_task_signing_runtime.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\celery-signing-strict-red\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 1,
+      "elapsed_seconds": 27.906,
+      "peaks": {
+        "rss_bytes": 269959168,
+        "handles": 961,
+        "threads": 31
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "memory": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_celery_task_signing_runtime.py",
+        "tests/workers/test_celery_hmac_boundaries.py",
+        "tests/workers/test_celery_security_schedule.py",
+        "tests/test_celery_task_registration.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\celery-signing-memory-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\celery-signing-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 65.063,
+      "peaks": {
+        "rss_bytes": 262238208,
+        "handles": 983,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "owned_redis": {
+      "complete": true,
+      "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+      "corrected": {
+        "exit_code": 0,
+        "counts": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "unrelated_canary_retained": true,
+        "remaining_test_namespace_keys": 0
+      },
+      "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "actual_redis_ping": true,
+      "signed_headers_body_and_callbacks": true,
+      "private_namespace_cleanup": true,
+      "unsigned_forgery_and_payload_tampering_rejected": true,
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 47.594
+    },
+    "redis_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\verify_celery_owned_redis_v2.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 48.187,
+      "peaks": {
+        "rss_bytes": 263704576,
+        "handles": 1020,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "tested_source": {
+      "head": "3debb90b8432437869b8f6608e7b0fd1b14d96ef",
+      "files": {
+        "src/app/workers/celery_app.py": "011d08509bc975707e3763f218797fa8eaa0c4595510bbffd69221815e55d6d6",
+        "src/app/workers/task_signing.py": "ba41dd919db750bec78ca51d5252171a2d6790e2059472f5ec6d8df159911a08",
+        "tests/integration/test_celery_task_signing_runtime.py": "0f82fa9eb8157f18a907ff7c7493ba75588113bdfc192b52f41454a73e1a483c",
+        "tests/workers/test_celery_hmac_boundaries.py": "1aeea1c7facd981d648f46fba9d0e92c3d1e302f88038af47b408a48ec2ea9bb"
+      }
+    },
+    "limitations": "Solo workers on memory/owned Redis. This authenticates messages, not exactly-once effects or durable replay. X509/multiple process pools and deployment are separate. Old HMAC message format is incompatible: coordinate publishers/workers and drain or quarantine reviewed legacy backlog."
+  },
+  "canonical_inventory_execution": {
+    "deadlock_negative_control": {
+      "purpose": "Disposable PostgreSQL inventory/effect contention; no real commercial effects",
+      "complete": false,
+      "counts": {
+        "tests": 12,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 1,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/services/inventory_transactions.py": "a2fa1912cb8488f3734b479fc0acf79b35f065c1e57117f5706772bbb27ab5d5",
+        "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+        "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+        "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+        "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+      },
+      "error": "AssertionError: {'tests': 12, 'failures': 1, 'errors': 0, 'skipped': 0}",
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 19.234
+    },
+    "postgresql": {
+      "purpose": "Disposable PostgreSQL inventory/effect contention; no real commercial effects",
+      "complete": true,
+      "counts": {
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 0,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/services/inventory_transactions.py": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+        "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+        "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+        "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+        "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+      },
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 18.047
+    },
+    "postgresql_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_inventory_postgres_repaired.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.656,
+      "peaks": {
+        "rss_bytes": 263294976,
+        "handles": 940,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "sqlite": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_inventory_transactions.py",
+        "tests/services/test_inventory_stock_movements.py",
+        "tests/services/test_inventory_expiry.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-core-sqlite-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-core-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 16.734,
+      "peaks": {
+        "rss_bytes": 267087872,
+        "handles": 916,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "tested_source": {
+      "base": "23f89431ce2d9365fe77180fc5cc7ce14d2fd3e6",
+      "files": {
+        "src/app/services/inventory_transactions.py": "ea859eab4c2fad374135b09b8f28c355c34167124fd3e9b314a77eb080c07efc",
+        "tests/services/test_inventory_transactions.py": "a903eb4bef4ba2ccdaeaf62628e1cea5c2af0d4ed05e7b7562b0ad6374094424",
+        "tests/services/test_inventory_stock_movements.py": "db452bd1ed26eff1c93bf8c908eb6d452c295b19f6669604eef52d7f12515d92",
+        "tests/services/test_inventory_expiry.py": "1d24c7e5e07449e670730f7a969b219c5283cda13010eb45407aa0ea5e8e4aeb",
+        "tests/chaos/test_inventory_transactions_postgres.py": "81cb5c448648d92f95960072ef908e357a01257ab3f4b478ea9e083b422bc152"
+      },
+      "candidate_archive_base": "3debb90b8432437869b8f6608e7b0fd1b14d96ef",
+      "publication_head": "23f89431ce2d9365fe77180fc5cc7ce14d2fd3e6"
+    },
+    "scheduler_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_inventory_expiry_scheduler.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-owner-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 17.688,
+      "peaks": {
+        "rss_bytes": 268808192,
+        "handles": 890,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 5,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "scheduler": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_inventory_expiry_scheduler.py",
+        "tests/bootstrap/test_business_background_lifecycle.py",
+        "tests/services/test_incident_scheduler_ownership.py",
+        "tests/services/test_inventory_transactions.py",
+        "tests/services/test_inventory_stock_movements.py",
+        "tests/services/test_inventory_expiry.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-integration-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\inventory-scheduler-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 20.984,
+      "peaks": {
+        "rss_bytes": 268996608,
+        "handles": 963,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 40,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "scheduler_tested_source": {
+      "base": "bf680e4f326ce63889f6e1aec54efb5534b36376",
+      "files": {
+        "src/app/services/inventory_expiry_scheduler.py": "15c784b99fd3bf1051dc166a808c0d8d5e1647298a1b770b881a1f62d9705413",
+        "tests/services/test_inventory_expiry_scheduler.py": "6380028301c74e7752c47ad4b162633dcd695045d3731e84ebc0104f25733aa0",
+        "src/app/bootstrap/business_background_lifecycle.py": "1420af7436910ebb69e686228ec4f1bb214daa8f9e496898bdb42b27d310b253",
+        "tests/bootstrap/test_business_background_lifecycle.py": "5dfa328a990f9b6990ecfb7fc7d671dcec0ab8c4cce118f29cd7b22dcf39388a"
+      }
+    },
+    "limitations": "Direct canonical service and schema-isolated PostgreSQL races with fake providers; app-owned scheduler SQL on SQLite. Not every HTTP consumer, historical stock reconciliation, distributed recovery or full release."
   }
 }
