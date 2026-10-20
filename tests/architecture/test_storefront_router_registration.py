@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.bootstrap.storefront_router_group import register_storefront_router_group
 
@@ -6,7 +7,7 @@ from src.app.bootstrap.storefront_router_group import register_storefront_router
 def test_storefront_router_group_registers_buyer_and_post_order_surfaces():
     app = FastAPI()
     registered = register_storefront_router_group(app)
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_route_contexts(app.routes)}
 
     assert {"pricing", "inventory", "support", "events", "payments"} <= set(registered)
     assert {"returns", "fraud"} <= set(registered)

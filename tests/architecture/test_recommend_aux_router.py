@@ -1,10 +1,11 @@
 from src.app.main import app
+from fastapi.routing import iter_route_contexts
 
 
 def _owners(path: str, method: str) -> list[str]:
     return [
         route.endpoint.__module__
-        for route in app.routes
+        for route in iter_route_contexts(app.routes)
         if getattr(route, "path", None) == path
         and method in (getattr(route, "methods", None) or set())
     ]

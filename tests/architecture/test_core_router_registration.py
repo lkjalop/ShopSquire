@@ -1,4 +1,5 @@
 from fastapi import APIRouter, FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.bootstrap.router_registration import RequiredRouter, register_required_routers
 
@@ -22,7 +23,7 @@ def test_required_router_group_registers_every_route_in_order():
     ))
 
     assert names == ("first", "second")
-    paths = [route.path for route in app.routes]
+    paths = [route.path for route in iter_route_contexts(app.routes)]
     assert paths.index("/registration-first") < paths.index("/registration-second")
 
 
