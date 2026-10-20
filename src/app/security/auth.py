@@ -676,7 +676,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                     _emit_iam(
                         action="authn_check",
                         outcome="missing",
-                        subject={"actor_id": (effective_key or "bearer"), "role": None},
+                        subject={"actor_id": _credential_audit_id(effective_key), "role": None},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                         risk="medium",
                         tags=["authn", "oidc" if authorization else "api_key"],
@@ -699,7 +699,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                     _emit_iam(
                         action="authz_check",
                         outcome="denied",
-                        subject={"actor_id": (effective_key or "bearer"), "role": role},
+                        subject={"actor_id": _credential_audit_id(effective_key), "role": role},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                         risk="medium",
                         tags=["authz"],
@@ -720,7 +720,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                         _emit_iam(
                             action="authz_check",
                             outcome="denied",
-                            subject={"actor_id": (effective_key or "bearer"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
+                            subject={"actor_id": _credential_audit_id(effective_key), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
                             resource=(ctx or {}).get("resource") or {"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                             risk="high" if ((ctx or {}).get("resource") or {}).get("sensitivity") == "high" else "medium",
                             tags=["authz", "abac"],
@@ -740,7 +740,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 _emit_iam(
                     action="access_granted",
                     outcome="granted",
-                    subject={"actor_id": (effective_key or "bearer"), "role": role},
+                    subject={"actor_id": _credential_audit_id(effective_key), "role": role},
                     resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                     risk="low",
                     tags=["authz"],
@@ -760,7 +760,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                         from src.app.security.insider_threat_detector import InsiderThreatSignal, _emit as _it_emit
                         _it_emit(InsiderThreatSignal(
                             signal_type="admin_access_from_unlisted_ip",
-                            actor=effective_key or "unknown",
+                            actor=_credential_audit_id(effective_key),
                             resource=getattr(request.url, "path", "unknown") if request else "unknown",
                             severity="critical",
                             context={"role": role, "source_ip": source_ip, "allowlist_size": len(_allowed_ips)},
@@ -772,7 +772,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
             try:
                 from src.app.security.insider_threat_detector import detect_off_hours_admin
                 detect_off_hours_admin(
-                    actor=effective_key or "unknown",
+                    actor=_credential_audit_id(effective_key),
                     action=getattr(request.url, "path", "unknown") if request else "unknown",
                     ip=source_ip,
                     role=role,
@@ -789,6 +789,14 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
 ROLE_MERCHANT = "merchant"
 ROLE_OWNER = "owner"
 ROLE_DEVELOPER = "developer"
+
+
+def _credential_audit_id(key: str | None) -> str:
+    if not key:
+        return 'bearer_or_unknown'
+    import hashlib
+    return 'credential:' + hashlib.sha256(key.encode()).hexdigest()[:24]
+
 
 
 def _non_dev_env() -> bool:
@@ -915,7 +923,7 @@ def require_role(allowed_roles: Iterable[str]):
                     _emit_iam(
                         action="authn_check",
                         outcome="invalid",
-                        subject={"actor_id": (effective_key or "api_key"), "role": None},
+                        subject={"actor_id": _credential_audit_id(effective_key), "role": None},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                         risk="medium",
                         tags=["authn", "api_key"],
@@ -940,7 +948,7 @@ def require_role(allowed_roles: Iterable[str]):
                     _emit_iam(
                         action="authz_check",
                         outcome="denied",
-                        subject={"actor_id": (effective_key or "api_key"), "role": role},
+                        subject={"actor_id": _credential_audit_id(effective_key), "role": role},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                         risk="medium",
                         tags=["authz"],
@@ -961,7 +969,7 @@ def require_role(allowed_roles: Iterable[str]):
                         _emit_iam(
                             action="authz_check",
                             outcome="denied",
-                            subject={"actor_id": (effective_key or "api_key"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
+                            subject={"actor_id": _credential_audit_id(effective_key), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
                             resource=(ctx or {}).get("resource") or {"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                             risk="high" if ((ctx or {}).get("resource") or {}).get("sensitivity") == "high" else "medium",
                             tags=["authz", "abac"],
@@ -981,7 +989,7 @@ def require_role(allowed_roles: Iterable[str]):
                 _emit_iam(
                     action="access_granted",
                     outcome="granted",
-                    subject={"actor_id": (effective_key or "api_key"), "role": role},
+                    subject={"actor_id": _credential_audit_id(effective_key), "role": role},
                     resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                     risk="low",
                     tags=["authz"],
@@ -1001,7 +1009,7 @@ def require_role(allowed_roles: Iterable[str]):
                         from src.app.security.insider_threat_detector import InsiderThreatSignal, _emit as _it_emit
                         _it_emit(InsiderThreatSignal(
                             signal_type="admin_access_from_unlisted_ip",
-                            actor=effective_key or "unknown",
+                            actor=_credential_audit_id(effective_key),
                             resource=getattr(request.url, "path", "unknown") if request else "unknown",
                             severity="critical",
                             context={"role": role, "source_ip": source_ip, "allowlist_size": len(_allowed_ips)},
@@ -1013,7 +1021,7 @@ def require_role(allowed_roles: Iterable[str]):
             try:
                 from src.app.security.insider_threat_detector import detect_off_hours_admin
                 detect_off_hours_admin(
-                    actor=effective_key or "unknown",
+                    actor=_credential_audit_id(effective_key),
                     action=getattr(request.url, "path", "unknown") if request else "unknown",
                     ip=source_ip,
                     role=role,
