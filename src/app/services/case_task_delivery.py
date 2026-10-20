@@ -17,6 +17,10 @@ _SHORTFALL_COUNT = re.compile(
     rf'\b(?:{_COUNT_WORD}\s*[- ]\s*(?:units?|items?)\s+(?:stock\s+)?(?:shortfall|shortage)'
     rf'|(?:shortfall|shortage)\s+(?:of\s+)?{_COUNT_WORD}\s+(?:units?|items?)'
     rf'|remaining\s+{_COUNT_WORD}\s+(?:units?|items?))\b', re.I)
+_FACT_RECALL = re.compile(r'\b(?:summari[sz]e|recap|remind\s+me|how\s+many|what\s+(?:is|was|are|were)\s+(?:my|our))\b', re.I)
+_OWNED_FACTS = re.compile(r'\b(?:my|our|i|we|current|existing|same|retained)\b', re.I)
+_FACT_SUBJECT = re.compile(r'\b(?:quantity|units?|budget|deadline|destination|delivery|request(?:ed)?|ask(?:ed)?)\b', re.I)
+_NEW_FACTS = re.compile(r'\b(?:also|add|include|switch|replace|use|run|play|support|new|now|actually|correction|search|research|find|fetch|check|look\s+up)\b|[$\u00a3\u20ac]|\b(?:AUD|USD|EUR|GBP)\s*\d', re.I)
 
 
 def case_task_intent(query):
@@ -24,13 +28,20 @@ def case_task_intent(query):
         return 'shortfall_email'
     if _MARKET.search(str(query or '')):
         return 'market_intelligence'
+    if _FACT_RECALL.search(str(query or '')) and _OWNED_FACTS.search(str(query or '')) and _FACT_SUBJECT.search(str(query or '')):
+        return 'case_facts'
     return None
 
 
 def is_case_task_read(query, state):
     """Mixed amendments use the normal reducer before any task is delivered."""
-    if not case_task_intent(query) or _AMENDMENT.search(str(query or '')):
+    intent = case_task_intent(query)
+    if not intent or _AMENDMENT.search(str(query or '')):
         return False
+    if intent == 'case_facts':
+        from src.app.services.conversation_case_state import decompose_case_obligations
+        if _NEW_FACTS.search(str(query or '')) or decompose_case_obligations(str(query or ''), current_state=state):
+            return False
     # A count explicitly naming the shortage is task context, not the buyer's
     # total requested quantity. Delivery still calculates the real shortage
     # from accepted selection and inventory; this prose grants no authority.
@@ -76,7 +87,7 @@ def deliver_case_task(*, out, request_db, tenant_id, uid, session_epoch, query):
             out['email_draft'] = draft
             out['supplier_email_draft'] = draft
             out['assistant_message'] = 'Draft — choose a supplier contact before sending.\nSubject: ' + draft['subject'] + '\n\n' + draft['body']
-        else:
+        elif intent == 'market_intelligence':
             from src.app.services.market_intelligence_agent import gather_market_context
             sku = state.get('selected_sku')
             context = gather_market_context(db, query=query, tenant_id=tenant_id,
@@ -92,7 +103,27 @@ def deliver_case_task(*, out, request_db, tenant_id, uid, session_epoch, query):
                     'Current market intelligence is unavailable for this request.'
                     if context['delivery_status'] == 'unavailable' else
                     'I have no current, scoped market evidence for this request. Its quantity and budget are retained.')
+        else:
+            out['assistant_message'] = _case_facts_message(state)
         _project_task_snapshot(out, state, revision, query)
+
+
+def _case_facts_message(state):
+    """Only facts from the just-validated canonical revision enter this answer."""
+    parts = []
+    if type(state.get('requested_quantity')) is int:
+        parts.append(f"{state['requested_quantity']} units")
+    budget = state.get('budget') or {}
+    if type(budget.get('amount_minor')) is int and budget.get('currency'):
+        scope = {'per_unit': 'per unit', 'total': 'total'}.get(budget.get('scope'), '(scope unresolved)')
+        parts.append(f"budget {budget['currency']} {budget['amount_minor'] / 100:.2f} {scope}")
+    destinations = state.get('destinations') or []
+    if destinations:
+        parts.append('delivery: ' + ', '.join(f"{row['quantity']} units to {row['location_ref']}" for row in destinations))
+    temporal = state.get('temporal') or {}
+    if temporal.get('original_expression'):
+        parts.append(f"deadline: {temporal['original_expression']} ({temporal.get('resolution_status', 'unresolved')})")
+    return 'Your retained request: ' + '; '.join(parts) + '.' if parts else 'The current request has no confirmed quantity, budget or destination yet.'
 
 
 def _project_task_snapshot(out, state, revision, query):
