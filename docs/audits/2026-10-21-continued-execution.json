@@ -1,8 +1,10 @@
 {
-  "recorded_at": "2026-10-20T22:19:37.325352+00:00",
-  "checkpoint_head": "8c397ee4d5af24be03a0b7f495b6ccb222ecf872",
+  "recorded_at": "2026-10-20T22:38:58.871415+00:00",
+  "checkpoint_head": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "13761e98 Keep named shortfall counts separate from total requested case quantity",
+    "d86386bb Record scoped privacy and person-bound enquiry integration with remaining roadmap gates",
     "8c397ee4 Integrate person-bound supplier enquiries and fence uncertain outbound attempts",
     "99425cab Isolate named-controller privacy inventory and reject incomplete memory exports",
     "32d760f6 Record shared effect policy, webhook responsiveness and honest native payment capability gaps",
@@ -93,12 +95,12 @@
   "committed_source_delta": {
     "production": {
       "files": 89,
-      "insertions": 4206,
+      "insertions": 4215,
       "deletions": 1298
     },
     "tests": {
-      "files": 143,
-      "insertions": 8002,
+      "files": 145,
+      "insertions": 8080,
       "deletions": 1242
     },
     "frontend": {
@@ -108,15 +110,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T22:18:58.615394+00:00",
-    "head": "8c397ee4d5af24be03a0b7f495b6ccb222ecf872",
+    "recorded_at": "2026-10-20T22:38:49.885072+00:00",
+    "head": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
     "branch": "checkpoint/turn-state-consolidation-20260830",
     "git_status_entries": 483,
     "tracked_changed": 238,
     "untracked": 245,
     "staged": 0,
-    "files": 5706,
-    "text_lines": 978343,
+    "files": 5708,
+    "text_lines": 978433,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -227,18 +229,62 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1545,
+      "tests": 1547,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19506,
+    "functions": 19509,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5587,
     "swallowed_production_handlers": 2028,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W04/W05",
+      "path": "src/app/services/case_task_delivery.py",
+      "symbol": "case_task_intent",
+      "line": 22,
+      "function_lines": 6,
+      "file_lines": 140,
+      "git_state": "committed",
+      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "remaining": "summary/recall material revision stability and complete mixed-intent coverage"
+    },
+    {
+      "work_package": "W04/W05",
+      "path": "src/app/services/case_task_delivery.py",
+      "symbol": "is_case_task_read",
+      "line": 30,
+      "function_lines": 13,
+      "file_lines": 140,
+      "git_state": "committed",
+      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "remaining": "all explicit quantity, logistics, budget and workload amendments"
+    },
+    {
+      "work_package": "W05/W06",
+      "path": "src/app/services/case_task_delivery.py",
+      "symbol": "deliver_case_task",
+      "line": 45,
+      "function_lines": 51,
+      "file_lines": 140,
+      "git_state": "committed",
+      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "remaining": "owned contact selection and useful current cited market evidence"
+    },
+    {
+      "work_package": "W04/W05",
+      "path": "tests/api/test_chat_shortfall_task_quantity.py",
+      "symbol": "test_shortfall_count_keeps_canonical_total_and_material_revision",
+      "line": 17,
+      "function_lines": 36,
+      "file_lines": 52,
+      "git_state": "committed",
+      "sha256": "7b1dcb6885edddd571898dbbda8316f6c73cc1c6b5b479f06aa796e60e95731b",
+      "remaining": "complete browser and mixed-amendment quantity profiles"
+    },
     {
       "work_package": "W07",
       "path": "src/app/services/user_data_inventory.py",
@@ -3072,7 +3118,7 @@
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.281,
+    "seconds": 0.266,
     "findings": 0,
     "stderr": ""
   },
@@ -7004,12 +7050,12 @@
   "committed_delta_by_scope": {
     "Application": {
       "files": 89,
-      "added": 4206,
+      "added": 4215,
       "removed": 1298
     },
     "Tests": {
-      "files": 143,
-      "added": 8002,
+      "files": 145,
+      "added": 8080,
       "removed": 1242
     },
     "Frontend": {
@@ -7034,13 +7080,13 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 27492,
+      "added": 27975,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 299,
-    "added": 42987,
+    "files": 301,
+    "added": 43557,
     "removed": 5010
   },
   "durable_image_gate": {
@@ -8398,5 +8444,874 @@
       }
     },
     "limitations": "Internal trusted principals, generated memberships and fake transports. Legacy permit-free messages remain contained by the default transport hold. This is not authenticated browser independent-person approval, real SMTP, every effect sink, or reviewed distributed crash recovery."
+  },
+  "named_shortfall_quantity": {
+    "integration_commit": "13761e98",
+    "classifier_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_case_task_shortfall_quantity.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-task-shortfall-quantity-red-valid\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 22.109,
+      "peaks": {
+        "rss_bytes": 264171520,
+        "handles": 892,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 10,
+        "failures": 5,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "http_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_shortfall_task_quantity.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-task-shortfall-http-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 24.516,
+      "peaks": {
+        "rss_bytes": 280236032,
+        "handles": 1057,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "prerequisite_failure_not_semantic_red": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_case_task_shortfall_quantity.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-task-shortfall-quantity-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 4,
+      "elapsed_seconds": 15.86,
+      "peaks": {
+        "rss_bytes": 258940928,
+        "handles": 860,
+        "threads": 27
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_case_task_shortfall_quantity.py",
+        "tests/api/test_chat_shortfall_task_quantity.py",
+        "tests/api/test_chat_case_tasks.py",
+        "tests/services/test_shortfall_enquiry_preview.py",
+        "tests/services/test_market_context_delivery.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-task-shortfall-quantity-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 33.094,
+      "peaks": {
+        "rss_bytes": 272834560,
+        "handles": 1088,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 36,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source": {
+      "candidate": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "base_production": "99425cab + verified 8c397ee4 cohort = current production d86386bb",
+      "sha256": {
+        "src/app/services/case_task_delivery.py": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+        "tests/api/test_chat_case_tasks.py": "c8b382b03e61c8c7b7e447a6a317e15b5f7033d2c178759fb92566ca4702b113",
+        "tests/services/test_case_task_shortfall_quantity.py": "4a7805fa53d6c5b446453ad92ddd649dd8c73683ac21ca24a3d55b455cb1ef44",
+        "tests/api/test_chat_shortfall_task_quantity.py": "7b1dcb6885edddd571898dbbda8316f6c73cc1c6b5b479f06aa796e60e95731b"
+      }
+    },
+    "verification": {
+      "commit": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "tested_files": [
+        "src/app/services/case_task_delivery.py",
+        "tests/api/test_chat_case_tasks.py",
+        "tests/services/test_case_task_shortfall_quantity.py",
+        "tests/api/test_chat_shortfall_task_quantity.py"
+      ],
+      "other_candidate_python_files_matching_head": 2986,
+      "counts": {
+        "tests": 36,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "scope": "Five classifier reds and two authenticated HTTP reds; four final HTTP cases retain 40 requested, revision 1, unknown or actual 25-unit shortage. No real effects."
+    }
+  },
+  "refreshed_enquiry_browser": {
+    "results": {
+      "source": "d86386bb3c2714f44cbaab8fa35cb38aff751c4f",
+      "scope": "Frozen preserved working tree, including uncommitted integration dependencies",
+      "results": [
+        {
+          "spec": "supplier-enquiry-journey.spec.ts",
+          "exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-20T22:24:17.864Z",
+            "duration": 11970.266000000001,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "errors": []
+        },
+        {
+          "spec": "ordinary-chat-shortfall.spec.ts",
+          "exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-20T22:25:18.744Z",
+            "duration": 9002.021,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "errors": []
+        }
+      ],
+      "changed_inputs": [],
+      "selected_inputs": 5718,
+      "ports_closed": {
+        "8100": true,
+        "5190": true
+      },
+      "snapshot_command_survivors": []
+    },
+    "resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_enquiry_browser_current.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 123.64,
+      "peaks": {
+        "rss_bytes": 346943488,
+        "handles": 1277,
+        "threads": 81
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "source_manifest_sha256": "e422eb644043707ba38f873965e33b083b6c497cad2d08b01e7e18f301985d00",
+    "scope": "Frozen preserved working tree including pending router/UI integration; pre-dates named-shortfall quantity repair."
+  },
+  "live_research_browser_assessment": {
+    "not_enrolled": {
+      "source": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "scope": "Frozen preserved working tree, including uncommitted integration dependencies",
+      "browser_stats": {
+        "startTime": "2026-10-20T22:33:40.785Z",
+        "duration": 12211.787,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "turns": [
+        {
+          "query": "initial",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 2,
+          "quantity": 30,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 2,
+            "operation_id": "chat:a3331d78-777e-42c1-88c9-ee88d671c4e4",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "consented search",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 3,
+          "quantity": 30,
+          "research_failure": {
+            "status": "failed",
+            "failure_code": "external_research_tenant_not_enrolled",
+            "message": "Open-world publisher discovery is unavailable. Upload, link, or enter requirements; no provider call was dispatched.",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "deadline_ms": 20000
+          },
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 3,
+            "operation_id": "chat:cd8e3bb4-d066-4c19-980b-cdf362362b91",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": "external_research_tenant_not_enrolled",
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "Actually make that 40 laptops. Keep my AUD 1500 per laptop budget and Sydney destination.",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 4,
+            "operation_id": "chat:5899309f-dca2-44f1-a2a1-8a92c0ff74c9",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "Draft an email asking our supplier to quote the unit quantity shortfall. Do not send it.",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 4,
+            "operation_id": "chat:387b6d3d-79a9-4ee0-ae44-ecca67d1110e",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "unknown",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "What market intelligence do you have on lead times and laptop supply? Keep my current request.",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 4,
+            "operation_id": "chat:d0871ae5-9935-4448-afda-8bd19741d40c",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "unknown",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": "blocked",
+          "market_reason": "no_current_scoped_evidence"
+        },
+        {
+          "query": "Summarise my quantity, per-unit budget and delivery destination without taking any action.",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 5,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 5,
+            "operation_id": "chat:740cf182-b714-4864-af1d-6c84b3cbc8ff",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "unknown",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "recall after reload",
+          "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+          "revision": 6,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-aacd2396-70ec-4331-9666-d395b06852d4",
+            "case_revision": 6,
+            "operation_id": "chat:ae52f0b6-27de-4698-8ab4-01e0a35106df",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "unknown",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        }
+      ],
+      "execution_receipts": [],
+      "successful_network_receipts": [],
+      "official_origin_successes": 0,
+      "discovery_successes": 0,
+      "ports_closed": {
+        "8100": true,
+        "5190": true
+      },
+      "interpretation": "Browser pass alone is not proof of live research or useful cited market intelligence."
+    },
+    "enrolled": {
+      "source": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "scope": "Frozen preserved working tree, including uncommitted integration dependencies",
+      "browser_stats": {
+        "startTime": "2026-10-20T22:35:53.072Z",
+        "duration": 17215.293,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "turns": [
+        {
+          "query": "initial",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 2,
+          "quantity": 30,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 2,
+            "operation_id": "chat:7f8fcb4f-a54c-46be-8782-7e8b697cc22c",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "consented search",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 3,
+          "quantity": 30,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 3,
+            "operation_id": "chat:970f3598-8baa-46ec-aa6f-80424185daf9",
+            "identity": null,
+            "discovery_status": "degraded",
+            "source_ownership_status": "discovered_candidate",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": "approve_publisher_origin_or_upload_requirements",
+            "failure_code": "publisher_not_yet_accepted",
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "Actually make that 40 laptops. Keep my AUD 1500 per laptop budget and Sydney destination.",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 4,
+            "operation_id": "chat:29a8799d-b4cf-49e9-b1d6-23ad1c3f3e88",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "Draft an email asking our supplier to quote the unit quantity shortfall. Do not send it.",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 4,
+            "operation_id": "chat:0791e6e2-03fd-4202-bb67-41ca6fe7c5e4",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "unknown",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "What market intelligence do you have on lead times and laptop supply? Keep my current request.",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 4,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 4,
+            "operation_id": "chat:108ee9a9-2d1d-4372-a3f5-859d70f80e72",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "unknown",
+            "catalog_authority": "blocked",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": "blocked",
+          "market_reason": "no_current_scoped_evidence"
+        },
+        {
+          "query": "Summarise my quantity, per-unit budget and delivery destination without taking any action.",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 5,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 5,
+            "operation_id": "chat:b08ef150-d26f-4095-9361-26891114e927",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "unknown",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        },
+        {
+          "query": "recall after reload",
+          "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+          "revision": 6,
+          "quantity": 40,
+          "research_failure": {},
+          "research_outcome": {
+            "schema_version": "research-outcome-v1",
+            "case_id": "sc-c3e10e2a-8c68-47a3-8fb5-3057e8c5836f",
+            "case_revision": 6,
+            "operation_id": "chat:e730df8c-3d18-4a9d-9dc3-0c272140e126",
+            "identity": null,
+            "discovery_status": "not_attempted",
+            "source_ownership_status": "not_assessed",
+            "url_security_receipt": null,
+            "fetch_status": "not_attempted",
+            "parsed_claim_count": 0,
+            "held_claim_count": 0,
+            "accepted_claim_count": 0,
+            "rejected_claim_count": 0,
+            "compilation_scopes": [],
+            "missing_requirement_attributes": [],
+            "literal_requirement_observations": [],
+            "requirement_completeness": "none",
+            "catalog_authority": "unknown",
+            "commerce_authority": "none",
+            "next_action": null,
+            "failure_code": null,
+            "simulation_only": false
+          },
+          "market_status": null,
+          "market_reason": null
+        }
+      ],
+      "execution_receipts": [
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "b0a48a8d999c1227fe602814e5e8abf0812445b125440bf49186815ff4a23b1c",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        },
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "e14126ffb4227a25d3de36e13b7ee97d39631f6078f87f91fe35cb9dfb6abf08",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        },
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "a86a6eabb47c315a9ac33efd165e727b8bc7a54e44f6472a43e3f8f4bdf83710",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        }
+      ],
+      "successful_network_receipts": [
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "b0a48a8d999c1227fe602814e5e8abf0812445b125440bf49186815ff4a23b1c",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        },
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "e14126ffb4227a25d3de36e13b7ee97d39631f6078f87f91fe35cb9dfb6abf08",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        },
+        {
+          "receipt_id": null,
+          "provider_capability": "WEB_DISCOVERY",
+          "execution_status": "completed",
+          "fixture": false,
+          "network_execution": true,
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "response_body_hash": "a86a6eabb47c315a9ac33efd165e727b8bc7a54e44f6472a43e3f8f4bdf83710",
+          "provider_endpoint_host": "127.0.0.1",
+          "rejection_reason": null
+        }
+      ],
+      "official_origin_successes": 0,
+      "discovery_successes": 3,
+      "ports_closed": {
+        "8100": true,
+        "5190": true
+      },
+      "interpretation": "Browser pass alone is not proof of live research or useful cited market intelligence."
+    },
+    "not_enrolled_results": {
+      "scope": "Frozen preserved working tree; live research enabled, all commerce held",
+      "source": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "complete": true,
+      "exit_code": 0,
+      "stats": {
+        "startTime": "2026-10-20T22:33:40.785Z",
+        "duration": 12211.787,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": [],
+      "changed_inputs": [],
+      "selected_inputs": 5720
+    },
+    "enrolled_results": {
+      "scope": "Frozen preserved working tree; live research enabled, all commerce held",
+      "source": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "complete": true,
+      "exit_code": 0,
+      "stats": {
+        "startTime": "2026-10-20T22:35:53.072Z",
+        "duration": 17215.293,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": [],
+      "changed_inputs": [],
+      "selected_inputs": 5720
+    },
+    "not_enrolled_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_live_memory_current.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 70.078,
+      "peaks": {
+        "rss_bytes": 293855232,
+        "handles": 1217,
+        "threads": 81
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "enrolled_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_live_memory_enrolled.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 70.141,
+      "peaks": {
+        "rss_bytes": 289615872,
+        "handles": 1221,
+        "threads": 81
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "source_manifest_sha256": "a3a9b8d23ab966d45f911d5eb04044e1eeec08a92f26bf862e90c37940be3820",
+    "limitations": "Both browser assertions pass and 5720 copied inputs stay unchanged. First run dispatched no research; enrolled second run has 3 real HTTP-200 discovery receipts with hashes, but zero official fetches/claims. Publisher approval remains required and market evidence is blocked. Summary/recall advances material revisions even though facts remain retained."
   }
 }
