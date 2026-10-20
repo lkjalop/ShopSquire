@@ -620,31 +620,19 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
     data minimization rather than full deletion.
     """
     uid_hash = hash_uid(uid)
+    tenant_id = _ct()
     redacted = {"decision_logs": 0, "decision_audits": 0, "customers": 0}
     try:
         with db_session() as db:
-            _where, params = _uid_patterns(uid, uid_hash)
-            rows = db.execute(
-                text(
-                    "SELECT id, input_data, retrieved_context, proposed_action "
-                    f"FROM decision_logs WHERE {_UID_WHERE_SQL}"
-                ),
-                params,
-            ).fetchall()
+            rows = _subject_decisions(db, tenant_id=tenant_id, uid=uid, uid_hash=uid_hash, details=True)
             ids = []
             for r in rows:
-                try:
-                    _id = r[0]
-                    ids.append(_id)
-                    inp = _safe_json(r[1])
-                    rc = _safe_json(r[2])
-                    pa = _safe_json(r[3])
-                    new_inp = _redact_json(inp) if isinstance(inp, (dict, list)) else inp
-                    new_rc = _redact_json(rc) if isinstance(rc, (dict, list)) else rc
-                    new_pa = _redact_json(pa) if isinstance(pa, (dict, list)) else pa
-                    db.execute(text("UPDATE decision_logs SET input_data = :inp, retrieved_context = :rc, proposed_action = :pa WHERE id = :id"), {"inp": json.dumps(new_inp, ensure_ascii=False), "rc": json.dumps(new_rc, ensure_ascii=False), "pa": json.dumps(new_pa, ensure_ascii=False), "id": _id})
-                except Exception:
-                    pass
+                values = {"id": r["id"], "tenant_id": tenant_id}
+                for column, parameter in (("input_data", "inp"), ("retrieved_context", "rc"), ("proposed_action", "pa")):
+                    value = _safe_json(r[column])
+                    values[parameter] = json.dumps(_redact_json(value), ensure_ascii=False)
+                db.execute(text("UPDATE decision_logs SET input_data=:inp, retrieved_context=:rc, proposed_action=:pa WHERE id=:id AND tenant_id=:tenant_id"), values)
+                ids.append(r["id"])
             redacted["decision_logs"] = len(ids)
             # redact decision_audits metadata
             if ids:
@@ -656,35 +644,28 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 ).fetchall()
                 cnt = 0
                 for r2 in rows2:
-                    try:
-                        aid = r2[0]
-                        meta = _safe_json(r2[1])
-                        new_meta = _redact_json(meta) if isinstance(meta, (dict, list)) else meta
-                        db.execute(text("UPDATE decision_audits SET metadata = :m WHERE id = :id"), {"m": json.dumps(new_meta, ensure_ascii=False), "id": aid})
-                        cnt += 1
-                    except Exception:
-                        pass
+                    aid = r2[0]
+                    meta = _safe_json(r2[1])
+                    new_meta = _redact_json(meta)
+                    db.execute(text("UPDATE decision_audits SET metadata = :m WHERE id = :id AND decision_id IN :decision_ids").bindparams(bindparam("decision_ids", expanding=True)), {"m": json.dumps(new_meta, ensure_ascii=False), "id": aid, "decision_ids": ids})
+                    cnt += 1
                 redacted["decision_audits"] = cnt
             # pseudonymize customers row for strict minimization
-            try:
-                res = db.execute(
-                    text(
-                        "UPDATE customers "
-                        "SET email = 'REDACTED:' || id, phone = NULL, "
-                        "first_name = 'REDACTED', last_name = NULL "
-                        "WHERE id = :uid"
-                    ),
-                    {"uid": uid},
-                )
-                redacted["customers"] = getattr(res, "rowcount", 0) or 0
-            except Exception:
-                redacted["customers"] = 0
+            res = db.execute(
+                text("UPDATE customers SET email='REDACTED:' || id, phone=NULL, name='REDACTED' "
+                     "WHERE id=:uid AND tenant_id=:tenant_id AND tenant_ownership_status!='unclassified'"),
+                {"uid": uid, "tenant_id": tenant_id},
+            )
+            redacted["customers"] = getattr(res, "rowcount", 0) or 0
             db.commit()
         try:
             from src.app.services.user_data_inventory import redact_redis
             redacted["session_memory"] = redact_redis(redis, uid)
         except Exception:
-            pass
-        return {"status": "redacted", "uid": uid, "uid_hash": uid_hash, "redacted_counts": redacted}
+            redacted["session_memory"] = {"complete": False}
+        complete = bool(isinstance(redacted["session_memory"], dict) and redacted["session_memory"].get("complete"))
+        return {"status": "redacted" if complete else "action_required", "uid": uid, "uid_hash": uid_hash,
+                "redacted_counts": redacted,
+                "action_required": [] if complete else ["redis_or_cache_redaction_incomplete"]}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

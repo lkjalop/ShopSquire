@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.app.deps import hash_uid
 from src.app.routers import privacy
+from fastapi import HTTPException
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def decision_store(monkeypatch):
         'CREATE TABLE chat_messages (id TEXT, tenant_id TEXT, uid TEXT, session_id TEXT, session_epoch TEXT, role TEXT, content TEXT, trace_id TEXT, created_at TEXT)',
         'CREATE TABLE conversation_fact_observation (tenant_id TEXT, subject_ref TEXT)',
         'CREATE TABLE draft_orders (customer_id TEXT, tenant_id TEXT)',
-        'CREATE TABLE customers (id TEXT, tenant_id TEXT)',
+        "CREATE TABLE customers (id TEXT, tenant_id TEXT, tenant_ownership_status TEXT DEFAULT 'classified', email TEXT, name TEXT, phone TEXT)",
         'CREATE TABLE orders (id TEXT, customer_id TEXT, tenant_id TEXT)',
         'CREATE TABLE order_sessions (uid TEXT, tenant_id TEXT, order_id TEXT)',
     ]
@@ -50,7 +51,7 @@ def decision_store(monkeypatch):
 
 
 @pytest.mark.parametrize('uid', ['buyer_7', 'buyer%7', 'buyer!7', 'buyer"7', 'buyer\\7', 'buyer\u00e9'])
-@pytest.mark.parametrize('operation', ['export', 'delete'])
+@pytest.mark.parametrize('operation', ['export', 'delete', 'redact'])
 def test_privacy_decisions_are_owned_by_exact_top_level_subject(decision_store, uid, operation):
     records = {
         'owned-spaced': ('controller-a', json.dumps({'uid': uid})),
@@ -66,19 +67,77 @@ def test_privacy_decisions_are_owned_by_exact_top_level_subject(decision_store, 
     # The control remains a different subject even when the ID has no wildcard.
     if records['wildcard-victim'][1] == records['owned-spaced'][1]:
         records['wildcard-victim'] = ('controller-a', json.dumps({'uid': uid + '-other'}))
+    for key, (tenant, payload) in list(records.items()):
+        if key != 'malformed':
+            records[key] = (tenant, json.dumps({**json.loads(payload), 'email': key + '@example.test'},
+                                              indent=2 if key == 'owned-formatted' else None,
+                                              ensure_ascii=key != 'owned-formatted'))
     with decision_store.begin() as connection:
         for key, (tenant, payload) in records.items():
             connection.execute(text('INSERT INTO decision_logs (id,tenant_id,input_data) VALUES (:id,:tenant,:payload)'),
                                {'id': key, 'tenant': tenant, 'payload': payload})
-            connection.execute(text('INSERT INTO decision_audits (id,decision_id) VALUES (:id,:id)'), {'id': key})
+            connection.execute(text('INSERT INTO decision_audits (id,decision_id,metadata) VALUES (:id,:id,:metadata)'),
+                               {'id': key, 'metadata': json.dumps({'email': key + '@example.test'})})
     owned = {'owned-spaced', 'owned-formatted', 'owned-hash'}
     if operation == 'export':
         result = privacy.export_user_data(uid, object(), False, 'owner')
         assert {row['id'] for row in result['decision_logs']} == owned
         assert {row['id'] for row in result['decision_audits']} == owned
-    else:
+    elif operation == 'delete':
         result = privacy.delete_user_data(uid, object(), 'owner')
         assert result['deleted_records']['decision_logs'] == len(owned)
         with decision_store.connect() as connection:
             assert set(connection.execute(text('SELECT id FROM decision_logs')).scalars()) == set(records) - owned
             assert set(connection.execute(text('SELECT id FROM decision_audits')).scalars()) == set(records) - owned
+    else:
+        result = privacy.redact_user_data(uid, object(), 'owner')
+        assert result['redacted_counts']['decision_logs'] == len(owned)
+        assert result['redacted_counts']['decision_audits'] == len(owned)
+        with decision_store.connect() as connection:
+            for key, payload in connection.execute(text('SELECT id,input_data FROM decision_logs')):
+                if key in owned:
+                    assert json.loads(payload)['email'] == '<REDACTED>'
+                else:
+                    assert payload == records[key][1]
+            for key, metadata in connection.execute(text('SELECT id,metadata FROM decision_audits')):
+                assert json.loads(metadata)['email'] == ('<REDACTED>' if key in owned else key + '@example.test')
+
+
+@pytest.mark.parametrize('tenant', ['controller-a', 'controller-b'])
+def test_customer_redaction_respects_authoritative_controller_ownership(decision_store, tenant):
+    uid = 'buyer_7'
+    with decision_store.begin() as connection:
+        connection.execute(text('INSERT INTO customers (id,tenant_id,email,name,phone) VALUES (:uid,:tenant,:email,:name,:phone)'),
+                           {'uid': uid, 'tenant': tenant, 'email': 'buyer@example.test', 'name': 'Buyer', 'phone': '012345'})
+    result = privacy.redact_user_data(uid, object(), 'owner')
+    with decision_store.connect() as connection:
+        row = connection.execute(text('SELECT email,name,phone FROM customers')).one()
+    if tenant == 'controller-a':
+        assert tuple(row) == ('REDACTED:' + uid, 'REDACTED', None)
+        assert result['redacted_counts']['customers'] == 1
+    else:
+        assert tuple(row) == ('buyer@example.test', 'Buyer', '012345')
+        assert result['redacted_counts']['customers'] == 0
+
+
+def test_failed_redaction_rolls_back_database_changes(decision_store):
+    payload = json.dumps({'uid': 'buyer_7', 'email': 'buyer@example.test'})
+    with decision_store.begin() as connection:
+        connection.execute(text('INSERT INTO decision_logs (id,tenant_id,input_data) VALUES (:id,:tenant,:payload)'),
+                           {'id': 'owned', 'tenant': 'controller-a', 'payload': payload})
+        connection.execute(text("CREATE TRIGGER reject_customer_redaction BEFORE UPDATE ON customers BEGIN SELECT RAISE(ABORT, 'controlled write failure'); END"))
+        connection.execute(text("INSERT INTO customers (id,tenant_id,email) VALUES ('buyer_7','controller-a','buyer@example.test')"))
+    with pytest.raises(HTTPException) as failure:
+        privacy.redact_user_data('buyer_7', object(), 'owner')
+    assert failure.value.status_code == 500
+    with decision_store.connect() as connection:
+        assert connection.execute(text("SELECT input_data FROM decision_logs WHERE id='owned'")).scalar() == payload
+        assert connection.execute(text("SELECT email FROM customers WHERE id='buyer_7'")).scalar() == 'buyer@example.test'
+
+
+def test_incomplete_cache_redaction_is_not_reported_as_complete(decision_store, monkeypatch):
+    import src.app.services.user_data_inventory as inventory
+    monkeypatch.setattr(inventory, 'redact_redis', lambda *args: {'complete': False, 'keys_failed': ['owned-key']})
+    result = privacy.redact_user_data('buyer_7', object(), 'owner')
+    assert result['status'] == 'action_required'
+    assert result['action_required'] == ['redis_or_cache_redaction_incomplete']
