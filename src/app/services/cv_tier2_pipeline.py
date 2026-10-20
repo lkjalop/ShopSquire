@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List
 
 from src.app.services.cv_model_pack import get_model_pack
+from src.app.services.cv_analysis_cache import analysis_namespace, is_cacheable_analysis
 from src.app.services.cv_object_detector import CVObjectDetector
 from src.app.services.cv_ocr import extract_text
 from src.app.services.cv_quality import score_quality
@@ -20,6 +21,7 @@ from src.app.security.url_guard import ensure_safe_outbound_url
 from src.app.services.decision_log import log_trace_event
 
 import difflib
+from copy import deepcopy
 import logging
 import math
 import os
@@ -469,25 +471,35 @@ def _extract_qr_payloads(image_bytes: bytes) -> Dict[str, Any]:
 
 
 def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: str | None = None) -> Dict[str, Any]:
-    """Image-hash-cached CV verdict. The tier2 analysis (detector + OCR + steg +
-    adversarial) is image-derived and deterministic, so a repeat of the SAME image
-    (demo, retry, multi-agent fan-out) is served from cache — taking cv/analyze
-    repeats from ~42s toward instant. Keyed by image + pack_id (meta/case_id is
-    context, not part of the verdict). Fail-open; only successful results cached."""
+    """Cache successful analysis only within its tenant, request and policy context.
+
+    Case IDs, filenames, buyer descriptions and order observations affect both
+    the result and its provenance. Unsupported context bypasses the optimization;
+    callers always receive their own mutable snapshot of a cached result.
+    """
+    def context_namespace():
+        return analysis_namespace(meta=meta, pack=get_model_pack(pack_id))
+
     _vc_key = None
     try:
         from src.app.services import vision_cache as _vcache
-        _vc_key = _vcache.image_key(image_bytes, f"tier2:{pack_id or 'default'}")
+        namespace = context_namespace()
+        _vc_key = _vcache.image_key(image_bytes, namespace)
         _hit = _vcache.get(_vc_key)
         if isinstance(_hit, dict):
-            return dict(_hit)
+            if is_cacheable_analysis(_hit) and namespace == context_namespace():
+                return deepcopy(_hit)
+            _vc_key = None
     except Exception:
         _vc_key = None
     result = _run_tier2_impl(image_bytes, meta=meta, pack_id=pack_id)
-    if _vc_key and isinstance(result, dict) and not result.get("error"):
+    if _vc_key and isinstance(result, dict) and is_cacheable_analysis(result):
         try:
             from src.app.services import vision_cache as _vcache
-            _vcache.put(_vc_key, dict(result))
+            # The model/registry or detector settings can change while analysis
+            # runs. Such a result must not populate the entry context's cache.
+            if namespace == context_namespace():
+                _vcache.put(_vc_key, deepcopy(result))
         except Exception:
             pass
     return result

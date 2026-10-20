@@ -295,6 +295,25 @@ class TestTier2PipelineSteg:
 class TestCVAnalyzeEndpointSteg:
     """API-level: POST /api/v1/cv/analyze with images_b64 for each steg image."""
 
+    def test_repeated_image_retains_its_own_case(self, test_server, api_key, monkeypatch):
+        import uuid
+        from src.app.services import vision_cache
+
+        monkeypatch.setenv("VISION_CACHE_ENABLED", "1")
+        monkeypatch.setattr(vision_cache, "_CACHE", {})
+        assert _STEG_IMAGES, "the required image profile must supply a corpus"
+        image = _b64(_TEST_SEC / str(_STEG_IMAGES[0]["output"]))
+        for _ in range(2):
+            case_id = "cache-proof-" + uuid.uuid4().hex
+            response = _retry_post(_api(test_server["base_url"], "/api/v1/cv/analyze"),
+                json_body={"case_id": case_id, "images_b64": [image],
+                    "description": "Identical owned image analysis", "issue_type": "security_test",
+                    "provider": "basic"}, headers=_headers(api_key))
+            assert response.status_code == 200, response.text[:500]
+            body = response.json()
+            assert body["case_id"] == case_id
+            assert body["cv_tiered_analysis"]["tier2"]["case_id"] == case_id
+
     @pytest.mark.parametrize("entry", _STEG_IMAGES, ids=[e["output"] for e in _STEG_IMAGES])
     def test_cv_analyze_with_steg_image(
         self, entry: Dict[str, Any], test_server: dict, api_key: str
@@ -316,6 +335,7 @@ class TestCVAnalyzeEndpointSteg:
         )
         j = r.json()
         assert j.get("case_id"), f"{entry['output']}: response missing case_id"
+        assert j["cv_tiered_analysis"]["tier2"]["case_id"] == j["case_id"]
 
         # Security matrix block
         sec_matrix = j.get("security_matrix") or {}
@@ -388,6 +408,7 @@ class TestCVAnalyzeEndpointSteg:
         j = r.json()
         # We do NOT require the decision log to be written; just confirm response structure
         assert "case_id" in j, "Missing case_id in parallel-agents response"
+        assert j["cv_tiered_analysis"]["tier2"]["case_id"] == j["case_id"]
 
 
 class TestImageSidecarSteg:
