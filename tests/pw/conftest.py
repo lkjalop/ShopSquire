@@ -53,8 +53,9 @@ def _find_free_port(start: int = 8099) -> int:
 
 
 @pytest.fixture(scope="module")
-def test_server():
+def test_server(tmp_path_factory):
     """Start the FastAPI app with uvicorn in a background thread for browser tests."""
+    owned_directory = tmp_path_factory.mktemp("pw-owned-api")
     requested_port = int(os.getenv("PLAYWRIGHT_TEST_PORT", "8099"))
     host = os.getenv("PLAYWRIGHT_TEST_HOST", "127.0.0.1")
     prev_skip_db_reset = os.environ.get("SKIP_DB_RESET")
@@ -63,7 +64,7 @@ def test_server():
     # Ensure the test server uses the repo feature flags and test-friendly overrides
     # Use a Playwright-specific flags file so other tests can freely overwrite
     # `config/feature_flags.json` without affecting the long-running pw server.
-    flags_path = os.path.join("tests", "playwright", "feature_flags_pw.json")
+    flags_path = str(owned_directory / "feature_flags.json")
     os.makedirs(os.path.dirname(flags_path), exist_ok=True)
     base_flags = {
         "USE_AGENT_CAPABILITIES": True,
@@ -108,7 +109,7 @@ def test_server():
     # Use small deterministic fallback product set for Playwright storefront tests
     os.environ.setdefault("TEST_USE_FALLBACK_PRODUCTS", "1")
     # Prefer on-disk SQLite and disable tracing for faster startup and shared connections
-    db_path = os.path.join("tests", "playwright", "smoke.sqlite")
+    db_path = str(owned_directory / "smoke.sqlite")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     if os.path.exists(db_path):
         try:
@@ -117,6 +118,14 @@ def test_server():
             pass
     # Force an isolated DB for Playwright so the app doesn't pick up a repo-level `.env` DATABASE_URL.
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+    # Image verdicts and handoffs require the actual migration chain, not only
+    # ORM metadata. The private directory exists only for this fixture.
+    import subprocess
+    import sys
+    with (owned_directory / "migrations.log").open("w", encoding="utf-8") as migration_log:
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+            env=os.environ.copy(), stdout=migration_log, stderr=subprocess.STDOUT,
+            check=True, timeout=30)
     # Ensure global engine/session are pointed at this DB even if other tests imported the DB layer earlier.
     try:
         from sqlalchemy import create_engine
@@ -214,7 +223,7 @@ def test_server():
         print("[pw.conftest] " + msg)
         raise RuntimeError(msg)
 
-    yield {"base_url": base_url}
+    yield {"base_url": base_url, "api_key": "local-merchant-key", "database_path": db_path}
     # uvicorn Server respects should_exit flag. Use a configurable join timeout
     try:
         server.should_exit = True

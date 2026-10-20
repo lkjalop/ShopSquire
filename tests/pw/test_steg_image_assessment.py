@@ -13,7 +13,7 @@ What this covers
 3. Parallel agents — three parallel tasks in cv.py (tier2, consistency,
    QR decode) under asyncio.wait_for timeout.
 4. Security matrix output — signals, severity, MITRE/OWASP tags.
-5. Image-sidecar endpoint — /api/v1/images/sidecar for per-image signals.
+5. Image-sidecar endpoint — /api/v1/vision/route for per-image signals.
 6. One regression guard that a clean (non-steg) 1x1 PNG does NOT fire.
 
 Test manifest reference: dump/test-sec/steg-test-manifest.json
@@ -26,11 +26,11 @@ import json
 import os
 import pathlib
 import time
-import warnings
 from typing import Any, Dict, List
 
 import pytest
 import requests
+from tests.image_security_fixtures import clean_png_bytes
 
 # ---------------------------------------------------------------------------
 # Skip guard — same convention used by other pw tests
@@ -45,7 +45,7 @@ if os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in ("1", "true", "
 # Paths
 # ---------------------------------------------------------------------------
 _REPO = pathlib.Path(__file__).resolve().parents[2]
-_TEST_SEC = _REPO / "dump" / "test-sec"
+_TEST_SEC = pathlib.Path(os.getenv("PYTEST_STEG_CORPUS_DIRECTORY", str(_REPO / "dump" / "test-sec")))
 _MANIFEST = _TEST_SEC / "steg-test-manifest.json"
 _EXPECTED = _TEST_SEC / "steg-detection-results.json"
 
@@ -60,11 +60,7 @@ def _b64(path: pathlib.Path) -> str:
 
 def _clean_1x1_png_b64() -> str:
     """Return base64 of a genuine 1×1 white PNG (no steg payload)."""
-    png_bytes = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNg"
-        "YAAAAAMAAWgmWQ0AAAAASUVORK5CYII="
-    )
-    return base64.b64encode(png_bytes).decode("ascii")
+    return base64.b64encode(clean_png_bytes()).decode("ascii")
 
 
 def _api(base: str, path: str) -> str:
@@ -79,15 +75,8 @@ def _headers(key: str) -> dict:
 
 
 def _retry_post(url: str, *, json_body: dict, headers: dict, attempts: int = 3, timeout: int = 60) -> requests.Response:
-    last: Exception | None = None
-    for idx in range(attempts):
-        try:
-            return requests.post(url, json=json_body, headers=headers, timeout=timeout)
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-            last = exc
-            if idx < attempts - 1:
-                time.sleep(1.0 * (idx + 1))
-    raise RuntimeError(f"POST {url} failed after {attempts} attempts: {last}")
+    # A timeout can follow a committed case write. Never replay an uncertain POST.
+    return requests.post(url, json=json_body, headers=headers, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +172,7 @@ class TestStegDetectorUnit:
         """A genuine 1×1 PNG must NOT produce is_suspicious=True."""
         steg_mod = pytest.importorskip("src.app.security.steg_detector")
         detect = steg_mod.detect_steganography
-        png_bytes = base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNg"
-            "YAAAAAMAAWgmWQ0AAAAASUVORK5CYII="
-        )
+        png_bytes = clean_png_bytes()
         result = detect(png_bytes)
         # 1×1 pixels is trivially too small to produce meaningful steg signal:
         # is_suspicious should be False or steg_score should be < 0.5
@@ -238,13 +224,13 @@ class TestTier2PipelineSteg:
     """Integration: run_tier2 on the steg images and verify evidence_tags."""
 
     @pytest.mark.parametrize("entry", _STEG_IMAGES, ids=[e["output"] for e in _STEG_IMAGES])
-    def test_tier2_emits_steganography_suspected_tag(self, entry: Dict[str, Any]) -> None:
+    def test_tier2_emits_steganography_suspected_tag(self, entry: Dict[str, Any], monkeypatch) -> None:
         """run_tier2 should include 'steganography_suspected' in evidence_tags
         for the known steg payloads — provided CV_STEG_DETECT_ENABLED=1."""
         tier2_mod = pytest.importorskip("src.app.services.cv_tier2_pipeline")
         run_tier2 = tier2_mod.run_tier2
 
-        os.environ.setdefault("CV_STEG_DETECT_ENABLED", "1")
+        monkeypatch.setenv("CV_STEG_DETECT_ENABLED", "1")
 
         img_bytes = (_TEST_SEC / str(entry["output"])).read_bytes()
         result = run_tier2(img_bytes, meta={"case_id": f"steg-test-{entry['payload_key']}"})
@@ -342,20 +328,11 @@ class TestCVAnalyzeEndpointSteg:
         payload_has_content = bool(expected_entry.get("has_content"))
 
         if payload_has_content and bool(os.getenv("CV_STEG_DETECT_ENABLED", "1")):
-            # Best-effort: warn rather than hard-fail if steg threshold not crossed
-            tier2_tags = list(j.get("tier2_evidence_tags") or [])
-            all_tags = tier2_tags + list(signals.keys())
-            steg_signalled = (
-                "steganography_suspected" in all_tags
-                or signals.get("steganography_suspected")
-                or sev in ("high", "critical", "warn", "medium")
+            # Require the actual detector tag on these known inert carriers.
+            tier2_tags = list(j.get("evidence_tags") or [])
+            assert "steganography_suspected" in tier2_tags, (
+                f"{entry['output']}: missing detector tag: severity={sev!r}, signals={signals}, tags={tier2_tags}"
             )
-            if not steg_signalled:
-                warnings.warn(
-                    f"{entry['output']}: expected steg signal in API response but none found. "
-                    f"severity={sev!r} signals={list(signals.keys())} tags={tier2_tags}",
-                    stacklevel=2,
-                )
 
     def test_cv_analyze_clean_image_not_escalated(
         self, test_server: dict, api_key: str
@@ -414,7 +391,7 @@ class TestCVAnalyzeEndpointSteg:
 
 
 class TestImageSidecarSteg:
-    """POST /api/v1/images/sidecar with the steg images — verify signal fields."""
+    """POST /api/v1/vision/route with the steg images — verify signal fields."""
 
     @pytest.mark.parametrize("entry", _STEG_IMAGES, ids=[e["output"] for e in _STEG_IMAGES])
     def test_sidecar_steg_suspicious_field(
@@ -427,22 +404,12 @@ class TestImageSidecarSteg:
         headers = {}
         if api_key:
             headers["x-api-key"] = api_key
-        try:
-            r = requests.post(
-                _api(base, "/api/v1/images/sidecar"),
-                files=files,
-                headers=headers,
-                timeout=60,
-            )
-        except Exception as exc:
-            pytest.skip(f"sidecar endpoint unreachable: {exc}")
-        if r.status_code == 404:
-            pytest.skip("sidecar endpoint not mounted on this server instance")
+        r = requests.post(_api(base, "/api/v1/vision/route"), files=files, headers=headers, timeout=60)
         assert r.status_code == 200, (
             f"{entry['output']}: sidecar returned {r.status_code}: {r.text[:300]}"
         )
         j = r.json()
-        signals = dict(j.get("signals") or {})
+        signals = dict(j["security"]["signals"])
         # steg_score must be present and numeric
         assert "steg_score" in signals, (
             f"{entry['output']}: 'steg_score' missing from sidecar signals={list(signals.keys())}"

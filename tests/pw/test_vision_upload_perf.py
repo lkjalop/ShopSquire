@@ -15,11 +15,11 @@ Run with:
     DISABLE_PLAYWRIGHT_TESTS=0 python -m pytest tests/pw/test_vision_upload_perf.py -v
 """
 
-import base64
 import os
 import time
 
 import pytest
+from tests.image_security_fixtures import clean_png_bytes
 
 # ---------------------------------------------------------------------------
 # Skip guard — honour the same env var as the rest of the pw suite
@@ -33,10 +33,7 @@ if os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in ("1", "true", "
 # ---------------------------------------------------------------------------
 # Minimal 1×1 PNG (valid image, triggers all security scan paths)
 # ---------------------------------------------------------------------------
-_MINIMAL_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNg"
-    "YAAAAAMAAWgmWQ0AAAAASUVORK5CYII="
-)
+_MINIMAL_PNG = clean_png_bytes()
 
 # Slightly larger PNG with an embedded plain-text "QR payload" to exercise the
 # security-flag / adversarial path without a real ML model.
@@ -54,18 +51,8 @@ def _request_with_retry(method, url, attempts=3, timeout=15, **kwargs):
     """Thin retry wrapper to absorb transient port-binding races."""
     import requests  # import inside test scope so skip guard stays clean
 
-    last_exc = None
-    for idx in range(attempts):
-        try:
-            return requests.request(method, url, timeout=timeout, **kwargs)
-        except requests.exceptions.ConnectionError as exc:
-            last_exc = exc
-            if idx < attempts - 1:
-                time.sleep(0.3 * (idx + 1))
-                continue
-            raise
-    if last_exc:
-        raise last_exc
+    # Do not repeat a POST whose response is uncertain.
+    return requests.request(method, url, timeout=timeout, **kwargs)
 
 
 class TestVisionTriagePerformance:
@@ -89,7 +76,7 @@ class TestVisionTriagePerformance:
         )
         elapsed = time.perf_counter() - t0
 
-        assert r.status_code in (200, 422), (
+        assert r.status_code == 200, (
             f"Unexpected status {r.status_code}: {r.text[:300]}"
         )
         assert elapsed < _PERF_BUDGET_SECONDS, (
@@ -121,7 +108,7 @@ class TestVisionTriagePerformance:
 
         # A flagged image may return 200 or a 4xx security block — both are fine
         # for this perf test; we only care about speed.
-        assert r.status_code < 500, (
+        assert r.status_code == 200, (
             f"Server error {r.status_code}: {r.text[:300]}"
         )
         assert elapsed < _PERF_BUDGET_SECONDS, (
@@ -144,21 +131,107 @@ class TestVisionTriagePerformance:
             headers={"x-api-key": "local-merchant-key"},
             timeout=_PERF_BUDGET_SECONDS + 2,
         )
-        if r.status_code == 200:
-            body = r.json()
-            has_security = (
-                "security_signals" in body
-                or "security" in body
-                or "qr_codes" in body
-            )
-            assert has_security, (
-                f"Response missing security contract keys. Keys: {list(body.keys())}"
-            )
+        assert r.status_code == 200, r.text[:500]
+        body = r.json()
+        assert isinstance(body["security"]["signals"], dict)
+        assert body["security"]["signals"]["adversarial_detected"] is True
+        assert body["security"]["signals"]["steg_suspicious"] is True
+
+    def test_health_remains_responsive_while_detector_runs(self, test_server, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        from src.app.security import adversarial_image_detector as adversarial
+
+        _patch_blocking_calls(monkeypatch)
+        started, release = Event(), Event()
+
+        def slow_detector(content):
+            started.set()
+            assert release.wait(timeout=5), "owned detector was not released"
+            return adversarial.AdversarialResult()
+
+        monkeypatch.setattr(adversarial, "detect_adversarial", slow_detector)
+        base = test_server["base_url"]
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            pending = worker.submit(_request_with_retry, "POST", base + "/api/v1/vision/triage",
+                files=[("image", ("clean.png", _MINIMAL_PNG, "image/png"))],
+                headers={"x-api-key": "local-merchant-key"}, timeout=_PERF_BUDGET_SECONDS+2)
+            try:
+                assert started.wait(timeout=3), "request never reached the detector"
+                t0 = time.perf_counter()
+                health = _request_with_retry("GET", base + "/health", timeout=1)
+                assert health.status_code == 200
+                assert time.perf_counter()-t0 < 1
+                assert not pending.done(), "detector must still be running during the health probe"
+            finally:
+                release.set()
+            response = pending.result(timeout=_PERF_BUDGET_SECONDS+2)
+        assert response.status_code == 200, response.text[:500]
 
 
 # ---------------------------------------------------------------------------
 # PART 2 — Playwright E2E upload performance test
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def vision_ui(test_server, tmp_path_factory):
+    """Serve this checkout's real React UI against only its owned API."""
+    import json
+    from pathlib import Path
+    import shutil
+    import socket
+    import subprocess
+    import psutil
+    import requests
+
+    frontend = Path(__file__).resolve().parents[2] / "frontend"
+    vite = frontend / "node_modules/vite/bin/vite.js"
+    node = shutil.which("node")
+    assert node and vite.is_file(), "the required UI profile needs the installed pinned frontend tools"
+    directory = tmp_path_factory.mktemp("vision-owned-ui")
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    env = {**os.environ, "VITE_API_PROXY_TARGET": test_server["base_url"],
+           "VITE_API_BASE_URL": "", "VITE_API_KEY": "", "VITE_OWNER_API_KEY": "",
+           "VITE_CACHE_DIR": str(directory / "vite-cache")}
+    log_path = directory / "vite.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        process = subprocess.Popen([node, str(vite), "--host", "127.0.0.1", "--port", str(port), "--strictPort"],
+            cwd=frontend, env=env, stdout=log, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        (directory / "owner.json").write_text(json.dumps({"pid": process.pid, "base_url": base}), encoding="utf-8")
+        try:
+            deadline = time.monotonic()+20
+            while time.monotonic() < deadline:
+                assert process.poll() is None, f"owned Vite exited; inspect {log_path}"
+                if base in log_path.read_text(encoding="utf-8", errors="replace"):
+                    try:
+                        ready = requests.get(base, timeout=1)
+                        if ready.status_code == 200 and "@vite/client" in ready.text:
+                            break
+                    except requests.ConnectionError:
+                        pass
+                time.sleep(0.1)
+            else:
+                pytest.fail(f"owned Vite was not ready; inspect {log_path}")
+            yield base
+        finally:
+            if process.poll() is None:
+                parent = psutil.Process(process.pid)
+                owned = [*parent.children(recursive=True), parent]
+                for child in owned:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                _, alive = psutil.wait_procs(owned, timeout=5)
+                for child in alive:
+                    child.kill()
+                psutil.wait_procs(alive, timeout=5)
+            process.wait(timeout=5)
+
 
 class TestVisionUploadE2EPerf:
     """Browser E2E: uploading an image in the storefront must populate the
@@ -166,85 +239,36 @@ class TestVisionUploadE2EPerf:
 
     _E2E_BUDGET_SECONDS = 10.0
 
-    def test_image_upload_populates_panel_within_budget(
-        self, test_server, page
-    ):
-        """Navigate to storefront, upload a PNG, assert results appear quickly."""
-        pytest.importorskip("playwright")
+    def test_image_upload_populates_panel_within_budget(self, vision_ui, test_server, page):
+        from urllib.parse import urlparse, parse_qs
         from playwright.sync_api import expect
-
-        base = test_server["base_url"]
-        # Derive the frontend URL — in CI the test server serves both API and
-        # UI from the same port when DISABLE_UI_ROUTES=0.
-        ui_base = base
-
-        page.goto(f"{ui_base}/", timeout=15_000)
-
-        # Locate the image upload input — look for an <input type="file"> that
-        # accepts images (the visual search panel).
-        upload_input = page.locator("input[type='file'][accept*='image']").first
-        try:
-            upload_input.wait_for(state="attached", timeout=8_000)
-        except Exception:
-            pytest.skip("No image upload input found — storefront may not be serving at this URL.")
-
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.context.set_extra_http_headers({"x-api-key": test_server["api_key"]})
+        page.goto(vision_ui, timeout=15_000)
+        page.get_by_role("button", name="Ask Me!", exact=True).click()
+        query = page.get_by_placeholder("Type your message...")
+        expect(query).to_be_visible()
+        upload = page.locator("input[type='file']").last
+        expect(upload).to_be_attached()
+        upload.set_input_files({"name": "owned-clean.png", "mimeType": "image/png", "buffer": _MINIMAL_PNG})
+        expect(page.get_by_role("img", name="attached 1", exact=True)).to_be_visible()
+        query.fill("Inspect this image. Do not add anything to my cart.")
         t0 = time.perf_counter()
+        with page.expect_response(lambda response: "/api/v1/vision/triage" in response.url
+                and response.request.method == "POST" and "fast" not in parse_qs(urlparse(response.url).query),
+                timeout=int(self._E2E_BUDGET_SECONDS*1000)) as pending:
+            query.press("Enter")
+        response = pending.value
+        assert response.status == 200, response.text()[:500]
+        body = response.json()
+        assert body["security"]["analysis_stage"] == "full"
+        assert body["artifact"]["artifact_id"]
+        expect(page.locator("[class*='anchorHeader']").first).to_be_visible(
+            timeout=max(1, int((self._E2E_BUDGET_SECONDS-(time.perf_counter()-t0))*1000)))
+        assert time.perf_counter()-t0 < self._E2E_BUDGET_SECONDS
+        assert errors == []
 
-        # Write the test PNG to a temp file so Playwright can set_input_files.
-        import tempfile, pathlib
-
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(_MINIMAL_PNG)
-            tmp_path = tmp.name
-
-        try:
-            upload_input.set_input_files(tmp_path)
-
-            # Wait for the results panel to become visible.  The selector matches
-            # either the ImageRecommendPanel product cards or any .results container.
-            results_locator = page.locator(
-                "[data-testid='image-recommend-panel'], "
-                ".imageRecommendPanel, "
-                "[class*='recommendPanel'], "
-                "[class*='productCard'], "
-                "[data-testid='product-card']"
-            ).first
-
-            try:
-                results_locator.wait_for(
-                    state="visible",
-                    timeout=int(self._E2E_BUDGET_SECONDS * 1000),
-                )
-                elapsed = time.perf_counter() - t0
-                assert elapsed < self._E2E_BUDGET_SECONDS, (
-                    f"Product panel appeared after {elapsed:.2f}s — exceeded {self._E2E_BUDGET_SECONDS}s E2E budget."
-                )
-            except Exception as exc:
-                elapsed = time.perf_counter() - t0
-                # If no product card appeared, fall back to checking whether ANY
-                # new content appeared (security banner, loading state resolved, etc.)
-                loader_gone = page.locator("[class*='loading'], [class*='spinner']")
-                still_loading = False
-                try:
-                    still_loading = loader_gone.first.is_visible()
-                except Exception:
-                    pass
-                if still_loading:
-                    pytest.fail(
-                        f"Image upload still showing loading state after {elapsed:.2f}s. "
-                        "The event loop may still be blocked by a synchronous call in the async route."
-                    )
-                # Otherwise the UI may not have a recognizable product card class — pass
-                # conditionally to avoid false failures on layout-class renames.
-                pytest.xfail(
-                    f"Could not find product card locator after {elapsed:.2f}s ({exc}). "
-                    "Adjust the locator if the component class name has changed."
-                )
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -257,53 +281,17 @@ def _patch_blocking_calls(monkeypatch, *, inject_flags: bool = False):
     This makes the performance test deterministic — we assert that the *wiring*
     (executor + timeout) is still in place, not that the real ML models are fast.
     """
-    # --- analyze_linked_artifact ---
-    try:
-        import src.app.security.linked_artifact_analysis as laa
+    from src.app.security import linked_artifact_analysis as linked
+    from src.app.security import adversarial_image_detector as adversarial
+    from src.app.security import steg_detector as steg
 
-        def _fast_linked(*args, **kwargs):
-            return {
-                "linked_artifact_available": False,
-                "linked_artifact_type": None,
-                "ssn_hits": [],
-                "pii_type": [],
-                "linked_final_url": None,
-            }
-
-        monkeypatch.setattr(laa, "analyze_linked_artifact", _fast_linked)
-    except Exception:
-        pass
-
-    # --- detect_adversarial ---
-    try:
-        import src.app.routers.vision as vision_mod
-
-        adv_result = (
-            {"adversarial_detected": True, "adversarial_score": 0.95, "method": "fgsm"}
-            if inject_flags
-            else {"adversarial_detected": False, "adversarial_score": 0.02, "method": "none"}
-        )
-
-        def _fast_adversarial(content):
-            return adv_result
-
-        monkeypatch.setattr(vision_mod, "detect_adversarial", _fast_adversarial, raising=False)
-    except Exception:
-        pass
-
-    # --- detect_steganography ---
-    try:
-        import src.app.routers.vision as vision_mod  # noqa: F811
-
-        steg_result = (
-            {"steg_suspicious": True, "steg_details": {"decoded_content": "test"}}
-            if inject_flags
-            else {"steg_suspicious": False, "steg_details": {}}
-        )
-
-        def _fast_steg(content):
-            return steg_result
-
-        monkeypatch.setattr(vision_mod, "detect_steganography", _fast_steg, raising=False)
-    except Exception:
-        pass
+    monkeypatch.setattr(linked, "analyze_linked_artifact", lambda *args, **kwargs: {
+        "linked_artifact_available": False, "linked_artifact_type": None,
+        "ssn_hits": [], "pii_type": [], "linked_final_url": None,
+    })
+    monkeypatch.setattr(adversarial, "detect_adversarial", lambda content:
+        adversarial.AdversarialResult(is_adversarial=inject_flags,
+                                      adversarial_score=0.95 if inject_flags else 0.02))
+    monkeypatch.setattr(steg, "detect_steganography", lambda content:
+        steg.StegResult(is_suspicious=inject_flags, steg_score=0.9 if inject_flags else 0.0,
+                        explanations=["Owned injected detector control"] if inject_flags else []))
