@@ -932,7 +932,8 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
         if engine_for_use is None:
             engine_for_use = get_engine()
         tenant_for_use = current_tenant_id()
-        import threading
+        from src.app.security.observer_workers import observer_work_group
+        work_group = observer_work_group(getattr(request, 'app', None))
 
         def _persist():
             from sqlalchemy import text as _text
@@ -1024,7 +1025,9 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
             if sync_mode:
                 _persist()
             else:
-                threading.Thread(target=_persist, daemon=True).start()
+                if not work_group.submit(_persist):
+                    logging.getLogger(__name__).warning('Security observer rejected work: capacity exhausted or app stopping')
+                    record_security_event('observer_rejected', 'warn', 'capacity_or_shutdown')
 
         request_session = getattr(getattr(request, 'state', None), 'db', None)
         if request_session is not None and request_session.in_transaction():

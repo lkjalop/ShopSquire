@@ -138,3 +138,41 @@ def test_shared_sqlite_connection_cannot_commit_a_callers_active_transaction(mon
             assert db.execute(text('SELECT count(*) FROM security_events')).scalar_one() == 1
     finally:
         engine.dispose()
+
+
+def test_security_event_flood_has_a_fixed_process_worker_budget(observer_database, monkeypatch):
+    import threading
+    lock = threading.Lock()
+    four_ready, fifth_started, release, finished = (threading.Event() for _ in range(4))
+    counts = {'started': 0, 'finished': 0}
+    monkeypatch.setenv('SECURITY_OBSERVER_SYNC', '0')
+
+    def slow_risk(*args, **kwargs):
+        with lock:
+            counts['started'] += 1
+            if counts['started'] == 4:
+                four_ready.set()
+            if counts['started'] > 4:
+                fifth_started.set()
+        assert release.wait(5)
+        return 'info', 0, 0, {'severity': 'info'}
+
+    def completed(*args):
+        with lock:
+            counts['finished'] += 1
+            if counts['finished'] == counts['started']:
+                finished.set()
+
+    monkeypatch.setattr(observer, 'compute_risk', slow_risk)
+    monkeypatch.setattr(observer, 'append_worm_record', completed)
+    request = Request({'type': 'http', 'app': SimpleNamespace(state=SimpleNamespace(engine=observer_database)),
+                       'state': {}, 'headers': [], 'client': ('127.0.0.1', 1)})
+    try:
+        for _ in range(4):
+            observer.emit_security_event('/bounded-workers', {'message': 'event'}, request=request)
+        assert four_ready.wait(3)
+        observer.emit_security_event('/bounded-workers', {'message': 'fifth event'}, request=request)
+        assert not fifth_started.wait(0.2), 'A fifth native thread exceeds the process observer budget'
+    finally:
+        release.set()
+        assert finished.wait(5)

@@ -53,6 +53,7 @@ def register_business_background_lifecycle(app: FastAPI) -> tuple[str, ...]:
     app.state.business_background_pairs = []
     failures: dict[str, str] = {}
     definitions = (
+        ("security_observer", "src.app.security.observer_workers", "start_security_observer", "stop_security_observer"),
         ("retention", "src.app.services.retention", "start_retention_loop", "stop_retention_loop"),
         ("incident_sla", "src.app.services.incident_sla_scheduler", "start_incident_sla_scheduler", "stop_incident_sla_scheduler"),
         ("payment_reconcile", "src.app.services.payment_reconcile_scheduler", "start_payment_reconcile_scheduler", "stop_payment_reconcile_scheduler"),
