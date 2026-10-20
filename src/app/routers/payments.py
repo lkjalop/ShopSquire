@@ -18,6 +18,7 @@ from src.app.security.client_ip import client_ip
 from src.app.policy.kill_switch import assert_autonomy_allowed
 from src.app.services.checkout_readiness import buyer_checkout_readiness
 from src.app.services.payment_execution_policy import payment_execution_enabled as _payment_execution_enabled
+from src.app.services.payment_provider_readiness import payment_provider_available
 
 _log = logging.getLogger("shopsquire.payments")
 
@@ -115,20 +116,23 @@ def providers_rollout_status(
     caps = flags.get("CAPABILITIES", {}) if isinstance(flags.get("CAPABILITIES"), dict) else {}
     settings = get_settings()
     execution_enabled = _payment_execution_enabled(settings.app_env)
+    stripe_available = execution_enabled and _stripe_key_live(settings.stripe_api_key) and payment_provider_available('stripe')
+    paypal_available = (execution_enabled and bool(settings.paypal_client_id and settings.paypal_client_secret)
+                        and payment_provider_available('paypal'))
     providers = [
         {
             "provider": "stripe",
             "enabled": execution_enabled and bool((caps.get("stripe") or caps.get("payments") or {}).get("enabled", True)),
             # honest readiness: a placeholder key (sk_test_xxx) is NOT a real integration — mirror the
             # checkout's stripe_live gate so this never reports "ga" on the demo placeholder.
-            "real_integration_ready": execution_enabled and _stripe_key_live(settings.stripe_api_key),
-            "rollout_stage": "ga" if execution_enabled and _stripe_key_live(settings.stripe_api_key) else "disabled",
+            "real_integration_ready": stripe_available,
+            "rollout_stage": "ga" if stripe_available else "disabled",
         },
         {
             "provider": "paypal",
             "enabled": execution_enabled and bool((caps.get("paypal") or {}).get("enabled", False)),
-            "real_integration_ready": execution_enabled and bool(settings.paypal_client_id and settings.paypal_client_secret),
-            "rollout_stage": "beta" if execution_enabled and bool(settings.paypal_client_id and settings.paypal_client_secret) else "disabled",
+            "real_integration_ready": paypal_available,
+            "rollout_stage": "beta" if paypal_available else "disabled",
         },
         {
             "provider": "revolut",
@@ -150,12 +154,14 @@ def providers_rollout_status(
         },
     ]
     enabled_count = len([p for p in providers if p["enabled"]])
+    available_count = sum(bool(p['enabled'] and p['real_integration_ready']) for p in providers)
     return {
         "providers": providers,
         "enabled_count": enabled_count,
-        "provider_concentration_risk": "high" if enabled_count <= 1 else ("medium" if enabled_count == 2 else "low"),
-        "recommendation": "Enable at least two providers in production to reduce checkout drop-off and concentration risk."
-        if enabled_count <= 1
+        "integration_ready_count": available_count,
+        "provider_concentration_risk": "high" if available_count <= 1 else ("medium" if available_count == 2 else "low"),
+        "recommendation": "Configure and verify at least two available providers to reduce checkout drop-off and concentration risk."
+        if available_count <= 1
         else "Provider diversity is acceptable.",
     }
 

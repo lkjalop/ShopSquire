@@ -8,6 +8,8 @@ from typing import Any
 
 from src.app.config import get_settings
 from src.app.services.shipping_providers import shipping_readiness
+from src.app.services.payment_execution_policy import payment_execution_enabled
+from src.app.services.payment_provider_readiness import payment_provider_available
 
 
 def _enabled(name: str, *, default: bool) -> bool:
@@ -20,12 +22,14 @@ def _enabled(name: str, *, default: bool) -> bool:
 
 
 def buyer_checkout_readiness() -> dict[str, Any]:
-    environment = str(os.getenv("APP_ENV", "local") or "local").lower()
+    environment = str(os.getenv("APP_ENV", "local")).strip().lower()
     non_production = environment in {"local", "dev", "development", "test", "testing"}
-    payment_execution = _enabled("PAYMENT_EXECUTION_ENABLED", default=non_production)
+    payment_execution = payment_execution_enabled(environment)
     demo_allowed = _enabled("ALLOW_DEMO_CHECKOUT", default=non_production)
     # Resolve validated application settings only when payment execution could use a provider.
     settings = get_settings() if payment_execution else None
+    if settings is not None:
+        payment_execution = payment_execution_enabled(getattr(settings, 'app_env', environment))
     publishable_key = str(os.getenv("STRIPE_PUBLISHABLE_KEY", "") or "")
     secret_key = str(getattr(settings, "stripe_api_key", "") or "") if settings is not None else ""
     stripe_ready = (
@@ -33,6 +37,7 @@ def buyer_checkout_readiness() -> dict[str, Any]:
         and bool(re.match(r"^pk_(test|live)_[A-Za-z0-9]+$", publishable_key))
         and secret_key.startswith("sk_")
         and secret_key != "sk_test_xxx"
+        and payment_provider_available('stripe')
     )
     if stripe_ready:
         payment = {
@@ -56,7 +61,7 @@ def buyer_checkout_readiness() -> dict[str, Any]:
             "label": "Unavailable",
             "methods": [],
             "real_payment": False,
-            "reason": "No payment method is configured.",
+            "reason": "No payment method is available.",
         }
 
     carrier = shipping_readiness()
