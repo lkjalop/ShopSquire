@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -23,6 +24,11 @@ OWNER = {"x-api-key": os.getenv("OWNER_API_KEY", "local-owner-key")}
 
 @pytest.fixture()
 def client(monkeypatch):
+    monkeypatch.setenv('PAYMENT_EXECUTION_ENABLED', '1')
+    monkeypatch.setenv('ALLOW_DEMO_CHECKOUT', '1')
+    monkeypatch.setattr(payments, 'get_settings', lambda: SimpleNamespace(
+        app_env='test', stripe_api_key='', paypal_client_id='', paypal_client_secret='',
+        feature_flags_path=os.environ['FEATURE_FLAGS_PATH']))
     eng = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False},
                         poolclass=StaticPool, future=True)
     import src.app.models.db as _dbmod
@@ -40,10 +46,12 @@ def client(monkeypatch):
     app = FastAPI()
     app.include_router(payments.router)
     try:
-        yield TestClient(app)
+        with TestClient(app) as test_client:
+            yield test_client
     finally:
         _dbmod.engine = orig
         _dbmod.set_engine(orig)
+        eng.dispose()
 
 
 def _seed_paid_order(oid="ORD-L1", total=50000, intent="pi_demo_ledger1"):
@@ -109,6 +117,7 @@ def test_refund_two_step_then_settlement_reconciles(client):
                 "id": "ch_1",
                 "payment_intent": "pi_demo_ledger1",
                 "amount_refunded": 20000,
+                "refunds": {"data": [{"id":"re_ledger1", "amount":20000, "status":"succeeded"}]},
             }},
         }),
         headers={"Content-Type": "application/json"},
@@ -120,7 +129,7 @@ def test_refund_two_step_then_settlement_reconciles(client):
     with db_session() as db:
         st = db.execute(text("SELECT status FROM orders WHERE id='ORD-L1'")).scalar()
         state = refund_state(db, "ORD-L1")
-    assert st == "returned"
+    assert st == "paid"  # a partial refund cannot imply full order return
     assert state == {"captured_cents": 50000, "requested_cents": 20000, "approved_cents": 20000,
                      "settled_cents": 20000, "open_request": False, "requests": 1, "approvals": 1}
 
@@ -164,7 +173,8 @@ def test_approved_refund_reserves_balance_before_provider_settlement(client):
     assert duplicate_exposure.json()["detail"]["refundable_cents"] == 0
 
 
-def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch):
+@pytest.mark.parametrize('provider_status,expected_status', [('succeeded','refund_executed'), ('pending','refund_submitted')])
+def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch, provider_status, expected_status):
     """Live Stripe key + real intent → refund_approve EXECUTES stripe.Refund.create (not just
     authorizes). Idempotency key prevents a double refund on retry."""
     _seed_paid_order(oid="ORD-EXEC", total=40000, intent="pi_real_live1")
@@ -180,7 +190,7 @@ def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch):
         def create_refund(self, *, payment_intent_id, amount_cents=None, reason=None, idempotency_key=None):
             calls.append({"pi": payment_intent_id, "amount": amount_cents, "idem": idempotency_key})
             return {"id": "re_123", "payment_intent": payment_intent_id, "amount": amount_cents,
-                    "currency": "usd", "status": "succeeded"}
+                    "currency": "usd", "status": provider_status}
 
     import src.app.routers.payments as pay
     monkeypatch.setattr(pay, "StripeClient", _FakeStripeClient)
@@ -190,7 +200,7 @@ def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch):
     r2 = client.post("/api/v1/payments/refunds/ORD-EXEC/approve", headers=OWNER)
     assert r2.status_code == 200, r2.text
     d = r2.json()
-    assert d["status"] == "refund_executed" and d["provider_execution"] == "stripe"
+    assert d["status"] == expected_status and d["provider_execution"] == "stripe"
     assert d["provider_refund_id"] == "re_123"
     assert calls == [{"pi": "pi_real_live1", "amount": 40000, "idem": "refund:ORD-EXEC:0"}]
 
@@ -211,3 +221,19 @@ def test_refund_approve_demo_intent_stays_manual(client, monkeypatch):
 
     r = client.post("/api/v1/payments/refunds/ORD-DEMO/approve", headers=OWNER)
     assert r.status_code == 200 and r.json()["provider_execution"] == "manual_or_webhook"
+
+
+def test_refund_approval_rolls_back_if_effect_permit_cannot_persist(client, monkeypatch):
+    from src.app.services import refund_execution as rx
+    _seed_paid_order(oid='ORD-PERMIT-FAIL', total=1000, intent='pi_real_permit')
+    assert client.post('/api/v1/payments/refunds/request', headers=MERCHANT,
+                       json={'order_id':'ORD-PERMIT-FAIL','amount_cents':1000}).status_code == 200
+    def fail(*args, **kwargs):
+        raise RuntimeError('permit_storage_unavailable')
+    original = rx.open_execution
+    monkeypatch.setattr(rx, 'open_execution', fail)
+    result = client.post('/api/v1/payments/refunds/ORD-PERMIT-FAIL/approve', headers=OWNER)
+    assert result.status_code == 503
+    monkeypatch.setattr(rx, 'open_execution', original)
+    # The approval and its reservation must roll back together, allowing retry.
+    assert client.post('/api/v1/payments/refunds/ORD-PERMIT-FAIL/approve', headers=OWNER).status_code == 200

@@ -635,7 +635,7 @@ def refund_approve(
                                 {"o": order_id}).scalar()
         record_txn(db, order_id=order_id, kind=KIND_REFUND_APPROVED,
                    amount_cents=_amount, currency=_currency,
-                   actor_type="role", actor_id=role, reason="approved", commit=True)
+                   actor_type="role", actor_id=role, reason="approved", commit=False)
         # M3: durably record the approved refund as a PENDING execution keyed by the provider
         # idempotency_key, so a failed provider call is RETRYABLE (re-issue with the same key → the
         # provider returns the same refund, never a second one).
@@ -645,9 +645,12 @@ def refund_approve(
             from src.app.services import refund_execution as _rx
             _exec_id = _rx.open_execution(db, order_id=order_id, approval_index=len(approvals),
                                           amount_cents=_amount, currency=_currency,
-                                          intent_id=_intent_id, idempotency_key=_exec_key)
+                                          intent_id=_intent_id, idempotency_key=_exec_key, commit=False)
+            db.commit()
         except Exception as _xex:
+            db.rollback()
             _log.warning("refund_approve: could not record refund execution: %s", _xex)
+            raise HTTPException(status_code=503, detail='refund_authorization_not_persisted') from _xex
     _log.info("refund approved for order %s (%s cents) by role=%s", order_id, _amount, role)
 
     # EXECUTE the refund at the provider when Stripe is live AND the order carries a real intent
@@ -662,30 +665,23 @@ def refund_approve(
         and not _intent.startswith("pi_demo_")
     ):
         try:
-            client = StripeClient(settings.stripe_api_key)
-            refund = client.create_refund(
-                payment_intent_id=_intent, amount_cents=(int(_amount) if _amount is not None else None),
-                reason="requested_by_customer", idempotency_key=_exec_key)
-            if _exec_id:                                       # M3: execution settled
-                try:
-                    with db_session() as _xdb:
-                        _rx.mark_settled(_xdb, _exec_id, provider_ref=refund.get("id"))
-                except Exception:
-                    pass
-            return {"order_id": order_id, "status": "refund_executed",
+            with db_session() as _xdb:
+                _rx.execute_pending(_xdb, order_id=order_id, exec_id=_exec_id,
+                    refund_fn=lambda intent, amount, key: StripeClient(settings.stripe_api_key).create_refund(
+                        payment_intent_id=intent, amount_cents=amount,
+                        reason='requested_by_customer', idempotency_key=key))
+                execution = _xdb.execute(text('SELECT state,provider_ref FROM refund_executions WHERE id=:id'),
+                                         {'id':_exec_id}).mappings().one()
+            if execution['state'] not in {_rx.STATE_SETTLED, _rx.STATE_SUBMITTED}:
+                raise RuntimeError('refund_dispatch_not_completed')
+            return {"order_id": order_id, "status": "refund_executed" if execution['state'] == _rx.STATE_SETTLED else 'refund_submitted',
                     "amount_cents": _amount, "provider_execution": "stripe",
-                    "provider_refund_id": refund.get("id"), "provider_status": refund.get("status"),
+                    "provider_refund_id": execution['provider_ref'], "provider_status": execution['state'],
                     "settled_by": "charge.refunded webhook"}
         except Exception as exc:
             # M3: approval + a PENDING execution are recorded; mark the execution failed so the retry
             # worker (or /refunds/{id}/execute) can re-issue it idempotently — no longer a raise-and-
             # forget that couldn't be retried (re-approve returned no_open_refund_request).
-            if _exec_id:
-                try:
-                    with db_session() as _xdb:
-                        _rx.mark_failed(_xdb, _exec_id, error=str(exc)[:200])
-                except Exception:
-                    pass
             _log.warning("refund execution failed for order %s: %s", order_id, exc)
             raise HTTPException(status_code=502, detail={
                 "message": "refund_provider_execution_failed", "error": str(exc)[:160],
@@ -753,20 +749,20 @@ def _apply_payment_webhook_event(event: Dict[str, Any], *, event_id: str) -> Non
                     release_inventory_for_order(db, order_id=str(order_id))
                 delivery.enqueue_job(db, event_id=event_id, job_type="ledger_payment_failed",
                                      payload={"intent_id": intent_id})
-        elif event_type == "charge.refunded":
-            pi_id = str(data_obj.get("payment_intent") or "").strip() or intent_id
-            db.execute(text(
-                "UPDATE orders SET status='returned',updated_at=CURRENT_TIMESTAMP "
-                "WHERE stripe_intent_id=:iid AND status IN ('delivered','shipped','paid')"),
-                {"iid": pi_id})
-            delivery.enqueue_job(
-                db, event_id=event_id, job_type="reconcile_refund",
-                payload={"intent_id": pi_id, "amount_cents": data_obj.get("amount_refunded"),
-                         "provider_ref": data_obj.get("id")})
+        elif event_type in {"charge.refunded", "refund.created", "refund.updated"}:
+            from src.app.services.refund_completion import completed_refund_receipts
+            receipts = completed_refund_receipts(event_type, data_obj)
+            if receipts:
+                delivery.enqueue_job(db, event_id=event_id, job_type="reconcile_refunds",
+                                     payload={"refunds": receipts})
         db.commit()
 
 
 def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
+    if job_type == "reconcile_refunds":
+        for receipt in payload.get("refunds") or []:
+            _handle_payment_outbox_job("reconcile_refund", receipt)
+        return
     intent_id = str(payload.get("intent_id") or "")
     if job_type == "dispatch_paid_order":
         _dispatch_paid_order(intent_id)
@@ -779,11 +775,15 @@ def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
         return
     if job_type == "reconcile_refund":
         amount = payload.get("amount_cents")
+        if (type(amount) is not int or amount <= 0
+                or not str(payload.get("provider_ref") or "").startswith("re_")):
+            raise ValueError("exact_refund_receipt_required")
         from src.app.services.payment_ledger import KIND_REFUND_SETTLED, record_txn, refund_state
         from src.app.services.refund_execution import settle_submitted_for_intent
         with db_session() as db:
+            order_lock = " FOR UPDATE" if db.get_bind().dialect.name == "postgresql" else ""
             row = db.execute(
-                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1" + order_lock),
                 {"iid": intent_id},
             ).fetchone()
             if not row:
@@ -814,6 +814,10 @@ def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
                            reason=_pref, commit=False)
                 settle_submitted_for_intent(
                     db, intent_id=intent_id, provider_ref=payload.get("provider_ref"), commit=False)
+                state = refund_state(db, order_id)
+                if int(state.get("settled_cents") or 0) >= int(row[1] or 0) > 0:
+                    db.execute(text("UPDATE orders SET status='returned',updated_at=CURRENT_TIMESTAMP "
+                                    "WHERE id=:o AND status IN ('paid','shipped','delivered')"), {"o":order_id})
                 db.commit()
             except Exception:
                 db.rollback()
@@ -839,8 +843,9 @@ def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None =
     try:
         from src.app.services.payment_ledger import record_txn
         with db_session() as db:
+            order_lock = " FOR UPDATE" if db.get_bind().dialect.name == "postgresql" else ""
             row = db.execute(
-                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1" + order_lock),
                 {"iid": intent_id},
             ).fetchone()
             if not row:
