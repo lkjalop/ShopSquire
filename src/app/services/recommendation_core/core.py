@@ -134,6 +134,7 @@ def _run_stage(
 
 
 from src.app.observability.stage_timer import build_timing_breakdown
+from src.app.services.recommendation_core.case_binding import execute_bound_turn
 
 
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -148,7 +149,7 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
         if envelope.cancellation is not None:
             envelope.cancellation.raise_if_cancelled()
         core = coordinator.evaluate(
-            lambda: _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit),
+            lambda: execute_bound_turn(db,envelope,lambda: _recommend_turn(db,envelope,llm_fn=llm_fn,limit=limit)),
         )
     except Exception as exc:
         from src.app.services.recommendation_core.cancellation import RecommendationCancelled
@@ -615,6 +616,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             logger.warning("ignored invalid inherited quantity: %s", exc)
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
+    from src.app.services.recommendation_core.case_binding import bind_selected_contract_plan
+    plan = bind_selected_contract_plan(db, plan, envelope)
     from src.app.services.recommendation_core.research_planner import build_research_plan
 
     research_plan = build_research_plan(
@@ -780,6 +783,11 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         if isinstance(intent.get("title_requirements"), dict) else None
     )
     workload_items = list((workload_trace or {}).get("items") or [])
+    selected_contract_evidence_stage = None
+    if plan.source == 'selected_case_contract':
+        from src.app.services.recommendation_core.case_binding import resolve_bound_evidence_stage, project_contract_workloads
+        selected_contract_evidence_stage = resolve_bound_evidence_stage(db, plan, envelope, decision)
+        workload_items = project_contract_workloads(workload_items, selected_contract_evidence_stage)
     declared_title_requirements = bool(
         (intent.get("title_requirements") or {}).get("declared_catalog_requirements")
     )
@@ -1043,12 +1051,12 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     semantic_catalog_qualifications: list[dict[str, Any]] = []
     semantic_compiled_requirements: list[dict[str, Any]] = []
     if plan.needs_concept_resolution:
-        from src.app.services.recommendation_core.evidence_stage import (
-            resolve_semantic_evidence_stage,
+        from src.app.services.recommendation_core.case_binding import (
+            resolve_bound_evidence_stage, compilation_receipt,
         )
         from src.app.services.semantic_resolution import approved_narration_evidence
 
-        evidence_stage = resolve_semantic_evidence_stage(plan, envelope, decision)
+        evidence_stage = selected_contract_evidence_stage or resolve_bound_evidence_stage(db, plan, envelope, decision)
         evidence_bundle = evidence_stage.evidence_bundle
         concept_data = evidence_stage.concept_data
         normalized = list(evidence_stage.normalized_evidence)
@@ -1059,13 +1067,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         semantic_compiled_requirements = [
             item.model_dump() for item in compilation.requirements
         ]
-        resp.extras["semantic_requirement_compilation"] = {
-            "status": "accepted" if semantic_compiled_requirements else "blocked",
-            "compiled_requirements": semantic_compiled_requirements,
-            "rejected_claims": [dict(item) for item in compilation.rejections],
-            "catalog_authority_granted": bool(semantic_compiled_requirements),
-            "commercial_authority_granted": False,
-        }
+        resp.extras["semantic_requirement_compilation"] = compilation_receipt(compilation)
         semantic_catalog_qualifications = list(evidence_stage.catalog_qualifications)
         # Provider-qualified identities are bounded retrieval candidates, not a
         # buyer selection.  Without this join, ordinary top-N category retrieval

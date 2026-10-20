@@ -192,7 +192,9 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
     assert titan.identity_evidence.mpn == "Titan 18 HX A2WJ-1038AU"
     assert titan.identity_evidence.retailer_sku == "126982"
     assert titan.identity_evidence.claim_ids
-    assert titan.evidence_freshness.specification == "fresh"
+    # This fixture evaluates Aug 8 but the specification is dated Aug 11.
+    # Future observations are unknown, even when availability is current.
+    assert titan.evidence_freshness.specification == "unknown"
     assert titan.evidence_freshness.price == "fresh"
     assert titan.evidence_freshness.availability == "fresh"
     assert {row.location_id for row in titan.availability} == {

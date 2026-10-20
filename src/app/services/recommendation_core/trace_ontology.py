@@ -60,6 +60,8 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
         },
     }]
 
+    from src.app.services.recommendation_core.case_binding import binding_execution_steps
+    steps.extend(binding_execution_steps(core))
     intent = dict((getattr(core, "extras", {}) or {}).get("intent") or {})
     title_requirements = dict(intent.get("title_requirements") or {})
     workload_evidence = dict(

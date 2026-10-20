@@ -121,10 +121,12 @@ def _freshness(
     observed = _as_utc(observed_at)
     if observed is None:
         return "unknown"
+    if observed > now:
+        return "unknown"
     expiry = _as_utc(expires_at)
     if expiry is not None:
         return "fresh" if now <= expiry else "stale"
-    age_hours = max(0.0, (now - observed).total_seconds() / 3600)
+    age_hours = (now - observed).total_seconds() / 3600
     return "fresh" if age_hours <= max_age_hours else "stale"
 
 
@@ -296,6 +298,7 @@ def _decision(
     observations: Sequence[ProductEvidenceObservation],
     availability_status: str,
     now: datetime,
+    contract=None,
 ):
     identity = _identity(row)
     ledger: list[FitLedgerRow] = []
@@ -337,7 +340,7 @@ def _decision(
             resolver="catalog_evidence_ledger",
         ))
     from src.app.services.recommendation_core.requirement_scope import accepted_requirement_gaps
-    completeness_gaps = accepted_requirement_gaps(claims, tenant_id=row.tenant_id)
+    completeness_gaps = accepted_requirement_gaps(claims, tenant_id=row.tenant_id,contract=contract,now=now)
     workload = WorkloadContract(
         desired_outcome=desired_outcome, artefact_name="buyer-accepted provisional scope",
         budget_cents=budget_cents, currency="AUD", surviving_hypothesis_ids=[scope_id],
@@ -462,8 +465,24 @@ def project_accepted_catalog(
     hypothesis_claims: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     candidate_configuration_ids: Sequence[str] | None = None,
     now: datetime | None = None,
+    case_id: str | None = None,
+    uid: str | None = None,
 ) -> ProductShelfProjection:
     observed_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    contract_receipt = None
+    selected_contract = None
+    if case_id is not None:
+        from src.app.services.case_contract_binding import gate_case_contract_consumption
+        accepted_claims, contract_receipt = gate_case_contract_consumption(
+            db,tenant_id=tenant_id,case_id=case_id,uid=uid,claims=accepted_claims,now=observed_now)
+        if contract_receipt['state']=='current':
+            from src.app.services.case_contract_binding import require_current_case_contract
+            selected_contract,_=require_current_case_contract(db,tenant_id=tenant_id,case_id=case_id,
+                uid=uid,binding_id=contract_receipt['binding_id'])
+        if contract_receipt['state'] != 'unselected':
+            allowed_ids = {id(claim) for claim in accepted_claims}
+            hypothesis_claims = {key:[claim for claim in claims if id(claim) in allowed_ids]
+                                 for key,claims in (hypothesis_claims or {}).items()}
     candidate_query = select(ProductConfiguration).where(
         ProductConfiguration.tenant_id == tenant_id,
         ProductConfiguration.active.is_(True),
@@ -525,7 +544,7 @@ def project_accepted_catalog(
                 row, shared_claims, scope_id="shared", desired_outcome=desired_outcome,
                 budget_cents=budget_cents,
                 observations=observations, availability_status=availability_status,
-                now=observed_now,
+                now=observed_now,contract=selected_contract,
             ),
         }
         if conditional:
@@ -533,14 +552,14 @@ def project_accepted_catalog(
                 row, [*shared_claims, *conditional], scope_id="conditional_scope",
                 desired_outcome=desired_outcome, budget_cents=budget_cents,
                 observations=observations, availability_status=availability_status,
-                now=observed_now,
+                now=observed_now,contract=selected_contract,
             )
         architecture_scope = f"architecture:{row.device_class}"
         decisions[architecture_scope] = _decision(
             row, shared_claims, scope_id=architecture_scope,
             desired_outcome=desired_outcome, budget_cents=budget_cents,
             observations=observations, availability_status=availability_status,
-            now=observed_now,
+            now=observed_now,contract=selected_contract,
         )
         for hypothesis_id in proposed_labels:
             claims_for_hypothesis = list({
@@ -553,7 +572,7 @@ def project_accepted_catalog(
                 row, claims_for_hypothesis, scope_id=hypothesis_id,
                 desired_outcome=desired_outcome, budget_cents=budget_cents,
                 observations=observations, availability_status=availability_status,
-                now=observed_now,
+                now=observed_now,contract=selected_contract,
             )
         candidates.append(ShelfCandidateInput(
             product=identity, title=row.title, price_cents=row.price_cents,
@@ -565,12 +584,13 @@ def project_accepted_catalog(
             availability=availability,
             identity_evidence=_identity_evidence(row, observations),
         ))
-    return build_product_shelves(
+    projection = build_product_shelves(
         candidates, hypothesis_ids=hypothesis_ids, scope_labels=labels,
         budget_cents=budget_cents, requested_quantity=requested_quantity,
         stretch_budget_cents=stretch_budget_cents,
         suppress_zero_relevance=bool(accepted_claims), suppress_unavailable=True,
     )
+    return projection.model_copy(update={'requirement_contract':contract_receipt})
 
 
 __all__ = ["project_accepted_catalog"]

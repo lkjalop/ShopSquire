@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
+from src.app.services.requirement_contract import ContractContext, RequirementContract
 
 from src.app.services.recommendation_core.requirement_compiler import (
     CompilationResult,
@@ -41,6 +42,9 @@ def resolve_semantic_evidence_stage(
     plan: Any,
     envelope: Any,
     decision: Any,
+    *,
+    requirement_contract: RequirementContract | None = None,
+    contract_context: ContractContext | None = None,
 ) -> SemanticEvidenceStageResult:
     """Resolve a material semantic proposal into typed, provenance-bound evidence."""
 
@@ -139,12 +143,18 @@ def resolve_semantic_evidence_stage(
     from src.app.services.recommendation_core.requirement_scope import resolve_requirement_scope
     compilation = compile_authoritative_requirements(
         [item for item in list(concept_data.get("claims") or []) if isinstance(item, dict)],
+        contract=requirement_contract, contract_context=contract_context,
         scope=resolve_requirement_scope(
             tenant_id=envelope.tenant_id, profile_id=active_profile_id(),
             product_type=str(getattr(decision, "node_handle", "") or ""),
-            relationship=str(getattr(decision, "subject_role", "") or ""),
+            relationship=(requirement_contract.relationship if requirement_contract and requirement_contract.relationship
+                          else str(getattr(decision, "subject_role", "") or "")),
         ),
     )
+    if compilation.contract_coverage is not None:
+        concept_data["requirement_contract_coverage"] = compilation.contract_coverage
+        if not compilation.contract_coverage["compiled_complete"]:
+            concept_data["catalog_qualifications"] = []
     catalog_qualifications = tuple(
         dict(item) for item in (concept_data.get("catalog_qualifications") or [])
         if isinstance(item, dict)

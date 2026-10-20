@@ -505,6 +505,13 @@ class CompiledRequirement(BaseModel):
     requirement_class: Literal["minimum", "recommended", "target", "optimal"] = "minimum"
     scope_caveat: str | None = Field(default=None, max_length=500)
     source_revision: str | None = Field(default=None, max_length=160)
+    source_id: str | None = Field(default=None, max_length=240)
+    source_record_id: str | None = Field(default=None, max_length=240)
+    observed_at: str | None = Field(default=None, max_length=80)
+    expires_at: str | None = Field(default=None, max_length=80)
+    revoked_at: str | None = Field(default=None, max_length=80)
+    applicability: dict[str, Any] | None = None
+    simulation_only: bool = False
     freshness_status: Literal["fresh", "stale", "unknown"] = "unknown"
     verification_status: Literal["verified", "unverified"] = "verified"
     supersedes_claim_id: str | None = Field(default=None, max_length=240)

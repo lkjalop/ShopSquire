@@ -12,7 +12,7 @@ hypothesis shelves, while preserving three boundaries:
 from __future__ import annotations
 
 import hashlib
-from typing import Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -225,6 +225,7 @@ class ShelfExclusion(BaseModel):
 
 
 class ProductShelfProjection(BaseModel):
+    requirement_contract: dict[str, Any] | None = None
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["product-shelves-v1"] = "product-shelves-v1"

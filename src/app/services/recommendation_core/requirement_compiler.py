@@ -8,6 +8,7 @@ provenance, confidence, and the attribute registry all validate it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -19,6 +20,7 @@ from src.app.services.attribute_registry import (
 )
 from src.app.services.recommendation_core.requirement_scope import RequirementScope, scope_is_current
 from src.app.services.recommendation_core.research_contracts import CompiledRequirement
+from src.app.services.requirement_contract import ContractContext, RequirementContract
 
 
 _AUTHORITATIVE = frozenset({"official_requirements", "approved_tenant_document"})
@@ -36,6 +38,7 @@ _OPERATORS = {
 class CompilationResult:
     requirements: tuple[CompiledRequirement, ...]
     rejections: tuple[dict[str, Any], ...]
+    contract_coverage: dict[str, Any] | None = None
 
 
 def compile_authoritative_requirements(
@@ -43,15 +46,25 @@ def compile_authoritative_requirements(
     *,
     minimum_confidence: float = 0.80,
     scope: RequirementScope | None = None,
+    contract: RequirementContract | None = None,
+    contract_context: ContractContext | None = None,
+    now: datetime | None = None,
 ) -> CompilationResult:
+    inputs = [raw if isinstance(raw, Mapping) else {} for raw in list(claims)[:64]]
+    coverage = None
+    eligible = {}
+    if contract is not None:
+        from src.app.services.recommendation_core.contract_compilation_gate import gate_contract_claims
+        eligible, coverage = gate_contract_claims(inputs, contract=contract, context=contract_context, now=now)
     scope_error = (
         "compilation_scope_unresolved" if scope is None
         else "compilation_scope_stale" if not scope_is_current(scope) else None
     )
     defs = load_defs(scope.manifest_id) if scope and not scope_error else {}
     accepted: list[CompiledRequirement] = []
+    compiled_obligations: set[str] = set()
     rejected: list[dict[str, Any]] = []
-    for raw in list(claims)[:64]:
+    for index, raw in enumerate(inputs):
         claim = raw if isinstance(raw, Mapping) else {}
         # A page/provider row can support multiple predicates. Preserve the row
         # separately; predicate identity must also include its exact contents.
@@ -79,6 +92,9 @@ def compile_authoritative_requirements(
             continue
         if scope_error:
             reject(scope_error)
+            continue
+        if coverage is not None and (not coverage["coverage_complete"] or index not in eligible):
+            reject("contract_incomplete" if not coverage["coverage_complete"] else "claim_outside_contract")
             continue
         if str(claim.get("authority") or "") not in _AUTHORITATIVE:
             reject("source_not_authoritative")
@@ -158,6 +174,8 @@ def compile_authoritative_requirements(
         if value is None:
             reject("value_not_registry_valid")
             continue
+        if coverage is not None:
+            compiled_obligations.add(eligible[index])
         accepted.append(
             CompiledRequirement(
                 attribute_key=key,
@@ -178,6 +196,13 @@ def compile_authoritative_requirements(
                 ),
                 scope_caveat=(str(claim.get("scope_caveat") or "").strip()[:500] or None),
                 source_revision=(str(claim.get("source_revision") or "").strip()[:160] or None),
+                source_id=claim.get("source_id"),
+                source_record_id=claim.get("source_record_id"),
+                observed_at=claim.get("observed_at"),
+                expires_at=claim.get("expires_at"),
+                revoked_at=claim.get("revoked_at"),
+                applicability=claim.get("applicability"),
+                simulation_only=claim.get("simulation_only") is True,
                 freshness_status=(
                     str(claim.get("freshness_status") or "unknown").strip().lower()
                     if str(claim.get("freshness_status") or "unknown").strip().lower()
@@ -194,4 +219,12 @@ def compile_authoritative_requirements(
                 ),
             )
         )
-    return CompilationResult(tuple(accepted), tuple(rejected))
+    if coverage is not None:
+        coverage = {**coverage, "compiled_complete": bool(coverage["coverage_complete"]
+                    and len(compiled_obligations) == len(contract.obligations)),
+                    "compiled_obligation_ids": sorted(compiled_obligations)}
+        if not coverage["compiled_complete"]:
+            rejected.extend({"claim_id": item.source_claim_ids[0], "attribute_key": item.attribute_key,
+                             "reason": "contract_compilation_incomplete"} for item in accepted)
+            accepted = []
+    return CompilationResult(tuple(accepted), tuple(rejected), coverage)

@@ -731,6 +731,14 @@ def _merge_session_overrides(
     return merged
 
 
+def _read_case_session(redis, uid, tenant, db, *, session_epoch, memory_enabled,
+                       confirmed_slots, canonical_case):
+    session = _merge_session_overrides(
+        _read_session_slice(redis, uid, tenant, db, session_epoch=session_epoch,
+                            memory_enabled=memory_enabled), confirmed_slots)
+    return _merge_canonical_procurement_case(session, canonical_case)
+
+
 def _merge_canonical_procurement_case(
     session: Optional[Dict[str, Any]],
     canonical_case: Optional[Dict[str, Any]],
@@ -1276,17 +1284,10 @@ def dispatch_recommendation_core_typed(
         if mode == "shadow" or cart_slice:
             # FULL envelope in the job (R10.1/P1.1): budget/session/image ride along so the
             # worker replays the turn production actually saw, not a query-only shadow of it.
-            session = _merge_session_overrides(
-                _read_session_slice(
-                    redis,
-                    uid,
-                    tenant,
-                    db,
-                    session_epoch=session_epoch,
-                    memory_enabled=memory_enabled,
-                ),
-                confirmed_slots,
-            )
+            session = _read_case_session(
+                redis, uid, tenant, db, session_epoch=session_epoch,
+                memory_enabled=memory_enabled, confirmed_slots=confirmed_slots,
+                canonical_case=canonical_case)
             shadow_env = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,

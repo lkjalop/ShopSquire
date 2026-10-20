@@ -24,12 +24,36 @@ from src.app.services.shopping_case_research_contract import (
     project_research_execution_contract,
 )
 from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
+from src.app.services import case_contract_binding as contract_bindings
 
 
 @dataclass(frozen=True)
 class EnrolledResearchUnavailable(Exception):
     status_code: int
     detail: dict[str, Any]
+
+
+def _revalidate_binding(db, scope, receipt):
+    try:
+        return contract_bindings.assert_case_contract_unchanged(db,**scope,receipt=receipt)
+    except ValueError as exc:
+        raise EnrolledResearchUnavailable(409, {'code':str(exc)}) from exc
+
+
+def _filter_contract_research(db, scope, research):
+    claims, receipt = contract_bindings.gate_case_contract_consumption(db,**scope,claims=research['claims'])
+    research['requirement_contract_binding'] = receipt
+    if receipt['state'] != 'unselected':
+        research['contract_review_claims'] = research['claims']
+        research['claims'] = claims
+        if not claims:
+            research['evidence_outcome'] = 'context_only' if research.get('context_claims') else 'unresolved'
+    return receipt
+
+
+def _catalog_before_research(db, scope, plan, budget_cents, candidate_configuration_ids):
+    return project_accepted_catalog(db,**scope,accepted_claims=[],desired_outcome=plan.retained_purpose,
+        budget_cents=budget_cents,candidate_configuration_ids=candidate_configuration_ids).model_dump(mode='json')
 
 
 def _validate_source_policies(
@@ -137,14 +161,10 @@ async def execute_enrolled_official_research(
             },
         )
     search_url = configured_search_url if readiness["effective"] else ""
-    before = project_accepted_catalog(
-        db,
-        accepted_claims=[],
-        desired_outcome=plan.retained_purpose,
-        budget_cents=budget_cents,
-        tenant_id=tenant_id,
-        candidate_configuration_ids=candidate_configuration_ids,
-    ).model_dump(mode="json")
+    binding_scope = dict(tenant_id=tenant_id,case_id=case_id,uid=uid)
+    binding = contract_bindings.read_case_contract_binding(db,**binding_scope)
+    _revalidate_binding(db,binding_scope,binding)
+    before = _catalog_before_research(db,binding_scope,plan,budget_cents,candidate_configuration_ids)
     case_revision = int(case.revision or 1)
     # Catalog projection is complete. Release its read transaction before the
     # governed HTTP fetch; persistence resumes only after a bounded result exists.
@@ -159,6 +179,7 @@ async def execute_enrolled_official_research(
         evidence_cache=official_workload_research.DEFAULT_OFFICIAL_EVIDENCE_CACHE,
         cancellation_requested=cancellation_requested,
     ))
+    research['requirement_contract_binding'] = _revalidate_binding(db,binding_scope,binding)
     research["discovery_readiness"] = {
         key: readiness.get(key) for key in (
             "configured", "reachable", "effective", "degraded", "capability_status",
@@ -195,8 +216,9 @@ async def execute_enrolled_official_research(
             claim for claim in research["claims"]
             if str(claim.get("claim_id") or "") in accepted_claim_ids
         ]
+    contract_receipt = _filter_contract_research(db,binding_scope,research)
     after = project_accepted_catalog(
-        db,
+        db, case_id=case_id, uid=uid,
         accepted_claims=research["claims"],
         desired_outcome=plan.retained_purpose,
         budget_cents=budget_cents,
@@ -335,6 +357,7 @@ async def execute_enrolled_official_research(
         "evidence_outcome": outcome,
         "research_delta": delta,
         "decision_trace": {
+            "requirement_contract": contract_receipt,
             "research_trust": synthesis.decision_trace_projection,
             "evidence_synthesis_ledger_id": synthesis.ledger_id,
         },
@@ -370,6 +393,7 @@ async def execute_enrolled_official_research(
         persist_requirement_acceptance_decision,
     )
 
+    _revalidate_binding(db,binding_scope,binding)
     result["procurement_decision_run"] = persist_requirement_acceptance_decision(
         db,
         tenant_id=tenant_id,

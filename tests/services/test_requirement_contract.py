@@ -64,3 +64,8 @@ def test_blender_contract_keeps_missing_compatibility_obligations_and_release():
     assert len(result["obligations"]) == 11
     assert not result["coverage_complete"]
     assert contract.context.version == "5.0"
+
+
+def test_future_product_timestamp_does_not_grant_current_evidence():
+    from src.app.services.accepted_catalog_projection import _freshness
+    assert _freshness(NOW + timedelta(days=1), now=NOW, max_age_hours=720) == "unknown"

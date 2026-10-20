@@ -39,6 +39,8 @@ def project_structured_requirement_claims(
                     "attribute_key", "operator", "value", "unit", "requirement_class",
                     "scope_caveat", "source_revision", "artefact_name", "artefact_version",
                     "compilation_scope", "source_excerpt", "value_spans",
+                    "source_id", "source_record_id", "observed_at", "expires_at",
+                    "applicability", "simulation_only",
                 )},
             }
             claim_id = "req-" + hashlib.sha256(json.dumps(
@@ -67,9 +69,14 @@ def project_structured_requirement_claims(
                     "verified_official" if compiled.get("verification_status") == "verified"
                     else "observed_held"
                 ),
-                "source_id": evidence.get("provider_id") or evidence.get("source"),
+                "source_id": compiled.get("source_id") or evidence.get("provider_id") or evidence.get("source"),
+                "source_record_id": compiled.get("source_record_id"),
                 "source_url": evidence.get("source_url"),
-                "observed_at": evidence.get("retrieved_at"),
+                "observed_at": compiled.get("observed_at") or evidence.get("retrieved_at"),
+                "expires_at": compiled.get("expires_at"),
+                "revoked_at": compiled.get("revoked_at"),
+                "applicability": compiled.get("applicability"),
+                "simulation_only": compiled.get("simulation_only") is True,
             }))
     return claims
 

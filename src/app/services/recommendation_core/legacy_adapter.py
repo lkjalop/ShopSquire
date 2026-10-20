@@ -185,6 +185,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "experiential_failure_lesson": core.extras.get("experiential_failure_lesson"),
         "infrastructure_alternatives": core.extras.get("infrastructure_alternatives"),
         "semantic_requirement_compilation": core.extras.get("semantic_requirement_compilation"),
+        "requirement_contract": core.extras.get("requirement_contract"),
         "semantic_evidence": core.extras.get("semantic_evidence"),
         "approved_narration_evidence": core.extras.get("approved_narration_evidence", []),
         "catalog_alignment": core.extras.get("catalog_alignment"),

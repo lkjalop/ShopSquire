@@ -69,7 +69,7 @@ def scope_is_current(scope: RequirementScope) -> bool:
     return current == scope
 
 
-def accepted_requirement_gaps(claims, *, tenant_id: str) -> list[str]:
+def accepted_requirement_gaps(claims, *, tenant_id: str, contract=None, now=None) -> list[str]:
     """Recheck completeness at fit time; unrelated identities cannot fill gaps."""
     gaps: set[str] = set()
     groups = {}
@@ -92,8 +92,14 @@ def accepted_requirement_gaps(claims, *, tenant_id: str) -> list[str]:
         group = groups.setdefault(key, (scope, set()))
         if claim.get('authority_status') == 'verified_official':
             group[1].add(str(claim.get('attribute') or ''))
-    for scope, present in groups.values():
-        if not scope.required_attributes:
-            gaps.add('manifest_obligations_missing')
-        gaps.update(set(scope.required_attributes) - present)
+    if contract is not None:
+        from src.app.services.requirement_contract import assess_contract_coverage
+        coverage=assess_contract_coverage(contract,context=contract.context,claims=list(claims),now=now)
+        if not coverage['coverage_complete']:
+            gaps.add('selected_contract_incomplete')
+    else:
+        for scope, present in groups.values():
+            if not scope.required_attributes:
+                gaps.add('manifest_obligations_missing')
+            gaps.update(set(scope.required_attributes) - present)
     return sorted(gaps)
