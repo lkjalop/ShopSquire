@@ -21,7 +21,7 @@ def _make_mock_post(active=True, extra=None):
 
 def test_metrics_owner_via_introspection(monkeypatch):
     # Configure introspection URL env
-    os.environ["OIDC_INTROSPECTION_URL"] = "https://auth.example/introspect"
+    monkeypatch.setenv("OIDC_INTROSPECTION_URL", "https://auth.example/introspect")
     # Mock requests.post to return active owner role
     import requests
 
@@ -48,7 +48,7 @@ def test_metrics_owner_via_introspection(monkeypatch):
 
 
 def test_metrics_merchant_requires_tenant_header(monkeypatch):
-    os.environ["OIDC_INTROSPECTION_URL"] = "https://auth.example/introspect"
+    monkeypatch.setenv("OIDC_INTROSPECTION_URL", "https://auth.example/introspect")
     import requests
     # Introspect returns merchant role
     monkeypatch.setattr(requests, "post", _make_mock_post(active=True, extra={"role": "merchant"}))

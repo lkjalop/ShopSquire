@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import base64
 import json
+import hashlib
+import hmac
+import time
 
 import pytest
 from sqlalchemy import create_engine
@@ -56,8 +59,25 @@ def test_transition_without_user_id_records_nothing_extra(db):
     assert "actor_user_id" not in (repo.current_version(db, cid).evidence or {})  # additive — no noise
 
 
-def test_operator_subject_extracts_jwt_subject_and_email():
+def test_operator_subject_rejects_unsigned_jwt_subject_and_email():
     auth = _jwt({"sub": "user-42", "email": "jane@acme.example", "role": "owner"})
+    assert _bearer_subject(auth) is None and _bearer_email(auth) is None
+    assert operator_subject(authorization=auth).user_id == ''
+
+
+def test_operator_subject_extracts_verified_jwt_subject_and_email(monkeypatch):
+    key = 'synthetic-test-signing-key-only'
+    monkeypatch.setenv('JWT_SIGNING_KEY', key)
+    monkeypatch.setenv('JWT_ISSUER', 'shopsquire')
+    monkeypatch.setenv('JWT_AUDIENCE', 'shopsquire-api')
+    seg = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
+    header = seg({'alg': 'HS256', 'typ': 'JWT'})
+    payload = seg({'sub': 'user-42', 'email': 'jane@acme.example', 'role': 'owner',
+                   'iss': 'shopsquire', 'aud': 'shopsquire-api', 'iat': int(time.time()),
+                   'exp': int(time.time()) + 300})
+    signature = base64.urlsafe_b64encode(hmac.new(key.encode(), f'{header}.{payload}'.encode(),
+                                                hashlib.sha256).digest()).decode().rstrip('=')
+    auth = f'Bearer {header}.{payload}.{signature}'
     assert _bearer_subject(auth) == "user-42" and _bearer_email(auth) == "jane@acme.example"
     subj = operator_subject(authorization=auth)
     assert isinstance(subj, OperatorSubject) and subj.user_id == "user-42" and subj.email == "jane@acme.example"

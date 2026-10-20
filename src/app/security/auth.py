@@ -95,55 +95,40 @@ def _clear_failed_auth(ip: str | None) -> None:
 
 
 def _bearer_subject(auth_header: Optional[str]) -> Optional[str]:
+    # A valid API key must never lend authority to an unrelated forged bearer.
+    claims = _verified_identity_claims(auth_header)
+    sub = claims.get('sub') or claims.get('user_id') or claims.get('uid')
+    return str(sub) if sub else None
+
+
+def _verified_identity_claims(auth_header: Optional[str]) -> dict:
     if not auth_header or not auth_header.lower().startswith("bearer "):
-        return None
+        return {}
     token = auth_header.split(" ", 1)[1].strip()
     # Local JWT path
     try:
         parts = token.split(".")
-        if len(parts) == 3:
+        if len(parts) == 3 and (_verify_local_jwt(auth_header) or _verify_oidc_jwt(auth_header)):
             p = parts[1]
             pad = "=" * ((4 - len(p) % 4) % 4)
             claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
-            sub = claims.get("sub") or claims.get("user_id") or claims.get("uid")
-            if sub:
-                return str(sub)
+            return claims
     except Exception:
         pass
     # Introspection fallback
     try:
         data = _introspect_token(auth_header)
-        if isinstance(data, dict):
-            sub = data.get("sub") or data.get("uid") or data.get("user_id")
-            if sub:
-                return str(sub)
+        if isinstance(data, dict) and data.get('active') is True:
+            return data
     except Exception:
         pass
-    return None
+    return {}
 
 
 def _bearer_email(auth_header: Optional[str]) -> Optional[str]:
-    """The email claim from a bearer (local JWT, else introspection), or None. Best-effort, never raises."""
-    if not auth_header or not auth_header.lower().startswith("bearer "):
-        return None
-    token = auth_header.split(" ", 1)[1].strip()
-    try:
-        parts = token.split(".")
-        if len(parts) == 3:
-            p = parts[1]
-            pad = "=" * ((4 - len(p) % 4) % 4)
-            claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
-            if claims.get("email"):
-                return str(claims["email"])
-    except Exception:
-        pass
-    try:
-        data = _introspect_token(auth_header)
-        if isinstance(data, dict) and data.get("email"):
-            return str(data["email"])
-    except Exception:
-        pass
-    return None
+    """Verified email for audit attribution; absent for unverified bearers."""
+    email = _verified_identity_claims(auth_header).get('email')
+    return str(email) if email else None
 
 
 @dataclass
@@ -212,13 +197,18 @@ def _assert_privileged_role_server_side(*, role: str, authorization: Optional[st
         return False
 
 
+def _auth_environment() -> str:
+    """Security defaults stay restrictive until development is explicitly named."""
+    return (str(os.getenv("APP_ENV") or "").strip().lower() or "production")
+
+
 def _abac_enabled() -> bool:
     explicit = str(os.getenv("ABAC_ENABLED", "") or "").lower()
     if explicit in ("1", "true", "yes", "on"):
         return True
     if explicit in ("0", "false", "no", "off"):
         return False
-    env = str(os.getenv("APP_ENV", "") or "").lower()
+    env = _auth_environment()
     return env in ("prod", "production")
 
 
@@ -350,7 +340,7 @@ def _evaluate_abac(
         or (request.query_params.get("tenant_id") if request else None)
     )
     source_ip = request.client.host if request and request.client else None
-    env = str(os.getenv("APP_ENV", "local") or "local").lower()
+    env = _auth_environment()
 
     details = {
         "resource": {"path": path, "method": method, "sensitivity": sensitivity},
@@ -405,7 +395,7 @@ def _admin_oidc_required() -> bool:
         return True
     if explicit in ("0", "false", "no", "off"):
         return False
-    env = str(os.getenv("APP_ENV", "") or "").lower()
+    env = _auth_environment()
     return env in ("prod", "production")
 
 
@@ -582,11 +572,7 @@ def _introspect_token(auth_header: Optional[str]) -> Optional[dict]:
     if not introspect_url:
         return None
     # Simple in-memory cache keyed by token (short TTL)
-    try:
-        now = time.time()
-    except Exception:
-        import time as time
-        now = time.time()
+    now = time.time()
     cached = _INTROSPECTION_CACHE.get(token)
     if cached:
         ts, data = cached
@@ -798,10 +784,9 @@ def _credential_audit_id(key: str | None) -> str:
     return 'credential:' + hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
-
 def _non_dev_env() -> bool:
     """Non-dev = staging/prod/anything that isn't a local/dev/test run (mirrors config._is_non_dev_env)."""
-    return str(os.getenv("APP_ENV", "local") or "local").strip().lower() not in (
+    return _auth_environment() not in (
         "local", "dev", "development", "test", "testing",
     )
 
