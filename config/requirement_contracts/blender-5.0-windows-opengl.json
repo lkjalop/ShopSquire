@@ -1,0 +1,31 @@
+{
+  "id": "blender-5.0-windows-opengl-recommended-v1",
+  "relationship": "RUN_SUBJECT_ON_PRODUCT",
+  "context": {
+    "subject": "Blender",
+    "version": "5.0",
+    "platform": "Windows x86-64",
+    "workload": "interactive modelling with OpenGL viewport and CPU rendering"
+  },
+  "obligations": [
+    {"id":"recommended-cpu","attribute":"cpu_cores","tier":"recommended","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"recommended-memory","attribute":"ram_gb","tier":"recommended","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"recommended-vram","attribute":"gpu_vram_gb","tier":"recommended","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"recommended-os","attribute":"operating_system","tier":"recommended","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"cpu-instruction-support","attribute":"cpu_sse42","tier":"minimum","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"architecture","attribute":"architecture_compatibility","tier":"minimum","source_ids":["blender_official_requirements"],"max_age_hours":168},
+    {"id":"opengl-version","attribute":"opengl_version","tier":"minimum","source_ids":["blender_5_0_release_requirements"],"max_age_hours":168},
+    {"id":"shader-draw-parameters","attribute":"opengl_shader_draw_parameters","tier":"minimum","source_ids":["blender_5_0_release_requirements"],"max_age_hours":168},
+    {"id":"clip-control","attribute":"opengl_clip_control","tier":"minimum","source_ids":["blender_5_0_release_requirements"],"max_age_hours":168},
+    {"id":"supported-gpu","attribute":"gpu_release_compatibility","tier":"minimum","source_ids":["blender_5_0_release_requirements"],"max_age_hours":168},
+    {"id":"supported-driver","attribute":"driver_release_compatibility","tier":"minimum","source_ids":["blender_5_0_release_requirements"],"max_age_hours":168}
+  ],
+  "exclusions": ["Cycles GPU rendering", "Vulkan backend", "render-time promises", "large-scene capacity", "other releases", "price and availability", "commerce authorization"],
+  "evidence_notes": [
+    "Diagnostic contract; selecting this contract does not attest release applicability or approve a new source.",
+    "The moving requirements table is not version-bound. Its observations cannot be copied into this release contract without supported applicability.",
+    "Release-specific basis: https://devtalk.blender.org/t/system-requirements-for-blender-5-0/41457 . This source still needs governed enrollment before production compilation.",
+    "OpenGL is one explicitly selected backend. Do not require Vulkan as an additional mandatory API or infer support merely from VRAM.",
+    "Obligations describe needed evidence, not a complete set of compiler-authorized predicates. Missing typed attributes and compatibility policies remain blockers."
+  ]
+}

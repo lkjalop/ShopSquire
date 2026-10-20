@@ -1,0 +1,8 @@
+{
+  "id": "fictional-memory-lab-v1",
+  "relationship": "RUN_SUBJECT_ON_PRODUCT",
+  "context": {"subject":"Fictional Memory Lab", "version":"1", "platform":"simulated workstation", "workload":"memory-capacity check only"},
+  "obligations": [{"id":"memory", "attribute":"ram_gb", "tier":"minimum", "source_ids":["simulation:memory-lab-publisher"], "max_age_hours":24}],
+  "exclusions": ["Real application compatibility", "Performance, GPU and CPU suitability", "Permission to purchase or send messages"],
+  "evidence_notes": ["Synthetic scenario only. Source observations are invented fixture evidence, not manufacturer certification."]
+}
