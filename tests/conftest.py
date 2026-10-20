@@ -37,6 +37,51 @@ _LAST_RUNNING_PATH = Path(
 )
 _TEST_STARTED_AT: dict[str, float] = {}
 _SESSION_BASELINE_THREAD_IDS: set[int] = set()
+_RESOURCE_GC_TEARDOWNS = 0
+
+
+def collect_test_resource_garbage():
+    """Measure unreachable test objects without clearing live application state."""
+    import gc
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        def snapshot():
+            data = {'rss_bytes': process.memory_info().rss}
+            if hasattr(process, 'num_handles'):data['handles'] = process.num_handles()
+            return data
+    except ImportError:
+        def snapshot():
+            return {}
+    before = snapshot()
+    collected = gc.collect()
+    return {'before': before, 'collected': collected, 'after': snapshot()}
+
+
+def pytest_runtest_logreport(report):
+    """Preserve completed failures even if a later test hits the hang backstop."""
+    destination = os.environ.get('PYTEST_RESULT_STREAM')
+    if destination and (report.when == 'call' or report.failed or report.skipped):
+        import json
+        row = {'nodeid': report.nodeid, 'phase': report.when, 'outcome': report.outcome,
+               'duration': report.duration}
+        if report.failed:row['failure'] = str(report.longrepr)
+        if os.getenv('PYTEST_CAPTURE_RESOURCES') == '1':
+            try:
+                import psutil
+                process = psutil.Process(os.getpid())
+                row['resources'] = {'rss_bytes': process.memory_info().rss,
+                                    'threads': process.num_threads(),
+                                    'cached_apps': len(_SINGLETONS)}
+                handles = getattr(process, 'num_handles', None)
+                if handles is not None:row['resources']['handles'] = handles()
+            except Exception:
+                pass
+        try:
+            with Path(destination).open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps(row) + '\n')
+        except OSError:
+            pass
 
 
 def _hang_backstop_fire(test_id: str) -> None:
@@ -837,6 +882,29 @@ def _restore_db_engine():
                 pass
     except Exception:
         pass
+
+    # Removed apps contain route/handler reference cycles. Release teardown's
+    # own references before collecting unreachable objects; a live fixture or
+    # borrowed resource still has its owner and must remain intact. This is test
+    # process cleanup, not evidence of production request retention or shutdown.
+    temporary_apps = []
+    temporary_app = None
+    temporary_engine = None
+    result = collect_test_resource_garbage()
+
+    # The opt-in interval controls diagnostic receipts, not resource cleanup.
+    interval = int(os.getenv('PYTEST_DIAGNOSTIC_GC_INTERVAL', '0') or 0)
+    if interval > 0:
+        global _RESOURCE_GC_TEARDOWNS
+        _RESOURCE_GC_TEARDOWNS += 1
+        if _RESOURCE_GC_TEARDOWNS % interval == 0:
+            import json
+            result['nodeid'] = (_LAST_RUNNING_PATH.read_text(encoding='utf-8').strip()
+                                if _LAST_RUNNING_PATH.exists() else None)
+            destination = os.getenv('PYTEST_RESOURCE_GC_STREAM')
+            if destination:
+                with Path(destination).open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(result) + '\n')
 
 
 # ---------------------------------------------------------------------------
