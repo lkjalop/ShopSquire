@@ -44,6 +44,19 @@ import uuid
 _RUNTIME = pytest.StashKey()
 
 
+def disable_message_connectors(env):
+    """Remove inherited external-message authority from a copied test environment."""
+    env.update(SECRETS_PROVIDER="env", SECRETS_PROVIDER_STRICT="0", INCIDENT_ALERTS_ENABLED="0")
+    for key in list(env):
+        if key.startswith(("JIRA_", "SN_", "SMTP_", "SENDGRID_", "SLACK_", "TEAMS_", "VAULT_")):
+            env[key] = ""
+    for key in ("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_API_TOKEN", "JIRA_USER", "JIRA_EMAIL",
+                "SN_INSTANCE_URL", "SN_USERNAME", "SN_PASSWORD", "SN_TOKEN", "SMTP_PASSWORD",
+                "SLACK_WEBHOOK_URL", "TEAMS_WEBHOOK_URL", "SENDGRID_API_KEY"):
+        env[key] = ""
+        env[key + "_REF"] = ""
+
+
 @contextmanager
 def _owned_runtime(config, *, artifact_directory=None, env_overrides=None, publish_base_url=True):
     import json
@@ -97,14 +110,7 @@ def _owned_runtime(config, *, artifact_directory=None, env_overrides=None, publi
         env[key] = ""
     # An owned API must not inherit authority to send messages or create real
     # incidents. Explicit test-owned adapters may be supplied through overrides.
-    for key in list(env):
-        if key.startswith(("JIRA_", "SN_", "SMTP_", "SENDGRID_", "SLACK_", "TEAMS_", "VAULT_")):
-            env[key] = ""
-    for key in ("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_API_TOKEN", "JIRA_USER", "JIRA_EMAIL",
-                "SN_INSTANCE_URL", "SN_USERNAME", "SN_PASSWORD", "SN_TOKEN", "SMTP_PASSWORD",
-                "SLACK_WEBHOOK_URL", "TEAMS_WEBHOOK_URL", "SENDGRID_API_KEY"):
-        env[key] = ""
-        env[key + "_REF"] = ""
+    disable_message_connectors(env)
     env.update(env_overrides or {})
 
     proc = None
