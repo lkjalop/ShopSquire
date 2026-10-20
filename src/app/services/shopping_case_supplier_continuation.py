@@ -354,6 +354,7 @@ def select_fulfillment_option(
             case_id=case_id,
             expected_revision=expected_revision,
             reason="buyer_selected_fulfillment_option",
+            procurement_updates={"requested_quantity": requested_quantity, "selected_sku": preferred_sku},
         )
     normalized = normalize_supplier_offers(
         offers, requested_quantity=requested_quantity,

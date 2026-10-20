@@ -45,6 +45,7 @@ def advance_material_case_revision(
     expected_revision: int,
     reason: str,
     conversation_state_overrides: dict[str, dict[str, Any]] | None = None,
+    procurement_updates: dict[str, Any] | None = None,
     now_iso: str | None = None,
 ) -> int:
     """CAS-advance the canonical revision and all conversation projections.
@@ -55,6 +56,9 @@ def advance_material_case_revision(
     conversation row id; all other rows retain their facts and only mirror the
     new revision.
     """
+
+    if procurement_updates is not None and set(procurement_updates) - {"requested_quantity", "selected_sku"}:
+        raise ValueError("unsupported_fulfillment_intent_update")
 
     prior = int(expected_revision)
     current = canonical_case_revision(
@@ -93,6 +97,19 @@ def advance_material_case_revision(
                 raise ValueError("case_revision_conflict")
             state = dict(overrides.get(str(row[0])) or json.loads(row[2]))
             typed = state.get("procurement_case_state")
+            if procurement_updates:
+                from src.app.services.procurement_case_state import ProcurementCaseState
+
+                if not isinstance(typed, dict):
+                    raise ValueError("canonical_procurement_state_required")
+                if (typed.get("case_id"), typed.get("revision")) != (case_id, prior):
+                    raise ValueError("canonical_procurement_state_scope_mismatch")
+                # Existing money, workload and allocation constraints survive.
+                # Invalid quantity/allocation combinations abort the caller's
+                # transaction rather than silently clearing buyer obligations.
+                typed = ProcurementCaseState.model_validate(
+                    {**typed, **procurement_updates, "revision": new_revision}, strict=True,
+                ).model_dump(mode="json")
             if isinstance(typed, dict):
                 state["procurement_case_state"] = {**typed, "revision": new_revision}
             changed = db.execute(text(
