@@ -5,6 +5,7 @@ import hmac
 import base64
 import os
 import time
+from threading import Lock
 from typing import Iterable, Tuple
 
 from fastapi import Request, HTTPException
@@ -20,22 +21,46 @@ from src.app.security.agent_events import (
 from src.app.observability.metrics import record_webhook_verification
 
 _LOCAL_REPLAY_CACHE: dict[str, float] = {}
+_LOCAL_REPLAY_LOCK = Lock()
 
 
 def _replay_seen_local(key: str, ttl_seconds: int) -> bool:
-    now = time.time()
-    # Opportunistic cleanup.
+    with _LOCAL_REPLAY_LOCK:
+        now = time.monotonic()
+        expired = [key for key, expiry in _LOCAL_REPLAY_CACHE.items() if expiry <= now]
+        for expired_key in expired:
+            _LOCAL_REPLAY_CACHE.pop(expired_key, None)
+        if _LOCAL_REPLAY_CACHE.get(key, 0) > now:
+            return True
+        if len(_LOCAL_REPLAY_CACHE) >= 10000:
+            raise HTTPException(status_code=503, detail="Webhook replay verification unavailable")
+        _LOCAL_REPLAY_CACHE[key] = now + max(1, int(ttl_seconds))
+        return False
+
+
+def _replay_seen(key: str, ttl_seconds: int) -> bool:
+    """Reserve once across workers; unavailable verification cannot authorize delivery.
+
+    A reservation is delivery deduplication, not proof that the downstream effect
+    committed. Durable effect recovery remains the handler's responsibility.
+    """
     try:
-        expired = [k for k, exp in _LOCAL_REPLAY_CACHE.items() if exp <= now]
-        for k in expired[:512]:
-            _LOCAL_REPLAY_CACHE.pop(k, None)
+        redis = get_redis()
+        if redis.__class__.__name__ == "DummyRedis":
+            environment = os.getenv("APP_ENV", "").strip().lower()
+            if environment not in {"local", "dev", "development", "test", "testing"}:
+                raise HTTPException(status_code=503, detail="Webhook replay verification unavailable")
+            return _replay_seen_local(key, ttl_seconds)
+        claimed = redis.set(key, "1", nx=True, ex=max(1, int(ttl_seconds)))
+        if claimed is None or claimed is False:
+            return True
+        if claimed is True or claimed in (b"OK", "OK"):
+            return False
+    except HTTPException:
+        raise
     except Exception:
         pass
-    exp = _LOCAL_REPLAY_CACHE.get(key)
-    if exp and exp > now:
-        return True
-    _LOCAL_REPLAY_CACHE[key] = now + max(1, int(ttl_seconds))
-    return False
+    raise HTTPException(status_code=503, detail="Webhook replay verification unavailable")
 
 
 def _normalize_signature(sig: str) -> str:
@@ -341,15 +366,10 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                     )
                     raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-                # Replay protection using Redis (best-effort)
+                # Shared atomic delivery reservation before the handler.
                 try:
                     replay_key = f"webhook_replay:{hashlib.sha256((signature + timestamp).encode('utf-8')).hexdigest()}"
-                    redis = get_redis()
-                    seen = False
-                    if redis.__class__.__name__ == "DummyRedis":
-                        seen = _replay_seen_local(replay_key, self.replay_ttl)
-                    else:
-                        seen = bool(redis.get(replay_key))
+                    seen = _replay_seen(replay_key, self.replay_ttl)
                     if seen:
                         log_agent_security_event(
                             interaction_type=AgentInteractionType.webhook_received,
@@ -362,12 +382,10 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                             requires_escalation=True,
                         )
                         raise HTTPException(status_code=409, detail="Replay detected")
-                    if redis.__class__.__name__ != "DummyRedis":
-                        redis.setex(replay_key, self.replay_ttl, "1")
                 except HTTPException:
                     raise
                 except Exception:
-                    pass
+                    raise HTTPException(status_code=503, detail="Webhook replay verification unavailable") from None
             elif not vendor_verified:
                 # C04: In production, reject unsigned webhooks entirely
                 reject_unsigned = str(os.getenv("WEBHOOK_REJECT_UNSIGNED", "1" if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "0")).lower() in ("1", "true", "yes")
@@ -423,12 +441,7 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                     replay_id = webhook_id_hdr or body_event_id
                     replay_material = path + "|" + (vendor or "generic") + "|" + replay_sig + "|" + replay_ts + "|" + replay_id
                     replay_key = f"webhook_replay:{hashlib.sha256(replay_material.encode('utf-8')).hexdigest()}"
-                    redis = get_redis()
-                    seen = False
-                    if redis.__class__.__name__ == "DummyRedis":
-                        seen = _replay_seen_local(replay_key, self.replay_ttl)
-                    else:
-                        seen = bool(redis.get(replay_key))
+                    seen = _replay_seen(replay_key, self.replay_ttl)
                     if seen:
                         log_agent_security_event(
                             interaction_type=AgentInteractionType.webhook_received,
@@ -441,12 +454,10 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                             requires_escalation=True,
                         )
                         raise HTTPException(status_code=409, detail="Replay detected")
-                    if redis.__class__.__name__ != "DummyRedis":
-                        redis.setex(replay_key, self.replay_ttl, "1")
                 except HTTPException:
                     raise
                 except Exception:
-                    pass
+                    raise HTTPException(status_code=503, detail="Webhook replay verification unavailable") from None
 
             return await call_next(request)
         except HTTPException as exc:

@@ -27,6 +27,9 @@ def _clear_webhook_replay_state(monkeypatch):
             def setex(self, key, ttl, value):
                 owned_keys.add(prefix + key)
                 return redis.setex(prefix + key, ttl, value)
+            def set(self, key, value, **kwargs):
+                owned_keys.add(prefix + key)
+                return redis.set(prefix + key, value, **kwargs)
         owned = ReplayNamespace()
         monkeypatch.setattr(security, "get_redis", lambda: owned)
     yield
