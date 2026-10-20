@@ -1,4 +1,7 @@
 import pathlib
+import os
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 
@@ -8,26 +11,19 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from src.app.models.db import get_db
-from src.app.models.orm import Base
 from src.app.security.idempotency import IdempotencyMiddleware
 from tests.utils import default_headers
 
 
 def _engine(database_path: pathlib.Path):
+    url=f"sqlite+pysqlite:///{database_path.as_posix()}"
+    subprocess.run([sys.executable,'-m','alembic','upgrade','head'],check=True,
+                   env={**os.environ,'DATABASE_URL':url,'DATABASE_URL_RO':url,'DATABASE_URL_REF':'','APP_ENV':'test'},
+                   stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=30)
     engine = create_engine(
         f"sqlite+pysqlite:///{database_path.as_posix()}", future=True,
         connect_args={"check_same_thread": False},
     )
-    schema = pathlib.Path("db/schema.sql")
-    if schema.exists():
-        with engine.connect() as conn:
-            for statement in [row.strip() for row in schema.read_text(encoding="utf-8").split(";") if row.strip()]:
-                try:
-                    conn.execute(text(statement))
-                except Exception:
-                    pass
-            conn.commit()
-    Base.metadata.create_all(engine)
     return engine
 
 

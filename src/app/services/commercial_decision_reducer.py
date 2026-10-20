@@ -18,7 +18,7 @@ DecisionStatus = Literal[
 ]
 FitTier = Literal["qualified", "conditional", "failed", "unverified"]
 QuantityOutcome = Literal["complete_by_deadline", "partial", "late", "unknown"]
-BudgetOutcome = Literal["within", "over", "not_stated"]
+BudgetOutcome = Literal["within", "over", "not_stated", "unknown"]
 
 
 class CommercialCandidate(BaseModel):
@@ -78,9 +78,13 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
             or candidate.supplier_lead_time_days <= candidate.deadline_days
         )
     )
-    available_by_deadline = None
-    if local is not None or supplier is not None:
-        available_by_deadline = int(local or 0) + int(supplier or 0) if supplier_by_deadline else int(local or 0)
+    available_by_deadline = local
+    if supplier_by_deadline:
+        known_supply = int(local or 0) + int(supplier or 0)
+        # Unknown local stock cannot prove a deficit. Sufficient verified
+        # supplier stock can independently prove coverage of the request.
+        if local is not None or known_supply >= candidate.requested_quantity:
+            available_by_deadline = known_supply
     shortfall = (
         max(0, candidate.requested_quantity - available_by_deadline)
         if available_by_deadline is not None else None
@@ -116,6 +120,8 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
     )
     if candidate.budget_per_unit_cents is None and candidate.budget_total_cents is None:
         budget_outcome: BudgetOutcome = "not_stated"
+    elif candidate.unit_price_cents is None:
+        budget_outcome = "unknown"
     else:
         budget_outcome = "over" if over_unit or over_total else "within"
 
@@ -138,10 +144,20 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
             reasons=reasons, resolution_owner="catalog",
         )
 
+    form_factor_unknown = bool(candidate.mandatory_form_factor and not candidate.actual_form_factor)
+    conditional = bool(
+        candidate.relationship == "compatible_substitute"
+        or candidate.material_unknowns or candidate.recommendation_compromises
+        or candidate.specification_freshness == "stale" or form_factor_unknown
+    )
+    technical_fit: FitTier = (
+        "unverified" if not candidate.exact_identity or candidate.specification_freshness == "unknown"
+        else "conditional" if conditional else "qualified"
+    )
     if budget_outcome == "over":
         reasons.append("The requested quantity exceeds the stated unit or total budget.")
         return CommercialDecision(
-            sku=candidate.sku, status="OVER_BUDGET", fit_tier="qualified",
+            sku=candidate.sku, status="OVER_BUDGET", fit_tier=technical_fit,
             quantity_outcome=quantity_outcome, budget_outcome=budget_outcome,
             available_by_deadline=available_by_deadline, shortfall=shortfall,
             reasons=reasons, resolution_owner="buyer",
@@ -156,12 +172,6 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
             reasons=reasons, resolution_owner="catalog",
         )
 
-    conditional = bool(
-        candidate.relationship == "compatible_substitute"
-        or candidate.material_unknowns
-        or candidate.recommendation_compromises
-        or candidate.specification_freshness == "stale"
-    )
     if candidate.relationship == "compatible_substitute":
         reasons.append("This is a proposed substitute and requires explicit buyer acceptance.")
     if candidate.material_unknowns:
@@ -170,6 +180,19 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
         reasons.append("Recommendation compromises: " + ", ".join(candidate.recommendation_compromises) + ".")
     if candidate.specification_freshness == "stale":
         reasons.append("Specification evidence is stale.")
+    if form_factor_unknown:
+        reasons.append("The mandatory form factor has not been verified.")
+    if quantity_outcome == "unknown" or candidate.unit_price_cents is None:
+        if quantity_outcome == "unknown":
+            reasons.append("Quantity and delivery coverage remain unverified.")
+        if candidate.unit_price_cents is None:
+            reasons.append("The unit price is unverified.")
+        return CommercialDecision(
+            sku=candidate.sku, status="UNVERIFIED", fit_tier=technical_fit,
+            quantity_outcome=quantity_outcome, budget_outcome=budget_outcome,
+            available_by_deadline=available_by_deadline, shortfall=shortfall,
+            reasons=reasons, resolution_owner="catalog" if candidate.unit_price_cents is None else "supplier",
+        )
 
     if conditional:
         status: DecisionStatus = (
@@ -185,7 +208,11 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
         )
         fit_tier = "qualified"
     if not reasons:
-        reasons.append("Verified requirements, budget, quantity and delivery window are satisfied.")
+        reasons.append("Verified requirements and known supply cover the requested quantity.")
+        if budget_outcome == "within":
+            reasons.append("The stated budget is satisfied.")
+    if budget_outcome == "not_stated":
+        reasons.append("No budget was stated.")
     return CommercialDecision(
         sku=candidate.sku, status=status, fit_tier=fit_tier,
         quantity_outcome=quantity_outcome, budget_outcome=budget_outcome,

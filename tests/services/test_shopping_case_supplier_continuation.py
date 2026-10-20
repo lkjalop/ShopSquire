@@ -84,7 +84,9 @@ def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> Non
     assert by_supplier["fixture-supplier-late"].response_status == "late"
     assert by_supplier["fixture-supplier-untrusted"].response_status == "quarantined"
     assert by_supplier["fixture-supplier-preferred"].commercial_decision.status == "QUALIFIED_NOW"
-    assert by_supplier["fixture-supplier-unavailable"].commercial_decision.status == "QUALIFIED_PARTIAL"
+    unavailable = by_supplier["fixture-supplier-unavailable"].commercial_decision
+    assert unavailable.status == "UNVERIFIED"  # No supplier price was offered.
+    assert unavailable.quantity_outcome == "partial"  # Known local supply remains visible.
     assert by_supplier["fixture-supplier-partial"].commercial_decision.status == "QUALIFIED_PARTIAL"
     assert by_supplier["fixture-supplier-substitute"].commercial_decision.status == "UNVERIFIED"
     assert by_supplier["fixture-supplier-late"].commercial_decision.status == "QUALIFIED_LATE"
