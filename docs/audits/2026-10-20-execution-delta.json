@@ -679,5 +679,1303 @@
       },
       "unchanged": true
     }
+  },
+  "continued_execution": {
+    "checkpoint_head": "18e3f469c6a279d2a0796f955638a123204ac1ee",
+    "assessment": "Scoped verification; complete release remains red",
+    "delta_loc": {
+      "head": "18e3f469c6a279d2a0796f955638a123204ac1ee",
+      "groups": {
+        "config": {
+          "files": 1,
+          "insertions": 31,
+          "deletions": 3
+        },
+        "docs": {
+          "files": 4,
+          "insertions": 6409,
+          "deletions": 0
+        },
+        "frontend": {
+          "files": 15,
+          "insertions": 76,
+          "deletions": 14
+        },
+        "dependency_manifests": {
+          "files": 2,
+          "insertions": 1680,
+          "deletions": 1866
+        },
+        "requirements": {
+          "files": 8,
+          "insertions": 346,
+          "deletions": 55
+        },
+        "scripts": {
+          "files": 1,
+          "insertions": 41,
+          "deletions": 13
+        },
+        "src": {
+          "files": 26,
+          "insertions": 1341,
+          "deletions": 492
+        },
+        "tests": {
+          "files": 26,
+          "insertions": 1876,
+          "deletions": 220
+        }
+      }
+    },
+    "source_inventory": {
+      "recorded_at": "2026-10-20T07:51:17.613739+00:00",
+      "head": "18e3f469c6a279d2a0796f955638a123204ac1ee",
+      "branch": "checkpoint/turn-state-consolidation-20260830",
+      "git_status_entries": 572,
+      "tracked_changed": 278,
+      "untracked": 294,
+      "staged": 0,
+      "files": 5656,
+      "text_lines": 974317,
+      "by_root": {
+        ".codex-logs": 23,
+        ".dockerignore": 1,
+        ".env.example": 1,
+        ".gitattributes": 1,
+        ".github": 20,
+        ".gitignore": 1,
+        ".tmp": 2,
+        ".vscode": 2,
+        "BUSINESS_CASE_AND_VALUATION.md": 1,
+        "CAREER_EVIDENCE.md": 1,
+        "CHANGES.md": 1,
+        "Dockerfile": 1,
+        "Dockerfile.kind-smoke": 1,
+        "Dockerfile.runtime": 1,
+        "Dockerfile.web": 1,
+        "EMAIL_SECURITY_SHOWCASE.md": 1,
+        "FRONTEND_WIREFRAMES_OPTIONS.md": 1,
+        "IMPLEMENTATION_PRIORITY_BUNDLE.md": 1,
+        "IMPLEMENTATION_STATUS_REPORT.md": 1,
+        "LINKEDIN_SHOWCASE.md": 1,
+        "Makefile": 1,
+        "NEXT_SPRINT_ROADMAP.md": 1,
+        "PROFESSIONAL_ASSESSMENT_REPORT.md": 1,
+        "PROGRESS_UPDATE.md": 1,
+        "PR_DESCRIPTION.md": 1,
+        "README.md": 1,
+        "SHOPSQUIRE_AGENTIC_PLATFORM_COMPREHENSIVE_ANALYSIS.md": 1,
+        "SHOPSQUIRE_COMPLIANCE_AND_SHIFT_LEFT_SECURITY.md": 1,
+        "SHOPSQUIRE_EXPANDED_AI_ML_PLAYBOOK.md": 1,
+        "SHOPSQUIRE_GAPS_AND_IMPROVEMENTS.md": 1,
+        "SHOPSQUIRE_PART1_PLATFORM_DEEP_DIVE.md": 1,
+        "SHOPSQUIRE_PART2_STRATEGY_AND_ROADMAP.md": 1,
+        "SHOPSQUIRE_PLATFORM_AUDIT.md": 1,
+        "SHOPSQUIRE_POSITIONING.md": 1,
+        "SHOPSQUIRE_PRD_v1.md": 1,
+        "SHOPSQUIRE_REPAIR_REPORT_2026-09-15.md": 1,
+        "SHOPsQUIRE_COMPREHENSIVE_ANALYSIS_JAN2026.md": 1,
+        "admin-procurement-text.json": 1,
+        "agentLUMEN v4.0.pdf": 1,
+        "agentLUMEN v4.5.pdf": 1,
+        "agentLUMEN_v4_REALISTIC_MVP.md": 1,
+        "agentLUMEN_v5_CONVERSATIONAL_MEMORY.md": 1,
+        "agentLUMEN_v5_UPDATES_SUMMARY.md": 1,
+        "alembic.ini": 1,
+        "alembic": 160,
+        "archive": 1,
+        "claude.ps1": 1,
+        "competitor_prices_template.csv": 1,
+        "config": 1013,
+        "connectors": 1,
+        "data": 20,
+        "db": 27,
+        "debug_open_ended_script.log": 1,
+        "debug_open_ended_sqlite_script.log": 1,
+        "demo_operator.ps1": 1,
+        "deploy": 1,
+        "docker-compose.dev.yml": 1,
+        "docker-compose.observability.yml": 1,
+        "docker-compose.postgres.yml": 1,
+        "docker-compose.searxng.yml": 1,
+        "docker-compose.secure.yml": 1,
+        "docker-compose.timescaledb.yml": 1,
+        "docker-compose.tls.yml": 1,
+        "docker-compose.yml": 1,
+        "docs": 515,
+        "dump": 10,
+        "env.production.template": 1,
+        "eval": 8,
+        "frontend": 322,
+        "full_pytest_after_finalfix.log": 1,
+        "full_pytest_after_fix.log": 1,
+        "full_pytest_after_flags_fix.log": 1,
+        "full_pytest_after_playbook_fix.log": 1,
+        "full_pytest_after_playbook_isolation_fix.log": 1,
+        "full_pytest_after_remaining6_fix.log": 1,
+        "full_pytest_after_trace_fallback_fix.log": 1,
+        "full_pytest_debug.log": 1,
+        "full_pytest_final.log": 1,
+        "helm": 20,
+        "infra": 15,
+        "late_suite_debug.log": 1,
+        "migration_artifacts": 3,
+        "open_ended_only.log": 1,
+        "open_ended_setup.log": 1,
+        "open_ended_sqlite.log": 1,
+        "openapi.json": 1,
+        "ops": 2,
+        "orchestrator_auto_cv_only.log": 1,
+        "out.txt": 1,
+        "pip_install_out.txt": 1,
+        "poetry.lock": 1,
+        "pretest_db_debug.txt": 1,
+        "pyproject.toml": 1,
+        "pytest.ini": 1,
+        "pytest_exit_code.txt": 1,
+        "remaining6_debug.log": 1,
+        "requirements": 8,
+        "response.json": 1,
+        "runs": 1,
+        "scripts": 281,
+        "sdk": 6,
+        "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
+        "sitecustomize.py": 1,
+        "src": 1318,
+        "start_cart_validation.ps1": 1,
+        "start_demo.ps1": 1,
+        "start_voice_pilot.ps1": 1,
+        "static": 277,
+        "terraform": 4,
+        "tests": 1509,
+        "tmp_ollama_aliases": 3,
+        "trace_unit_hang.log": 1
+      },
+      "python_syntax_errors": [],
+      "functions": 19209,
+      "production_functions_over_200": 99,
+      "broad_production_handlers": 5593,
+      "swallowed_production_handlers": 2037,
+      "blocking_candidates_in_async": 0
+    },
+    "source_manifests": [
+      {
+        "path": ".artifacts/roadmap-execution-2026-10-20/observer-ownership-source.json",
+        "sha256": "ae68578301172e2ffb059e2ff4581c6f58d790ba9efb9cbe37eea78e2b858cb4",
+        "manifest": {
+          "base_head": "ea4442a6e6668f74ac39145c4f435d9814340e38",
+          "full_files": [
+            "src/app/security/observer.py",
+            "tests/security/test_observer_session_ownership.py",
+            "tests/services/test_timeseries_persistence.py",
+            "tests/test_security_indirect_prompt_injection.py"
+          ],
+          "candidate_hashes": {
+            "src/app/security/observer.py": "e0066395a5946b3a957ad66e6b45638af521e89bd696546037853e64343d6845",
+            "tests/security/test_observer_session_ownership.py": "207c426cae53860f0e063b3ca453c877f381546bcaf143c04bbe06de2e7978e7",
+            "tests/services/test_timeseries_persistence.py": "18f577a14014fc810f2719fd6c94ebca6754392cee38f727c7d7a119e4fd3d30",
+            "tests/test_security_indirect_prompt_injection.py": "228f53107bcb702b7421538291fbdd253955d0c21102c64252db5bdc509d8d6e"
+          }
+        }
+      },
+      {
+        "path": ".artifacts/roadmap-execution-2026-10-20/security-fixture-source.json",
+        "sha256": "d5e762c0229691aff19b5b02fb9afc7dcb1b404be163a38f16b5b88cc7da0588",
+        "manifest": {
+          "base_head": "ab4b729618be625e9cd62f4decb5f901bbca7f2d",
+          "full_files": [
+            "tests/test_security_prompt_injection_endpoints.py"
+          ],
+          "candidate_hashes": {
+            "tests/test_security_prompt_injection_endpoints.py": "62c149f74e8c9166b036ec99de2319a808f9947db6d8c6f8e6e5a3a671099400"
+          }
+        }
+      },
+      {
+        "path": ".artifacts/roadmap-execution-2026-10-20/vision-final-source.json",
+        "sha256": "bf8b74f1f3cbb0bba14f9e49cc70df719fd2bede92d7875d121a173d02ae2d19",
+        "manifest": {
+          "base_head": "f24159dfeb324ad48b73e6a5aa3bce227fd4a7aa",
+          "full_files": [
+            "src/app/services/cv_ocr.py",
+            "src/app/services/paddle_model_assets.py",
+            "src/app/services/media_process_isolation.py",
+            "tests/services/test_paddle_ocr_contract.py",
+            "tests/services/test_cv_ocr_provider_selection.py",
+            "tests/scripts/test_generate_runtime_requirements.py",
+            "pyproject.toml",
+            "poetry.lock",
+            "config/runtime_dependency_profiles.json",
+            "requirements/api-runtime-windows.txt",
+            "requirements/api-runtime.txt",
+            "requirements/bootstrap-runtime-windows.txt",
+            "requirements/bootstrap-runtime.txt",
+            "requirements/test-runtime-windows.txt",
+            "requirements/test-runtime.txt",
+            "requirements/vision-runtime-windows.txt",
+            "requirements/vision-runtime.txt",
+            "scripts/generate_runtime_requirements.py"
+          ],
+          "partial_files": [],
+          "candidate_hashes": {
+            "src/app/services/cv_ocr.py": "b03f6f24d65436de4b34eb12456a6b0172e79c81fd958b419c3eb55957f254ea",
+            "src/app/services/paddle_model_assets.py": "33e199ae319bb432b0c99d0283bb03dc59d87c57fa4835223ba11647ea575823",
+            "src/app/services/media_process_isolation.py": "2d39373a3aa2830ffb11ecb81befef171f2208f65f25315167fe82d94039c612",
+            "tests/services/test_paddle_ocr_contract.py": "76071dbb7bd7e92fc9b7763547449fdb3a575adcd054ac6695f662aefe09a949",
+            "tests/services/test_cv_ocr_provider_selection.py": "b4f8530b60649657d0cef3c5cbb00167e56cb76bdb279cfbd1e7486c0f0acb71",
+            "tests/scripts/test_generate_runtime_requirements.py": "dd82959b1293f6c4366ba7d9c84d963879c04d4ae09a8f3e3e04bd21b927e3af",
+            "pyproject.toml": "b3e18b9e60b3b9430ce39ab7a71d1d8f23d2bd0cf1fff3167c422c119130be3a",
+            "poetry.lock": "83b3b793f51330cf7e5086bee3f84ae4e2f4ef6ea2de2f21c0c4845b55a3bee2",
+            "config/runtime_dependency_profiles.json": "2434702c795b5fdfe335bc46b1c1c45cab2b63ce77b6dfb0a11212b241a17c46",
+            "requirements/api-runtime-windows.txt": "f4a496edb1ec129ef5a46e1d13e9ef38ed32670c55ec52e66fef542410512ac3",
+            "requirements/api-runtime.txt": "2ae0bdf04055136082a3f968d346203e3e33e46567ba9c8a30b28d61023311db",
+            "requirements/bootstrap-runtime-windows.txt": "004b6521a58fbcd51a47c13c1d67309b8e3188341235fe72867abaa885b20995",
+            "requirements/bootstrap-runtime.txt": "004b6521a58fbcd51a47c13c1d67309b8e3188341235fe72867abaa885b20995",
+            "requirements/test-runtime-windows.txt": "d12f88302ce2338dcb9233f93bff09e3e4c3d4cd1550269563bb3a2381de3133",
+            "requirements/test-runtime.txt": "4e09a4212bfc545fdf323c907deb6d776f4115a89675d6f277ec1a24f92ea8fe",
+            "requirements/vision-runtime-windows.txt": "b53a0967fce0ffc7a88bf438ca0f7231ce30e2845ee442cd774848137b90f0a9",
+            "requirements/vision-runtime.txt": "17ffbadd6eb835df8071e857446ea192c5b0b7e364460b3d4803b8484b17076f",
+            "scripts/generate_runtime_requirements.py": "bba3d2a36570027429d3a3453f397c974b0c855eff764ecf7945e0dadae13800"
+          }
+        }
+      },
+      {
+        "path": ".artifacts/roadmap-execution-2026-10-20/observer-workers-source.json",
+        "sha256": "0c9f42ac578bea8df5de4cd1032de1168e857921a38341eea11a8444b18eb0bb",
+        "manifest": {
+          "base_head": "8adeddf2b1e9ba46a4bc411bb404b39e015b66d8",
+          "full_files": [
+            "src/app/security/observer.py",
+            "src/app/security/observer_workers.py",
+            "tests/security/test_observer_session_ownership.py",
+            "tests/security/test_observer_worker_ownership.py"
+          ],
+          "partial_files": [
+            "src/app/main.py",
+            "src/app/bootstrap/business_background_lifecycle.py",
+            "tests/bootstrap/test_business_background_lifecycle.py"
+          ],
+          "candidate_hashes": {
+            "src/app/security/observer.py": "a3dfb8b927dabb89f220e171a6cd0cc28e5e63bb8f0e0a60ee2cef14c050ed3c",
+            "src/app/security/observer_workers.py": "6d0b1a11833bc6d23eb3c36c30a42bad68c9e1ab4a76e3f715146662a791f4b4",
+            "tests/security/test_observer_session_ownership.py": "ac6c1df3c216f3a86f3bd6f531e53949f5d0efbaa2a5b5266fcbbcd66464ad3b",
+            "tests/security/test_observer_worker_ownership.py": "3a8287e4fea14e108284945e75776f914e5f4bba0de0097b061788dd93b0f555",
+            "src/app/main.py": "6d337e3350095e2666362bc5a850cccf66af10971fbd9a17b76d5bfe4487670b",
+            "src/app/bootstrap/business_background_lifecycle.py": "9449f1ba93d251dd1fa499a75fb5e5ecea9ac7a8c5715f7415e6615214c7cc19",
+            "tests/bootstrap/test_business_background_lifecycle.py": "a2d47d1ea696afed4a03dd7cdf1fd0e7a85624f431bdf3cd999253b748f1f8b8"
+          }
+        }
+      },
+      {
+        "path": ".artifacts/roadmap-execution-2026-10-20/main-encoding-source.json",
+        "sha256": "b03999a9d68fea407ca277b562a72670531d3952d1bb9e29f37cdc2f02a7d708",
+        "manifest": {
+          "base_head": "5a84ac43430bdf9dbbf8f267f645eb2df49bd58f",
+          "file": "src/app/main.py",
+          "sha256": "94fbda307cb2e6298922adae7f17a8512b295f9f783b3e9d997feeea46585079",
+          "code_structure_unchanged_ignoring_text_constants": true
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "profile": "observer-complete-ownership-candidate",
+        "path": ".artifacts/roadmap-execution-2026-10-20/observer-complete-ownership-candidate/receipt.json",
+        "sha256": "dfe85a1eead2527b1e1bf4113252d4330582c4c7c4591968dc98d9f2d06711dd",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/security/test_observer_session_ownership.py",
+            "tests/services/test_timeseries_persistence.py",
+            "tests/security/test_threat_detection.py",
+            "tests/test_security_prompt_injection_endpoints.py",
+            "tests/test_security_indirect_prompt_injection.py",
+            "tests/observability/test_http_metric_cardinality.py",
+            "-q",
+            "--timeout=45",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\observer-complete-ownership-candidate\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-observer-ownership",
+          "native_exit_code": 0,
+          "elapsed_seconds": 27.312,
+          "peaks": {
+            "rss_bytes": 286547968,
+            "handles": 1237,
+            "threads": 35
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 14,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "profile": "security-fixture-candidate",
+        "path": ".artifacts/roadmap-execution-2026-10-20/security-fixture-candidate/receipt.json",
+        "sha256": "ef258df2e2841b006ce78c975e4768f86e1645873ee7342b6203068b1c1793db",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/api/test_chat_case_tasks.py",
+            "tests/api/test_chat_owned_evidence_intake.py",
+            "tests/test_security_prompt_injection_endpoints.py",
+            "tests/test_security_indirect_prompt_injection.py",
+            "tests/services/test_timeseries_persistence.py",
+            "tests/security/test_observer_session_ownership.py",
+            "-q",
+            "--timeout=45",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\security-fixture-candidate\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-security-fixture",
+          "native_exit_code": 0,
+          "elapsed_seconds": 43.719,
+          "peaks": {
+            "rss_bytes": 311324672,
+            "handles": 1283,
+            "threads": 38
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 22,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "profile": "vision-final-candidate",
+        "path": ".artifacts/roadmap-execution-2026-10-20/vision-final-candidate/receipt.json",
+        "sha256": "561f385ffd63009d395a63dc67dea66346f6771f37fc376ba000940ce76552eb",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/scripts/test_generate_runtime_requirements.py",
+            "tests/services/test_paddle_ocr_contract.py",
+            "tests/services/test_media_process_isolation.py",
+            "tests/services/test_cv_ocr_provider_selection.py",
+            "tests/api/test_chat_case_tasks.py",
+            "tests/api/test_chat_owned_evidence_intake.py",
+            "tests/services/test_incident_scheduler_ownership.py",
+            "tests/services/test_tenant_session_binding.py",
+            "tests/services/test_memory_retention_regressions.py",
+            "tests/services/test_market_context_delivery.py",
+            "tests/services/test_market_intelligence_agent.py",
+            "tests/security/test_admin_route_boundary.py",
+            "tests/api/test_native_buyer_surface_auth.py",
+            "tests/cv/test_cv_upload_ownership.py",
+            "tests/security/test_observer_session_ownership.py",
+            "tests/services/test_timeseries_persistence.py",
+            "tests/security/test_threat_detection.py",
+            "tests/test_security_prompt_injection_endpoints.py",
+            "tests/test_security_indirect_prompt_injection.py",
+            "tests/observability/test_http_metric_cardinality.py",
+            "-q",
+            "--timeout=45",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vision-final-candidate\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-vision-final",
+          "native_exit_code": 0,
+          "elapsed_seconds": 51.812,
+          "peaks": {
+            "rss_bytes": 329887744,
+            "handles": 1655,
+            "threads": 41
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 98,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "profile": "paddle-plain-cpu-windows",
+        "path": ".artifacts/roadmap-execution-2026-10-20/paddle-plain-cpu-windows/receipt.json",
+        "sha256": "2c71e0dce3168ce276365b5b9d46726ac25490efab94da564128820540dec349",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\verify_paddle_runtime.py",
+            "--manifest",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\paddle-models-v5\\models.json",
+            "--output",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\paddle-plain-cpu-windows\\native-paddle.json"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-vision-runtime",
+          "native_exit_code": 0,
+          "elapsed_seconds": 5.5,
+          "peaks": {
+            "rss_bytes": 367808512,
+            "handles": 567,
+            "threads": 9
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      {
+        "profile": "linux-vision-generator-fixed-profile",
+        "path": ".artifacts/roadmap-execution-2026-10-20/linux-vision-generator-fixed-profile/receipt.json",
+        "sha256": "9a0a61b526908702a09b21ed46fe603152f621cd61331b06f54b3aabb653c2d0",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.venv\\Scripts\\python.exe",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_linux_vision_generator_fixed.py"
+          ],
+          "cwd": "C:\\AI\\ShopSquire",
+          "native_exit_code": 0,
+          "elapsed_seconds": 330.734,
+          "peaks": {
+            "rss_bytes": 24436736,
+            "handles": 159,
+            "threads": 14
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      {
+        "profile": "observer-workers-verified-candidate",
+        "path": ".artifacts/roadmap-execution-2026-10-20/observer-workers-verified-candidate/receipt.json",
+        "sha256": "245b762d398dbca66da0905d5aea84b9aa94748bbb5fd0fff901be53edab2192",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/scripts/test_generate_runtime_requirements.py",
+            "tests/services/test_paddle_ocr_contract.py",
+            "tests/services/test_media_process_isolation.py",
+            "tests/services/test_cv_ocr_provider_selection.py",
+            "tests/api/test_chat_case_tasks.py",
+            "tests/api/test_chat_owned_evidence_intake.py",
+            "tests/services/test_incident_scheduler_ownership.py",
+            "tests/services/test_tenant_session_binding.py",
+            "tests/services/test_memory_retention_regressions.py",
+            "tests/services/test_market_context_delivery.py",
+            "tests/services/test_market_intelligence_agent.py",
+            "tests/security/test_admin_route_boundary.py",
+            "tests/api/test_native_buyer_surface_auth.py",
+            "tests/cv/test_cv_upload_ownership.py",
+            "tests/security/test_observer_session_ownership.py",
+            "tests/services/test_timeseries_persistence.py",
+            "tests/security/test_threat_detection.py",
+            "tests/test_security_prompt_injection_endpoints.py",
+            "tests/test_security_indirect_prompt_injection.py",
+            "tests/observability/test_http_metric_cardinality.py",
+            "tests/security/test_observer_worker_ownership.py",
+            "tests/bootstrap/test_business_background_lifecycle.py",
+            "tests/observability/test_tracing_provider_ownership.py",
+            "tests/test_runtime_lifecycle.py",
+            "-q",
+            "--timeout=45",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\observer-workers-verified-candidate\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-observer-workers",
+          "native_exit_code": 0,
+          "elapsed_seconds": 63.031,
+          "peaks": {
+            "rss_bytes": 438288384,
+            "handles": 2435,
+            "threads": 40
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 121,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "profile": "main-encoding-correction",
+        "path": ".artifacts/roadmap-execution-2026-10-20/main-encoding-correction/receipt.json",
+        "sha256": "7289c427154111de89a7883076a54034187ba70c5d0980a96c0592da305b2c88",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/security/test_observer_worker_ownership.py",
+            "tests/bootstrap/test_business_background_lifecycle.py",
+            "tests/observability/test_tracing_provider_ownership.py",
+            "tests/test_runtime_lifecycle.py",
+            "-q",
+            "--timeout=45",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\main-encoding-correction\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\candidate-main-encoding",
+          "native_exit_code": 0,
+          "elapsed_seconds": 49.687,
+          "peaks": {
+            "rss_bytes": 409235456,
+            "handles": 1908,
+            "threads": 33
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 22,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "profile": "all-locked-versions-audit",
+        "path": ".artifacts/roadmap-execution-2026-10-20/all-locked-versions-audit/receipt.json",
+        "sha256": "4871ef20f36b600a54507d76c62f9015bb434f10a55094bf558efdc50320c9ec",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\execution-2026-10-19\\audit-tools\\Scripts\\python.exe",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\audit_all_locked_versions.py"
+          ],
+          "cwd": "C:\\AI\\ShopSquire",
+          "native_exit_code": 1,
+          "elapsed_seconds": 6.141,
+          "peaks": {
+            "rss_bytes": 56176640,
+            "handles": 553,
+            "threads": 13
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      {
+        "profile": "post-runtime-browser-profile",
+        "path": ".artifacts/roadmap-execution-2026-10-20/post-runtime-browser-profile/receipt.json",
+        "sha256": "127422c2a1aa1acca3be3b7d82cd736cfeac8447709a76035248310c5d150017",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_post_runtime_browser.py"
+          ],
+          "cwd": "C:\\AI\\ShopSquire",
+          "native_exit_code": 0,
+          "elapsed_seconds": 197.937,
+          "peaks": {
+            "rss_bytes": 384942080,
+            "handles": 1527,
+            "threads": 89
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      {
+        "profile": "post-runtime-live-profile",
+        "path": ".artifacts/roadmap-execution-2026-10-20/post-runtime-live-profile/receipt.json",
+        "sha256": "c8f84f588f6031fc7d59fef436e05e2f00b97b5f5221a558c265d1f815d93740",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-vision-v3-verified-env\\Scripts\\python.exe",
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_post_runtime_live.py"
+          ],
+          "cwd": "C:\\AI\\ShopSquire",
+          "native_exit_code": 0,
+          "elapsed_seconds": 36.672,
+          "peaks": {
+            "rss_bytes": 287113216,
+            "handles": 1225,
+            "threads": 81
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      {
+        "profile": "canonical-task-view-clean-candidate",
+        "path": ".artifacts/roadmap-execution-2026-10-20/canonical-task-view-clean-candidate/receipt.json",
+        "sha256": "8f281d823809d46f9f04201f5f449987f71173bbc7732c0d9c728fceaa345d89",
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-api-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/api/test_chat_case_tasks.py",
+            "tests/services/test_shortfall_enquiry_preview.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\canonical-task-view-clean-candidate\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\candidate-canonical-task-view",
+          "native_exit_code": 0,
+          "elapsed_seconds": 38.937,
+          "peaks": {
+            "rss_bytes": 263634944,
+            "handles": 1135,
+            "threads": 36
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 18,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      }
+    ],
+    "linux": {
+      "verification": {
+        "python": "3.11.17 (main, Oct  6 2026, 02:02:21) [GCC 14.2.0]",
+        "installed_pins": 162,
+        "pin_mismatches": [],
+        "cv2_owners": [
+          "opencv-contrib-python"
+        ],
+        "pytest_exit": 0,
+        "network": "disconnected before verification"
+      },
+      "native_ocr": {
+        "elapsed_seconds": 6.639,
+        "provider": "paddle",
+        "error": null,
+        "text": "Minimum RAM: 32 GB Storage: 1000 GB SSD",
+        "confidence": 0.988609105348587,
+        "boxes": 2,
+        "input_sha256": "bcf93244806fe2ef924c02999925d6231e9d2f40ff352b50b96c41813b2bcdf2",
+        "model_manifest_sha256": "e96ee2ef54b9c790c85d71480f853c1b63df6cffc57af9403593bcd370bf0de7"
+      },
+      "receipt": {
+        "native_exit_code": 0,
+        "elapsed_seconds": 328.297,
+        "network_disabled_before_verification": true,
+        "state": {
+          "Status": "exited",
+          "Running": false,
+          "Paused": false,
+          "Restarting": false,
+          "OOMKilled": false,
+          "Dead": false,
+          "Pid": 0,
+          "ExitCode": 0,
+          "Error": "",
+          "StartedAt": "2026-10-20T07:26:12.278902579Z",
+          "FinishedAt": "2026-10-20T07:31:38.734609216Z"
+        }
+      },
+      "pytest_counts": {
+        "tests": 84,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "windows_installed": {
+      "expected_pins": 162,
+      "mismatches": [],
+      "cv2_owners": [
+        "opencv-contrib-python"
+      ]
+    },
+    "declared_profile_audits": [
+      {
+        "profile": "api-runtime-windows",
+        "exit_code": 0,
+        "seconds": 2.75,
+        "packages": 95,
+        "affected": []
+      },
+      {
+        "profile": "api-runtime",
+        "exit_code": 0,
+        "seconds": 2.61,
+        "packages": 95,
+        "affected": []
+      },
+      {
+        "profile": "bootstrap-runtime-windows",
+        "exit_code": 0,
+        "seconds": 3.38,
+        "packages": 4,
+        "affected": []
+      },
+      {
+        "profile": "bootstrap-runtime",
+        "exit_code": 0,
+        "seconds": 2.39,
+        "packages": 4,
+        "affected": []
+      },
+      {
+        "profile": "test-runtime-windows",
+        "exit_code": 0,
+        "seconds": 2.39,
+        "packages": 37,
+        "affected": []
+      },
+      {
+        "profile": "test-runtime",
+        "exit_code": 0,
+        "seconds": 2.5,
+        "packages": 36,
+        "affected": []
+      },
+      {
+        "profile": "vision-runtime-windows",
+        "exit_code": 0,
+        "seconds": 3.98,
+        "packages": 72,
+        "affected": []
+      },
+      {
+        "profile": "vision-runtime",
+        "exit_code": 0,
+        "seconds": 2.61,
+        "packages": 70,
+        "affected": []
+      }
+    ],
+    "all_locked_versions_audit": {
+      "recorded_at": "2026-10-20T07:51:08.388661+00:00",
+      "lock_sha256": "83b3b793f51330cf7e5086bee3f84ae4e2f4ef6ea2de2f21c0c4845b55a3bee2",
+      "service": "pip-audit PyPIService; all distinct lock versions; no host marker filtering",
+      "locked_package_versions": 272,
+      "package_advisory_matches": 29,
+      "affected": [
+        {
+          "name": "diskcache",
+          "version": "5.6.3",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-2447",
+              "aliases": [
+                "CVE-2025-69872",
+                "GHSA-w8v5-vhqr-4h9v"
+              ],
+              "fix_versions": []
+            },
+            {
+              "id": "PYSEC-2026-2447",
+              "aliases": [
+                "CVE-2025-69872",
+                "GHSA-w8v5-vhqr-4h9v"
+              ],
+              "fix_versions": []
+            }
+          ]
+        },
+        {
+          "name": "langchain",
+          "version": "0.3.30",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-2192",
+              "aliases": [
+                "CVE-2026-55443",
+                "GHSA-gr75-jv2w-4656",
+                "PYSEC-2026-2556"
+              ],
+              "fix_versions": [
+                "1.3.9"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2192",
+              "aliases": [
+                "CVE-2026-55443",
+                "GHSA-gr75-jv2w-4656"
+              ],
+              "fix_versions": [
+                "1.3.9"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langchain-community",
+          "version": "0.3.21",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-1515",
+              "aliases": [
+                "CVE-2025-6984",
+                "GHSA-pc6w-59fv-rh23"
+              ],
+              "fix_versions": [
+                "0.3.27"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-1515",
+              "aliases": [
+                "CVE-2025-6984",
+                "GHSA-pc6w-59fv-rh23"
+              ],
+              "fix_versions": [
+                "0.3.27"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langchain-core",
+          "version": "0.3.86",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-2193",
+              "aliases": [
+                "CVE-2026-34070",
+                "GHSA-qh6h-p6c9-ff54"
+              ],
+              "fix_versions": [
+                "1.2.22"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2562",
+              "aliases": [
+                "CVE-2026-26013",
+                "GHSA-2g6r-c272-w58r"
+              ],
+              "fix_versions": [
+                "1.2.11"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2562",
+              "aliases": [
+                "CVE-2026-26013",
+                "GHSA-2g6r-c272-w58r"
+              ],
+              "fix_versions": [
+                "1.2.11"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langchain-openai",
+          "version": "0.3.35",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-76",
+              "aliases": [
+                "CVE-2026-41488",
+                "GHSA-r7w7-9xr2-qq2r"
+              ],
+              "fix_versions": [
+                "1.1.14"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-76",
+              "aliases": [
+                "CVE-2026-41488",
+                "GHSA-r7w7-9xr2-qq2r"
+              ],
+              "fix_versions": [
+                "1.1.14"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langchain-text-splitters",
+          "version": "0.3.11",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-77",
+              "aliases": [
+                "CVE-2026-41481",
+                "GHSA-fv5p-p927-qmxr"
+              ],
+              "fix_versions": [
+                "1.1.2"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-77",
+              "aliases": [
+                "CVE-2026-41481",
+                "GHSA-fv5p-p927-qmxr"
+              ],
+              "fix_versions": [
+                "1.1.2"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langgraph-sdk",
+          "version": "0.4.2",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "CVE-2026-104873",
+              "aliases": [
+                "GHSA-fvww-7h3r-vfhp"
+              ],
+              "fix_versions": [
+                "0.4.4"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-4240",
+              "aliases": [
+                "CVE-2026-104873",
+                "GHSA-fvww-7h3r-vfhp"
+              ],
+              "fix_versions": [
+                "0.4.4"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "langsmith",
+          "version": "0.3.45",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-2583",
+              "aliases": [
+                "CVE-2026-41182",
+                "GHSA-rr7j-v2q5-chgv"
+              ],
+              "fix_versions": [
+                "0.7.31"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2555",
+              "aliases": [
+                "CVE-2026-45134",
+                "GHSA-3644-q5cj-c5c7",
+                "PYSEC-2026-2560",
+                "PYSEC-2026-2582"
+              ],
+              "fix_versions": [
+                "0.8.0"
+              ]
+            },
+            {
+              "id": "CVE-2026-59152",
+              "aliases": [
+                "GHSA-f4xh-w4cj-qxq8"
+              ],
+              "fix_versions": [
+                "0.8.18"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2582",
+              "aliases": [
+                "CVE-2026-45134",
+                "GHSA-3644-q5cj-c5c7"
+              ],
+              "fix_versions": [
+                "0.8.0"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-2583",
+              "aliases": [
+                "CVE-2026-41182",
+                "GHSA-rr7j-v2q5-chgv"
+              ],
+              "fix_versions": [
+                "0.7.31"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ragas",
+          "version": "0.4.3",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "PYSEC-2026-3046",
+              "aliases": [
+                "CVE-2026-6587",
+                "GHSA-95ww-475f-pr4f"
+              ],
+              "fix_versions": []
+            },
+            {
+              "id": "PYSEC-2026-3046",
+              "aliases": [
+                "CVE-2026-6587",
+                "GHSA-95ww-475f-pr4f"
+              ],
+              "fix_versions": []
+            }
+          ]
+        },
+        {
+          "name": "tornado",
+          "version": "6.5.7",
+          "skipped": false,
+          "skip_reason": null,
+          "vulnerabilities": [
+            {
+              "id": "GHSA-chx6-46f5-w4vp",
+              "aliases": [],
+              "fix_versions": [
+                "6.5.9"
+              ]
+            },
+            {
+              "id": "GHSA-c2m8-h5v5-343r",
+              "aliases": [],
+              "fix_versions": [
+                "6.5.9"
+              ]
+            },
+            {
+              "id": "GHSA-3hv7-mjh2-fv65",
+              "aliases": [],
+              "fix_versions": [
+                "6.5.9"
+              ]
+            },
+            {
+              "id": "GHSA-wwv5-g3v4-889x",
+              "aliases": [],
+              "fix_versions": [
+                "6.5.8"
+              ]
+            },
+            {
+              "id": "GHSA-8423-8fgw-73vq",
+              "aliases": [],
+              "fix_versions": [
+                "6.5.8"
+              ]
+            },
+            {
+              "id": "CVE-2026-82397",
+              "aliases": [
+                "GHSA-mpf4-983q-p7j4"
+              ],
+              "fix_versions": [
+                "6.5.8"
+              ]
+            },
+            {
+              "id": "PYSEC-2026-3928",
+              "aliases": [
+                "CVE-2026-82397",
+                "GHSA-mpf4-983q-p7j4"
+              ],
+              "fix_versions": [
+                "6.5.8"
+              ]
+            }
+          ]
+        }
+      ],
+      "errors_or_skips": []
+    },
+    "browser": {
+      "offline": {
+        "selected_specs": [
+          "conversational-qualification",
+          "uploaded-requirements-journey",
+          "turn-transition-revision-matrix",
+          "supplier-enquiry-journey",
+          "live-research-memory-assessment"
+        ],
+        "completed": [
+          {
+            "spec": "conversational-qualification",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:50:14.239Z",
+              "duration": 28657.797,
+              "expected": 6,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          },
+          {
+            "spec": "uploaded-requirements-journey",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:51:00.429Z",
+              "duration": 22240.601,
+              "expected": 4,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          },
+          {
+            "spec": "turn-transition-revision-matrix",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:51:43.417Z",
+              "duration": 5867.168,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          },
+          {
+            "spec": "supplier-enquiry-journey",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:52:09.979Z",
+              "duration": 13180.33,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          },
+          {
+            "spec": "live-research-memory-assessment",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:52:43.785Z",
+              "duration": 1774.244,
+              "expected": 0,
+              "skipped": 1,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          }
+        ]
+      },
+      "source": {
+        "before": {
+          "files": 1529,
+          "sha256": "6d21e26dfd7823ae7717969d50c9cd7a94c730522c0bda232dfa3506b69dcbab"
+        },
+        "after": {
+          "files": 1529,
+          "sha256": "6d21e26dfd7823ae7717969d50c9cd7a94c730522c0bda232dfa3506b69dcbab"
+        },
+        "unchanged": true
+      },
+      "gate": "13 named required cases pass across offline12 + explicitlive1, zero skips in the live rerun; broad release browser gate remains open",
+      "live": {
+        "selected_specs": [
+          "live-research-memory-assessment"
+        ],
+        "completed": [
+          {
+            "spec": "live-research-memory-assessment",
+            "exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-20T07:54:08.005Z",
+              "duration": 18599.780000000002,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            }
+          }
+        ]
+      },
+      "live_source": {
+        "before": {
+          "files": 1529,
+          "sha256": "6d21e26dfd7823ae7717969d50c9cd7a94c730522c0bda232dfa3506b69dcbab"
+        },
+        "after": {
+          "files": 1529,
+          "sha256": "6d21e26dfd7823ae7717969d50c9cd7a94c730522c0bda232dfa3506b69dcbab"
+        },
+        "unchanged": true
+      },
+      "task_assessment": {
+        "email_draft": {
+          "case_id": "sc-e8505cec-3472-4f0b-9275-a46d516a9264",
+          "case_revision": 4,
+          "requested_quantity": 40,
+          "shortfall": null,
+          "recipient": null,
+          "subject": "Stock shortfall enquiry",
+          "body": "Hello,\n\nPlease confirm availability, price and lead time toward our request for 40 units. The exact shortfall is pending confirmation of the accepted product and current inventory coverage.\nDelivery: Sydney (40 units).\nBudget: AUD 1500.00 per unit.\n\nPlease include freight costs and any minimum order quantity. This enquiry does not authorize a purchase.",
+          "status": "provisional_draft",
+          "missing_inputs": [
+            "supplier_contact",
+            "current_accepted_selection"
+          ],
+          "commerce_authority": "none",
+          "dispatch_authorized": false
+        },
+        "email_reply": "Draft — choose a supplier contact before sending.\nSubject: Stock shortfall enquiry\n\nHello,\n\nPlease confirm availability, price and lead time toward our request for 40 units. The exact shortfall is pending confirmation of the accepted product and current inventory coverage.\nDelivery: Sydney (40 units).\nBudget: AUD 1500.00 per unit.\n\nPlease include freight costs and any minimum order quantity. This enquiry does not authorize a purchase.",
+        "market_evidence": {
+          "hippograph_insights": [],
+          "needs_market_evidence": true,
+          "evidence_kinds": [],
+          "market_findings": [],
+          "market_evidence": {
+            "findings": [],
+            "citations": [],
+            "salient_entities": []
+          },
+          "narration_note": "",
+          "delivery_status": "blocked",
+          "delivery_reason": "no_current_scoped_evidence",
+          "withheld_market_findings": [],
+          "case_id": "sc-e8505cec-3472-4f0b-9275-a46d516a9264",
+          "case_revision": 4,
+          "commerce_authority": "none"
+        },
+        "market_reply": "I have no current, scoped market evidence for this request. Its quantity and budget are retained.",
+        "scope": "Draft delivery is asserted. Market delivery requires current citations or an explicit blocked/unavailable reason; this does not certify live market-source freshness."
+      }
+    },
+    "limitations": [
+      "All pass counts overlap.",
+      "Root browser source includes uncommitted work and is not a clean Git release.",
+      "Two host suspensions invalidated earlier install deadlines; retained failed receipts are not passes.",
+      "Candidate preparation accidentally re-encoded main.py text in 5a84ac43; corrected 18e3f469 with exact22 lifecycle passes and AST structure check.",
+      "Windows uses disposable worker timeout and sampled RSS monitoring; the product does not enforce a Windows OS memory job limit.",
+      "Full final-source Python/browser/restore/endurance gates remain open."
+    ]
   }
 }

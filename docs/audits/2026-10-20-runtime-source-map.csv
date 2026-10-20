@@ -1,0 +1,10 @@
+path,symbol,line,function_lines,file_lines,sha256,review_focus
+src/app/security/observer.py,emit_security_event,833,216,1048,a3dfb8b927dabb89f220e171a6cd0cc28e5e63bb8f0e0a60ee2cef14c050ed3c,observer transaction and deferred persistence
+src/app/security/observer_workers.py,submit,17,25,91,6d0b1a11833bc6d23eb3c36c30a42bad68c9e1ab4a76e3f715146662a791f4b4,bounded observer admission
+src/app/security/observer_workers.py,stop,43,10,91,6d0b1a11833bc6d23eb3c36c30a42bad68c9e1ab4a76e3f715146662a791f4b4,shutdown ownership
+src/app/services/cv_ocr.py,_paddle_ocr,103,52,267,b03f6f24d65436de4b34eb12456a6b0172e79c81fd958b419c3eb55957f254ea,Paddle3 native adapter
+src/app/services/cv_ocr.py,_isolated_paddle_ocr,184,31,267,b03f6f24d65436de4b34eb12456a6b0172e79c81fd958b419c3eb55957f254ea,disposable OCR budget
+src/app/services/paddle_model_assets.py,local_paddle_models,13,42,54,33e199ae319bb432b0c99d0283bb03dc59d87c57fa4835223ba11647ea575823,local model integrity
+src/app/routers/privacy.py,_consent_key,103,2,702,67ce2a8e510b16ad6cd8979911dcf207f3d88a968139b953bb77f404c0273018,remaining tenant partition and durability gap
+src/app/routers/privacy.py,delete_user_data,242,134,702,67ce2a8e510b16ad6cd8979911dcf207f3d88a968139b953bb77f404c0273018,remaining all-plane erasure and recovery
+src/app/main.py,create_app,271,2215,2495,94fbda307cb2e6298922adae7f17a8512b295f9f783b3e9d997feeea46585079,remaining runtime coupling
