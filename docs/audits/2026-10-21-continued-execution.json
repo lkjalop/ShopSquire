@@ -1,8 +1,16 @@
 {
-  "recorded_at": "2026-10-20T15:19:57.901970+00:00",
-  "checkpoint_head": "29c041bb0c7f3b033db4aee3bcb1f1fe2fa5ed74",
+  "recorded_at": "2026-10-20T16:18:35.719288+00:00",
+  "checkpoint_head": "cc43389b5768e6384573a027d13b7717628b626a",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "cc43389b security: verify bearer identity and close missing-env defaults",
+    "591f4e1d test: own scoring flags and playbook configuration files",
+    "85857db3 security: expose quota admission and own HTTP budget tests",
+    "8c27a68a chat: bind workload scale answers to the owned question",
+    "7d2081ce deps: declare and verify official HTML parser runtime",
+    "0e1f3383 security: fingerprint credentials in audit attribution",
+    "afa1d7c2 test: own checkout and security fixture inputs in broad profiles",
+    "b7c99f3e docs: record current draft workflow, restore proof and remaining release gates",
     "29c041bb fix(memory): synchronize accepted fulfillment quantity and SKU atomically",
     "459794af test(browser): release synchronous drivers at module ownership boundary",
     "5e2bcc88 fix(procurement): preserve unknown price, supply and technical fit",
@@ -54,14 +62,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 42,
-      "insertions": 1894,
-      "deletions": 789
+      "files": 47,
+      "insertions": 2032,
+      "deletions": 842
     },
     "tests": {
-      "files": 72,
-      "insertions": 3571,
-      "deletions": 644
+      "files": 87,
+      "insertions": 3987,
+      "deletions": 765
     },
     "frontend": {
       "files": 15,
@@ -70,15 +78,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T15:15:20.638923+00:00",
-    "head": "29c041bb0c7f3b033db4aee3bcb1f1fe2fa5ed74",
+    "recorded_at": "2026-10-20T16:15:38.638661+00:00",
+    "head": "cc43389b5768e6384573a027d13b7717628b626a",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 563,
-    "tracked_changed": 277,
+    "git_status_entries": 559,
+    "tracked_changed": 273,
     "untracked": 286,
     "staged": 0,
-    "files": 5680,
-    "text_lines": 975403,
+    "files": 5684,
+    "text_lines": 975824,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -183,24 +191,68 @@
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1321,
+      "src": 1322,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1526,
+      "tests": 1529,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19293,
+    "functions": 19307,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5590,
     "swallowed_production_handlers": 2034,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W11",
+      "path": "src/app/security/auth.py",
+      "symbol": "_verified_identity_claims",
+      "line": 104,
+      "function_lines": 22,
+      "file_lines": 1073,
+      "git_state": "committed",
+      "sha256": "e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3",
+      "remaining": "broader identity, token revocation and effect/person boundaries"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/security/auth.py",
+      "symbol": "_auth_environment",
+      "line": 200,
+      "function_lines": 3,
+      "file_lines": 1073,
+      "git_state": "committed",
+      "sha256": "e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3",
+      "remaining": "remaining configuration and deployment guard equivalence"
+    },
+    {
+      "work_package": "W04",
+      "path": "src/app/services/recommendation_core/workload_refinement.py",
+      "symbol": "workload_scale_relation",
+      "line": 27,
+      "function_lines": 39,
+      "file_lines": 65,
+      "git_state": "committed",
+      "sha256": "4eea31a8c3c0cfaa9fe005635e9ced71f1748bd6d08a5ddf34d2c98152099e16",
+      "remaining": "complete live, replacement and unrelated-question continuity matrix"
+    },
+    {
+      "work_package": "W11/W12",
+      "path": "src/app/services/recommendation_compatibility.py",
+      "symbol": "serve_v2_compatibility",
+      "line": 392,
+      "function_lines": 404,
+      "file_lines": 795,
+      "git_state": "committed",
+      "sha256": "dd3634184c50cefc5971215a272e98dbd85017a06bee420a02873c3a48341443",
+      "remaining": "remaining browser/live/security profiles and caller header behavior"
+    },
     {
       "work_package": "W04/W05",
       "path": "src/app/services/shopping_case_revision.py",
@@ -1227,6 +1279,291 @@
         "errors": 0,
         "skipped": 0
       }
+    },
+    "credential-attribution-verified": {
+      "receipt_sha256": "a4d8f44dcdca213e7722e834a73d10fda5731b19ccb787b42f7d517563a9c3c0",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_credential_audit_attribution.py",
+        "tests/security/test_auth_fail_closed.py",
+        "tests/security/test_admin_route_boundary.py",
+        "tests/security/test_admin_playbooks_governance.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\credential-attribution-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\credential-attribution-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 17.328,
+      "peaks": {
+        "rss_bytes": 261689344,
+        "handles": 1022,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "html-parser-clean-behavior": {
+      "receipt_sha256": "15cc95179e5ad8c29e1685e44fb9df18556c59e8a65f2456703a736afe400f58",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_product_capability_evidence.py",
+        "tests/services/test_dependency_resilience_lifecycle.py",
+        "tests/scripts/test_research_runtime_profile.py",
+        "tests/scripts/test_runtime_profile_launcher.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-clean-behavior\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\html-parser-dependency-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 20.469,
+      "peaks": {
+        "rss_bytes": 264192000,
+        "handles": 903,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "html-parser-profile-contracts": {
+      "receipt_sha256": "34b5f0f46e1a140320e88ed97aab13425159437a21bb74f64d50ff2fbbc4a380",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/scripts/test_generate_runtime_requirements.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-profile-contracts\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\html-parser-dependency-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 14.516,
+      "peaks": {
+        "rss_bytes": 267653120,
+        "handles": 886,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "html-parser-installed-audit": {
+      "receipt_sha256": "f0ed8a425e8485d6270411071a7b88a547eddb562ef0f843844df05ece00edf0",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\execution-2026-10-19\\audit-tools\\Scripts\\python.exe",
+        "-m",
+        "pip_audit",
+        "--path",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Lib\\site-packages",
+        "--format",
+        "json",
+        "--output",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-installed-advisories.json",
+        "--progress-spinner",
+        "off",
+        "--desc",
+        "off"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 9.703,
+      "peaks": {
+        "rss_bytes": 54337536,
+        "handles": 228,
+        "threads": 5
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "html-parser-profile-audits": {
+      "receipt_sha256": "e370da3dc7172b07fadd63bea9b50fea3b071ece627939a384acb545b1bad230",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\audit_html_parser_profiles.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 24.031,
+      "peaks": {
+        "rss_bytes": 54632448,
+        "handles": 228,
+        "threads": 6
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "html-parser-linux-process": {
+      "receipt_sha256": "a383dca3124d76deeedaf48a9497b09259853d27c33ea351d05d50a571212c27",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_html_parser_linux.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 144.594,
+      "peaks": {
+        "rss_bytes": 24621056,
+        "handles": 156,
+        "threads": 12
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "clarification-model-complete": {
+      "receipt_sha256": "008246789b9f42eb213fc68fea68be0fa4a28197ea774ce2ad0a745a2836edc2",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_pending_workload_scale.py",
+        "tests/services/test_turn_router_clarification.py",
+        "tests/services/test_turn_transition.py",
+        "tests/services/test_case_catalog_trace_binding.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\clarification-model-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\clarification-continuity-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.953,
+      "peaks": {
+        "rss_bytes": 285790208,
+        "handles": 945,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 38,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "quota-http-verified": {
+      "receipt_sha256": "709bbe5487d3221c504433ac02170b157f7d870f35b4a2cee795cd43bbdd2d95",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_rate_limits.py",
+        "tests/security/test_pricing_rate_limits.py",
+        "tests/services/test_recommendation_facade.py",
+        "tests/services/test_recommendation_facade_cart.py",
+        "tests/unit/test_rate_limit_distributed.py",
+        "tests\\api\\test_recommend_v2_compatibility.py",
+        "tests\\architecture\\test_recommend_compatibility_boundary.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\quota-http-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\quota-http-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 51.703,
+      "peaks": {
+        "rss_bytes": 296755200,
+        "handles": 1380,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 79,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "config-ownership-verified-tests": {
+      "receipt_sha256": "7532a0a63b8262757c24663549d71aeb38e48331afc00f483a82255728f6536b",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_admin_scoring.py",
+        "tests/test_scoring.py",
+        "tests/security/test_flag_dual_approval.py",
+        "tests/playbooks/test_playbooks_lifecycle_dlq.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\config-ownership-verified-tests\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\config-test-ownership-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 38.75,
+      "peaks": {
+        "rss_bytes": 280576000,
+        "handles": 1253,
+        "threads": 35
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified-identity-complete": {
+      "receipt_sha256": "7edc9bf6df1ae1606387648412e1390dec6be46e94869757897d58d434d6fbf0",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_verified_operator_identity.py",
+        "tests/security/test_auth_fail_closed.py",
+        "tests/security/test_credential_audit_attribution.py",
+        "tests/security/test_admin_route_boundary.py",
+        "tests/services/fulfillment/test_operator_identity.py",
+        "tests/services/test_operator_tenant_membership.py",
+        "tests/unit/test_metrics_rbac.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\verified-identity-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\verified-identity-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.812,
+      "peaks": {
+        "rss_bytes": 265961472,
+        "handles": 996,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 31,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
     }
   },
   "api_ci": {
@@ -1277,9 +1614,9 @@
     "umask_file_mode": "0600"
   },
   "all_lock_audit": {
-    "recorded_at": "2026-10-20T08:01:55.776496+00:00",
-    "lock_sha256": "de6adc81c7c0de9ce7b99a98a4ee3fd84896cf615c270953d9333f4ad06afc6d",
-    "locked_package_versions": 261,
+    "recorded_at": "2026-10-20T16:15:27.969729+00:00",
+    "lock_sha256": "5ab1381c80329de014a44e87dfc418034b9a291fe06f3a16c761edc240919c22",
+    "locked_package_versions": 264,
     "package_advisory_matches": 4,
     "affected": [
       {
@@ -1331,7 +1668,8 @@
         ]
       }
     ],
-    "errors_or_skips": []
+    "errors_or_skips": [],
+    "unique_package_advisories": 2
   },
   "first_full_diagnostic": {
     "reported_phases": 851,
@@ -2000,7 +2338,7 @@
   },
   "undefined_names": {
     "command": [
-      "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\dependency-numpy2-verified-env\\Scripts\\python.exe",
+      "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
       "-m",
       "ruff",
       "check",
@@ -2008,21 +2346,22 @@
       "scripts",
       "tests",
       "alembic",
-      "sdk",
       "--select",
       "F821,F823",
       "--output-format",
       "json"
     ],
-    "native_exit_code": 0,
-    "findings": []
+    "exit_code": 0,
+    "seconds": 0.172,
+    "findings": 0,
+    "stderr": ""
   },
   "third_full_diagnostic": {
-    "reported_phases": 4756,
+    "reported_phases": 7096,
     "outcomes": {
-      "passed": 4517,
-      "skipped": 203,
-      "failed": 36
+      "passed": 6811,
+      "skipped": 210,
+      "failed": 75
     },
     "failed_tests": [
       {
@@ -2168,6 +2507,162 @@
       {
         "nodeid": "tests/services/test_product_capability_evidence.py::test_asus_official_parser_binds_claims_to_the_exact_sku_column",
         "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_production_hardening.py::test_scan_returns_report_with_no_requirements",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_production_hardening.py::test_scan_detects_typosquat_in_requirements",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommend_pipeline_timeouts.py::test_bounded_times_out_and_reraises",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommend_pipeline_timeouts.py::test_bounded_passes_through_fast_result",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommend_pipeline_timeouts.py::test_hung_leg_falls_back_not_blocks",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommend_pipeline_timeouts.py::test_bounded_records_timeout_reason",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommend_pipeline_timeouts.py::test_bounded_records_leg_failure_reason",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_primary_serves_core_lane",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_material_clarification_can_cross_delegated_lane_without_execution",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_compatibility_cutover_serves_grounded_bounded_fallback[True]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_compatibility_cutover_serves_grounded_bounded_fallback[False]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_degraded_semantic_authorization_hold_cannot_delegate_to_less_strict_legacy",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_degraded_facade_preserves_facts_and_safe_failure_evidence",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_procurement_advice_requires_its_own_serve_flag",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_policy_answer_requires_its_own_serve_flag",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_read_only_domain_lanes_require_independent_flags[SUPPORT_CLAIM-RECOMMEND_SUPPORT_HANDOFF_MODE]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_read_only_domain_lanes_require_independent_flags[INVENTORY-RECOMMEND_INVENTORY_READ_MODE]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_typed_outcome_distinguishes_served_delegate_and_blocked",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_canary_splits_traffic",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_pilot_mode_is_exact_and_tenant_qualified",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_pilot_mode_fails_closed_and_off_is_immediate_rollback",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_image_turns_use_shared_core_with_bounded_observations",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_hostile_image_facts_are_stripped_before_core",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_core_lanes_are_served[SEARCH]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_core_lanes_are_served[FILTER]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_core_lanes_are_served[COMPARE]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_core_lanes_are_served[EXPLAIN]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_core_lanes_are_served[OFF_CATALOG]",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade.py::test_shadow_enqueues_and_returns_none",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade_cart.py::test_dispatch_shadow_mode_enqueues_cart_never_executes",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_recommendation_facade_cart.py::test_dispatch_serves_cart_with_core_mode_off",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_v2_contract_binding.py::test_facade_serves_binding_hold_without_legacy_fallback",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_v2_contract_binding.py::test_shadow_job_preserves_canonical_case_binding",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_vision_runtime_budget.py::test_visual_search_does_not_launch_unbounded_local_ocr_fallback",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/services/test_vision_worker_budget.py::test_timed_out_queued_image_work_never_starts",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/test_agent_guardrails.py::test_recommend_never_invents_sku",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/test_api_contract.py::test_recommend_response_schema",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/test_cart_stock_gates.py::test_cart_currency_comes_from_catalog_product",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/test_conversation_router_group.py::test_conversation_group_registers_required_surfaces_without_silent_skip",
+        "phase": "call"
       }
     ],
     "source": {
@@ -2197,11 +2692,39 @@
         "process_fds": 68,
         "process_threads": 31
       },
-      "elapsed_seconds": 3530.55,
+      "elapsed_seconds": 5390.92,
       "violation": null
     },
-    "state": "running on the earlier frozen working tree; no final-source certification",
-    "complete": false
+    "state": "incomplete: original 5400-second deadline reached; no final-source certification",
+    "complete": false,
+    "receipt": {
+      "native_exit_code": -15,
+      "elapsed_seconds": 5400.87,
+      "resource_violation": "profile_deadline_5400s",
+      "peaks": {
+        "process_rss_bytes": 1130192896,
+        "process_fds": 68,
+        "process_threads": 31
+      },
+      "source_fingerprint": "45af482f64295f3d471ce2252894d56753345224964ce362072f2ebe4949d6ec",
+      "source_changes_in_disposable_copy": [
+        {
+          "path": "config/feature_flags.json",
+          "before": "bf1c7807dc7ee0e3f833bf61e0eeeef0106d7f4b7e97dde64f9a67f72b872036",
+          "after": "708312370e10ad71ec0e2b50e977c75d43324755d4d4187483ef00fff3400905"
+        },
+        {
+          "path": "config/security/cv_playbooks.json",
+          "before": "b359425faccf271692a88296a83eb733108688cd79245b684464d5c441603a7f",
+          "after": "402cfa18513b5a6e5e09c453efa2cbc2bf4f3333fa26fff16c65f9720e162f9c"
+        },
+        {
+          "path": "config/security/taxonomy/risk_correlation_policy.json",
+          "before": "24f259d11dc9912f14b03af0c3224b260202901ecc054707e763439c86ff64ec",
+          "after": "7822d6bdc5e1eaa32b30ebb162bc89c7d373b4e8ae64c988759af5808c158e37"
+        }
+      ]
+    }
   },
   "current_qualification": {
     "stats": {
@@ -2367,5 +2890,244 @@
       "commercial_effects": "sandbox/disabled"
     },
     "assessment": "Same frozen code, restored disposable SQLite checkpoint; not distributed recovery or production rollback"
+  },
+  "dependency_installation_164": {
+    "installed_count": 164,
+    "expected_count": 164,
+    "exact_match": true,
+    "versions": {
+      "aiohappyeyeballs": "2.7.1",
+      "aiohttp": "3.14.5",
+      "aiosignal": "1.4.0",
+      "aistudio-sdk": "0.3.9",
+      "alembic": "1.19.0",
+      "amqp": "5.3.1",
+      "annotated-doc": "0.0.5",
+      "annotated-types": "0.8.0",
+      "anyio": "4.14.2",
+      "argon2-cffi": "23.1.0",
+      "argon2-cffi-bindings": "25.1.0",
+      "asgiref": "3.12.1",
+      "async-timeout": "5.0.1",
+      "attrs": "26.1.0",
+      "bce-python-sdk": "0.9.79",
+      "beautifulsoup4": "4.15.0",
+      "billiard": "4.2.4",
+      "celery": "5.6.3",
+      "certifi": "2026.7.22",
+      "cffi": "2.1.1",
+      "chardet": "7.7.0",
+      "charset-normalizer": "3.4.9",
+      "click": "8.4.2",
+      "click-didyoumean": "0.3.1",
+      "click-plugins": "1.1.1.2",
+      "click-repl": "0.3.0",
+      "colorama": "0.4.6",
+      "colorlog": "6.12.0",
+      "coverage": "7.15.3",
+      "crc32c": "2.9.post0",
+      "cryptography": "50.0.2",
+      "dnspython": "2.8.0",
+      "email-validator": "2.3.0",
+      "et-xmlfile": "2.0.0",
+      "fastapi": "0.149.0",
+      "filelock": "3.32.2",
+      "frozenlist": "1.8.0",
+      "fsspec": "2026.6.0",
+      "future": "1.0.0",
+      "googleapis-common-protos": "1.75.0",
+      "greenlet": "3.5.4",
+      "grpcio": "1.83.0",
+      "h11": "0.16.0",
+      "hf-xet": "1.6.0",
+      "httpcore": "1.0.9",
+      "httptools": "0.8.0",
+      "httpx": "0.27.2",
+      "huggingface-hub": "1.26.0",
+      "idna": "3.18",
+      "imagehash": "4.3.2",
+      "imagesize": "2.0.1",
+      "iniconfig": "2.3.0",
+      "kombu": "5.6.2",
+      "librt": "0.13.0",
+      "mako": "1.4.1",
+      "markupsafe": "3.0.3",
+      "modelscope": "1.40.2",
+      "modelscope-hub": "0.4.6",
+      "multidict": "6.9.1",
+      "mypy": "1.20.2",
+      "mypy-extensions": "1.1.0",
+      "neo4j": "5.28.4",
+      "networkx": "3.6.1",
+      "numpy": "2.3.5",
+      "opencv-contrib-python": "4.10.0.84",
+      "openpyxl": "3.1.5",
+      "opentelemetry-api": "1.45.1",
+      "opentelemetry-exporter-http-transport": "0.66b1",
+      "opentelemetry-exporter-jaeger-thrift": "1.21.0",
+      "opentelemetry-exporter-otlp": "1.45.1",
+      "opentelemetry-exporter-otlp-common": "0.66b1",
+      "opentelemetry-exporter-otlp-proto-common": "1.45.1",
+      "opentelemetry-exporter-otlp-proto-grpc": "1.45.1",
+      "opentelemetry-exporter-otlp-proto-http": "1.45.1",
+      "opentelemetry-instrumentation": "0.66b1",
+      "opentelemetry-instrumentation-asgi": "0.66b1",
+      "opentelemetry-instrumentation-fastapi": "0.66b1",
+      "opentelemetry-instrumentation-redis": "0.66b1",
+      "opentelemetry-instrumentation-requests": "0.66b1",
+      "opentelemetry-proto": "1.45.1",
+      "opentelemetry-sdk": "1.45.1",
+      "opentelemetry-semantic-conventions": "0.66b1",
+      "opentelemetry-util-http": "0.66b1",
+      "opt-einsum": "3.3.0",
+      "orjson": "3.11.9",
+      "packaging": "26.3",
+      "paddleocr": "3.7.0",
+      "paddlepaddle": "3.3.1",
+      "paddlex": "3.7.2",
+      "pandas": "3.0.5",
+      "pathspec": "1.1.1",
+      "pillow": "12.3.0",
+      "pip": "26.2.1",
+      "playwright": "1.62.0",
+      "pluggy": "1.6.0",
+      "prettytable": "3.18.0",
+      "prometheus-client": "0.17.1",
+      "prompt-toolkit": "3.0.53",
+      "propcache": "0.5.2",
+      "protobuf": "7.36.2",
+      "psutil": "7.2.2",
+      "psycopg2-binary": "2.9.12",
+      "py-cpuinfo": "9.0.0",
+      "pyclipper": "1.4.0",
+      "pycparser": "3.0",
+      "pycryptodome": "4.1.0",
+      "pydantic": "2.13.4",
+      "pydantic-core": "2.46.4",
+      "pyee": "13.0.1",
+      "pygments": "2.20.0",
+      "pyjwt": "2.15.1",
+      "pypdfium2": "4.30.0",
+      "pytesseract": "0.3.13",
+      "pytest": "9.1.1",
+      "pytest-asyncio": "1.4.0",
+      "pytest-cov": "7.1.0",
+      "pytest-playwright": "0.10.0",
+      "pytest-timeout": "2.4.0",
+      "python-bidi": "0.6.11",
+      "python-dateutil": "2.9.0.post0",
+      "python-dotenv": "1.2.2",
+      "python-json-logger": "2.0.7",
+      "python-multipart": "0.0.32",
+      "python-slugify": "8.0.4",
+      "pytz": "2026.3.post1",
+      "pywavelets": "1.9.0",
+      "pyyaml": "6.0.2",
+      "pyzbar": "0.1.9",
+      "qrcode": "8.2",
+      "redis": "5.3.1",
+      "reportlab": "5.0.1",
+      "requests": "2.34.2",
+      "ruamel-yaml": "0.19.1",
+      "ruff": "0.3.7",
+      "safetensors": "0.8.0",
+      "scipy": "1.17.1",
+      "setuptools": "84.2.0",
+      "shapely": "2.1.2",
+      "six": "1.17.0",
+      "sniffio": "1.3.1",
+      "soupsieve": "2.10",
+      "sqlalchemy": "2.0.51",
+      "starlette": "1.7.0",
+      "text-unidecode": "1.3",
+      "thrift": "0.24.0",
+      "tqdm": "4.70.0",
+      "types-cffi": "2.0.0.20260518",
+      "types-pyopenssl": "24.1.0.20240722",
+      "types-redis": "4.6.0.20241004",
+      "types-setuptools": "83.0.0.20260724",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.2",
+      "tzdata": "2026.3",
+      "tzlocal": "5.4.4",
+      "ujson": "5.13.0",
+      "urllib3": "2.8.0",
+      "uvicorn": "0.29.0",
+      "vine": "5.1.0",
+      "watchfiles": "1.2.0",
+      "wcwidth": "0.8.2",
+      "websockets": "15.0.1",
+      "wheel": "0.48.0",
+      "wrapt": "1.17.3",
+      "yarl": "1.25.1"
+    },
+    "single_cv2_owner": [
+      "opencv-contrib-python"
+    ]
+  },
+  "fourth_partitioned_diagnostic": {
+    "source": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+    "head": "591f4e1d",
+    "collection_total": 8319,
+    "complete": false,
+    "partitions": [
+      {
+        "bucket": 0,
+        "state": "finished",
+        "collected": 8319,
+        "selected": 353,
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 405.264,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 747229184,
+            "process_fds": 42,
+            "process_threads": 17
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": []
+        }
+      },
+      {
+        "bucket": 1,
+        "state": "running",
+        "collected": 8319,
+        "selected": 2351
+      },
+      {
+        "bucket": 2,
+        "state": "queued"
+      },
+      {
+        "bucket": 3,
+        "state": "running",
+        "collected": 8319,
+        "selected": 1083
+      },
+      {
+        "bucket": 4,
+        "state": "queued"
+      },
+      {
+        "bucket": 5,
+        "state": "queued"
+      }
+    ],
+    "scope": "Working-tree diagnostic with all collected IDs partitioned; collection skips and monolithic ordering remain separate requirements"
+  },
+  "configuration_source_ownership": {
+    "before": {
+      "config/feature_flags.json": "99ba4f998dce7800344359d323f18202663d3dbd689eb2c93a602e5c97eb384d",
+      "config/security/cv_playbooks.json": "5d39da0a22d0461e086a45635be87ad0a127e4dc423581612024973380c2c4d4",
+      "config/security/taxonomy/risk_correlation_policy.json": "52351b7ed7ce53a91ba81202d3849abb20516a814e9ba50e2bdfb15ce28ad657"
+    },
+    "after": {
+      "config/feature_flags.json": "99ba4f998dce7800344359d323f18202663d3dbd689eb2c93a602e5c97eb384d",
+      "config/security/cv_playbooks.json": "5d39da0a22d0461e086a45635be87ad0a127e4dc423581612024973380c2c4d4",
+      "config/security/taxonomy/risk_correlation_policy.json": "52351b7ed7ce53a91ba81202d3849abb20516a814e9ba50e2bdfb15ce28ad657"
+    },
+    "changed": [],
+    "test_exit": 0
   }
 }

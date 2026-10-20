@@ -1,4 +1,8 @@
 work_package,path,symbol,line,function_lines,file_lines,git_state,sha256,remaining
+W11,src/app/security/auth.py,_verified_identity_claims,104,22,1073,committed,e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3,"broader identity, token revocation and effect/person boundaries"
+W11,src/app/security/auth.py,_auth_environment,200,3,1073,committed,e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3,remaining configuration and deployment guard equivalence
+W04,src/app/services/recommendation_core/workload_refinement.py,workload_scale_relation,27,39,65,committed,4eea31a8c3c0cfaa9fe005635e9ced71f1748bd6d08a5ddf34d2c98152099e16,"complete live, replacement and unrelated-question continuity matrix"
+W11/W12,src/app/services/recommendation_compatibility.py,serve_v2_compatibility,392,404,795,committed,dd3634184c50cefc5971215a272e98dbd85017a06bee420a02873c3a48341443,remaining browser/live/security profiles and caller header behavior
 W04/W05,src/app/services/shopping_case_revision.py,advance_material_case_revision,40,91,133,committed,dc7d63d92454e28ea4632fd8ff3bea589f6651b255600981800d7246f710becd,integrate all UI consumers; preserve canonical quantity and destination invariants
 W08,src/app/services/commercial_decision_reducer.py,reduce_commercial_candidate,69,154,225,committed,4ae3a8477dbd8372a8390aae94325d93d505f1206a2c194bd06d9e559803d730,unknown price and supply remain unverified; complete inventory provider matrix
 W09,src/app/routers/admin_playbooks.py,_ensure_change_approval,57,31,491,committed,f847b7a1a56ad900fa87232a8bcb2c48d1bd8f0de14d5d2f29a23e573b9ddbb0,"remaining generic approval durability, person and replay boundaries"
