@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
 from src.app.main import create_app
 from tests.utils import default_headers
-import os
+import pytest
 
-# Avoid real dependency probes (Redis / Ollama) in unit test context.
-os.environ.setdefault("TEST_FAST_HEALTH", "1")
+@pytest.fixture(autouse=True)
+def local_health_profile(monkeypatch):
+    # Collection must not alter unrelated browser/backend runtimes.
+    monkeypatch.setenv("TEST_FAST_HEALTH", "1")
 
 app = create_app()
 

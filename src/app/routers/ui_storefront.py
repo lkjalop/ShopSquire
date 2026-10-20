@@ -262,7 +262,6 @@ def widget_js() -> Response:
 
 @router.get("/storefront")
 def storefront() -> HTMLResponse:
-    api_key = os.getenv("MERCHANT_API_KEY", "")
     products = _get_products()
 
     def _detail_link(p: dict) -> str:
@@ -320,7 +319,7 @@ def storefront() -> HTMLResponse:
         <section class="grid" id="product-grid">__CARDS__</section>
         __EMPTY_STATE__
       </main>
-      <shopsquire-widget data-api-base="" data-api-key="__API_KEY__" data-uid="guest-user" data-signed-in="false"></shopsquire-widget>
+      <shopsquire-widget data-api-base="" data-uid="guest-user" data-signed-in="false"></shopsquire-widget>
       <script src="/ui/widget.js"></script>
       <script>
         window.__GUARDRAILS__ = __GUARDRAILS__;
@@ -332,7 +331,6 @@ def storefront() -> HTMLResponse:
     html = (
         html.replace("__CARDS__", cards)
         .replace("__EMPTY_STATE__", "<p>No catalog products are currently available.</p>" if not products else "")
-        .replace("__API_KEY__", api_key)
         .replace("__GUARDRAILS__", json.dumps(profile))
         .replace("__PRODUCTS__", products_json)
     )
@@ -679,9 +677,7 @@ def product_detail(sku: str) -> HTMLResponse:
     ) or "<tr><td>No specs available</td></tr>"
 
     price_display = ("$" + str(price)) if price is not None else ""
-    api_key = os.getenv("MERCHANT_API_KEY", "")
     csp_nonce = secrets.token_urlsafe(16)
-    decision_modal_test_open = str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on")
     html = """
     <!doctype html>
     <html lang='en'>
@@ -704,7 +700,7 @@ def product_detail(sku: str) -> HTMLResponse:
         <button class='add-to-cart'>Add to Cart</button>
         <table><tbody>__SPEC_ROWS__</tbody></table>
       </main>
-      <div id="decision-modal" role="dialog" aria-modal="true" style="display:__DECISION_MODAL_DISPLAY__;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.28);padding:24px;overflow:auto;">
+      <div id="decision-modal" role="dialog" aria-modal="true" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.28);padding:24px;overflow:auto;">
         <div style="max-width:640px;margin:6% auto;background:#fff;border-radius:12px;padding:12px;border:1px solid #e5e7eb;">
           <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1px solid #f3f4f6;">
             <div style="font-weight:700;">Decision Trace</div>
@@ -724,7 +720,7 @@ def product_detail(sku: str) -> HTMLResponse:
           </div>
         </div>
       </div>
-      <shopsquire-widget data-api-base='' data-api-key='__API_KEY__' data-uid='detail-user' data-signed-in='false'></shopsquire-widget>
+      <shopsquire-widget data-api-base='' data-uid='detail-user' data-signed-in='false'></shopsquire-widget>
       <script src='/ui/widget.js'></script>
       <script nonce='__CSP_NONCE__'>
         const cartCount = document.querySelector('.cart-count');
@@ -776,9 +772,7 @@ def product_detail(sku: str) -> HTMLResponse:
         html.replace("__NAME__", name)
         .replace("__PRICE__", price_display)
         .replace("__SPEC_ROWS__", spec_rows)
-        .replace("__API_KEY__", api_key)
         .replace("__CSP_NONCE__", csp_nonce)
-        .replace("__DECISION_MODAL_DISPLAY__", "block" if decision_modal_test_open else "none")
     )
     csp = (
         "default-src 'self'; "
