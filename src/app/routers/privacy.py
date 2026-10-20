@@ -78,19 +78,32 @@ def _redact_json(obj):
         return obj
 
 
-def _uid_patterns(uid: str, uid_hash: str) -> tuple[str, Dict[str, str]]:
-    patterns = [
-        f'%\"uid\": \"{uid}\"%',
-        f'%\"uid\":\"{uid}\"%',
-        f'%\"uid_hash\": \"{uid_hash}\"%',
-        f'%\"uid_hash\":\"{uid_hash}\"%',
-    ]
-    where = " OR ".join([f"input_data LIKE :p{i}" for i in range(len(patterns))])
-    params = {f"p{i}": pat for i, pat in enumerate(patterns)}
-    return where, params
-
-
-_UID_WHERE_SQL = "(input_data LIKE :p0 OR input_data LIKE :p1 OR input_data LIKE :p2 OR input_data LIKE :p3)"
+def _subject_decisions(db, *, tenant_id: str, uid: str, uid_hash: str, details: bool = False) -> list[dict]:
+    # These legacy rows store JSON as text. LIKE cannot establish ownership:
+    # IDs contain wildcard characters and quoted/nested subjects are not owners.
+    # Decode within the controller boundary, independently of JSON formatting or
+    # database-specific JSON operators. Stream candidates to bound working memory.
+    columns = "id, input_data"
+    if details:
+        columns += (", agent_name, valid_from, retrieved_context, agent_reasoning, "
+                    "proposed_action, policy_version, approval_required, execution_status")
+    result = db.execute(
+        text(f"SELECT {columns} FROM decision_logs WHERE tenant_id=:tenant_id ORDER BY valid_from DESC"),
+        {"tenant_id": tenant_id},
+        execution_options={"stream_results": True, "yield_per": 200},
+    )
+    owned = []
+    try:
+        for row in result.mappings():
+            payload = _safe_json(row.get("input_data"))
+            if not isinstance(payload, dict):
+                continue
+            owner = payload.get("uid")
+            if owner == uid or (owner is None and payload.get("uid_hash") == uid_hash):
+                owned.append(dict(row))
+    finally:
+        result.close()
+    return owned
 
 
 def _in_clause(prefix: str, values: List[str]) -> tuple[str, Dict[str, str]]:
@@ -252,16 +265,8 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
     }
     try:
         with db_session() as db:
-            _where, params = _uid_patterns(uid, uid_hash)
-            params["tenant_id"] = tenant_id
-            ids = db.execute(
-                text(
-                    f"SELECT id FROM decision_logs WHERE tenant_id=:tenant_id "
-                    f"AND {_UID_WHERE_SQL}"
-                ),
-                params,
-            ).fetchall()
-            decision_ids = [r[0] for r in ids if r and r[0]]
+            decisions = _subject_decisions(db, tenant_id=tenant_id, uid=uid, uid_hash=uid_hash)
+            decision_ids = [row["id"] for row in decisions if row.get("id")]
             if decision_ids:
                 in_params = {"decision_ids": decision_ids}
                 res = db.execute(
@@ -441,7 +446,7 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 export["orders"] = [dict(r) for r in rows]
             else:
                 rows = db.execute(
-                    "SELECT * FROM orders WHERE customer_id=:uid AND tenant_id=:tenant_id",
+                    text("SELECT * FROM orders WHERE customer_id=:uid AND tenant_id=:tenant_id"),
                     {"uid": uid, "tenant_id": _ct()},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
@@ -450,16 +455,7 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                               {"uid": uid, "t": _ct()}).mappings().all()
             export["draft_orders"] = [dict(r) for r in rows]
 
-            _where, params = _uid_patterns(uid, uid_hash)
-            rows = db.execute(
-                text(
-                    "SELECT id, agent_name, valid_from, input_data, retrieved_context, agent_reasoning, "
-                    "proposed_action, policy_version, approval_required, execution_status "
-                    f"FROM decision_logs WHERE tenant_id=:tenant_id "
-                    f"AND {_UID_WHERE_SQL} ORDER BY valid_from DESC"
-                ),
-                {**params, "tenant_id": _ct()},
-            ).mappings().all()
+            rows = _subject_decisions(db, tenant_id=_ct(), uid=uid, uid_hash=uid_hash, details=True)
             decisions = []
             decision_ids = []
             for r in rows:
