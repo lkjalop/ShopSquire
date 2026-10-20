@@ -1,4 +1,9 @@
 work_package,path,symbol,line,function_lines,file_lines,git_state,sha256,remaining
+W12/W15,scripts/run_image_security_profile.py,run,28,121,154,committed,df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08,promotion into complete CI/deployment gates and remaining live/model profiles
+W07/W11,src/app/services/cv_analysis_cache.py,analysis_namespace,10,11,39,committed,6721294f2aefd64399f582c0b8329213dcb59b9dfb401ebefa6e01c8357aec83,all-plane erasure and wider provider/model provenance policies
+W03/W07,src/app/services/cv_tier2_pipeline.py,run_tier2,473,33,1154,committed,63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e,"remaining image/case recovery, large-image and live-model profiles"
+W01/W12,tests/pw/conftest.py,test_server,56,203,302,committed,34979e1bd19adc55dbdcdbd96ec4da1a784648c0e385b9ec6f19b3bd4ee65aae,remaining environment/thread cleanup and broader browser prerequisites
+W12,tests/pw/test_vision_upload_perf.py,vision_ui,177,57,297,committed,0b257a98c5252fcba8e8be8d36c433b5be284026d653fed3ea38878457707253,"remaining full browser, real-model and service profiles"
 W10,alembic/env.py,assert_preserving_downgrade,58,21,155,committed,5163783ec2496e0174812f110a8ba2c5907c9d75130309b798153241cc34cf70,"offline SQL guards, deployment rollback and commercial crash recovery"
 W03,src/app/services/case_contract_binding.py,gate_case_contract_consumption,108,18,160,committed,5b73894580a171494707ecedaab1ea8b904f150b227621f909117f14b6a6acc5,selection HTTP/UI integration and enabled governed source journeys
 W03,src/app/services/recommendation_core/contract_compilation_gate.py,gate_contract_claims,14,22,35,committed,63f15a15a7b1f6a829cf9c06d5819fdb29486bad2c2db3113a9bb740ffab12d8,full provider/context/revocation consumer matrix
@@ -26,5 +31,5 @@ W08,src/app/services/inventory_transactions.py,reserve,134,22,208,working-tree c
 W09,src/app/services/fulfillment/person_approval.py,validate,93,25,134,working-tree changes or untracked prerequisite,5df9272bcbe033becdf22edc0e1bb8eeed853958533d840b115a66547dca41ad,complete approval/effect sink matrix
 W10,src/app/services/fulfillment/operator_recovery.py,resolve,23,32,54,working-tree changes or untracked prerequisite,3fb84fc402dfd2f2f724ec1aa542bb40f87a25d263b95301e5d1a21fadaa9cc6,"crash windows, reviewed recovery and restore/rollback"
 W11,src/app/services/citation_memory.py,get_trusted_claims,197,34,272,committed,e76b215d3b540e641008528ca39ffa97a95e4d7087e13c7517125267dfe95225,remaining runtime DDL/global table readiness ownership
-W12/W15,tests/owned_security_runtime.py,_owned_runtime,48,84,162,committed,370b37f44806e353f642a9d0aeb3a505bd4f8c635f4036dcc7b81cee8c9eb0e4,required profiles with isolated processes and persisted detection
+W12/W15,tests/owned_security_runtime.py,_owned_runtime,61,88,179,committed,27b85fd81d3df1264ee0d466b218023f5ba9173069f0b22b30e07132e4911f72,required profiles with isolated processes and persisted detection
 W13/W15,tests/conftest.py,_restore_db_engine,825,102,1060,committed,897c1c5ab200aaccae26478e3d507e9d57845b2d4dc100bf0a61316f21aa2e0c,full-run resource validation; not production endurance proof

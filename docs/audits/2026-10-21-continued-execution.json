@@ -1,8 +1,14 @@
 {
-  "recorded_at": "2026-10-20T17:28:40.014931+00:00",
-  "checkpoint_head": "7d46bfa2af83594861a272ea104aa49e74170647",
+  "recorded_at": "2026-10-20T18:37:42.901609+00:00",
+  "checkpoint_head": "00515e0eee16749a3bf96d83d9d7cfed7915c45a",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "00515e0e Add a reproducible image security gate with owned process and resource cleanup",
+    "609f5f91 Inventory all 246 skipped diagnostic cases and their remaining execution requirements",
+    "ba86d9e9 Bind cached image analysis to tenant, case context and detector policy",
+    "afb3e498 Execute required image profiles on migrated data and the real owned storefront",
+    "d9b2dcdc Require owned red-team outcomes and strip inherited message connector credentials",
+    "91d87ac9 Refresh roadmap with reconciled broad coverage and contract, schema, replay repairs",
     "7d46bfa2 Atomically reserve signed webhook deliveries and block unavailable replay checks",
     "a2d68053 Bind selected case contracts through evidence compilation and catalog use",
     "f6b7573f db: integrate migration chain and preflight protected rollback",
@@ -69,31 +75,31 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 62,
-      "insertions": 2708,
-      "deletions": 920
+      "files": 64,
+      "insertions": 2768,
+      "deletions": 929
     },
     "tests": {
-      "files": 105,
-      "insertions": 5067,
-      "deletions": 926
+      "files": 111,
+      "insertions": 5558,
+      "deletions": 1159
     },
     "frontend": {
-      "files": 15,
-      "insertions": 76,
-      "deletions": 14
+      "files": 16,
+      "insertions": 78,
+      "deletions": 15
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T17:28:29.190688+00:00",
-    "head": "7d46bfa2af83594861a272ea104aa49e74170647",
+    "recorded_at": "2026-10-20T18:36:19.664286+00:00",
+    "head": "00515e0eee16749a3bf96d83d9d7cfed7915c45a",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 523,
-    "tracked_changed": 261,
+    "git_status_entries": 522,
+    "tracked_changed": 260,
     "untracked": 262,
     "staged": 0,
-    "files": 5687,
-    "text_lines": 976233,
+    "files": 5691,
+    "text_lines": 976704,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -194,28 +200,83 @@
       "requirements": 8,
       "response.json": 1,
       "runs": 1,
-      "scripts": 282,
+      "scripts": 283,
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1322,
+      "src": 1323,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1531,
+      "tests": 1533,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19342,
+    "functions": 19376,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5590,
     "swallowed_production_handlers": 2032,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W12/W15",
+      "path": "scripts/run_image_security_profile.py",
+      "symbol": "run",
+      "line": 28,
+      "function_lines": 121,
+      "file_lines": 154,
+      "git_state": "committed",
+      "sha256": "df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08",
+      "remaining": "promotion into complete CI/deployment gates and remaining live/model profiles"
+    },
+    {
+      "work_package": "W07/W11",
+      "path": "src/app/services/cv_analysis_cache.py",
+      "symbol": "analysis_namespace",
+      "line": 10,
+      "function_lines": 11,
+      "file_lines": 39,
+      "git_state": "committed",
+      "sha256": "6721294f2aefd64399f582c0b8329213dcb59b9dfb401ebefa6e01c8357aec83",
+      "remaining": "all-plane erasure and wider provider/model provenance policies"
+    },
+    {
+      "work_package": "W03/W07",
+      "path": "src/app/services/cv_tier2_pipeline.py",
+      "symbol": "run_tier2",
+      "line": 473,
+      "function_lines": 33,
+      "file_lines": 1154,
+      "git_state": "committed",
+      "sha256": "63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e",
+      "remaining": "remaining image/case recovery, large-image and live-model profiles"
+    },
+    {
+      "work_package": "W01/W12",
+      "path": "tests/pw/conftest.py",
+      "symbol": "test_server",
+      "line": 56,
+      "function_lines": 203,
+      "file_lines": 302,
+      "git_state": "committed",
+      "sha256": "34979e1bd19adc55dbdcdbd96ec4da1a784648c0e385b9ec6f19b3bd4ee65aae",
+      "remaining": "remaining environment/thread cleanup and broader browser prerequisites"
+    },
+    {
+      "work_package": "W12",
+      "path": "tests/pw/test_vision_upload_perf.py",
+      "symbol": "vision_ui",
+      "line": 177,
+      "function_lines": 57,
+      "file_lines": 297,
+      "git_state": "committed",
+      "sha256": "0b257a98c5252fcba8e8be8d36c433b5be284026d653fed3ea38878457707253",
+      "remaining": "remaining full browser, real-model and service profiles"
+    },
     {
       "work_package": "W10",
       "path": "alembic/env.py",
@@ -517,11 +578,11 @@
       "work_package": "W12/W15",
       "path": "tests/owned_security_runtime.py",
       "symbol": "_owned_runtime",
-      "line": 48,
-      "function_lines": 84,
-      "file_lines": 162,
+      "line": 61,
+      "function_lines": 88,
+      "file_lines": 179,
       "git_state": "committed",
-      "sha256": "370b37f44806e353f642a9d0aeb3a505bd4f8c635f4036dcc7b81cee8c9eb0e4",
+      "sha256": "27b85fd81d3df1264ee0d466b218023f5ba9173069f0b22b30e07132e4911f72",
       "remaining": "required profiles with isolated processes and persisted detection"
     },
     {
@@ -1326,6 +1387,188 @@
       "commercial_effects": "sandbox/disabled",
       "counts": {
         "tests": 41,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "durable-image-profile": {
+      "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
+      "exit_code": 0,
+      "counts": {
+        "tests": 67,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "resource_violation": null,
+      "peaks": {
+        "process_rss_bytes": 399380480,
+        "process_handles_or_fds": 1860
+      },
+      "elapsed_seconds": 100.469,
+      "changed_profile_inputs": [],
+      "profile_input_sha256": {
+        "scripts/run_image_security_profile.py": "df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08",
+        "tests/image_security_fixtures.py": "a3231de1d936c84b37b7e90c4ddabdb4727bdd61af0da816512ce72c86f225e0",
+        "tests/pw/conftest.py": "80d378e268c2f583ba342a2bb5e36d17962098b19bff1966bde1f7d4f545f52c",
+        "tests/pw/test_vision_upload_perf.py": "0331632ada9300cf4d0571891d3bc4806d787382dd2fbdbd2e398cced0bed22e",
+        "tests/pw/test_steg_image_assessment.py": "4bc80101f44c9506f3a2fca89db476c6c487e08a385350e6ce189bcf2710f598",
+        "src/app/services/cv_tier2_pipeline.py": "79607590052bb7944169bbc31f2b4ec11740fc13e66e7225690cef834ef2228d",
+        "src/app/services/cv_analysis_cache.py": "89e11f00891e57ade97f119b3c7e8f232ce15f015aa3675440ea1dc3350a7739",
+        "frontend/vite.config.ts": "639d42043e27ccb6a8a8cb7ce4deb7966af906d7b8d06c675fb3e62ddf13f101",
+        "frontend/package-lock.json": "d83684bcacb3446098e1eb433436bd4e364aa2981f5f10aec461cbffd8f36a4f"
+      },
+      "owned_surviving_pids": [],
+      "model_profile": "CPU/offline deterministic inputs; real-model certification is separate",
+      "policy_gate_bypass": false,
+      "tolerant_get_errors": false,
+      "green": true
+    },
+    "durable-runtime-compatibility": {
+      "receipt_sha256": "b5f3d84de69165fac411689bd9e6d9cdc499f92601d9a802445beeffe105a08f",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_durable_runtime_compatibility.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\durable-image-profile-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 45.11,
+      "peaks": {
+        "rss_bytes": 273104896,
+        "handles": 1289,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "redteam-required-verified": {
+      "receipt_sha256": "298c5ca93ef86ac7cee2120c9a9b0b9f2ba37e22270d571cd0dbb33c9d61e7de",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_redteam_required_verified.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\redteam-owned-contract-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 47.328,
+      "peaks": {
+        "rss_bytes": 273997824,
+        "handles": 1289,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "image-security-full-required": {
+      "receipt_sha256": "23e4845998dcada7d0ffd79aef1b6017d0c9bdd0e7e4d5205ba175205f73b004",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_image_security_full_required.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\image-security-required-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 89.656,
+      "peaks": {
+        "rss_bytes": 382914560,
+        "handles": 1859,
+        "threads": 91
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 66,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "image-frontend-validation": {
+      "receipt_sha256": "35355706d0cf7082e947c429672072c381c6f170aff643a2783af5c9f617f655",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_image_frontend_validation.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 7.5,
+      "peaks": {
+        "rss_bytes": 515112960,
+        "handles": 221,
+        "threads": 12
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "tier2-context-verified": {
+      "receipt_sha256": "a4c4b9802cc0f50f631ea27eb9947f17b579063e5cb452a804a359e3c7d2718b",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_cv_tier2_cache_context.py",
+        "tests/services/test_vision_cache.py",
+        "tests/cv/test_cv_tier2_ocr_ladder.py",
+        "tests/test_cv_security_matrix_agents.py",
+        "tests/api/test_cv_security_decoupling.py",
+        "tests/security/test_steg_extraction_coverage.py",
+        "tests/security/test_steg_detector_enhanced.py",
+        "tests/security/test_steg_detector_dct.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\tier2-context-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 40.406,
+      "peaks": {
+        "rss_bytes": 441221120,
+        "handles": 1245,
+        "threads": 58
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 60,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "tier2-context-full-required": {
+      "receipt_sha256": "77e6748f10a628e18d338cf31abea76347642a28412126d0758f31ba0c14ce02",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_tier2_context_full.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 97.859,
+      "peaks": {
+        "rss_bytes": 400318464,
+        "handles": 1856,
+        "threads": 91
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 67,
         "failures": 0,
         "errors": 0,
         "skipped": 0
@@ -2536,7 +2779,7 @@
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.171,
+    "seconds": 0.11,
     "findings": 0,
     "stderr": ""
   },
@@ -5195,14 +5438,1122 @@
     }
   },
   "cart_instrumented_linux_root": {
-    "reported_phases": 368,
+    "reported_phases": 1091,
     "outcomes": {
-      "passed": 338,
-      "skipped": 30
+      "passed": 1057,
+      "skipped": 34
     },
     "failed_tests": [],
-    "state": "running",
-    "receipt": null,
+    "state": "finished",
+    "receipt": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 559.636,
+      "resource_violation": null,
+      "peaks": {
+        "process_rss_bytes": 462323712,
+        "process_fds": 28,
+        "process_threads": 13
+      },
+      "source_fingerprint": "ecabfd5af71a4d363ca1ca1565a08009291a7e795271a47a518b3d35e4bb804b",
+      "source_changes_in_disposable_copy": []
+    },
     "assessment": "Same older frozen v5 source with SQL engine/connection instrumentation. A pass without a causal repair does not close an intermittent failure."
+  },
+  "required_opt_in_profiles": {
+    "scope": "Later owned repair candidates; historical v4 outcomes remain unchanged; final fully integrated source gates are separate",
+    "red_team": {
+      "receipt_sha256": "298c5ca93ef86ac7cee2120c9a9b0b9f2ba37e22270d571cd0dbb33c9d61e7de",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_redteam_required_verified.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\redteam-owned-contract-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 47.328,
+      "peaks": {
+        "rss_bytes": 273997824,
+        "handles": 1289,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "webhook_signature_and_timestamp": {
+      "complete": true,
+      "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+      "corrected": {
+        "exit_code": 0,
+        "counts": {
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "unrelated_canary_retained": true,
+        "remaining_test_namespace_keys": 0
+      },
+      "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "actual_redis_ping": true,
+      "exact_signed_bytes": true,
+      "private_namespace_cleanup": true,
+      "wrong_signature_and_replay_and_timestamp_controls": true,
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 20.531
+    },
+    "image_api_detectors_and_react_before_cache_fix": {
+      "receipt_sha256": "23e4845998dcada7d0ffd79aef1b6017d0c9bdd0e7e4d5205ba175205f73b004",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_image_security_full_required.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\image-security-required-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 89.656,
+      "peaks": {
+        "rss_bytes": 382914560,
+        "handles": 1859,
+        "threads": 91
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 66,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "image_api_detectors_and_react_after_cache_fix": {
+      "receipt_sha256": "77e6748f10a628e18d338cf31abea76347642a28412126d0758f31ba0c14ce02",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_tier2_context_full.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 97.859,
+      "peaks": {
+        "rss_bytes": 400318464,
+        "handles": 1856,
+        "threads": 91
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 67,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "image_cache_context": {
+    "files": [
+      {
+        "path": "src/app/services/cv_tier2_pipeline.py",
+        "sha256": "63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e"
+      },
+      {
+        "path": "src/app/services/cv_analysis_cache.py",
+        "sha256": "6721294f2aefd64399f582c0b8329213dcb59b9dfb401ebefa6e01c8357aec83"
+      },
+      {
+        "path": "tests/services/test_cv_tier2_cache_context.py",
+        "sha256": "59af98d33304ac22cadc32af6346f6ba60126ea4cd77da30aaf78c973669e73e"
+      },
+      {
+        "path": "tests/pw/test_steg_image_assessment.py",
+        "sha256": "64f45c0493e87aca11f00930fa827c3773cf74331462cf073ee99358e784df8a"
+      }
+    ],
+    "unit": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_cv_tier2_cache_context.py",
+        "tests/services/test_vision_cache.py",
+        "tests/cv/test_cv_tier2_ocr_ladder.py",
+        "tests/test_cv_security_matrix_agents.py",
+        "tests/api/test_cv_security_decoupling.py",
+        "tests/security/test_steg_extraction_coverage.py",
+        "tests/security/test_steg_detector_enhanced.py",
+        "tests/security/test_steg_detector_dct.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\tier2-context-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 40.406,
+      "peaks": {
+        "rss_bytes": 441221120,
+        "handles": 1245,
+        "threads": 58
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 60,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "native": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_tier2_context_full.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 97.859,
+      "peaks": {
+        "rss_bytes": 400318464,
+        "handles": 1856,
+        "threads": 91
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 67,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "ownership": {
+      "base_head": "afb3e4988f5dd17b97f454c819be8730dd1d0865",
+      "fingerprint": "d0e54a35694514cf4ea16fe96e8d1dc5dca25bf64414f02052631d57c731a980",
+      "protected_files": 5440,
+      "changed_files": [],
+      "test_exit_code": 0
+    },
+    "analysis_implementation_ast_unchanged": true,
+    "negative_control_receipts": {
+      "tier2-context-red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_cv_tier2_cache_context.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\tier2-context-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 20.563,
+        "peaks": {
+          "rss_bytes": 269811712,
+          "handles": 889,
+          "threads": 29
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 9,
+          "failures": 8,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "tier2-context-expanded-red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_cv_tier2_cache_context.py::test_pack_definition_change_forces_fresh_analysis",
+          "tests/services/test_cv_tier2_cache_context.py::test_unsupported_context_bypasses_cache_without_changing_analysis",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\tier2-context-expanded-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 11.718,
+        "peaks": {
+          "rss_bytes": 264409088,
+          "handles": 881,
+          "threads": 27
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 2,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "tier2-context-epoch-red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_cv_tier2_cache_context.py::test_configuration_changed_during_analysis_is_not_cached_under_the_old_context",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\tier2-context-epoch-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-context-epoch-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 18.297,
+        "peaks": {
+          "rss_bytes": 269787136,
+          "handles": 877,
+          "threads": 29
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "tier2-http-equivalent-red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_tier2_http_equivalent_red.py"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-http-binding-red-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 23.235,
+        "peaks": {
+          "rss_bytes": 356159488,
+          "handles": 1490,
+          "threads": 85
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "tier2-http-binding-red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_tier2_http_binding_red.py"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\tier2-http-binding-red-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 40.781,
+        "peaks": {
+          "rss_bytes": 366252032,
+          "handles": 1490,
+          "threads": 89
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      }
+    },
+    "negative_control_notes": "Initial seven API checks passed; the dedicated equal-input/different-case pair then reproduced the actual HTTP wrong-case failure. Focused reds and the intermediate policy-change red are retained separately."
+  },
+  "skip_ledger": {
+    "source": "partitioned v4, 591f4e1d",
+    "skipped_test_ids": 246,
+    "normalized_reason_groups": 63,
+    "later_executed_ids": 5,
+    "unchanged_history": true,
+    "collection_skipped_modules_are_separate": true,
+    "archived_v1": 21,
+    "disabled_standard_playwright": 86,
+    "disabled_live_playwright": 3,
+    "path": "docs/audits/2026-10-21-required-profile-skip-ledger.csv",
+    "normalized_reasons": {
+      "total": 246,
+      "groups": [
+        {
+          "reason": "Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)",
+          "count": 86,
+          "tests": [
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a high school student looking for a laptop-high_school]",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[engineering student who needs AutoCAD and SolidWorks-engineering_student]",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I train ML models with PyTorch on large datasets-ai_ml_workstation]",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a content creator doing 4K video editing in Premiere Pro-content_creator]",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[corporate laptop for Microsoft Teams and Excel presentations-corporate]",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[university student for assignments and lectures-student]",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-applied-applied the change to your cart]",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-stale_cart-cart changed since I proposed that]",
+            "tests/pw/test_admin_bi_security_trend_panels.py::test_admin_bi_panels_render_security_matrix_and_decision_replay[chromium]",
+            "tests/pw/test_admin_dashboards.py::test_admin_ragas_dashboards_links_present[chromium]",
+            "tests/pw/test_admin_escalations_matrix_gate_ui.py::test_escalations_shows_matrix_gate_error_on_409[chromium]",
+            "tests/pw/test_answer_first_parity.py::test_widget_results_match_backend[chromium]",
+            "tests/pw/test_answer_first_parity.py::test_widget_no_results_is_graceful_not_blank[chromium]",
+            "tests/pw/test_decision_trace_e2e.py::test_decision_trace_modal_and_trace_api[chromium]",
+            "tests/pw/test_decision_trace_modal.py::test_decision_trace_gear_modal[chromium]",
+            "tests/pw/test_decision_trace_nlp_panels.py::test_decision_trace_nlp_panels[chromium]",
+            "tests/pw/test_decision_trace_timeline.py::test_timeline_renders_events[chromium]",
+            "tests/pw/test_decision_trace_timeline.py::test_event_drilldown[chromium]",
+            "tests/pw/test_email_lab_security_matrix_flow.py::test_email_lab_analyze_populates_trace_and_security_matrix[chromium]",
+            "tests/pw/test_followup_chips.py::test_followup_chips_render_and_are_clickable[chromium]",
+            "tests/pw/test_followup_chips_e2e.py::test_followup_chips_e2e[chromium]",
+            "tests/pw/test_forensics_ui_placeholder.py::test_forensics_ui_route[chromium]",
+            "tests/pw/test_product_detail.py::test_product_detail_not_found[chromium]",
+            "tests/pw/test_recommend_playwright_e2e.py::test_storefront_search_triggers_recommend[chromium]",
+            "tests/pw/test_right_panel_and_comparison.py::test_right_side_panel_grid_and_comparison[chromium]",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_chat_with_admin_click_path_opens_escalation_room[chromium]",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_two_browser_buyer_and_authenticated_staff_exchange_messages[chromium]",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_rotated_staff_token_is_rejected_and_new_token_uses_sse[chromium]",
+            "tests/pw/test_storefront_frontend_smoke.py::test_storefront_shows_assistant_not_admin[chromium]",
+            "tests/pw/test_trace_sse_policy_gate.py::test_trace_id_and_sse_events[chromium]",
+            "tests/pw/test_trace_sse_policy_gate.py::test_policy_gate_logged_and_visible[chromium]",
+            "tests/pw/test_vision_triage_e2e.py::test_vision_triage_image_upload[chromium]",
+            "tests/pw/test_widget_interactions.py::test_widget_opens_and_queries[chromium]",
+            "tests/pw/test_cv_escalation_rules.py::test_cv_escalation_rules_create_ticket",
+            "tests/pw/test_cv_upload_escalation.py::test_cv_upload_triggers_escalation_and_ticket",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_cv_analyze_msi_qr",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_vision_triage_msi_qr",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_chat_query_with_msi_image",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_cv_analyze_apple_not_laptop",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_vision_triage_apple",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_complaint_triage_apple_not_in_catalog",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_cv_analyze_cracked_mac",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_submit_complaint_cracked_mac",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_case_status_after_submit",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_add_images_to_existing_case",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_chat_query_damaged_return",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_support_answer_bsod_query",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_complaint_triage_bsod_technical",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_cv_analyze_bsod_image",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_chat_query_bsod_with_image",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_low_fraud_legitimate_return",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_high_fraud_chargeback_threat",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_submit_complaint_with_cracked_mac_order",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_guest_submit_with_apple_as_receipt",
+            "tests/pw/test_demo_e2e_clickthrough.py::TestBrowserDemoClickthrough::test_browser_skipped",
+            "tests/pw/test_followup_budget_envelope.py::test_exact_followup_keeps_budget_and_result_envelope",
+            "tests/pw/test_nlp_contract_fixture.py::test_deterministic_fixture_basic",
+            "tests/pw/test_persona_budget_quality.py::test_budget_max_hard_cap_no_over_products",
+            "tests/pw/test_persona_budget_quality.py::test_budget_max_strict_filter_text_only",
+            "tests/pw/test_persona_budget_quality.py::test_high_school_routes_correctly_not_university_general",
+            "tests/pw/test_persona_budget_quality.py::test_llm_response_no_technical_token_leakage",
+            "tests/pw/test_persona_budget_quality.py::test_llm_response_no_think_block_leak",
+            "tests/pw/test_persona_budget_quality.py::test_budget_question_gets_llm_response",
+            "tests/pw/test_persona_budget_quality.py::test_security_flagged_image_does_not_500",
+            "tests/pw/test_persona_budget_quality.py::test_recommend_with_flagged_image_still_returns_products",
+            "tests/pw/test_persona_budget_quality.py::test_truly_open_ended_query_triggers_nqe",
+            "tests/pw/test_persona_budget_quality.py::test_persona_query_does_not_trigger_nqe_gate_early_return",
+            "tests/pw/test_recommend_spec_price_trace.py::test_recommend_price_and_spec_filters_api",
+            "tests/pw/test_recommend_spec_price_trace.py::test_decision_trace_followup",
+            "tests/pw/test_recommend_spec_price_trace.py::test_security_escalation_on_pci_query",
+            "tests/pw/test_sec_files_e2e.py::TestStegImages::test_clean_1x1_does_not_fire",
+            "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_wire_transfer_pdf_bec_detection",
+            "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_xlsm_macro_lolbin_detection",
+            "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_vba_source_prompt_injection_and_lolbin",
+            "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_multi_attachment_combined_severity",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_registry_returns_15_agents",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_risk_tier_filter",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_violation_counts_flag",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_single_agent_lookup",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_unknown_agent_returns_404",
+            "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_each_agent_has_required_fields",
+            "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_email_evaluate_warm_path_latency",
+            "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_cv_analyze_single_image_latency",
+            "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_maestro_boundaries_latency",
+            "tests/pw/test_sec_files_e2e.py::TestBrowserSecFilesE2E::test_browser_skipped",
+            "tests/pw/test_storefront_chat_with_admin_flow.py::test_revoked_and_expired_staff_tokens_are_rejected"
+          ]
+        },
+        {
+          "reason": "Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites",
+          "count": 21,
+          "tests": [
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I'm a university student looking for a laptop for assignments-student]",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need a laptop for gaming, playing Valorant and Fortnite-gamer]",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[looking for a work from home setup, need Teams and Outlook-corporate]",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I do video editing on Premiere Pro and DaVinci Resolve-creative]",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need something lightweight for travel and commuting-traveler]",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_labels_set_brand_constraint",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_cv_signals_populate_security_payload",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_qr_detected_triggers_reupload",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_payload_structure_on_benign_query",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_matrix_includes_cv_signals_when_image_provided",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_budget_question_for_vague_query",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_use_case_question",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_questions_have_options",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_selection_applies_budget_constraint",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_low_confidence_persona_triggers_use_case_fallback",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestMultiTurnNQE::test_budget_persists_across_turns",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_cv_analyze_returns_case_id_and_analysis",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_macbook_qr_image_triggers_security_signal",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_clean_apple_mac_image_benign",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_lenovo_image_labels_feed_recommend",
+            "tests/test_cv_nqe_security_matrix_e2e.py::TestQuestionPlanContract::test_question_plan_always_present"
+          ]
+        },
+        {
+          "reason": "Skipped: TEST_POSTGRES_URL is required",
+          "count": 11,
+          "tests": [
+            "tests/chaos/test_effect_sink_postgres.py::test_concurrent_purchase_order_dispatch_has_one_provider_effect",
+            "tests/chaos/test_effect_sink_postgres.py::test_refund_permit_revocation_and_unbound_legacy_fail_closed",
+            "tests/chaos/test_effect_sink_postgres.py::test_refund_payload_changed_between_read_and_claim_cannot_dispatch",
+            "tests/chaos/test_effect_sink_postgres.py::test_concurrent_outbound_workers_transmit_once",
+            "tests/chaos/test_effect_sink_postgres.py::test_concurrent_refund_completion_is_exact_and_replay_safe",
+            "tests/chaos/test_effect_sink_postgres.py::test_duplicate_refund_jobs_cannot_double_append_ledger",
+            "tests/chaos/test_release_integrity_postgres.py::test_dmarc_postgres_ownership_and_weighted_summary",
+            "tests/chaos/test_release_integrity_postgres.py::test_transaction_tenant_binding_survives_commit_and_pool_reuse",
+            "tests/chaos/test_release_integrity_postgres.py::test_category_cap_serializes_across_internal_commits",
+            "tests/chaos/test_release_integrity_postgres.py::test_actual_evaluation_migration_preserves_legacy_scores_as_unverified",
+            "tests/chaos/test_release_integrity_postgres.py::test_audit_recovery_replays_crash_after_durable_decision_once"
+          ]
+        },
+        {
+          "reason": "Skipped: live model acceptance not explicitly enabled",
+          "count": 10,
+          "tests": [
+            "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[fit_conflict-i need something for training llm models, is 3500 enough? if i go higher what then?]",
+            "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[knowledge-what's the real difference between an 8gb and 16gb gpu for AI work?]",
+            "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[game_fit-gaming laptop for valorant under 1900]",
+            "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[payment-i want to spend around 25000 on machines for my team \\u2014 do you offer payment plans?]",
+            "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[budget_yn-is 1800 enough for gaming?]",
+            "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[off_catalog-i need 5 rack-mount GPU servers with A100s, budget 80k]",
+            "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[contradiction-i need 12 dell laptops and a monitor and 2 headsets under 1500 total]",
+            "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[ai_honesty-i want to fine tune a 7b model locally under 2500]",
+            "tests/acceptance/test_swap_rate_battery.py::test_off_catalog_returns_no_laptops",
+            "tests/acceptance/test_swap_rate_battery.py::test_ai_query_returns_no_accessory_noise"
+          ]
+        },
+        {
+          "reason": "Skipped: live acceptance not explicitly enabled",
+          "count": 9,
+          "tests": [
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[photoshop and video editing laptop under 1600-gm-ps]",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[unity game development laptop under 2000-gm-unity]",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[stable diffusion image generation laptop under 1900-gm-sd]",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[i want to fine tune a 7b model locally under 2500-gm-ft]",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[gaming and school laptop under 1500-gm-hybrid]",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_carries_requirements_even_on_clarify",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_verdicts_on_product_turn",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_a100_never_sells_laptops",
+            "tests/acceptance/test_golden_workload_matrix.py::test_golden_finetune_never_sells_pharmacy"
+          ]
+        },
+        {
+          "reason": "Skipped: separately owned Redis required",
+          "count": 6,
+          "tests": [
+            "tests/integration/test_owned_redis_semantic_scope.py::test_separate_instances_share_only_exact_scope_and_observe_erasure",
+            "tests/integration/test_owned_redis_semantic_scope.py::test_partitioned_worker_cannot_reveal_locally_retained_erased_value",
+            "tests/integration/test_owned_redis_semantic_scope.py::test_conversation_erasure_reaches_another_local_store",
+            "tests/integration/test_owned_redis_semantic_scope.py::test_failed_index_command_never_persists_an_orphan_conversation",
+            "tests/integration/test_owned_redis_semantic_scope.py::test_concurrent_writes_and_subject_erasure_leave_no_unindexed_values",
+            "tests/integration/test_owned_redis_semantic_scope.py::test_real_worker_processes_observe_erasure_through_partition_and_restart"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama not reachable at http://127.0.0.1:1",
+          "count": 6,
+          "tests": [
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_ollama_embed_returns_vector",
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_jailbreak_seeds_have_high_mutual_cosine",
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_benign_vs_jailbreak_cosine_gap",
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_semantic_variant_detected_with_ollama",
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_seed_cache_populated",
+            "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_50_benign_queries_false_positive_rate"
+          ]
+        },
+        {
+          "reason": "Skipped: macbook-1.png not found in dump/",
+          "count": 5,
+          "tests": [
+            "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_macbook1_returns_200",
+            "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_response_has_security_details",
+            "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_persists_trace_events",
+            "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_multi_image",
+            "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_returns_security_signals[macbook-1.png]"
+          ]
+        },
+        {
+          "reason": "Skipped: no reachable Redis (integration test)",
+          "count": 5,
+          "tests": [
+            "tests/services/test_recommendation_shadow_worker.py::test_real_stream_roundtrip_processed_acked_deleted",
+            "tests/services/test_recommendation_shadow_worker.py::test_real_crash_recovery_via_xautoclaim",
+            "tests/services/test_recommendation_shadow_worker.py::test_real_poison_dead_lettered",
+            "tests/services/test_recommendation_shadow_worker.py::test_real_malformed_dead_lettered",
+            "tests/services/test_recommendation_shadow_worker.py::test_real_two_consumers_split_work_no_double_process"
+          ]
+        },
+        {
+          "reason": "Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests",
+          "count": 5,
+          "tests": [
+            "tests/chaos/test_demand_allocation_concurrency_postgres.py::test_eight_simultaneous_allocators_cannot_exceed_atp",
+            "tests/chaos/test_money_concurrency_postgres.py::test_refund_slot_has_one_winner",
+            "tests/chaos/test_money_concurrency_postgres.py::test_inventory_release_credits_stock_once",
+            "tests/chaos/test_money_concurrency_postgres.py::test_cancel_and_mark_paid_cannot_both_win",
+            "tests/chaos/test_money_concurrency_postgres.py::test_concurrent_refund_workers_call_provider_once"
+          ]
+        },
+        {
+          "reason": "Skipped: numpy/Pillow not available",
+          "count": 4,
+          "tests": [
+            "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_high_entropy_image_flagged_suspicious",
+            "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_steg_explanations_present_when_suspicious",
+            "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_strict_threshold_suppresses_alert",
+            "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_loose_threshold_flags_borderline_image"
+          ]
+        },
+        {
+          "reason": "Skipped: Integration tests disabled. Set RUN_INTEGRATION=1 to enable.",
+          "count": 4,
+          "tests": [
+            "tests/integration/test_e2e.py::test_e2e_full_flow",
+            "tests/integration/test_e2e_full_flow_v2.py::test_e2e_customer_flow_with_orders_and_memory",
+            "tests/e2e/test_returns_wrong_image_e2e.py::test_returns_wrong_image_e2e",
+            "tests/e2e/test_returns_wrong_item_sku_e2e.py::test_returns_wrong_item_sku_mismatch_e2e"
+          ]
+        },
+        {
+          "reason": "Skipped: Replay detection requires Redis",
+          "count": 4,
+          "tests": [
+            "tests/webhooks/test_webhook_signature.py::test_webhook_signature_replay_detected_with_redis",
+            "tests/webhooks/test_webhook_signature.py::test_stripe_signature_replay",
+            "tests/webhooks/test_webhook_signature.py::test_github_signature_replay",
+            "tests/webhooks/test_webhook_signature.py::test_slack_signature_replay"
+          ]
+        },
+        {
+          "reason": "Skipped: Explicit owned Ollama runtime and enrolled models required",
+          "count": 3,
+          "tests": [
+            "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[llava]",
+            "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[qwen2.5-vl]",
+            "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[minicpm-v]"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama llava not available",
+          "count": 3,
+          "tests": [
+            "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_describes_image",
+            "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_diffusion_image_description",
+            "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_spectral_score_vs_llava_judgement"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama model 'llama3.2:3b' not available at http://127.0.0.1:1",
+          "count": 3,
+          "tests": [
+            "tests/security/test_model_theft_ollama_probe.py::test_ollama_generates_extraction_queries_caught_by_guard",
+            "tests/security/test_model_theft_ollama_probe.py::test_ollama_high_volume_probe_triggers_rate_limit",
+            "tests/security/test_model_theft_ollama_probe.py::test_ollama_benign_shopping_queries_pass"
+          ]
+        },
+        {
+          "reason": "Skipped: E2E_FRONTEND_URL not set",
+          "count": 3,
+          "tests": [
+            "tests/browser/test_filters_and_security.py::test_price_spec_query_not_security_blocked[chromium]",
+            "tests/browser/test_filters_and_security.py::test_pci_query_triggers_security_review[chromium]",
+            "tests/browser/test_trace_panel.py::test_trace_panel_opens[chromium]"
+          ]
+        },
+        {
+          "reason": "Skipped: backend not reachable",
+          "count": 3,
+          "tests": [
+            "tests/e2e/test_full_platform_e2e.py::test_image_upload_cv_pipeline",
+            "tests/e2e/test_full_platform_e2e.py::test_shopping_cart_and_upsell",
+            "tests/e2e/test_full_platform_e2e.py::test_platform_latency_budget"
+          ]
+        },
+        {
+          "reason": "Skipped: set GATE_PROCUREMENT=1 against a live stack",
+          "count": 3,
+          "tests": [
+            "tests/e2e/test_procurement_journey_playwright.py::test_full_governed_procurement_journey_api",
+            "tests/e2e/test_procurement_journey_playwright.py::test_fluid_sourcing_journey_api",
+            "tests/e2e/test_procurement_journey_playwright.py::test_buyer_storefront_renders_procurement_check"
+          ]
+        },
+        {
+          "reason": "Skipped: macbook-2.png not found in dump/",
+          "count": 2,
+          "tests": [
+            "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_returns_security_signals[macbook-2.png]",
+            "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_macbook2_returns_200"
+          ]
+        },
+        {
+          "reason": "Skipped: ms-texti.png missing in dump/test-cv",
+          "count": 2,
+          "tests": [
+            "tests/test_fixed_image_security_pack.py::test_fixed_pack_ms_texti_expected_signals",
+            "tests/test_fixed_image_security_pack.py::test_fixed_pack_recommend_route_consistency_for_ms_texti"
+          ]
+        },
+        {
+          "reason": "Skipped: Postgres/Timescale matrix requires postgres engine + ENABLE_DB_MATRIX=1",
+          "count": 2,
+          "tests": [
+            "tests/integration/test_db_postgres_timescale_matrix.py::test_postgres_source_of_truth_connectivity",
+            "tests/integration/test_db_postgres_timescale_matrix.py::test_timescale_extension_and_time_bucket_or_skip"
+          ]
+        },
+        {
+          "reason": "Skipped: steg test image not available",
+          "count": 2,
+          "tests": [
+            "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_known_steg_lolbin_image_flagged",
+            "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_known_steg_prompt_injection_image_flagged"
+          ]
+        },
+        {
+          "reason": "Skipped: frontend not reachable",
+          "count": 2,
+          "tests": [
+            "tests/e2e/test_full_platform_e2e.py::test_full_recommend_and_decision_trace_tabs",
+            "tests/e2e/test_full_platform_e2e.py::test_browser_recommend_to_cart_upsell"
+          ]
+        },
+        {
+          "reason": "Skipped: requires running backend and admin frontend",
+          "count": 2,
+          "tests": [
+            "tests/e2e/test_live_allocation_workbench.py::test_eight_buyer_pressure_wave_and_partial_recovery_are_visible",
+            "tests/e2e/test_procurement_malicious_reply_playwright.py::test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert"
+          ]
+        },
+        {
+          "reason": "Skipped: requires the running demo stack",
+          "count": 2,
+          "tests": [
+            "tests/e2e/test_live_policy_trace.py::test_policy_question_uses_typed_chat_and_projects_authority_boundaries",
+            "tests/e2e/test_live_procurement_closed_loop.py::test_exact_cart_line_amendment_requires_delivery_reconfirmation"
+          ]
+        },
+        {
+          "reason": "Skipped: live Playwright tests disabled (set LIVE_PLAYWRIGHT_TESTS=1)",
+          "count": 2,
+          "tests": [
+            "tests/e2e/test_storefront_playwright.py::test_decision_trace_populates_after_chat",
+            "tests/e2e/test_storefront_playwright.py::test_decision_trace_multimodal_tabs_regression"
+          ]
+        },
+        {
+          "reason": "Skipped: test image not present",
+          "count": 1,
+          "tests": [
+            "tests/api/test_cv_security_decoupling.py::test_qr_survives_vision_llm_timeout"
+          ]
+        },
+        {
+          "reason": "Skipped: fixture missing: dump/test-cv/Dell 15 DC15255.webp",
+          "count": 1,
+          "tests": [
+            "tests/services/test_image_downscale.py::test_real_fixtures_are_bounded"
+          ]
+        },
+        {
+          "reason": "Skipped: set RUN_LIVE_PUBLIC_SOURCE_TESTS=1 for official USGS protocol probe",
+          "count": 1,
+          "tests": [
+            "tests/services/test_public_market_source_fetch.py::test_live_usgs_mcs_official_sciencebase_protocol"
+          ]
+        },
+        {
+          "reason": "Skipped: no demo catalog: (sqlite3.OperationalError) unable to open database file\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+          "count": 1,
+          "tests": [
+            "tests/services/test_retrieval_scope_union.py::test_capability_query_retrieval_spans_host_union"
+          ]
+        },
+        {
+          "reason": "Skipped: not-fixed.png not found in dump/",
+          "count": 1,
+          "tests": [
+            "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_not_fixed_screenshot"
+          ]
+        },
+        {
+          "reason": "Skipped: macbook-1.png not found",
+          "count": 1,
+          "tests": [
+            "tests/test_cv_pipeline_integration.py::TestDecisionTraceRetrieval::test_decision_trace_endpoint"
+          ]
+        },
+        {
+          "reason": "Skipped: macbook-QR.png missing in dump/test-cv",
+          "count": 1,
+          "tests": [
+            "tests/test_fixed_image_security_pack.py::test_fixed_pack_macbook_qr_expected_signals"
+          ]
+        },
+        {
+          "reason": "Skipped: no frontend dist built \u2014 nothing to scan",
+          "count": 1,
+          "tests": [
+            "tests/test_no_bundled_demo_key.py::test_no_bundled_demo_key_in_dist"
+          ]
+        },
+        {
+          "reason": "Skipped: TEST_POSTGRES_URL (Postgres) required for the true order-transition race",
+          "count": 1,
+          "tests": [
+            "tests/chaos/test_money_concurrency_http.py::test_concurrent_order_transitions_one_winner_postgres"
+          ]
+        },
+        {
+          "reason": "Skipped: Celery test transport accepted unsigned task; header propagation not enforced in this runtime",
+          "count": 1,
+          "tests": [
+            "tests/integration/test_celery_task_signing_runtime.py::test_celery_runtime_rejects_unsigned_and_bad_signature"
+          ]
+        },
+        {
+          "reason": "Skipped: roadmap \u00a78 TODO: image-match shape needs a multipart upload fixture, not reachable via plain GET",
+          "count": 1,
+          "tests": [
+            "tests/integration/test_recommend_contract_stability.py::test_image_match_shape"
+          ]
+        },
+        {
+          "reason": "Skipped: roadmap \u00a78 TODO: security/Maestro block shape not reliably triggered by injection-text GET; needs policy-gate fixture",
+          "count": 1,
+          "tests": [
+            "tests/integration/test_recommend_contract_stability.py::test_security_block_shape"
+          ]
+        },
+        {
+          "reason": "Skipped: Heavy integration test (steg + QR on real attachments). Set PYTEST_FULL_INTEGRATION=1 to enable.",
+          "count": 1,
+          "tests": [
+            "tests/security/test_email_eval_matrix.py::test_email_eval_matrix_builds_expected_cases_when_fixtures_present"
+          ]
+        },
+        {
+          "reason": "Skipped: steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png not available",
+          "count": 1,
+          "tests": [
+            "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png-lolbin_command_sequence]"
+          ]
+        },
+        {
+          "reason": "Skipped: steg-prompt_injection_hidden-Dell_15_DC15255.png not available",
+          "count": 1,
+          "tests": [
+            "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-prompt_injection_hidden-Dell_15_DC15255.png-prompt_injection_hidden]"
+          ]
+        },
+        {
+          "reason": "Skipped: steg-c2_beacon_simulation-apple-mac.png not available",
+          "count": 1,
+          "tests": [
+            "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-c2_beacon_simulation-apple-mac.png-c2_beacon_pattern]"
+          ]
+        },
+        {
+          "reason": "Skipped: steg-data_exfiltration_instruction-lenovo-pro7 (1).png not available",
+          "count": 1,
+          "tests": [
+            "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-data_exfiltration_instruction-lenovo-pro7 (1).png-data_exfiltration_instruction]"
+          ]
+        },
+        {
+          "reason": "Skipped: explicit isolated PostgreSQL certificate required",
+          "count": 1,
+          "tests": [
+            "tests/certification/test_postgres_draft_boundary.py::test_explicit_sourcing_is_durable_idempotent_and_never_enqueues_dispatch"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama executable not found on expected path; skipping env check",
+          "count": 1,
+          "tests": [
+            "tests/cv/test_cv_provider_llava_available.py::test_ollama_llava_installed"
+          ]
+        },
+        {
+          "reason": "Skipped: CV certification not run: local licensed/real sample pack is absent; missing=['apple-mac.jpg', 'macbook-QR.png', 'lenovo-pro7.webp']",
+          "count": 1,
+          "tests": [
+            "tests/cv/test_cv_real_sample_pack_contract.py::test_cv_real_sample_pack_present_for_manual_certification"
+          ]
+        },
+        {
+          "reason": "Skipped: backend not reachable; skip gate-1",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_baseline_adaptation_off"
+          ]
+        },
+        {
+          "reason": "Skipped: set GATE1_INTEL_ON=1 against a HIPPOGRAPH_FEEDBACK_ENABLED deployment",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_market_intelligence_on"
+          ]
+        },
+        {
+          "reason": "Skipped: set GATE2_FULLSTACK=1 with API+DB+Redis+Celery up and signals seeded",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_adaptive_growth_playwright.py::test_gate2_finding_to_hippograph_to_narration_to_trace"
+          ]
+        },
+        {
+          "reason": "Skipped: set GATE3_LIVE_RANKING=1 against a RANKING_NUDGE_EXPERIMENT_ENABLED + live experiment",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_adaptive_growth_playwright.py::test_gate3_assignment_and_visible_ranking_delta"
+          ]
+        },
+        {
+          "reason": "Skipped: Manual run: requires local server",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_cv_upload_api.py::test_cv_upload_flow_api_noninteractive"
+          ]
+        },
+        {
+          "reason": "Skipped: Manual run: requires Playwright and running server",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_cv_upload_playwright.py::test_camera_ui_capture_and_upload"
+          ]
+        },
+        {
+          "reason": "Skipped: storefront not reachable; skip playwright e2e",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_storefront_playwright.py::test_storefront_playwright_basic"
+          ]
+        },
+        {
+          "reason": "Skipped: frontend not reachable; skip storefront shell smoke",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_storefront_playwright.py::test_frontend_storefront_shell_smoke"
+          ]
+        },
+        {
+          "reason": "Skipped: backend not reachable; skip contract trace test",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_storefront_playwright.py::test_decision_trace_contract"
+          ]
+        },
+        {
+          "reason": "Skipped: storefront not reachable; skip e2e check",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_storefront_playwright.py::test_storefront_http_fallback"
+          ]
+        },
+        {
+          "reason": "Skipped: UI not reachable: http://127.0.0.1:5173",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_storefront_upload_threshold_calibration_playwright.py::test_storefront_upload_threshold_calibration_playwright"
+          ]
+        },
+        {
+          "reason": "Skipped: live Playwright regression disabled; set LIVE_PLAYWRIGHT_TESTS=1",
+          "count": 1,
+          "tests": [
+            "tests/e2e/test_visual_fastpath_regression.py::test_compromised_images_render_products_trace_tabs_and_healthz"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama text model 'llama3:8b' not available; skipping",
+          "count": 1,
+          "tests": [
+            "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[llama3:8b]"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama text model 'mistral:latest' not available; skipping",
+          "count": 1,
+          "tests": [
+            "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[mistral:latest]"
+          ]
+        },
+        {
+          "reason": "Skipped: Ollama text model 'qwen2.5:latest' not available; skipping",
+          "count": 1,
+          "tests": [
+            "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[qwen2.5:latest]"
+          ]
+        },
+        {
+          "reason": "Skipped: got empty parameter set for (entry)",
+          "count": 1,
+          "tests": [
+            "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[NOTSET]"
+          ]
+        }
+      ]
+    }
+  },
+  "committed_delta_by_scope": {
+    "Application": {
+      "files": 64,
+      "added": 2768,
+      "removed": 929
+    },
+    "Tests": {
+      "files": 111,
+      "added": 5558,
+      "removed": 1159
+    },
+    "Frontend": {
+      "files": 16,
+      "added": 78,
+      "removed": 15
+    },
+    "Migrations": {
+      "files": 20,
+      "added": 523,
+      "removed": 1
+    },
+    "Scripts": {
+      "files": 4,
+      "added": 353,
+      "removed": 13
+    },
+    "Runtime/configuration": {
+      "files": 15,
+      "added": 2333,
+      "removed": 2441
+    },
+    "Documentation/other": {
+      "files": 12,
+      "added": 24666,
+      "removed": 0
+    }
+  },
+  "committed_delta_all": {
+    "files": 242,
+    "added": 36279,
+    "removed": 4558
+  },
+  "durable_image_gate": {
+    "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
+    "exit_code": 0,
+    "counts": {
+      "tests": 67,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "resource_violation": null,
+    "peaks": {
+      "process_rss_bytes": 399380480,
+      "process_handles_or_fds": 1860
+    },
+    "elapsed_seconds": 100.469,
+    "changed_profile_inputs": [],
+    "profile_input_sha256": {
+      "scripts/run_image_security_profile.py": "df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08",
+      "tests/image_security_fixtures.py": "a3231de1d936c84b37b7e90c4ddabdb4727bdd61af0da816512ce72c86f225e0",
+      "tests/pw/conftest.py": "80d378e268c2f583ba342a2bb5e36d17962098b19bff1966bde1f7d4f545f52c",
+      "tests/pw/test_vision_upload_perf.py": "0331632ada9300cf4d0571891d3bc4806d787382dd2fbdbd2e398cced0bed22e",
+      "tests/pw/test_steg_image_assessment.py": "4bc80101f44c9506f3a2fca89db476c6c487e08a385350e6ce189bcf2710f598",
+      "src/app/services/cv_tier2_pipeline.py": "79607590052bb7944169bbc31f2b4ec11740fc13e66e7225690cef834ef2228d",
+      "src/app/services/cv_analysis_cache.py": "89e11f00891e57ade97f119b3c7e8f232ce15f015aa3675440ea1dc3350a7739",
+      "frontend/vite.config.ts": "639d42043e27ccb6a8a8cb7ce4deb7966af906d7b8d06c675fb3e62ddf13f101",
+      "frontend/package-lock.json": "d83684bcacb3446098e1eb433436bd4e364aa2981f5f10aec461cbffd8f36a4f"
+    },
+    "owned_surviving_pids": [],
+    "model_profile": "CPU/offline deterministic inputs; real-model certification is separate",
+    "policy_gate_bypass": false,
+    "tolerant_get_errors": false,
+    "green": true
+  },
+  "durable_image_gate_tested_source": {
+    "files": [
+      {
+        "path": "scripts/run_image_security_profile.py",
+        "sha256": "df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08"
+      },
+      {
+        "path": "tests/owned_security_runtime.py",
+        "sha256": "27b85fd81d3df1264ee0d466b218023f5ba9173069f0b22b30e07132e4911f72"
+      }
+    ],
+    "image_profile": {
+      "exit_code": 0,
+      "counts": {
+        "tests": 67,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "resource_violation": null,
+      "peaks": {
+        "process_rss_bytes": 399380480,
+        "process_handles_or_fds": 1860
+      },
+      "elapsed_seconds": 100.469,
+      "changed_profile_inputs": [],
+      "profile_input_sha256": {
+        "scripts/run_image_security_profile.py": "df3b6fea8fe04f80a63eb21338a5364102808e97a16db96cac3db11485e8db08",
+        "tests/image_security_fixtures.py": "a3231de1d936c84b37b7e90c4ddabdb4727bdd61af0da816512ce72c86f225e0",
+        "tests/pw/conftest.py": "80d378e268c2f583ba342a2bb5e36d17962098b19bff1966bde1f7d4f545f52c",
+        "tests/pw/test_vision_upload_perf.py": "0331632ada9300cf4d0571891d3bc4806d787382dd2fbdbd2e398cced0bed22e",
+        "tests/pw/test_steg_image_assessment.py": "4bc80101f44c9506f3a2fca89db476c6c487e08a385350e6ce189bcf2710f598",
+        "src/app/services/cv_tier2_pipeline.py": "79607590052bb7944169bbc31f2b4ec11740fc13e66e7225690cef834ef2228d",
+        "src/app/services/cv_analysis_cache.py": "89e11f00891e57ade97f119b3c7e8f232ce15f015aa3675440ea1dc3350a7739",
+        "frontend/vite.config.ts": "639d42043e27ccb6a8a8cb7ce4deb7966af906d7b8d06c675fb3e62ddf13f101",
+        "frontend/package-lock.json": "d83684bcacb3446098e1eb433436bd4e364aa2981f5f10aec461cbffd8f36a4f"
+      },
+      "owned_surviving_pids": [],
+      "model_profile": "CPU/offline deterministic inputs; real-model certification is separate",
+      "policy_gate_bypass": false,
+      "tolerant_get_errors": false,
+      "green": true
+    },
+    "runtime_compatibility": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_durable_runtime_compatibility.py"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\durable-image-profile-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 45.11,
+      "peaks": {
+        "rss_bytes": 273104896,
+        "handles": 1289,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
   }
 }
