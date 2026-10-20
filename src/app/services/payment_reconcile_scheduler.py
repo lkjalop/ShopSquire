@@ -12,6 +12,7 @@ import os
 import threading
 
 from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from src.app.models.db import db_session
 
@@ -19,6 +20,7 @@ logger = logging.getLogger("shopsquire.payment_reconcile_scheduler")
 
 _STOP_ATTR = "payment_reconcile_scheduler_stop"
 _THREAD_ATTR = "payment_reconcile_scheduler_thread"
+_WORKER_LOCK = threading.RLock()
 
 
 def _enabled() -> bool:
@@ -33,7 +35,16 @@ def _interval_sec() -> float:
         return 60.0
 
 
-def run_once() -> int:
+def run_once(*, engine=None) -> int:
+    """Use one explicit owner throughout reconciliation and nested outbox handlers."""
+    if engine is None:
+        return _run_once()
+    from src.app.models.database_ownership import database_owner
+    with database_owner(engine):
+        return _run_once()
+
+
+def _run_once() -> int:
     """Reconcile durable payment work. Returns total repaired/drained. Never raises."""
     repaired = 0
     try:
@@ -83,33 +94,39 @@ def run_once() -> int:
 def start_payment_reconcile_scheduler(app=None):
     if not _enabled():
         return
-    stop_event = threading.Event()
+    with _WORKER_LOCK:
+        if app is None or not isinstance(getattr(app.state, 'engine', None), Engine):
+            raise RuntimeError('Payment reconciliation requires an application database owner')
+        existing = getattr(app.state, _THREAD_ATTR, None)
+        if existing is not None and existing.is_alive():
+            return
+        engine = app.state.engine
+        stop_event = threading.Event()
 
-    def _loop():
-        # one immediate pass on boot (repairs orphans from the previous run), then periodic.
-        while not stop_event.is_set():
-            try:
-                run_once()
-            except Exception as exc:
-                logger.warning("payment reconcile loop error: %s", repr(exc)[:120])
-            stop_event.wait(timeout=_interval_sec())
+        def _loop():
+            # An immediate pass repairs work left by the previous process.
+            while not stop_event.is_set():
+                try:
+                    run_once(engine=engine)
+                except Exception as exc:
+                    logger.warning("payment reconcile loop error: %s", repr(exc)[:120])
+                stop_event.wait(timeout=_interval_sec())
 
-    th = threading.Thread(target=_loop, daemon=True, name="payment-reconcile-scheduler")
-    th.start()
-    if app is not None:
+        th = threading.Thread(target=_loop, daemon=True, name="payment-reconcile-scheduler")
         setattr(app.state, _STOP_ATTR, stop_event)
         setattr(app.state, _THREAD_ATTR, th)
+        th.start()
 
 
 def stop_payment_reconcile_scheduler(app=None):
     if app is None:
         return
-    stop_event = getattr(app.state, _STOP_ATTR, None)
-    th = getattr(app.state, _THREAD_ATTR, None)
-    if stop_event is not None:
-        stop_event.set()
-    if th is not None:
-        try:
+    with _WORKER_LOCK:
+        stop_event = getattr(app.state, _STOP_ATTR, None)
+        th = getattr(app.state, _THREAD_ATTR, None)
+        if stop_event is not None:
+            stop_event.set()
+        if th is not None:
             th.join(timeout=5.0)
-        except Exception:
-            pass
+            if th.is_alive():
+                raise RuntimeError('Payment reconciliation worker did not stop')

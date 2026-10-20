@@ -1265,6 +1265,10 @@ def db_session():
                 eng = eng_req
     except Exception:
         eng = engine
+    from src.app.models.database_ownership import current_database_engine
+    owned_engine = current_database_engine()
+    if owned_engine is not None:
+        eng = owned_engine
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng, future=True)
     session = SessionLocal()
     from src.app.platform.tenant_session import bind_session_tenant
@@ -1398,7 +1402,9 @@ def db_session():
 def get_engine():
     # Return the module-level engine. Tests commonly monkeypatch this object;
     # auto-replacing from DATABASE_URL here can break request/session parity.
-    return engine
+    from src.app.models.database_ownership import current_database_engine
+    owned_engine = current_database_engine()
+    return owned_engine if owned_engine is not None else engine
 
 
 def get_db_for_request(request: Request | None = None):
@@ -1416,7 +1422,7 @@ def get_db_for_request(request: Request | None = None):
         eng = None
 
     if eng is None:
-        eng = globals().get("engine")
+        eng = get_engine()
     # If a request-specific engine exists, prefer creating a sessionmaker
     # bound to that engine to avoid reusing a global SessionLocal which may
     # be bound to a different engine from another test run.
