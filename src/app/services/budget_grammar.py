@@ -269,6 +269,26 @@ def _min_plausible_budget() -> int:
         return 50
 
 
+def is_budget_only_amendment(text: str) -> bool:
+    """A literal scalar amendment, not a purchase inferred from a parsed amount.
+
+    Only closed budget-edit syntax may restore prior subject authority during a
+    model outage. Any residual product, workload, quantity or unknown token makes
+    this abstain. Amount parsing remains exclusively owned by parse_budget.
+    """
+    parsed = parse_budget(text)
+    if parsed is None or parsed.source_span is None:
+        return False
+    start, end = parsed.source_span
+    remainder = str(text or "").lower()[:start] + " " + str(text or "").lower()[end:]
+    words = re.findall(r"\w+", remainder)
+    return all(word in {
+        "actually", "please", "budget", "is", "now", "make", "it", "that",
+        "the", "cut", "reduce", "increase", "change", "to", "at", "max",
+        "maximum", "only", "instead", "under", "up", "around", "about",
+    } for word in words)
+
+
 def parse_budget(text: str) -> Optional[BudgetParse]:
     """Parse ONE budget expression from free text. Ordered most-specific-first; every branch applies the
     spec-unit guard so "under 2 kg" / "16 gb" never becomes money. Returns None when nothing matches."""

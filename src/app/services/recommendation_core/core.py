@@ -328,7 +328,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # router incorrectly labels the turn as a switch or returns no node. This is a core
     # authorization invariant, not an intent heuristic: the canonical budget parser proves
     # the bounded constraint, and the prior node was already sellability-clamped.
-    if (decision.node_handle is None and decision.subject_action == "continue"
+    from src.app.services.budget_grammar import is_budget_only_amendment
+    if (decision.node_handle is None and (
+            decision.subject_action == "continue" or is_budget_only_amendment(envelope.query))
             and (envelope.session or {}).get("prior_node")):
         try:
             prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
