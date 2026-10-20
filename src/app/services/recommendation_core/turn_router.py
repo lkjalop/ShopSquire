@@ -1762,6 +1762,14 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     # this clamp: a refusal still requires sells_within()==False (clamp 4), and for SEARCH a
     # wrong-ish handle is only a retrieval hint. Candidates stay in the prompt as guidance.
     node = get_node(str(data.get("handle") or "").strip())
+    # A bounded answer to the owned performance question is stronger than a
+    # contradictory model switch. Literal replacement is excluded by the parser.
+    from src.app.services.recommendation_core.workload_refinement import workload_scale_relation
+    scale_relation = workload_scale_relation(envelope.buyer_query or envelope.query, pending)
+    scale_model_proposal = dict(data) if scale_relation else None
+    if scale_relation:
+        data = {**data, "subject_action": "continue", "clarification_relation": scale_relation}
+
     # SESSION CONSUMPTION (M3-C2): make multi-turn REAL. A CONTINUATION turn — the model
     # classified it FILTER/COMPARE/EXPLAIN (narrowing / comparing / asking-about, not a fresh
     # SEARCH) and named NO node of its own — is refining the PRIOR subject, so inherit the last
@@ -2600,7 +2608,7 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
         budget_scope=budget_scope,
         settlement_currency=envelope.currency,
     )
-    proposal = _bounded_model_proposal(data)
+    proposal = _bounded_model_proposal(scale_model_proposal or data)
     # The visible proposal uses the same accepted/completed projection as the
     # decision trace. Never re-project raw model patches without buyer grounding.
     proposal["case_patches"] = [dict(item) for item in case_patches]
