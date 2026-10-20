@@ -48,8 +48,6 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
     return not _is_non_dev_env(getattr(settings, "app_env", None))
 
 
-
-
 def _require_payment_execution(settings) -> None:
     if not _payment_execution_enabled(getattr(settings, "app_env", None)):
         raise HTTPException(status_code=503, detail="Payment execution is disabled by policy")
@@ -494,7 +492,11 @@ async def stripe_webhook(request: Request) -> Dict:
     flow can be exercised without Stripe configured.
     """
     payload_bytes = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
+    import asyncio
+    return await asyncio.to_thread(_process_stripe_webhook, payload_bytes, request.headers.get('stripe-signature', ''))
+
+
+def _process_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict:
     webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
 
     if webhook_secret:
