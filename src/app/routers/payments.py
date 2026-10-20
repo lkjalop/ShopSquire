@@ -17,6 +17,7 @@ from src.app.security.transaction_firewall import evaluate_transaction_firewall
 from src.app.security.client_ip import client_ip
 from src.app.policy.kill_switch import assert_autonomy_allowed
 from src.app.services.checkout_readiness import buyer_checkout_readiness
+from src.app.services.payment_execution_policy import payment_execution_enabled as _payment_execution_enabled
 
 _log = logging.getLogger("shopsquire.payments")
 
@@ -47,13 +48,6 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
     return not _is_non_dev_env(getattr(settings, "app_env", None))
 
 
-def _payment_execution_enabled(app_env: str | None = None) -> bool:
-    explicit = str(os.getenv("PAYMENT_EXECUTION_ENABLED", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return True
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    return not _is_non_dev_env(app_env)
 
 
 def _require_payment_execution(settings) -> None:
@@ -134,25 +128,25 @@ def providers_rollout_status(
         },
         {
             "provider": "paypal",
-            "enabled": bool((caps.get("paypal") or {}).get("enabled", False)),
-            "real_integration_ready": bool(settings.paypal_client_id and settings.paypal_client_secret),
-            "rollout_stage": "beta" if bool(settings.paypal_client_id and settings.paypal_client_secret) else "disabled",
+            "enabled": execution_enabled and bool((caps.get("paypal") or {}).get("enabled", False)),
+            "real_integration_ready": execution_enabled and bool(settings.paypal_client_id and settings.paypal_client_secret),
+            "rollout_stage": "beta" if execution_enabled and bool(settings.paypal_client_id and settings.paypal_client_secret) else "disabled",
         },
         {
             "provider": "revolut",
-            "enabled": bool((caps.get("revolut") or {}).get("enabled", False)),
+            "enabled": execution_enabled and bool((caps.get("revolut") or {}).get("enabled", False)),
             "real_integration_ready": False,
             "rollout_stage": "disabled",
         },
         {
             "provider": "googlepay",
-            "enabled": bool((caps.get("googlepay") or {}).get("enabled", False)),
+            "enabled": execution_enabled and bool((caps.get("googlepay") or {}).get("enabled", False)),
             "real_integration_ready": False,
             "rollout_stage": "disabled",
         },
         {
             "provider": "afterpay",
-            "enabled": bool((caps.get("afterpay") or {}).get("enabled", False)),
+            "enabled": execution_enabled and bool((caps.get("afterpay") or {}).get("enabled", False)),
             "real_integration_ready": False,
             "rollout_stage": "disabled",
         },

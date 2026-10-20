@@ -9,6 +9,7 @@ from src.app.observability.tracing import get_tracer
 from src.app.services.payments import PayPalClient
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
+from src.app.services.payment_execution_policy import PaymentExecutionDisabled, payment_execution_enabled
 
 router = APIRouter(prefix="/api/v1/payments/paypal", tags=["payments-paypal"])
 tracer = get_tracer("payments-paypal")
@@ -48,6 +49,8 @@ def create_intent(
             detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
             raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
         settings = get_settings()
+        if not payment_execution_enabled(settings.app_env):
+            raise HTTPException(status_code=503, detail="Payment execution is disabled by policy")
         if not settings.paypal_client_id or not settings.paypal_client_secret:
             raise HTTPException(status_code=503, detail="PayPal provider not configured")
         try:
@@ -62,5 +65,7 @@ def create_intent(
                 "pci_scope": "tokenized_provider_managed",
                 "card_data_stored": ["token", "last4", "provider_ref"],
             }
+        except PaymentExecutionDisabled as exc:
+            raise HTTPException(status_code=503, detail="Payment execution is disabled by policy") from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))

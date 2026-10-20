@@ -10,6 +10,7 @@ from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.observability.tracing import get_tracer
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
+from src.app.services.payment_execution_policy import payment_execution_enabled
 
 router = APIRouter(prefix="/api/v1/payments/revolut", tags=["payments-revolut"])
 tracer = get_tracer("payments-revolut")
@@ -48,6 +49,9 @@ def create_intent(
             code = 401 if risk.get("action") == "step_up_mfa" else 202
             detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
             raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
+        settings = get_settings()
+        if not payment_execution_enabled(settings.app_env):
+            raise HTTPException(status_code=503, detail="Payment execution is disabled by policy")
         base_url = os.getenv("REVOLUT_API_BASE_URL", "").strip()
         api_key = os.getenv("REVOLUT_API_KEY", "").strip()
         if not (base_url and api_key):
@@ -61,6 +65,8 @@ def create_intent(
         }
         try:
             with httpx.Client(timeout=10.0) as client:
+                if not payment_execution_enabled(settings.app_env):
+                    raise HTTPException(status_code=503, detail="Payment execution is disabled by policy")
                 resp = client.post(
                     f"{base_url.rstrip('/')}/intents",
                     json=payload,

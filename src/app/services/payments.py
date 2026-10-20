@@ -2,6 +2,7 @@ from typing import Dict, Optional
 
 from src.app.security.agent_events import AgentInteractionType, log_agent_security_event
 from src.app.security.supply_chain import SupplyChainMonitor
+from src.app.services.payment_execution_policy import require_payment_execution
 
 
 class StripeClient:
@@ -14,6 +15,7 @@ class StripeClient:
 
     def create_payment_intent(self, amount_cents: int, currency: str = "USD", metadata: Optional[Dict] = None,
                               idempotency_key: Optional[str] = None) -> Dict:
+        require_payment_execution()
         try:
             self.supply_chain.check_endpoint_integrity("stripe")
         except Exception:
@@ -21,6 +23,7 @@ class StripeClient:
         # idempotency_key (P0-1d): provider-level double-charge guard — a retry with the same key
         # returns the SAME intent from Stripe instead of minting a second one. Mirrors create_refund.
         kwargs: Dict = {"idempotency_key": idempotency_key} if idempotency_key else {}
+        require_payment_execution()
         intent = self.stripe.PaymentIntent.create(
             amount=int(amount_cents),
             currency=currency.lower(),
@@ -53,6 +56,7 @@ class StripeClient:
                       reason: Optional[str] = None, idempotency_key: Optional[str] = None) -> Dict:
         """Execute a refund against a PaymentIntent. amount_cents omitted → full refund. Idempotency
         key prevents a double refund on retry. Returns the normalized refund record."""
+        require_payment_execution()
         try:
             self.supply_chain.check_endpoint_integrity("stripe")
         except Exception:
@@ -63,6 +67,7 @@ class StripeClient:
         if reason in ("duplicate", "fraudulent", "requested_by_customer"):
             params["reason"] = reason
         kwargs: Dict = {"idempotency_key": idempotency_key} if idempotency_key else {}
+        require_payment_execution()
         refund = self.stripe.Refund.create(**params, **kwargs)
         try:
             log_agent_security_event(
@@ -98,6 +103,7 @@ class PayPalClient:
         self.supply_chain = SupplyChainMonitor()
 
     def create_order(self, amount_cents: int, currency: str = "USD", description: Optional[str] = None) -> Dict:
+        require_payment_execution()
         try:
             self.supply_chain.check_endpoint_integrity("paypal")
         except Exception:
@@ -116,6 +122,7 @@ class PayPalClient:
                 }
             ]
         })
+        require_payment_execution()
         resp = self.client.execute(req)
         result = resp.result
         try:
