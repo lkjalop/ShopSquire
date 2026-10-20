@@ -1,8 +1,12 @@
 {
-  "recorded_at": "2026-10-20T19:24:24.208076+00:00",
-  "checkpoint_head": "f714dc924d95fecc4cbe07f6711b1c87de111450",
+  "recorded_at": "2026-10-20T19:46:33.862484+00:00",
+  "checkpoint_head": "d4eb4de09e25d4f806d0d4c0e68b9fb4fe7f4210",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "d4eb4de0 Require usable native payment interfaces before reporting configured checkout readiness",
+    "81d15f21 Offload synchronous payment webhook transactions while preserving request database ownership",
+    "b30ce4d1 Enforce shared payment execution policy before HTTP and SDK provider dispatch",
+    "afeaab1a Record payment database isolation, refund authority races and remaining delivery boundaries",
     "f714dc92 Map refund PostgreSQL skip lineages to committed exact-effect concurrency controls",
     "0f9be939 Bind refund claims and completion to exact effects, receipts and current worker ownership",
     "bc10f677 Scope payment reconciliation and nested ledger work to their application database",
@@ -85,14 +89,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 74,
-      "insertions": 3426,
-      "deletions": 1153
+      "files": 82,
+      "insertions": 3540,
+      "deletions": 1177
     },
     "tests": {
-      "files": 124,
-      "insertions": 6806,
-      "deletions": 1227
+      "files": 129,
+      "insertions": 7170,
+      "deletions": 1228
     },
     "frontend": {
       "files": 16,
@@ -101,15 +105,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T19:23:42.320076+00:00",
-    "head": "f714dc924d95fecc4cbe07f6711b1c87de111450",
+    "recorded_at": "2026-10-20T19:44:54.307816+00:00",
+    "head": "d4eb4de09e25d4f806d0d4c0e68b9fb4fe7f4210",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 509,
-    "tracked_changed": 255,
-    "untracked": 254,
+    "git_status_entries": 498,
+    "tracked_changed": 247,
+    "untracked": 251,
     "staged": 0,
-    "files": 5698,
-    "text_lines": 977558,
+    "files": 5701,
+    "text_lines": 977832,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -214,24 +218,79 @@
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1325,
+      "src": 1326,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1538,
+      "tests": 1540,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19445,
+    "functions": 19465,
     "production_functions_over_200": 99,
-    "broad_production_handlers": 5588,
+    "broad_production_handlers": 5589,
     "swallowed_production_handlers": 2030,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W09/W11",
+      "path": "src/app/services/payment_execution_policy.py",
+      "symbol": "payment_execution_enabled",
+      "line": 9,
+      "function_lines": 8,
+      "file_lines": 22,
+      "git_state": "committed",
+      "sha256": "ff6c29204b99a6098832d04364acc265dc72db2aa5bfb88f8be030e9cfb77eb9",
+      "remaining": "complete deployment/context default matrix, all provider sinks and final unified gates"
+    },
+    {
+      "work_package": "W02/W09",
+      "path": "src/app/services/payment_provider_readiness.py",
+      "symbol": "payment_provider_available",
+      "line": 14,
+      "function_lines": 18,
+      "file_lines": 31,
+      "git_state": "committed",
+      "sha256": "81530c629c709482c69e6b307a723569ff98987c2eb7c113fc1c84118d1be841",
+      "remaining": "qualified native SDK installation, credentials and actual provider conformance"
+    },
+    {
+      "work_package": "W01/W10",
+      "path": "src/app/routers/payments.py",
+      "symbol": "_process_stripe_webhook",
+      "line": 505,
+      "function_lines": 66,
+      "file_lines": 922,
+      "git_state": "committed",
+      "sha256": "03721b861026b90be32befdb4bfe57e055ad563df515330df3f78fecea0cc6d2",
+      "remaining": "production signed profiles, admission/load and complete effect recovery"
+    },
+    {
+      "work_package": "W02/W09",
+      "path": "src/app/services/checkout_readiness.py",
+      "symbol": "buyer_checkout_readiness",
+      "line": 24,
+      "function_lines": 51,
+      "file_lines": 74,
+      "git_state": "committed",
+      "sha256": "6c0f36182ea5b4d8cb0c1b7b7437104a188f961828defe5e0364d9a665b96b3f",
+      "remaining": "native SDK deployment, actual provider qualification and all frontend availability states"
+    },
+    {
+      "work_package": "W02/W09",
+      "path": "src/app/routers/payments.py",
+      "symbol": "providers_rollout_status",
+      "line": 112,
+      "function_lines": 55,
+      "file_lines": 922,
+      "git_state": "committed",
+      "sha256": "03721b861026b90be32befdb4bfe57e055ad563df515330df3f78fecea0cc6d2",
+      "remaining": "installed runtime parity and real provider qualification; local interfaces are not live credential validation"
+    },
     {
       "work_package": "W01",
       "path": "src/app/models/database_ownership.py",
@@ -280,12 +339,12 @@
       "work_package": "W09/W10",
       "path": "src/app/routers/payments.py",
       "symbol": "refund_approve",
-      "line": 609,
+      "line": 615,
       "function_lines": 81,
-      "file_lines": 916,
-      "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "859d5d5abd8e8603013b9712bc1f89cf3c5aaa5b4c28e9e988b40b794c2d7a9d",
-      "remaining": "remaining shared provider execution-policy/offload WIP and independent person approval"
+      "file_lines": 922,
+      "git_state": "committed",
+      "sha256": "03721b861026b90be32befdb4bfe57e055ad563df515330df3f78fecea0cc6d2",
+      "remaining": "qualified native provider dependencies, graceful missing-SDK HTTP behavior and independent person approval"
     },
     {
       "work_package": "W09/W10",
@@ -6852,14 +6911,14 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 74,
-      "added": 3426,
-      "removed": 1153
+      "files": 82,
+      "added": 3540,
+      "removed": 1177
     },
     "Tests": {
-      "files": 124,
-      "added": 6806,
-      "removed": 1227
+      "files": 129,
+      "added": 7170,
+      "removed": 1228
     },
     "Frontend": {
       "files": 16,
@@ -6883,14 +6942,14 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 26774,
+      "added": 27105,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 265,
-    "added": 40293,
-    "removed": 4850
+    "files": 278,
+    "added": 41102,
+    "removed": 4875
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -7558,6 +7617,319 @@
       "provider_status_reference": "https://docs.stripe.com/api/refunds/object"
     },
     "provider_status_reference": "https://docs.stripe.com/api/refunds/object",
-    "limitations": "All providers are fakes. Effect identity/expiry/revocation/fencing and exact-refund completion do not establish independent-person authority, every mandatory receipt field/currency rule, provider review/backoff or complete effect crash recovery. Shared policy/readiness and async webhook offload remain router WIP."
+    "limitations": "All providers are fakes. Effect identity/expiry/revocation/fencing and exact-refund completion do not establish independent-person authority, every mandatory receipt field/currency rule, provider review/backoff or complete effect crash recovery. Shared policy/native-readiness and webhook offload were integrated in the later named commits; qualified SDK installation and independent-person/mandatory-receipt/recovery gates remain open."
+  },
+  "shared_payment_execution_policy": {
+    "baseline_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_provider_execution_policy.py",
+        "tests/api/test_payment_adapter_execution_policy.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-policy-boundaries-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-policy-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 21.031,
+      "peaks": {
+        "rss_bytes": 270589952,
+        "handles": 948,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 18,
+        "failures": 11,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "additional_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_provider_execution_policy.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-policy-dispatch-and-config-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-policy-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 13.875,
+      "peaks": {
+        "rss_bytes": 262590464,
+        "handles": 926,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 18,
+        "failures": 6,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_provider_execution_policy.py",
+        "tests/api/test_payment_adapter_execution_policy.py",
+        "tests/test_payments_providers.py",
+        "tests/services/test_refund_execution.py",
+        "tests/api/test_payment_ledger_refunds.py",
+        "tests/services/test_payment_scheduler_ownership.py",
+        "tests/services/test_background_database_ownership.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-policy-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-policy-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 31.813,
+      "peaks": {
+        "rss_bytes": 271380480,
+        "handles": 1180,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 75,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "tested_source": {
+      "base": "afeaab1accc20da7207985e5afbd6c95dda5741c",
+      "files": {
+        "src/app/services/payment_execution_policy.py": "ff6c29204b99a6098832d04364acc265dc72db2aa5bfb88f8be030e9cfb77eb9",
+        "src/app/services/payments.py": "772d0c86c4d999c0af38a41d95e2c1282e1e0e4578cd61dd9f0c84a9ddee9e97",
+        "src/app/routers/payments.py": "65f085e5633d737b76cc71d62f0156da2285cac21b4db74a448071a1ec5362ab",
+        "src/app/routers/payments_paypal.py": "07e80d82f59f7d0e419f5e775c57806e53e030defe888ad494a020ceb29f6245",
+        "src/app/routers/payments_revolut.py": "9452dec4883d770ad0c3193ba737217662cb806a15195174fffd319d8ba8ca09",
+        "src/app/routers/payments_googlepay.py": "364d806f110720886e1ab12d8419aeed30c64a570d99707d92762089b3d2d8da",
+        "src/app/routers/payments_afterpay.py": "733b1f9630419372d02259a91f918efbb032c9855e998f257d996015a6d0c329",
+        "tests/services/test_payment_provider_execution_policy.py": "065a112220039004f43921a8a30a0562070ac7ef0e1a1f9a70fccf2c9631dfed",
+        "tests/api/test_payment_adapter_execution_policy.py": "f0ff2b801e27501ff62bee176333d9d36379aa4d33f11c2f961daddbb2abfb6e",
+        "tests/test_payments_providers.py": "d65b81137e2d0ac69277e5c50cdd8c0bd4e461c27118810858b15e75cd1d8e76"
+      },
+      "partial_router": "Shared helper import, removal of duplicate local function and rollout status only; async webhook offload remains WIP."
+    },
+    "protected_inputs": {
+      "counts": {
+        "tests": 75,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "tested_inputs_unchanged": [
+        "src/app/services/payment_execution_policy.py",
+        "src/app/services/payments.py",
+        "src/app/routers/payments.py",
+        "src/app/routers/payments_paypal.py",
+        "src/app/routers/payments_revolut.py",
+        "src/app/routers/payments_googlepay.py",
+        "src/app/routers/payments_afterpay.py",
+        "tests/services/test_payment_provider_execution_policy.py",
+        "tests/api/test_payment_adapter_execution_policy.py",
+        "tests/test_payments_providers.py"
+      ],
+      "protected_inputs_unchanged": [
+        "config/feature_flags.json",
+        "src/app/config.py"
+      ],
+      "partial_router": "Async webhook offload remains WIP; all tested policy changes staged with matching normalized bytes"
+    },
+    "scope": "Stub HTTP/SDK transports; intended policy/checkpoint enforcement, not live provider conformance."
+  },
+  "payment_webhook_event_loop": {
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_payment_webhook_event_loop.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\webhook-event-loop-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\webhook-event-loop-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 18.89,
+      "peaks": {
+        "rss_bytes": 271785984,
+        "handles": 961,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_payment_webhook_event_loop.py",
+        "tests/api/test_payment_ledger_refunds.py",
+        "tests/services/test_refund_execution.py",
+        "tests/services/test_payment_scheduler_ownership.py",
+        "tests/services/test_background_database_ownership.py",
+        "tests/api/test_payment_adapter_execution_policy.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\webhook-event-loop-fixed\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\webhook-event-loop-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 26.734,
+      "peaks": {
+        "rss_bytes": 267988992,
+        "handles": 1068,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 51,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source": {
+      "base": "b30ce4d15681a4f1465ae81b215599949a7bff57",
+      "files": {
+        "src/app/routers/payments.py": "859d5d5abd8e8603013b9712bc1f89cf3c5aaa5b4c28e9e988b40b794c2d7a9d",
+        "tests/api/test_payment_webhook_event_loop.py": "93f69513b38e79743dc2e51a381b87e14b68c3e16e53119bb9ae1ac37a095b4e"
+      },
+      "scope": "Actual ASGI handler/SQL and copied engine owner; local development JSON webhook profile, not production signature authentication or the historical 151-second security request."
+    },
+    "measurement": {
+      "counts": {
+        "tests": 51,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "health_elapsed_seconds": 0.324421,
+      "limit_seconds": 0.75,
+      "source_inputs_unchanged": [
+        "src/app/routers/payments.py",
+        "tests/api/test_payment_webhook_event_loop.py"
+      ],
+      "profile_scope": "Actual ASGI handler/SQL and copied engine owner; local development JSON webhook profile, not production signature authentication or the historical 151-second security request."
+    }
+  },
+  "native_payment_readiness": {
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_native_readiness.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-native-readiness-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-native-readiness-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 17.813,
+      "peaks": {
+        "rss_bytes": 269619200,
+        "handles": 887,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 9,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_native_readiness.py",
+        "tests/services/test_checkout_readiness.py",
+        "tests/test_payments_providers.py",
+        "tests/services/test_payment_provider_execution_policy.py",
+        "tests/api/test_payment_adapter_execution_policy.py",
+        "tests/api/test_payment_ledger_refunds.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-native-readiness-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-native-readiness-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 24.188,
+      "peaks": {
+        "rss_bytes": 270012416,
+        "handles": 1160,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 59,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source": {
+      "base": "81d15f211fb7788221a1107f89af3bd650b5cf9c",
+      "files": {
+        "src/app/services/payment_provider_readiness.py": "81530c629c709482c69e6b307a723569ff98987c2eb7c113fc1c84118d1be841",
+        "src/app/services/checkout_readiness.py": "6c0f36182ea5b4d8cb0c1b7b7437104a188f961828defe5e0364d9a665b96b3f",
+        "src/app/routers/payments.py": "03721b861026b90be32befdb4bfe57e055ad563df515330df3f78fecea0cc6d2",
+        "tests/services/test_payment_native_readiness.py": "aae251431d845e595b2cfa8c4b2b40a4eea8ac4ab65eb738df1ca2ec29466c4c"
+      },
+      "scope": "Native import/callable capability truth and consistent local execution policy; no installation, credential validation or live provider request."
+    },
+    "observed_dependency_gap": {
+      "native_sdk_importable": {
+        "stripe": false,
+        "paypalcheckoutsdk": false
+      },
+      "project_declared": {
+        "stripe": false,
+        "paypal-checkout-serversdk": false,
+        "paypalcheckoutsdk": false
+      },
+      "locked": {
+        "stripe": null,
+        "paypal-checkout-serversdk": null,
+        "paypalcheckoutsdk": null
+      },
+      "default_docker_copies_lock": false,
+      "scope": "Read-only import/metadata inspection; no provider transactions"
+    },
+    "limitations": "A local import/callable probe is not credential/connectivity validation or proof of a real integration. Native SDKs remain absent from the measured installation/project/lock. No SDK was installed or live payment sent."
+  },
+  "git_identical_content_refresh": {
+    "head_blob": "cda7613eb52cfaa3561631866956bd7ee5c19978",
+    "filtered_working_blob": "cda7613eb52cfaa3561631866956bd7ee5c19978",
+    "working_bytes_unchanged": true,
+    "staged_changes": false,
+    "scope": "Index stat refresh only; no Docker build or dependency alignment repair."
   }
 }
