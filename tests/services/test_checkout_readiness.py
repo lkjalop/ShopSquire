@@ -6,6 +6,8 @@ from src.app.main import create_app
 
 def test_local_checkout_is_honestly_demo_and_shipping_estimate(monkeypatch):
     monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ALLOW_DEMO_CHECKOUT", "1")
+    monkeypatch.setenv("PAYMENT_EXECUTION_ENABLED", "0")
     monkeypatch.delenv("STRIPE_PUBLISHABLE_KEY", raising=False)
     monkeypatch.delenv("AUSPOST_API_KEY", raising=False)
     monkeypatch.delenv("STARTRACK_API_KEY", raising=False)

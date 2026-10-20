@@ -1,5 +1,6 @@
 import pytest
 from fastapi import APIRouter, FastAPI
+from fastapi.routing import iter_route_contexts
 
 from src.app.app_router_registry import register_routers, router_registration
 
@@ -13,7 +14,7 @@ def test_typed_router_registry_preserves_order_and_records_names():
         router_registration("first", first), router_registration("second", second),
     ))
     assert app.state.registered_router_groups == ["first", "second"]
-    paths = [route.path for route in app.routes]
+    paths = [route.path for route in iter_route_contexts(app.routes)]
     assert paths.index("/first") < paths.index("/second")
 
 
