@@ -90,8 +90,8 @@ def citation_memory_stats(
 
 @router.get("/citation_memory/trusted_claims")
 def trusted_claims(
-    agent_name: str,
-    claim_type: str,
+    agent_name: str | None = None,
+    claim_type: str | None = None,
     min_trust: float = Query(default=0.7, ge=0.0, le=1.0),
     limit: int = Query(default=20, ge=1, le=100),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -99,7 +99,7 @@ def trusted_claims(
     """Get high-trust agent claims for transparency."""
     try:
         from src.app.services.citation_memory import get_trusted_claims
-        claims = get_trusted_claims(agent_name, claim_type, min_trust=min_trust, limit=limit)
+        claims = get_trusted_claims(agent_name, claim_type, min_trust=min_trust, limit=limit, strict=True)
         return {"agent_name": agent_name, "claim_type": claim_type, "count": len(claims), "claims": claims}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

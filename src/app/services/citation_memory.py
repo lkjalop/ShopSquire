@@ -12,6 +12,8 @@ Architecture:
 """
 from __future__ import annotations
 
+from src.app.platform.tenant_context import current_tenant_id
+
 import json
 import time
 import uuid
@@ -116,7 +118,7 @@ def store_claim(claim: AgentClaim) -> str:
                 "trust_score": 0.5,  # neutral starting trust
                 "verification_status": "pending",
                 "session_id": claim.session_id,
-                "tenant_id": claim.tenant_id,
+                "tenant_id": claim.tenant_id or current_tenant_id(),
                 "metadata_json": json.dumps(claim.metadata or {}),
             })
             db.commit()
@@ -132,8 +134,8 @@ def verify_claim(claim_id: str, *, outcome: str, outcome_correct: bool,
         with db_session() as db:
             ensure_agent_learning_table(db)
             row = db.execute(
-                text("SELECT trust_score, confidence FROM agent_learnings WHERE id = :id"),
-                {"id": claim_id}
+                text("SELECT trust_score, confidence FROM agent_learnings WHERE id = :id AND tenant_id = :tenant"),
+                {"id": claim_id, "tenant": current_tenant_id()}
             ).fetchone()
             if not row:
                 return 0.5
@@ -151,9 +153,10 @@ def verify_claim(claim_id: str, *, outcome: str, outcome_correct: bool,
                 UPDATE agent_learnings
                 SET trust_score = :trust, verification_status = :status,
                     outcome_data = :outcome_data, verified_at = CURRENT_TIMESTAMP
-                WHERE id = :id
+                WHERE id = :id AND tenant_id = :tenant
             """), {
                 "id": claim_id,
+                "tenant": current_tenant_id(),
                 "trust": round(new_trust, 4),
                 "status": "verified_correct" if outcome_correct else "verified_incorrect",
                 "outcome_data": json.dumps({"outcome": outcome, **(outcome_data or {})}),
@@ -172,17 +175,17 @@ def get_agent_trust_score(agent_name: str, claim_type: str | None = None) -> flo
             if claim_type:
                 rows = db.execute(text("""
                     SELECT trust_score FROM agent_learnings
-                    WHERE agent_name = :agent AND claim_type = :ctype
+                    WHERE agent_name = :agent AND claim_type = :ctype AND tenant_id = :tenant
                     AND verification_status LIKE 'verified_%'
                     ORDER BY verified_at DESC LIMIT 50
-                """), {"agent": agent_name, "ctype": claim_type}).fetchall()
+                """), {"agent": agent_name, "ctype": claim_type, "tenant": current_tenant_id()}).fetchall()
             else:
                 rows = db.execute(text("""
                     SELECT trust_score FROM agent_learnings
-                    WHERE agent_name = :agent
+                    WHERE agent_name = :agent AND tenant_id = :tenant
                     AND verification_status LIKE 'verified_%'
                     ORDER BY verified_at DESC LIMIT 50
-                """), {"agent": agent_name}).fetchall()
+                """), {"agent": agent_name, "tenant": current_tenant_id()}).fetchall()
             if not rows:
                 return 0.5
             scores = [float(r[0]) for r in rows]
@@ -191,21 +194,23 @@ def get_agent_trust_score(agent_name: str, claim_type: str | None = None) -> flo
         return 0.5
 
 
-def get_trusted_claims(agent_name: str, claim_type: str, min_trust: float = 0.7,
-                       limit: int = 20) -> List[Dict[str, Any]]:
+def get_trusted_claims(agent_name: str | None, claim_type: str | None, min_trust: float = 0.7,
+                       limit: int = 20, *, strict: bool = False) -> List[Dict[str, Any]]:
     """Retrieve high-trust claims that can boost future confidence."""
     try:
         with db_session() as db:
             ensure_agent_learning_table(db)
             rows = db.execute(text("""
-                SELECT id, claim_key, claim_value, trust_score, confidence, metadata_json
+                SELECT id, claim_key, claim_value, trust_score, confidence, metadata_json, agent_name, claim_type
                 FROM agent_learnings
-                WHERE agent_name = :agent AND claim_type = :ctype
+                WHERE tenant_id = :tenant
+                AND (:agent IS NULL OR agent_name = :agent) AND (:ctype IS NULL OR claim_type = :ctype)
                 AND trust_score >= :min_trust
                 ORDER BY trust_score DESC, verified_at DESC
                 LIMIT :lim
             """), {
                 "agent": agent_name, "ctype": claim_type,
+                "tenant": current_tenant_id(),
                 "min_trust": min_trust, "lim": limit,
             }).fetchall()
             return [
@@ -215,10 +220,13 @@ def get_trusted_claims(agent_name: str, claim_type: str, min_trust: float = 0.7,
                     "trust_score": float(r[3]),
                     "confidence": float(r[4]),
                     "metadata": json.loads(r[5]) if r[5] else {},
+                    "agent_name": r[6], "claim_type": r[7],
                 }
                 for r in rows
             ]
     except Exception:
+        if strict:
+            raise
         return []
 
 
@@ -227,8 +235,9 @@ def get_claim_stats(agent_name: str | None = None) -> Dict[str, Any]:
     try:
         with db_session() as db:
             ensure_agent_learning_table(db)
-            where = "WHERE agent_name = :agent" if agent_name else ""
-            params = {"agent": agent_name} if agent_name else {}
+            from src.app.platform.tenant_context import current_tenant_id
+            where = 'WHERE tenant_id = :tenant' + (' AND agent_name = :agent' if agent_name else '')
+            params = {'tenant': current_tenant_id(), **({'agent': agent_name} if agent_name else {})}
 
             total = db.execute(
                 text(f"SELECT COUNT(*) FROM agent_learnings {where}"), params
