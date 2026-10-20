@@ -9,14 +9,15 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import text
 
 STATES = {
-    "proposed", "approved", "queued", "delivered", "responded",
+    "proposed", "approved", "queued", "submitted", "delivered", "responded",
     "expired", "failed", "superseded", "quarantined",
 }
 _ALLOWED = {
     None: {"proposed", "responded", "quarantined"},
     "proposed": {"approved", "failed", "superseded", "quarantined"},
     "approved": {"queued", "failed", "superseded", "quarantined"},
-    "queued": {"delivered", "failed", "superseded", "quarantined"},
+    "queued": {"submitted", "delivered", "failed", "superseded", "quarantined"},
+    "submitted": {"delivered", "responded", "expired", "superseded"},
     "delivered": {"responded", "expired", "superseded"},
     "responded": {"superseded"},
     "failed": {"queued", "superseded"},

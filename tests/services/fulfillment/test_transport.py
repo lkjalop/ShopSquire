@@ -26,7 +26,11 @@ def test_get_transport_defaults_to_sandbox(monkeypatch):
 
 def test_get_transport_smtp_when_flagged(monkeypatch):
     monkeypatch.setenv("FULFILLMENT_SUPPLIER_TRANSPORT", "smtp")
-    assert isinstance(T.get_transport(), T.SmtpTransport)
+    tx = T.get_transport()
+    assert isinstance(tx, T.ApprovalRequiredTransport)
+    result = tx.send(to='supplier@example.test', subject='RFQ', body='request')
+    assert result.status == 'failed' and result.provider_ref == ''
+    assert result.detail == 'independent_person_approval_required'
 
 
 # ── SMTP adapter (fake client — no real network) ─────────────────────────────
@@ -69,6 +73,15 @@ def test_smtp_send_failure_is_status_failed():
 
 def test_smtp_no_recipient_fails():
     assert T.SmtpTransport(client_factory=_FakeSMTP).send(to="", subject="s", body="b").status == "failed"
+
+
+def test_smtp_lost_receipt_after_send_is_uncertain():
+    class LostReceipt(_FakeSMTP):
+        def send_message(self,msg):
+            raise TimeoutError('server may already have accepted DATA')
+    result=T.SmtpTransport(client_factory=LostReceipt).send(to='a@b.example',subject='s',body='b')
+    assert result.status=='unknown'
+    assert result.provider_ref==''
 
 
 # ── send_approved routes through the transport ───────────────────────────────

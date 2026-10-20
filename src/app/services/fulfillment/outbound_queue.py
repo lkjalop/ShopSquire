@@ -1,20 +1,16 @@
-"""Reliable outbound supplier-message queue (agnostic CORE) — durable send with retry + backoff +
-dead-letter + idempotency + 855-acknowledgement tracking.
+"""Durable supplier-message attempts with exact payload and approval binding.
 
-A supplier RFQ/PO send must not be fire-and-forget: at scale you need at-least-once delivery with bounded
-retries, a dead-letter for messages that never succeed, idempotency so a retried command never double-sends,
-and tracking of the supplier's acknowledgement (EDI 855). This is that queue. The actual transmission goes
-through the INJECTED transport seam (SANDBOX by default; SMTP at deploy) — no secrets here. Ready to carry a
-real send the moment SMTP creds land; until then it durably records + 'sends' via sandbox.
-
-Vertical-blind: recipient/subject/body are opaque strings; status/attempts are counts. Best-effort; never
-raises into the workflow.
+Known pre-send failures have bounded retries. Uncertain delivery and expired worker
+claims require reconciliation; idempotency headers alone do not prevent duplicate
+SMTP effects. Default transports contain real delivery pending identity integration.
+Caller-injected adapters remain an internal boundary, not authenticated HTTP proof.
 """
 from __future__ import annotations
 
 import logging
 import os
 import uuid
+from time import monotonic
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -37,6 +33,7 @@ CREATE TABLE IF NOT EXISTS outbound_message (
     provider_ref     TEXT,
     ack_status       TEXT DEFAULT 'awaiting',  -- awaiting | acked  (EDI 855)
     acked_at         TEXT,
+    ack_reference    TEXT,
     last_error       TEXT,
     actor_type       TEXT,                     -- the approved transition intent, replayed on deferred delivery
     actor_id         TEXT,
@@ -47,36 +44,36 @@ CREATE TABLE IF NOT EXISTS outbound_message (
     transport_eligible INTEGER DEFAULT 1,
     created_at       TEXT,
     updated_at       TEXT,
+    effect_digest    TEXT,
+    permit_expires_at TEXT,
+    permit_revoked_at TEXT,
+    person_approval_id TEXT,
     UNIQUE (tenant_id, idempotency_key)
 )
 """
 
-# How long a row may sit CLAIMED ('sending') before a crashed worker's claim is reclaimed for retry.
+# Age after which an unfinished claim is held for reconciliation, without resend.
 def _stale_claim_seconds() -> int:
     return int(os.getenv("OUTBOUND_STALE_CLAIM_SEC", "300") or 300)
 
 
 def _now_iso(now_iso: Optional[str]) -> str:
-    """Canonical 'T'-separated, seconds-precision ISO. ALL queue timestamps go through here so the lexical
-    next_attempt_at <= now comparison is sound — callers pass space- OR T-separated strings (the workflow uses
-    a space, ISO uses a 'T'); mixing them silently breaks string ordering ('T' 0x54 > ' ' 0x20)."""
+    """UTC without an offset, preserving subsecond precision for lexical due checks.
+
+    Historical naive queue timestamps represent UTC. Convert aware inputs to that
+    same clock; comparing ISO strings with different offsets can dispatch early.
+    """
     from datetime import datetime, timezone
-    if now_iso:
-        try:
-            return datetime.fromisoformat(str(now_iso)).isoformat(timespec="seconds")
-        except (TypeError, ValueError):
-            return str(now_iso)
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+    stamp = datetime.fromisoformat(str(now_iso).replace('Z', '+00:00')) if now_iso else datetime.now(timezone.utc)
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+    return stamp.isoformat()
 
 
 def _plus_seconds(now_iso: str, seconds: int) -> str:
     from datetime import datetime, timedelta
-    try:
-        base = datetime.fromisoformat(str(now_iso))
-    except Exception:
-        from datetime import timezone
-        base = datetime.now(timezone.utc).replace(tzinfo=None)
-    return (base + timedelta(seconds=int(seconds))).isoformat(timespec="seconds")
+    base = datetime.fromisoformat(_now_iso(now_iso))
+    return (base + timedelta(seconds=float(seconds))).isoformat()
 
 
 def _backoff_seconds(attempts: int) -> int:
@@ -170,7 +167,7 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
             transition_event: str = "", now_iso: Optional[str] = None,
             grounding_materials: Optional[List[Dict[str, Any]]] = None,
             party_ref: Optional[str] = None, channel: str = "email",
-            response_expectation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            response_expectation: Optional[Dict[str, Any]] = None, person_approval_id: str | None = None) -> Dict[str, Any]:
     """Durably enqueue an outbound supplier message. IDEMPOTENT on (tenant, idempotency_key) — a retried
     enqueue of the same content_hash returns the existing row (deduped), never a second send. pending +
     due now. ``actor_type``/``actor_id``/``transition_event`` persist the already-approved workflow intent so a
@@ -179,24 +176,35 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
     if db is None or not idempotency_key:
         return {"message_id": None, "status": "skipped", "deduped": False}
     ts = _now_iso(now_iso)
+    from src.app.services.fulfillment.effect_contract import effect_digest
+    binding = effect_digest(tenant_id=tenant_id, case_id=case_id, recipient=recipient,
+        subject=subject, body=body, channel=channel, actor_type=actor_type, actor_id=actor_id,
+        transition_event=transition_event, idempotency_key=idempotency_key,person_approval_id=person_approval_id)
+    if person_approval_id:
+        from src.app.services.fulfillment.person_approval import validate
+        validate(db,tenant_id=tenant_id,approval_id=person_approval_id,digest=binding,now=ts)
     from src.app.services.supplier_contact_schedule import decide_contact_schedule
     schedule = decide_contact_schedule(
         channel=channel, expectation=response_expectation, submitted_at=ts,
     )
     try:
-        existing = db.execute(text("SELECT id, status FROM outbound_message WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
+        existing = db.execute(text("SELECT id, status, effect_digest FROM outbound_message WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
                               {"t": tenant_id, "k": idempotency_key}).fetchone()
         if existing:
+            if existing[2] != binding:
+                return {"message_id": existing[0], "status": "effect_conflict", "deduped": False}
             return {"message_id": existing[0], "status": existing[1], "deduped": True}
         mid = f"out-{uuid.uuid4().hex[:12]}"
         db.execute(text(
             "INSERT INTO outbound_message (id, tenant_id, case_id, recipient, subject, body, idempotency_key, "
             "status, attempts, max_attempts, next_attempt_at, ack_status, actor_type, actor_id, transition_event, "
             "channel, schedule_reason, sla_clock, transport_eligible, "
-            "created_at, updated_at) "
-            "VALUES (:i,:t,:c,:r,:s,:b,:k,:status,0,:m,:n,'awaiting',:at,:ai,:te,:channel,:reason,:sla,:eligible,:ts,:ts)"),
+            "created_at, updated_at, effect_digest, permit_expires_at,person_approval_id) "
+            "VALUES (:i,:t,:c,:r,:s,:b,:k,:status,0,:m,:n,'awaiting',:at,:ai,:te,:channel,:reason,:sla,:eligible,:ts,:ts,:digest,:expiry,:person)"),
             {"i": mid, "t": tenant_id, "c": case_id, "r": recipient, "s": subject, "b": body,
-             "k": idempotency_key, "m": int(max_attempts), "n": schedule.not_before,
+             "digest": binding, "expiry": _plus_seconds(ts, 86400), "person":person_approval_id,
+             "k": idempotency_key, "m": int(max_attempts),
+             "n": _now_iso(schedule.not_before) if schedule.not_before else None,
              "status": schedule.queue_state, "at": actor_type, "ai": actor_id,
              "te": transition_event, "channel": schedule.channel, "reason": schedule.reason,
              "sla": schedule.sla_clock, "eligible": 1 if schedule.transport_eligible else 0, "ts": ts})
@@ -221,12 +229,63 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
 
 
 def _reclaim_stale(db, *, tenant_id: str, ts: str) -> None:
-    """A row claimed ('sending') by a worker that then crashed is reset to 'pending' once its claim ages past
-    OUTBOUND_STALE_CLAIM_SEC, so it is retried rather than stranded. Idempotency on content_hash keeps the
-    eventual resend at-least-once-safe for a transport that honours it."""
+    """Quarantine uncertain delivery after a worker dies; never infer provider deduplication."""
     cutoff = _plus_seconds(ts, -_stale_claim_seconds())
-    db.execute(text("UPDATE outbound_message SET status='pending', updated_at=:ts WHERE tenant_id=:t "
-                    "AND status='sending' AND updated_at < :cut"), {"ts": ts, "t": tenant_id, "cut": cutoff})
+    age = _utc_sql(db, 'updated_at') + ' < ' + _utc_sql(db, ':cut')
+    db.execute(text("UPDATE outbound_message SET status='reconciliation_required', "
+                    "last_error='delivery_outcome_unknown', updated_at=:ts WHERE tenant_id=:t "
+                    "AND status='sending' AND " + age), {"ts": ts, "t": tenant_id, "cut": cutoff})
+
+
+def _utc_sql(db, expression):
+    """Compare existing ISO timestamps as instants, including old offset rows.
+
+    Expressions are internal column names or bind placeholders. Historical naive
+    timestamps mean UTC even when the PostgreSQL connection timezone differs.
+    """
+    dialect = db.get_bind().dialect.name
+    if dialect == 'sqlite':
+        return f'julianday({expression})'
+    if dialect == 'postgresql':
+        return (f"(CASE WHEN {expression} ~ '(Z|[+-][0-9]{{2}}:[0-9]{{2}})$' "
+                f"THEN CAST({expression} AS TIMESTAMPTZ) "
+                f"ELSE CAST({expression} AS TIMESTAMP) AT TIME ZONE 'UTC' END)")
+    raise ValueError('outbound_timestamp_dialect_not_supported')
+
+
+def _attempt_delivery(transport, **payload):
+    """A raised error cannot prove that the provider did not accept the effect."""
+    try:
+        result=transport.send(**payload)
+        status=getattr(result,'status','unknown')
+        return (status if status in ('sent','failed') else 'unknown',
+                getattr(result,'provider_ref','') or '',getattr(result,'detail','') or '')
+    except Exception as exc:
+        return 'unknown','',f'{type(exc).__name__}: {exc}'[:200]
+
+
+_CLAIM_WHERE = (
+    "tenant_id=:claim_tenant AND id=:claim_id AND status='sending' "
+    "AND attempts=:claim_attempt AND effect_digest=:claim_digest"
+)
+
+
+def _update_claim(db, claim, assignments, values):
+    """Internal SQL assignments; a late attempt cannot settle a newer state."""
+    return db.execute(text('UPDATE outbound_message SET ' + assignments + ' WHERE ' + _CLAIM_WHERE),
+                      {**claim, **values}).rowcount == 1
+
+
+def _delivery_update(status, provider_ref, detail, ts, attempts, max_attempts):
+    if status == 'sent':
+        return "status='sent',provider_ref=:p,last_error=NULL,updated_at=:ts", {'p': provider_ref, 'ts': ts}
+    if status == 'unknown':
+        return ("status='reconciliation_required',last_error=:e,updated_at=:ts",
+                {'e': 'delivery_outcome_unknown:' + detail, 'ts': ts})
+    if attempts >= max_attempts:
+        return "status='dead_letter',last_error=:e,updated_at=:ts", {'e': detail, 'ts': ts}
+    return ("status='pending',next_attempt_at=:n,last_error=:e,updated_at=:ts",
+            {'n': _plus_seconds(ts, _backoff_seconds(attempts)), 'e': detail, 'ts': ts})
 
 
 def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "default",
@@ -242,13 +301,15 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
         return {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0, "sent_rows": []}
     tx = transport or _default_transport()
     ts = _now_iso(now_iso)
+    started = monotonic()
     out: Dict[str, Any] = {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0, "sent_rows": []}
     try:
         _reclaim_stale(db, tenant_id=tenant_id, ts=ts)
+        due = _utc_sql(db, 'next_attempt_at') + ' <= ' + _utc_sql(db, ':ts')
         sql = ("SELECT id, case_id, recipient, subject, body, idempotency_key, attempts, max_attempts, "
-               "actor_type, actor_id, transition_event FROM outbound_message WHERE tenant_id=:t AND status IN ('pending','scheduled') "
+               "actor_type, actor_id, transition_event, effect_digest, permit_expires_at, permit_revoked_at,person_approval_id FROM outbound_message WHERE tenant_id=:t AND status IN ('pending','scheduled') "
                "AND channel='email' AND transport_eligible=1 "
-               "AND (next_attempt_at IS NULL OR next_attempt_at <= :ts) ")
+               "AND (next_attempt_at IS NULL OR " + due + ") ")
         params: Dict[str, Any] = {"t": tenant_id, "ts": ts, "lim": int(limit)}
         if only_key:
             sql += "AND idempotency_key=:k "
@@ -261,12 +322,35 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
         out["error"] = f"{type(exc).__name__}: {exc}"
         return out
     for r in (rows or []):
-        mid, case_id, recipient, subject, body, idem, attempts, max_attempts, a_type, a_id, t_event = r
+        mid, case_id, recipient, subject, body, idem, attempts, max_attempts, a_type, a_id, t_event, binding, expiry, revoked, person = r
+        from src.app.services.fulfillment.effect_contract import effect_digest, permit_current
+        current_binding = effect_digest(tenant_id=tenant_id, case_id=case_id, recipient=recipient,
+            subject=subject, body=body, channel="email", actor_type=a_type or "", actor_id=a_id or "",
+            transition_event=t_event or "", idempotency_key=idem,person_approval_id=person)
+        from src.app.services.fulfillment.person_approval import dispatch_current
+        dispatch_time = _plus_seconds(ts, max(0, monotonic() - started))
+        if binding != current_binding or not permit_current(expiry, revoked, dispatch_time) or not dispatch_current(db,tenant_id,person,binding,dispatch_time):
+            db.execute(text("UPDATE outbound_message SET status='blocked_authority', last_error=:e "
+                            "WHERE tenant_id=:t AND id=:i AND status IN ('pending','scheduled')"),
+                       {"e": "effect_binding_or_permit_invalid", "t": tenant_id, "i": mid})
+            db.commit()
+            out["blocked_authority"] = out.get("blocked_authority", 0) + 1
+            continue
         # ATOMIC CLAIM: only the worker whose UPDATE flips pending→sending may transmit (rowcount guard).
         try:
             claim = db.execute(text("UPDATE outbound_message SET status='sending', attempts=attempts+1, "
-                                    "updated_at=:ts WHERE id=:i AND status IN ('pending','scheduled')"),
-                               {"ts": ts, "i": mid})
+                                    "updated_at=:ts WHERE id=:i AND tenant_id=:t AND effect_digest=:digest "
+                                    "AND recipient=:recipient AND subject=:subject AND body=:body "
+                                    "AND case_id=:case AND channel='email' AND transport_eligible=1 "
+                                    "AND COALESCE(actor_type,'')=:actor_type AND COALESCE(actor_id,'')=:actor_id "
+                                    "AND COALESCE(transition_event,'')=:event AND permit_expires_at=:expiry "
+                                    "AND COALESCE(person_approval_id,'')=:person "
+                                    "AND permit_revoked_at IS NULL AND attempts=:prior_attempts "
+                                    "AND status IN ('pending','scheduled')"),
+                               {"ts": ts, "i": mid, "t": tenant_id, "digest": binding,
+                                "recipient": recipient, "subject": subject, "body": body, "case": case_id,
+                                "actor_type": a_type or "", "actor_id": a_id or "", "event": t_event or "",
+                                "expiry": expiry,"person":person or '', 'prior_attempts': int(attempts or 0)})
             db.commit()
         except Exception as exc:
             logger.warning("outbound claim failed for %s: %s", mid, exc)
@@ -279,6 +363,8 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             continue  # another worker claimed it first
         out["processed"] += 1
         new_attempts = int(attempts or 0) + 1
+        claim_owner = dict(claim_tenant=tenant_id, claim_id=mid,
+                           claim_attempt=new_attempts, claim_digest=binding)
         # OUTBOUND INTEGRITY GATE: scan the drafted content right before it leaves so the platform
         # never RELAYS a poisoned payload or LEAKS a secret to a supplier (becoming a threat vector).
         # A 'block' quarantines the row (never transmitted); the finding is traced for the
@@ -288,12 +374,17 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             from src.app.services.fulfillment.outbound_integrity import scan_outbound_supplier_message
             _integrity = scan_outbound_supplier_message(subject, body, recipient=recipient)
         except Exception:
-            pass
-        if _integrity.get("action") == "block":
+            _integrity = {"action": "block", "findings": ["integrity_scanner_unavailable"], "categories": []}
+        if not isinstance(_integrity, dict) or _integrity.get('action') != 'allow':
+            if not isinstance(_integrity, dict):
+                _integrity = {'findings': ['integrity_result_invalid'], 'categories': []}
             try:
-                db.execute(text("UPDATE outbound_message SET status='blocked_content', last_error=:e, updated_at=:ts "
-                                "WHERE id=:i"), {"e": ("integrity:" + ",".join(_integrity.get("findings") or []))[:200],
-                                                 "ts": ts, "i": mid})
+                if not _update_claim(db, claim_owner,
+                        "status='blocked_content', last_error=:e, updated_at=:ts",
+                        {'e': ('integrity:' + ','.join(_integrity.get('findings') or []))[:200], 'ts': ts}):
+                    db.rollback()
+                    out['settlement_conflicts'] = out.get('settlement_conflicts', 0) + 1
+                    continue
                 db.commit()
                 _project_lifecycle(
                     db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
@@ -313,20 +404,32 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             out.setdefault("blocked_content", 0)
             out["blocked_content"] += 1
             continue  # never transmit a blocked message
+        dispatch_time = _plus_seconds(ts, max(0, monotonic() - started))
+        still_owned = db.execute(text('SELECT 1 FROM outbound_message WHERE ' + _CLAIM_WHERE +
+                                      ' AND permit_revoked_at IS NULL AND permit_expires_at=:expiry'),
+                                 {**claim_owner, 'expiry': expiry}).scalar()
+        if not still_owned:
+            db.rollback()
+            out['settlement_conflicts'] = out.get('settlement_conflicts', 0) + 1
+            continue
+        if not permit_current(expiry, revoked, dispatch_time) or not dispatch_current(db,tenant_id,person,binding,dispatch_time):
+            _update_claim(db, claim_owner, "status='blocked_authority',last_error='person_approval_invalid'", {})
+            db.commit()
+            out['blocked_authority']=out.get('blocked_authority',0)+1
+            continue
+        status, provider_ref, detail = _attempt_delivery(
+            tx,to=recipient,subject=subject,body=body,idempotency_key=str(idem or ''))
         try:
-            res = tx.send(to=recipient, subject=subject, body=body, idempotency_key=str(idem or ""))
-            status = getattr(res, "status", "failed")
-            provider_ref = getattr(res, "provider_ref", "") or ""
-            detail = getattr(res, "detail", "") or ""
-        except Exception as exc:
-            status, provider_ref, detail = "failed", "", str(exc)[:200]
-        try:
+            assignments, values = _delivery_update(status, provider_ref, detail, ts,
+                                                   new_attempts, int(max_attempts or 5))
+            if not _update_claim(db, claim_owner, assignments, values):
+                db.rollback()
+                out['settlement_conflicts'] = out.get('settlement_conflicts', 0) + 1
+                continue
             if status == "sent":
-                db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, last_error=NULL, updated_at=:ts "
-                                "WHERE id=:i"), {"p": provider_ref, "ts": ts, "i": mid})
                 _project_lifecycle(
                     db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
-                    recipient=recipient, subject=subject, body=body, state="delivered",
+                    recipient=recipient, subject=subject, body=body, state="submitted",
                     idempotency_key=str(idem or mid), actor_type="worker",
                     reason=f"provider_ref:{provider_ref}",
                 )
@@ -335,9 +438,10 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
                 out["sent_rows"].append({"case_id": case_id, "content_hash": idem, "provider_ref": provider_ref,
                                          "actor_type": a_type or "", "actor_id": a_id or "",
                                          "transition_event": t_event or ""})
+            elif status == 'unknown':
+                db.commit()
+                out['reconciliation_required']=out.get('reconciliation_required',0)+1
             elif new_attempts >= int(max_attempts or 5):
-                db.execute(text("UPDATE outbound_message SET status='dead_letter', last_error=:e, updated_at=:ts "
-                                "WHERE id=:i"), {"e": detail, "ts": ts, "i": mid})
                 _project_lifecycle(
                     db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
                     recipient=recipient, subject=subject, body=body, state="failed",
@@ -346,9 +450,6 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
                 db.commit()
                 out["dead_lettered"] += 1
             else:
-                nxt = _plus_seconds(ts, _backoff_seconds(new_attempts))
-                db.execute(text("UPDATE outbound_message SET status='pending', next_attempt_at=:n, last_error=:e, "
-                                "updated_at=:ts WHERE id=:i"), {"n": nxt, "e": detail, "ts": ts, "i": mid})
                 db.commit()
                 out["retried"] += 1
         except Exception as exc:
@@ -368,13 +469,16 @@ def get_by_key(db, *, idempotency_key: str, tenant_id: str = "default") -> Dict[
     if db is None or not idempotency_key:
         return {}
     try:
-        r = db.execute(text("SELECT status, provider_ref, attempts, ack_status, last_error FROM outbound_message "
+        r = db.execute(text("SELECT status, provider_ref, attempts, ack_status, last_error, acked_at FROM outbound_message "
                             "WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
                        {"t": tenant_id, "k": idempotency_key}).fetchone()
         if not r:
             return {}
+        from src.app.services.fulfillment.effect_contract import completion_status
         return {"status": r[0], "provider_ref": r[1] or "", "attempts": int(r[2] or 0),
-                "ack_status": r[3], "last_error": r[4] or ""}
+                "ack_status": r[3], "last_error": r[4] or "",
+                "completion_status": completion_status(status=r[0], provider_ref=r[1],
+                    ack_status=r[3], acked_at=r[5])}
     except Exception:
         return {}
 
@@ -392,11 +496,13 @@ def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idemp
     'dead_letter'. The actor/event are persisted so a DEFERRED delivery replays the SAME approved transition.
     Preserves the human-only send invariant: it only sends what the caller already approved, and a re-dispatch
     of the same content_hash never double-sends (deduped)."""
-    enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body, idempotency_key=idempotency_key,
+    enqueued = enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body, idempotency_key=idempotency_key,
             max_attempts=max_attempts, tenant_id=tenant_id, actor_type=actor_type, actor_id=actor_id,
             transition_event=transition_event, now_iso=now_iso,
             grounding_materials=grounding_materials, party_ref=party_ref,
             channel=channel, response_expectation=response_expectation)
+    if enqueued.get("status") == "effect_conflict":
+        return {"status": "failed", "detail": "effect_conflict", "provider_ref": ""}
     existing = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     if existing.get("status") == "sent":  # idempotent re-dispatch of an already-delivered message
         return {"status": "sent", "provider_ref": existing.get("provider_ref", ""), "detail": "deduped"}
@@ -406,6 +512,17 @@ def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idemp
     row = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     return {"status": row.get("status", "pending"), "provider_ref": row.get("provider_ref", ""),
             "detail": row.get("last_error", "")}
+
+
+def revoke_pending_permit(db, *, tenant_id: str, idempotency_key: str, now_iso=None) -> bool:
+    """Withdraw an undispatched grant. In-flight effects require reconciliation."""
+    result = db.execute(text(
+        "UPDATE outbound_message SET permit_revoked_at=:now, status='blocked_authority', "
+        "last_error='permit_revoked' WHERE tenant_id=:t AND idempotency_key=:k "
+        "AND status IN ('pending','scheduled')"
+    ), {"now": _now_iso(now_iso), "t": tenant_id, "k": idempotency_key})
+    db.commit()
+    return result.rowcount == 1
 
 
 def record_ack(db, *, idempotency_key: str, ack_ref: str = "", case_id: str = "", tenant_id: str = "default",
@@ -425,8 +542,8 @@ def record_ack(db, *, idempotency_key: str, ack_ref: str = "", case_id: str = ""
             return {"acked": False, "message_id": row[0], "reason": f"not_sent:{row[1]}"}
         if case_id and str(row[2] or "") != str(case_id):
             return {"acked": False, "message_id": row[0], "reason": "case_mismatch"}
-        db.execute(text("UPDATE outbound_message SET ack_status='acked', acked_at=:ts, provider_ref="
-                        "COALESCE(NULLIF(:ar,''), provider_ref), updated_at=:ts WHERE id=:i AND status='sent'"),
+        db.execute(text("UPDATE outbound_message SET ack_status='acked', acked_at=:ts, ack_reference=:ar, "
+                        "updated_at=:ts WHERE id=:i AND status='sent'"),
                    {"ts": ts, "ar": ack_ref, "i": row[0]})
         db.commit()
         return {"acked": True, "message_id": row[0], "reason": "ok"}
@@ -465,9 +582,6 @@ def dead_letters(db, *, tenant_id: str = "default", limit: int = 50) -> List[Dic
 
 
 def _default_transport() -> Any:
-    """Pick the transport the same way external_comms does — SMTP when FULFILLMENT_SUPPLIER_TRANSPORT=smtp,
-    else sandbox. No secrets read here beyond what SmtpTransport reads at deploy."""
-    from src.app.services.fulfillment.transport import SandboxTransport, SmtpTransport
-    if str(os.getenv("FULFILLMENT_SUPPLIER_TRANSPORT", "sandbox")).strip().lower() == "smtp":
-        return SmtpTransport()
-    return SandboxTransport()
+    """Share the foreground send boundary, including the independent-approval hold."""
+    from src.app.services.fulfillment.transport import get_transport
+    return get_transport()

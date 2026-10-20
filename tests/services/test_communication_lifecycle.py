@@ -117,7 +117,7 @@ def test_quarantine_is_tenant_isolated_and_prevents_commercial_effect(db):
     assert timeline(db, tenant_id="tenant-b", observation_id="same") == []
 
 
-def test_outbound_queue_projects_approved_queued_and_delivered(db):
+def test_outbound_queue_projects_submission_without_claiming_delivery(db):
     from src.app.services.fulfillment import outbound_queue
     db.execute(text(outbound_queue._DDL))
     queued = outbound_queue.enqueue(
@@ -152,7 +152,7 @@ def test_outbound_queue_projects_approved_queued_and_delivered(db):
         db, tenant_id="tenant-a", observation_id=str(row[0])
     )
     assert [event["state"] for event in events] == [
-        "proposed", "approved", "queued", "delivered",
+        "proposed", "approved", "queued", "submitted",
     ]
     assert events[1]["grounding_refs"] and events[2]["grounding_refs"]
     payload = db.execute(text(

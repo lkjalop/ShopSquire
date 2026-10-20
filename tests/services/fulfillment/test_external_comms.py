@@ -110,7 +110,7 @@ def test_phone_supplier_contact_is_durably_queued_and_not_emailed(db):
         "FROM outbound_message WHERE case_id=:case_id"
     ), {"case_id": cid}).one()
     assert tuple(row) == (
-        "phone", "queued_contact", 0, "2026-06-29T23:00:00+00:00", "paused",
+        "phone", "queued_contact", 0, "2026-06-29T23:00:00", "paused",
     )
 
 

@@ -1,5 +1,6 @@
 """Enterprise approval-tier gate — spend routes a purchase to the right approver level."""
 from __future__ import annotations
+import pytest
 
 from src.app.services.fulfillment.approval_policy import (
     approver_can_clear, approver_level, required_approval_tier)
@@ -23,8 +24,10 @@ def test_required_tier_climbs_with_spend():
 
 
 def test_required_tier_handles_bad_input():
-    assert required_approval_tier(None, tiers=_TIERS)["tier"] == "auto"
-    assert required_approval_tier("oops", tiers=_TIERS)["value_cents"] == 0
+    import pytest
+    for value in (None, 'oops', -1, True):
+        with pytest.raises(ValueError):
+            required_approval_tier(value, tiers=_TIERS)
 
 
 def test_approver_level_default_map():
@@ -41,3 +44,25 @@ def test_approver_can_clear_gates_by_level():
     assert blocked["required_tier"] == "director" and "below required" in blocked["reason"]
     # owner clears the top tier
     assert approver_can_clear("owner", 50000000)["ok"] is True
+
+
+@pytest.mark.parametrize('bands',[
+    [], [None],
+    [{'max_cents':None,'tier':'all','min_level':0}],
+    [{'max_cents':True,'tier':'small','min_level':1}],
+    [{'max_cents':100,'tier':'small','min_level':1}],
+    [{'max_cents':None,'tier':'all','min_level':1}, {'max_cents':100,'tier':'small','min_level':2}],
+    [{'max_cents':1000,'tier':'small','min_level':2}, {'max_cents':100,'tier':'medium','min_level':3},
+     {'max_cents':None,'tier':'large','min_level':4}],
+    [{'max_cents':100,'tier':'small','min_level':3}, {'max_cents':None,'tier':'large','min_level':1}],
+])
+def test_malformed_tiers_cannot_downgrade_required_authority(bands):
+    with pytest.raises(ValueError,match='invalid_approval_tiers'):
+        required_approval_tier(10,tiers=bands)
+
+
+def test_invalid_configured_role_level_cannot_grant_authority(monkeypatch):
+    from src.app.services.fulfillment import approval_policy as policy
+    monkeypatch.setattr(policy,'_profile',lambda slot,default:{'merchant':True})
+    with pytest.raises(ValueError,match='invalid_approval_role_levels'):
+        policy.approver_level('merchant')

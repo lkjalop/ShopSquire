@@ -10,9 +10,10 @@ transition; only the bytes-on-the-wire differ.
     via an injected SMTP client. UNEXERCISED against a real server here (no live SMTP); the message build
     + the send call ARE tested with a fake client. Wire SMTP_HOST/PORT/USER/PASSWORD/SENDER at deploy.
 
-A real send NEVER raises into the workflow — a failure returns status='failed', and send_approved then
-does NOT record a send (the human can retry). Vertical-blind; the recipient is the allowlist-resolved
-address the caller passes, never buyer text.
+A known pre-send failure returns 'failed'. A lost response after transmission starts returns
+'unknown' and the queue holds it for reconciliation without automatic retry. The default selector
+blocks real delivery pending independent-person approval. Recipients come from the caller's
+allowlist resolution, never from buyer prose.
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ _SMTP_TIMEOUT_S = float(os.getenv("FULFILLMENT_SMTP_TIMEOUT_SEC", "15") or 15)
 @dataclass(frozen=True)
 class SendResult:
     provider_ref: str
-    status: str            # sent | failed
+    status: str            # sent | failed (known pre-send failure) | unknown
     detail: str = ""       # transport label / error summary
 
 
@@ -44,9 +45,21 @@ class SandboxTransport:
                           detail="sandbox")
 
 
+class ApprovalRequiredTransport:
+    """Contain real delivery until verified independent-person approval is wired.
+
+    A role or a shared key cannot establish two different people. This hold is
+    intentionally not an environment-variable bypass and does not report a send.
+    The SMTP adapter remains available for isolated adapter tests.
+    """
+
+    def send(self, *, to: str, subject: str, body: str, idempotency_key: str = "") -> SendResult:
+        return SendResult(provider_ref='', status='failed', detail='independent_person_approval_required')
+
+
 class SmtpTransport:
     """Real SMTP send (flag-gated). Deterministic + testable via an injected ``client_factory`` (default
-    smtplib.SMTP). Returns status='failed' on any error — it never raises into the workflow."""
+    smtplib.SMTP). Errors after starting DATA are uncertain and require reconciliation."""
 
     def __init__(self, *, host: Optional[str] = None, port: Optional[int] = None,
                  user: Optional[str] = None, password: Optional[str] = None,
@@ -61,6 +74,8 @@ class SmtpTransport:
     def send(self, *, to: str, subject: str, body: str, idempotency_key: str = "") -> SendResult:
         if not to:
             return SendResult(provider_ref="", status="failed", detail="no_recipient")
+        sending=False
+        client=None
         try:
             from email.message import EmailMessage
             msg = EmailMessage()
@@ -81,12 +96,15 @@ class SmtpTransport:
             if self.user:
                 client.starttls()
                 client.login(self.user, self.password)
+            sending=True
             client.send_message(msg)
             _quiet_quit(client)  # closing is best-effort — must not flip a successful send to failed
             ref = f"SMTP-{(idempotency_key or uuid.uuid4().hex)[:12].upper()}"
             return SendResult(provider_ref=ref, status="sent", detail="smtp")
         except Exception as exc:
-            return SendResult(provider_ref="", status="failed", detail=str(exc)[:200])
+            if client is not None:
+                _quiet_quit(client)
+            return SendResult(provider_ref="", status="unknown" if sending else "failed", detail=str(exc)[:200])
 
 
 def _quiet_quit(client) -> None:
@@ -100,7 +118,9 @@ def get_transport() -> SupplierTransport:
     """Select the transport from FULFILLMENT_SUPPLIER_TRANSPORT (default 'sandbox')."""
     mode = str(os.getenv("FULFILLMENT_SUPPLIER_TRANSPORT", "sandbox")).strip().lower()
     if mode == "smtp":
-        return SmtpTransport()
+        return ApprovalRequiredTransport()
+    if mode != 'sandbox':
+        return ApprovalRequiredTransport()
     return SandboxTransport()
 
 
@@ -113,6 +133,9 @@ def transport_health() -> Dict[str, Any]:
     if mode == "smtp":
         required = (("SMTP_HOST", os.getenv("SMTP_HOST", "")), ("SMTP_SENDER", os.getenv("SMTP_SENDER", "")))
         missing: List[str] = [k for k, v in required if not str(v).strip()]
-        return {"mode": "smtp", "configured": not missing, "missing": missing,
-                "transmits": True}
+        return {"mode": "smtp", "configured": False, "missing": missing,
+                "transmits": False, "blocked_reason": "independent_person_approval_required"}
+    if mode != 'sandbox':
+        return {'mode': mode, 'configured': False, 'missing': [], 'transmits': False,
+                'blocked_reason': 'unknown_transport'}
     return {"mode": "sandbox", "configured": True, "missing": [], "transmits": False}

@@ -16,7 +16,7 @@ def test_smtp_missing_env_is_not_configured(monkeypatch):
     monkeypatch.delenv("SMTP_HOST", raising=False)
     monkeypatch.delenv("SMTP_SENDER", raising=False)
     h = transport_health()
-    assert h["mode"] == "smtp" and h["configured"] is False and h["transmits"] is True
+    assert h["mode"] == "smtp" and h["configured"] is False and h["transmits"] is False
     assert "SMTP_HOST" in h["missing"] and "SMTP_SENDER" in h["missing"]
 
 
@@ -25,4 +25,5 @@ def test_smtp_fully_configured(monkeypatch):
     monkeypatch.setenv("SMTP_HOST", "mail.example")
     monkeypatch.setenv("SMTP_SENDER", "procurement@shopsquire.example")
     h = transport_health()
-    assert h["mode"] == "smtp" and h["configured"] is True and h["missing"] == []
+    assert h["mode"] == "smtp" and h["configured"] is False and h["missing"] == []
+    assert h['blocked_reason'] == 'independent_person_approval_required'

@@ -41,15 +41,13 @@ def _profile(slot: str, default: Any) -> Any:
 def required_approval_tier(value_cents: Any, *, tiers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """The required approval tier for a spend of ``value_cents``. Returns
     {tier, min_level, value_cents, reason}. First band whose max_cents covers the value wins; the final
-    (max_cents=None) band is the catch-all top tier. Pure; never raises."""
-    try:
-        v = max(0, int(value_cents or 0))
-    except (TypeError, ValueError):
-        v = 0
-    bands = tiers if tiers is not None else (_profile("approval_value_tiers", None) or _DEFAULT_TIERS)
+    (max_cents=None) band is the catch-all top tier. Invalid spend is rejected."""
+    if type(value_cents) is not int or value_cents < 0:
+        raise ValueError('spend_must_be_nonnegative_integer_cents')
+    v = value_cents
+    bands = tiers if tiers is not None else _profile("approval_value_tiers", _DEFAULT_TIERS)
+    _validate_tiers(bands)
     for band in bands:
-        if not isinstance(band, dict):
-            continue
         mc = band.get("max_cents")
         if mc is None or v <= int(mc):
             return {"tier": str(band.get("tier") or "review"), "min_level": int(band.get("min_level") or 1),
@@ -59,12 +57,30 @@ def required_approval_tier(value_cents: Any, *, tiers: Optional[List[Dict[str, A
             "value_cents": v, "reason": "spend above all bands → top tier"}
 
 
+def _validate_tiers(bands):
+    if not isinstance(bands,list) or not bands:
+        raise ValueError('invalid_approval_tiers')
+    previous_cap,previous_level=-1,0
+    for index,band in enumerate(bands):
+        if not isinstance(band,dict):raise ValueError('invalid_approval_tiers')
+        cap,level=band.get('max_cents'),band.get('min_level')
+        if (not isinstance(band.get('tier'),str) or not band['tier'].strip()
+                or type(level) is not int or level<1 or level<previous_level):
+            raise ValueError('invalid_approval_tiers')
+        if index==len(bands)-1:
+            if cap is not None:raise ValueError('invalid_approval_tiers')
+        elif type(cap) is not int or cap<=previous_cap:
+            raise ValueError('invalid_approval_tiers')
+        previous_cap,previous_level=cap,level
+
+
 def approver_level(role: str) -> int:
     """The approval LEVEL of an actor role (StoreProfile approval_role_levels, else the default map).
     Unknown role → 0 (clears only the 'auto' tier)."""
-    levels = _profile("approval_role_levels", None) or _DEFAULT_ROLE_LEVELS
-    if not isinstance(levels, dict):
-        levels = _DEFAULT_ROLE_LEVELS
+    levels = _profile("approval_role_levels", _DEFAULT_ROLE_LEVELS)
+    if not isinstance(levels,dict) or any(not isinstance(role,str) or not role.strip()
+            or type(level) is not int or level<0 for role,level in levels.items()):
+        raise ValueError('invalid_approval_role_levels')
     return int(levels.get(str(role or "").strip().lower(), 0))
 
 

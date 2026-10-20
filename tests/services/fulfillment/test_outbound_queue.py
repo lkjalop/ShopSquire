@@ -52,6 +52,55 @@ def _enq(db, key="hash-1", now="2026-06-28T10:00:00"):
                      idempotency_key=key, max_attempts=3, now_iso=now)
 
 
+def test_changed_bytes_cannot_reuse_an_approved_key(db):
+    _enq(db)
+    result = q.enqueue(db, case_id='c1', recipient='attacker@example.com', subject='RFQ',
+                       body='...', idempotency_key='hash-1', now_iso='2026-06-28T10:00:01')
+    assert result['status'] == 'effect_conflict'
+
+
+def test_modified_queued_payload_fails_at_dispatch(db):
+    _enq(db)
+    db.execute(text("UPDATE outbound_message SET body='tampered'"))
+    db.commit()
+    result = q.process_pending(db, transport=_OkTransport(), now_iso='2026-06-28T10:00:01')
+    assert result['sent'] == 0 and result['blocked_authority'] == 1
+
+
+def test_revoked_and_expired_permits_do_not_dispatch(db):
+    _enq(db)
+    assert q.revoke_pending_permit(db, tenant_id='default', idempotency_key='hash-1')
+    assert q.process_pending(db, transport=_OkTransport())['sent'] == 0
+    _enq(db, key='expired')
+    result = q.process_pending(db, transport=_OkTransport(), now_iso='2026-07-01T00:00:00')
+    assert result['sent'] == 0 and result['blocked_authority'] == 1
+
+
+def test_send_receipt_does_not_claim_verified_completion(db):
+    _enq(db)
+    q.process_pending(db, transport=_OkTransport(), now_iso='2026-06-28T10:00:01')
+    assert q.get_by_key(db, idempotency_key='hash-1')['completion_status'] == 'submitted_unverified'
+
+
+@pytest.mark.parametrize('raises', [True, False])
+def test_uncertain_provider_outcome_never_automatically_retries(db, raises):
+    _enq(db)
+    class Uncertain:
+        calls=0
+        def send(self, **kwargs):
+            self.calls+=1
+            if raises:
+                raise TimeoutError('receipt lost after possible acceptance')
+            return _Res('unknown',detail='receipt lost')
+    tx=Uncertain()
+    q.process_pending(db,transport=tx,now_iso='2026-06-28T10:00:01')
+    q.process_pending(db,transport=tx,now_iso='2026-06-28T10:10:01')
+    assert tx.calls==1
+    row=q.get_by_key(db,idempotency_key='hash-1')
+    assert row['status']=='reconciliation_required'
+    assert row['completion_status']=='not_completed'
+
+
 def test_enqueue_then_process_sends(db):
     _enq(db)
     out = q.process_pending(db, transport=_OkTransport(), now_iso="2026-06-28T10:00:01")
@@ -137,8 +186,8 @@ def test_record_ack_closes_the_loop(db):
     r = q.record_ack(db, idempotency_key="ackme", ack_ref="855-REF", now_iso="2026-06-28T11:00:00")
     assert r["acked"] is True
     assert q.queue_status(db)["unacknowledged_sent"] == 0
-    row = db.execute(text("SELECT ack_status, provider_ref FROM outbound_message")).fetchone()
-    assert row[0] == "acked" and row[1] == "855-REF"
+    row = db.execute(text("SELECT ack_status, provider_ref, ack_reference FROM outbound_message")).fetchone()
+    assert row[0] == "acked" and row[1] == "PROV-1" and row[2] == "855-REF"
 
 
 def test_queue_status_counts_by_status(db):
@@ -207,16 +256,16 @@ def test_claimed_sending_row_is_not_resent(db):
     assert db.execute(text("SELECT status FROM outbound_message")).fetchone()[0] == "sending"
 
 
-def test_stale_claim_is_reclaimed_and_delivered(db):
-    """A 'sending' row older than the stale-claim window (crashed worker) is reclaimed to pending and retried."""
+def test_stale_claim_requires_reconciliation_without_resending(db):
+    """A crash after provider acceptance must not cause a blind resend."""
     _enq(db, key="stale")
     db.execute(text("UPDATE outbound_message SET status='sending', updated_at='2026-06-28T09:00:00' "
                     "WHERE idempotency_key='stale'"))
     db.commit()
     tx = _CountingTransport()
     out = q.process_pending(db, transport=tx, now_iso="2026-06-28T10:00:00")  # >300s later → reclaimed
-    assert tx.calls == 1 and out["sent"] == 1
-    assert db.execute(text("SELECT status FROM outbound_message")).fetchone()[0] == "sent"
+    assert tx.calls == 0 and out["sent"] == 0
+    assert db.execute(text("SELECT status FROM outbound_message")).fetchone()[0] == "reconciliation_required"
 
 
 def test_record_ack_rejects_unsent_row(db):
