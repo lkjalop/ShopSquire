@@ -3,13 +3,12 @@ import pytest
 
 pytestmark = pytest.mark.skipif(os.getenv("SKIP_PLAYWRIGHT", "1") == "1", reason="Playwright not configured in local CI")
 
-BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost:8080")
 
 
-def test_browse_to_checkout(page):
-    page.goto(f"{BASE_URL}/ui/storefront")
+def test_browse_to_checkout(page, browser_test_server):
+    page.goto(f"{browser_test_server['base_url']}/ui/storefront")
     page.click(".detail")
     page.click(".add-to-cart")
-    page.goto(f"{BASE_URL}/ui/checkout")
+    page.goto(f"{browser_test_server['base_url']}/ui/checkout")
     page.click("button:has-text('Place Order')")
     assert page.locator("#form-error").is_visible()

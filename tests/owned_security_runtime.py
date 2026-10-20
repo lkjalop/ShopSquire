@@ -45,7 +45,7 @@ _RUNTIME = pytest.StashKey()
 
 
 @contextmanager
-def _owned_runtime(config):
+def _owned_runtime(config, *, artifact_directory=None, env_overrides=None, publish_base_url=True):
     import json
     from pathlib import Path
     from sqlalchemy.engine import make_url
@@ -57,7 +57,8 @@ def _owned_runtime(config):
     port = _find_free_port(int(os.getenv("SECURITY_TEST_PORT", "8082")))
     base_url = f"http://{host}:{port}"
     explicit_directory = os.getenv("PYTEST_OWNED_SECURITY_DIRECTORY")
-    directory = (Path(explicit_directory) if explicit_directory else
+    directory = (Path(artifact_directory) if artifact_directory is not None else
+                 Path(explicit_directory) if explicit_directory else
                  Path(config.rootpath) / ".artifacts" / ("owned-security-" + uuid.uuid4().hex))
     directory.mkdir(parents=True, exist_ok=False)
     db_path = directory / "security.sqlite3"
@@ -93,6 +94,7 @@ def _owned_runtime(config):
     for key in ("STRIPE_API_KEY", "STRIPE_API_KEY_REF", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_ID_REF",
                 "PAYPAL_CLIENT_SECRET", "PAYPAL_CLIENT_SECRET_REF", "ERP_PO_URL", "ERP_API_KEY", "REDIS_URL_REF"):
         env[key] = ""
+    env.update(env_overrides or {})
 
     proc = None
     log_path = directory / "server.log"
@@ -110,14 +112,16 @@ def _owned_runtime(config):
                 "database_path": str(db_path), "database_url": database_url}), encoding="utf-8")
             if not _wait_ready(base_url, timeout=30):
                 raise RuntimeError(f"Owned security API was not ready; inspect {log_path}")
-            os.environ["E2E_BASE_URL"] = base_url
+            if publish_base_url:
+                os.environ["E2E_BASE_URL"] = base_url
             yield {"base_url": base_url, "owned": True, "process_id": proc.pid,
                    "database_path": str(db_path), "database_url": database_url}
         finally:
-            if previous_base is None:
-                os.environ.pop("E2E_BASE_URL", None)
-            else:
-                os.environ["E2E_BASE_URL"] = previous_base
+            if publish_base_url:
+                if previous_base is None:
+                    os.environ.pop("E2E_BASE_URL", None)
+                else:
+                    os.environ["E2E_BASE_URL"] = previous_base
             if proc is not None and proc.poll() is None:
                 proc.terminate()
                 try:

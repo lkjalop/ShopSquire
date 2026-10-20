@@ -4,19 +4,18 @@ import re
 from playwright.sync_api import expect, Page
 
 
-BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost:8080")
 
 
-def test_storefront_loads(page: Page):
-    page.goto(f"{BASE_URL}/ui/storefront")
+def test_storefront_loads(page: Page, browser_test_server):
+    page.goto(f"{browser_test_server['base_url']}/ui/storefront")
     expect(page).to_have_title("ShopSquire Storefront")
     cards = page.locator(".grid .card")
     expect(cards).to_have_count(1)
     expect(page.locator("shopsquire-widget")).to_have_count(1)
 
 
-def test_product_detail_from_storefront(page: Page):
-    page.goto(f"{BASE_URL}/ui/storefront")
+def test_product_detail_from_storefront(page: Page, browser_test_server):
+    page.goto(f"{browser_test_server['base_url']}/ui/storefront")
     first_detail = page.locator(".detail").first
     expect(first_detail).to_be_visible()
     first_detail.click()
@@ -24,8 +23,8 @@ def test_product_detail_from_storefront(page: Page):
     expect(page.locator("h1")).to_be_visible()
 
 
-def test_widget_opens(page: Page):
-    page.goto(f"{BASE_URL}/ui/storefront")
+def test_widget_opens(page: Page, browser_test_server):
+    page.goto(f"{browser_test_server['base_url']}/ui/storefront")
     page.wait_for_function("!!customElements.get('shopsquire-widget')")
     widget = page.locator("shopsquire-widget")
     expect(widget).to_have_count(1)
