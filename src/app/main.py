@@ -102,7 +102,7 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     Probes ONLY the packages the selected provider can use: importing paddleocr
     loads the full Paddle framework (whose model-source check stalls ~10-15s when
     its source is blocked), so the boot-path probe must never pay that cost for a
-    provider that doesn't need it (glm-ocr/embedded run via Ollama â€” no local OCR).
+    provider that doesn't need it (glm-ocr/embedded run via Ollama — no local OCR).
     An unprobed package is ABSENT from deps ("not probed"), never reported False
     ("probed and missing"). The exhaustive all-dependency introspection lives in
     the role-gated cv_readiness diagnostic, not on the boot path."""
@@ -158,7 +158,7 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
         runtime["pyzbar_runtime"] = False
 
     if no_local_ocr:
-        ready = True  # glm-ocr uses Ollama â€” no local binary required
+        ready = True  # glm-ocr uses Ollama — no local binary required
     elif selected == "tesseract":
         ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
         if not ready:
@@ -340,9 +340,9 @@ def create_app() -> FastAPI:
         except RuntimeError as _audit_err:
             import logging as _al
             _al.getLogger("shopsquire.startup").critical(
-                "STARTUP BLOCKED: %s â€” set AUDIT_CHAIN_SECRET before starting in production.", _audit_err
+                "STARTUP BLOCKED: %s — set AUDIT_CHAIN_SECRET before starting in production.", _audit_err
             )
-            raise  # Abort startup â€” do not run with a broken audit chain in prod
+            raise  # Abort startup — do not run with a broken audit chain in prod
         except Exception:
             pass
         try:
@@ -365,7 +365,7 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         # LOUD memory-store guard (must run AFTER init_logging or the OK line is dropped by the
-        # last-resort handler): a dead Redis does not stop the app â€” it silently degrades into
+        # last-resort handler): a dead Redis does not stop the app — it silently degrades into
         # per-call connection timeouts and LITERAL context loss (session memory gone). That failure
         # mode cost days of confused latency numbers and would cost a live demo its memory. Scream
         # at startup; the /health checker screams ONCE on every up/down transition at runtime.
@@ -375,11 +375,11 @@ def create_app() -> FastAPI:
             try:
                 from src.app.deps import get_redis as _gr
                 _rc = _gr()
-                if type(_rc).__name__ == "DummyRedis":  # the dev fallback answers in-process â€” a lie
+                if type(_rc).__name__ == "DummyRedis":  # the dev fallback answers in-process — a lie
                     raise ConnectionError("DummyRedis fallback active (Redis was down at first use)")
                 if hasattr(_rc, "ping"):
                     _rc.ping()
-                _redis_log.info("memory store (Redis) reachable â€” session memory ACTIVE")
+                _redis_log.info("memory store (Redis) reachable — session memory ACTIVE")
             except Exception as _rerr:
                 _redis_log.critical(
                     "\n" + "!" * 78 +
@@ -441,7 +441,7 @@ def create_app() -> FastAPI:
         # Router-model preload OFF-THREAD: absorb the cold-load spike AND keep the router model
         # resident so a concurrent vision request (glm-ocr) can't evict it mid-session. Measured:
         # warm+pinned the router routes in ~5-6s (PASS the 8s gate); cold-or-evicted it spikes to
-        # 11-13s â€” the "latency blocker" was VRAM eviction, not model speed. Pair with
+        # 11-13s — the "latency blocker" was VRAM eviction, not model speed. Pair with
         # OLLAMA_MAX_LOADED_MODELS>=2 so the router and the VLM coexist instead of thrashing.
         # Off by default under test envs (no Ollama on CI); best-effort everywhere.
         try:
@@ -513,7 +513,7 @@ def create_app() -> FastAPI:
                                 )
                                 ingest_reviewed_configurations(db)
                         elif profile_id and profile_id != "electronics" and local_default:
-                            # Non-electronics vertical (fashion/pharmacy/â€¦): seed its OWN profile catalog
+                            # Non-electronics vertical (fashion/pharmacy/…): seed its OWN profile catalog
                             # into products+inventory so the switched store runs real DB retrieval, not
                             # just the zero-result fallback. Agnostic: the seeder reads the profile slot.
                             from scripts.seed_profile_catalog import seed_profile_catalog
@@ -537,7 +537,7 @@ def create_app() -> FastAPI:
                             # cannot wait behind startup's still-open catalog write.
                             db.commit()
                             seed_demo_vendor_contacts()  # kyv_vendors manage their own session
-                            seed_demo_supplier_history()  # supplier_baseline_events â€” prior-dealings context
+                            seed_demo_supplier_history()  # supplier_baseline_events — prior-dealings context
                     except Exception:
                         pass
                     db.commit()
@@ -824,7 +824,7 @@ def create_app() -> FastAPI:
         pass
 
     # Allow frontend dev server access (Vite) for local demos/tests.
-    # In production, CORS_ORIGINS must be explicitly set â€” localhost origins are
+    # In production, CORS_ORIGINS must be explicitly set — localhost origins are
     # only included when APP_ENV is local/dev or CORS_ORIGINS explicitly lists them.
     try:
         origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -832,17 +832,17 @@ def create_app() -> FastAPI:
         if not origins:
             _app_env = os.getenv("APP_ENV", "local").strip().lower()
             if _app_env in ("local", "dev", "development", "test", "testing"):
-                # DEV: allow ANY localhost/127.0.0.1 port so a demo on an alternate frontend port (5178, â€¦)
-                # or backend port just works â€” no per-port CORS edit. allow_origin_regex echoes the specific
+                # DEV: allow ANY localhost/127.0.0.1 port so a demo on an alternate frontend port (5178, …)
+                # or backend port just works — no per-port CORS edit. allow_origin_regex echoes the specific
                 # origin, so it's compatible with allow_credentials (a wildcard '*' would not be). PROD still
                 # requires explicit CORS_ORIGINS below.
                 origin_regex = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
                 origins = []
             else:
-                # Production: no wildcard fallback â€” require explicit CORS_ORIGINS
+                # Production: no wildcard fallback — require explicit CORS_ORIGINS
                 import logging as _logging
                 _logging.getLogger(__name__).warning(
-                    "CORS_ORIGINS not set in APP_ENV=%s â€” CORS will be restrictive (no allowed origins). "
+                    "CORS_ORIGINS not set in APP_ENV=%s — CORS will be restrictive (no allowed origins). "
                     "Set CORS_ORIGINS env var to your frontend domain(s).",
                     _app_env,
                 )
@@ -945,14 +945,14 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     # Capture JA3/JA4 headers from trusted ingress proxies for fraud scoring.
-    # Added last so it runs first â€” fingerprint data is available to all downstream middleware and handlers.
+    # Added last so it runs first — fingerprint data is available to all downstream middleware and handlers.
     try:
         app.add_middleware(TLSFingerprintMiddleware)
     except Exception:
         pass
 
-    # Scope the active StoreProfile (vertical) per request: X-Store-Profile header â†’ STORE_PROFILE_ID
-    # env â†’ electronics. Pure-ASGI so the ContextVar reaches the (threadpool-run) sync routes â€” turns
+    # Scope the active StoreProfile (vertical) per request: X-Store-Profile header → STORE_PROFILE_ID
+    # env → electronics. Pure-ASGI so the ContextVar reaches the (threadpool-run) sync routes — turns
     # the agnostic core from env-level into per-tenant runtime selection.
     try:
         from src.app.platform.store_profile_middleware import StoreProfileMiddleware
@@ -1317,7 +1317,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
-        # â”€â”€ Handle structured ShopSquireError subclasses â”€â”€
+        # ── Handle structured ShopSquireError subclasses ──
         try:
             from src.app.exceptions import ShopSquireError
             if isinstance(exc, ShopSquireError):
@@ -1439,9 +1439,9 @@ def create_app() -> FastAPI:
             # the request hot path. The bounded path runs emit + anomaly in a worker thread under a hard
             # timeout. CONCURRENCY-GATED DEFAULT-OFF (OBSERVER_THREADED): the threaded path uses a
             # SEPARATE db_session, which is correct on Postgres (per-thread connections) but unsafe on a
-            # shared single-connection pool (SQLite/tests â†’ "cannot start a transaction within a
+            # shared single-connection pool (SQLite/tests → "cannot start a transaction within a
             # transaction", and on timeout the un-cancellable thread keeps writing on that connection).
-            # With the flag off (default) the observer runs INLINE on the request-scoped session â€” the
+            # With the flag off (default) the observer runs INLINE on the request-scoped session — the
             # proven, race-free path. Enable OBSERVER_THREADED in prod (Postgres) for the hard time-bound.
             import asyncio as _aio
             import logging as _logging
@@ -1481,12 +1481,12 @@ def create_app() -> FastAPI:
                     await _aio.wait_for(_aio.to_thread(lambda: _run_observer_sync(None)), timeout=_obs_budget)
                 except _aio.TimeoutError:
                     _logging.getLogger("shopsquire.observer").warning(
-                        "security observer timed out (%.1fs) on %s â€” skipped; request continues", _obs_budget, path
+                        "security observer timed out (%.1fs) on %s — skipped; request continues", _obs_budget, path
                     )
                 except Exception:
                     pass
             else:
-                # Default: inline on the request-scoped session â€” no cross-connection race.
+                # Default: inline on the request-scoped session — no cross-connection race.
                 _run_observer_sync(request)
             response = await call_next(request)
             return response
@@ -2033,7 +2033,7 @@ def create_app() -> FastAPI:
                 ui_router = None
 
     register_admin_access_router_group(app)
-    # P2: two fully-built admin routers were never included â†’ their endpoints 404'd. Register them
+    # P2: two fully-built admin routers were never included → their endpoints 404'd. Register them
     # (case cockpit: /api/v1/admin/cases/{id}/cockpit+/tags; decision time-travel: /admin/decisions/asof).
     register_core_router_group(app)
     # CV analysis endpoint (complaints triage)
@@ -2382,7 +2382,7 @@ def create_app() -> FastAPI:
     
     register_storefront_router_group(app)
 
-    # Inventory background worker â€” monitors stock levels and generates reorder recommendations.
+    # Inventory background worker — monitors stock levels and generates reorder recommendations.
     # Registered unconditionally; previously was erroneously inside the fraud router except block.
     try:
         import asyncio
