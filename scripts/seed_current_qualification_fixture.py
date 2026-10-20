@@ -81,6 +81,7 @@ def seed_current_observations(db, *, now):
         configuration = ProductConfiguration(id=instance + ":" + label, tenant_id=TENANT,
             product_id=row[0], sku=row[1], title="FICTIONAL current qualification: " + row[2],
             manufacturer="Fictional Manufacturer", retailer="Fictional Shop", source_url=SOURCE,
+            mpn="SIM-" + row[1], retailer_sku=row[1],
             configuration_hash=hashlib.sha256((instance + label).encode()).hexdigest(),
             price_cents=row[4], currency=row[5], specification_observed_at=now,
             price_observed_at=now, availability_observed_at=now)

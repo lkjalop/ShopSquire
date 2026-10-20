@@ -60,6 +60,8 @@ def test_current_observations_preserve_fixed_replay_and_exact_configuration():
         _, receipt = seed_current_observations(db, now=datetime(2026, 10, 21, tzinfo=timezone.utc))
         current = db.get(ProductConfiguration, receipt["configuration_ids"][0])
         assert current.sku == "LAP-FIXTURE-B"
+        assert current.mpn == "SIM-" + current.sku
+        assert current.retailer_sku == current.sku
         assert db.execute(select(ProductConfiguration.id).where(
             ProductConfiguration.tenant_id == TENANT, ProductConfiguration.sku == current.sku,
             ProductConfiguration.active.is_(True))).scalars().all() == [current.id]
