@@ -26,13 +26,13 @@ def _browser_runtime(pytestconfig, tmp_path_factory, *, demo_checkout=False):
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def browser_test_server(pytestconfig, tmp_path_factory):
     with _browser_runtime(pytestconfig, tmp_path_factory) as runtime:
         yield runtime
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def demo_checkout_server(pytestconfig, tmp_path_factory):
     with _browser_runtime(pytestconfig, tmp_path_factory, demo_checkout=True) as runtime:
         yield runtime
