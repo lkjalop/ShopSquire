@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import Any, Dict, Tuple, List, Optional
 import os
+from src.app.platform.tenant_context import current_tenant_id
 
 from src.app.deps import (
     security_sanitize,
@@ -16,14 +17,14 @@ from src.app.deps import (
 )
 from src.app.security.nlp_deception import DeceptionDetector
 import re
-from src.app.models.db import db_session
 from fastapi import Request
 from src.app.observability.tracing import init_tracer, get_tracer
 from src.app.observability.metrics import record_control_failure, record_security_event
 from src.app.security.escalation import auto_route_security_event
 from src.app.security.pci import contains_pci_data
-from sqlalchemy.engine import Engine
 import random
+import logging
+from copy import deepcopy
 from urllib.parse import unquote
 from src.app.observability.worm import append_worm_record
 from src.app.services.geoip import enrich_ip
@@ -849,7 +850,7 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
         pass
     init_tracer()
     tracer = get_tracer("security-observer")
-    raw_payload = payload if isinstance(payload, dict) else {}
+    raw_payload = deepcopy(payload) if isinstance(payload, dict) else {}
     sanitized = security_sanitize(payload)
     actor_ctx: Dict[str, Any] = {}
     try:
@@ -924,21 +925,20 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
         span.set_attribute("observer.path", path)
         span.set_attribute("observer.severity", severity)
         span.set_attribute("observer.payload.size", len(json.dumps(sanitized)))
-        # NOTE: Schema is Alembic-managed. SQLite test/dev uses `db_session()` which
-        # ensures minimal tables exist; avoid creating tables here.
-        def _ensure_security_tables(engine: Engine):
-            return
-
-        # Perform persistence in a background thread to avoid adding latency
-        # to the HTTP request path. Tests that need to observe events should
-        # still find them shortly after the request completes.
+        # Capture deployment ownership before leaving the request thread. A
+        # background observer must never use, commit, or retain request.state.db.
+        from src.app.models.db import get_engine
+        engine_for_use = getattr(getattr(getattr(request, "app", None), "state", None), "engine", None)
+        if engine_for_use is None:
+            engine_for_use = get_engine()
+        tenant_for_use = current_tenant_id()
         import threading
 
         def _persist():
             from sqlalchemy import text as _text
             severity_l = severity
             risk_adj_l = risk_adj
-            details_l = details
+            details_l = deepcopy(details)
             event_id = str(uuid.uuid4())
 
             # If compute_risk was deferred, compute it now so persisted event has full analysis
@@ -960,85 +960,36 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
             except Exception:
                 pass
 
-            # Resolve request-scoped session / engine if available
-            engine_for_use = None
-            request_session = None
             try:
-                if request is not None and hasattr(request, "state"):
-                    request_session = getattr(request.state, "db", None)
-            except Exception:
-                request_session = None
-            try:
-                if request is not None and hasattr(request, "app") and hasattr(request.app, "state"):
-                    engine_for_use = getattr(request.app.state, "engine", None)
-            except Exception:
-                engine_for_use = None
-
-            def _do_insert_with_session(sess):
-                try:
-                    sess.execute(
-                        _text(
-                            "INSERT INTO security_events (id, path, event_time, severity, verdict_score, details) VALUES (:id, :path, :event_time, :severity, :score, :details)"
-                        ),
-                        {
-                            "id": event_id,
-                            "path": path,
+                from sqlalchemy.orm import Session
+                from src.app.platform.tenant_session import bind_session_tenant
+                with Session(engine_for_use) as db:
+                    bind_session_tenant(db, tenant_id=tenant_for_use)
+                    db.execute(_text(
+                        "INSERT INTO security_events (id,path,event_time,severity,verdict_score,details) "
+                        "VALUES (:id,:path,:event_time,:severity,:score,:details)"), {
+                            "id": event_id, "path": path,
                             "event_time": event_time or __import__("datetime").datetime.utcnow().isoformat(),
-                            "severity": severity_l,
-                            "score": int(risk_adj_l),
+                            "severity": severity_l, "score": int(risk_adj_l),
                             "details": json.dumps(details_blob, ensure_ascii=False),
-                        },
-                    )
-                    try:
-                        sess.commit()
-                    except Exception:
-                        try:
-                            sess.rollback()
-                        except Exception:
-                            pass
+                        })
+                    db.commit()
+                # Optional analytics has its own transaction. Its failure must
+                # neither undo the event nor commit any caller's business work.
+                try:
+                    with Session(engine_for_use) as db_ts:
+                        bind_session_tenant(db_ts, tenant_id=tenant_for_use)
+                        db_ts.execute(_text(
+                            "INSERT INTO security_observer_timeseries "
+                            "(id,event_id,severity,risk_adj,insider_score,tenant_id) "
+                            "VALUES (:id,:eid,:sev,:risk,:ins,:tenant)"), {
+                                "id": str(uuid.uuid4()), "eid": event_id, "sev": severity_l,
+                                "risk": float(risk_adj_l or 0.0),
+                                "ins": float(details_l.get("insider_score", 0.0)), "tenant": tenant_for_use,
+                            })
+                        db_ts.commit()
                 except Exception:
-                    try:
-                        sess.rollback()
-                    except Exception:
-                        pass
-
-            try:
-                if request_session is not None:
-                    _do_insert_with_session(request_session)
-                elif engine_for_use is not None:
-                    try:
-                        with engine_for_use.begin() as conn:
-                            conn.execute(
-                                _text(
-                                    "INSERT INTO security_events (id, path, event_time, severity, verdict_score, details) VALUES (:id, :path, :event_time, :severity, :score, :details)"
-                                ),
-                                {
-                                    "id": event_id,
-                                    "path": path,
-                                    "event_time": event_time or __import__("datetime").datetime.utcnow().isoformat(),
-                                    "severity": severity_l,
-                                    "score": int(risk_adj_l),
-                                    "details": json.dumps(details_blob, ensure_ascii=False),
-                                },
-                            )
-                    except Exception:
-                        try:
-                            from sqlalchemy.orm import sessionmaker
-
-                            SessionTmp = sessionmaker(autocommit=False, autoflush=False, bind=engine_for_use, future=True)
-                            db_tmp = SessionTmp()
-                            try:
-                                _do_insert_with_session(db_tmp)
-                            finally:
-                                try:
-                                    db_tmp.close()
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
-                else:
-                    with db_session() as db:
-                        _do_insert_with_session(db)
+                    logging.getLogger(__name__).warning("Security observer analytics write failed", exc_info=True)
 
                 try:
                     auto_route_security_event(event_id, severity_l, float(risk_adj_l or 0.0), details_l or {})
@@ -1051,45 +1002,6 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
                 except Exception:
                     pass
 
-                # Persist a lightweight timeseries point for alerting/analytics
-                try:
-                    from src.app.models.db import db_session as _db_session
-                    insider_score = None
-                    try:
-                        insider_score = float(details_l.get("insider_score", 0.0))
-                    except Exception:
-                        insider_score = None
-                    with _db_session() as db_ts:
-                        try:
-                            db_ts.execute(
-                                _text(
-                                    "INSERT INTO security_observer_timeseries "
-                                    "(id, event_id, severity, risk_adj, insider_score, tenant_id) "
-                                    "VALUES (:id, :eid, :sev, :r_adj, :ins, :tid)"
-                                ),
-                                {
-                                    "id": str(uuid.uuid4()),
-                                    "eid": event_id,
-                                    "sev": severity_l,
-                                    "r_adj": float(risk_adj_l or 0.0),
-                                    "ins": insider_score,
-                                    "tid": None,
-                                },
-                            )
-                            try:
-                                db_ts.commit()
-                            except Exception:
-                                try:
-                                    db_ts.rollback()
-                                except Exception:
-                                    pass
-                        except Exception:
-                            try:
-                                db_ts.rollback()
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
 
             except Exception:
                 try:
@@ -1108,8 +1020,26 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
             sync_mode = str(os.getenv("SECURITY_OBSERVER_SYNC", "0")).strip() in ("1", "true", "yes")
         except Exception:
             sync_mode = False
-        if sync_mode:
-            _persist()
+        def dispatch():
+            if sync_mode:
+                _persist()
+            else:
+                threading.Thread(target=_persist, daemon=True).start()
+
+        request_session = getattr(getattr(request, 'state', None), 'db', None)
+        if request_session is not None and request_session.in_transaction():
+            # Release the business transaction/connection first. This also
+            # protects single-connection SQLite pools: a second Session there
+            # would otherwise commit the caller's transaction underneath it.
+            from sqlalchemy import event
+            pending_dispatch = dispatch
+
+            def after_transaction_end(session, transaction):
+                nonlocal pending_dispatch
+                if transaction.parent is None and pending_dispatch is not None:
+                    job, pending_dispatch = pending_dispatch, None
+                    job()
+
+            event.listen(request_session, 'after_transaction_end', after_transaction_end)
         else:
-            t = threading.Thread(target=_persist, daemon=True)
-            t.start()
+            dispatch()
