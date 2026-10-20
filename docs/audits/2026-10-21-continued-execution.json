@@ -1,8 +1,10 @@
 {
-  "recorded_at": "2026-10-20T22:38:58.871415+00:00",
-  "checkpoint_head": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+  "recorded_at": "2026-10-20T22:51:36.930724+00:00",
+  "checkpoint_head": "e950facd7f279ff37a691828eb2a058402afd94c",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "e950facd Keep owned fact recall on the accepted material case revision",
+    "9ec5f123 Record named-shortfall retention and separate live discovery from source and market completion",
     "13761e98 Keep named shortfall counts separate from total requested case quantity",
     "d86386bb Record scoped privacy and person-bound enquiry integration with remaining roadmap gates",
     "8c397ee4 Integrate person-bound supplier enquiries and fence uncertain outbound attempts",
@@ -95,12 +97,12 @@
   "committed_source_delta": {
     "production": {
       "files": 89,
-      "insertions": 4215,
+      "insertions": 4246,
       "deletions": 1298
     },
     "tests": {
-      "files": 145,
-      "insertions": 8080,
+      "files": 147,
+      "insertions": 8155,
       "deletions": 1242
     },
     "frontend": {
@@ -110,15 +112,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T22:38:49.885072+00:00",
-    "head": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+    "recorded_at": "2026-10-20T22:50:23.466371+00:00",
+    "head": "e950facd7f279ff37a691828eb2a058402afd94c",
     "branch": "checkpoint/turn-state-consolidation-20260830",
     "git_status_entries": 483,
     "tracked_changed": 238,
     "untracked": 245,
     "staged": 0,
-    "files": 5708,
-    "text_lines": 978433,
+    "files": 5710,
+    "text_lines": 978543,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -229,12 +231,12 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1547,
+      "tests": 1549,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19509,
+    "functions": 19513,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5587,
     "swallowed_production_handlers": 2028,
@@ -244,34 +246,56 @@
     {
       "work_package": "W04/W05",
       "path": "src/app/services/case_task_delivery.py",
-      "symbol": "case_task_intent",
-      "line": 22,
-      "function_lines": 6,
-      "file_lines": 140,
+      "symbol": "_case_facts_message",
+      "line": 111,
+      "function_lines": 16,
+      "file_lines": 171,
       "git_state": "committed",
-      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "sha256": "9e2f192068c70ae1705889b99c6ae056ab67a607136278e22dbfbc33a893e01c",
+      "remaining": "complete recall/mixed-turn coverage and common presentation integration"
+    },
+    {
+      "work_package": "W04/W09",
+      "path": "tests/api/test_chat_case_read_revision.py",
+      "symbol": "test_case_recall_preserves_material_revision_and_accepted_selection",
+      "line": 17,
+      "function_lines": 28,
+      "file_lines": 44,
+      "git_state": "committed",
+      "sha256": "63e12384956f7646e4219193c9813e9b42038b4e3e019454a561793d82be871a",
+      "remaining": "all authorization/case consumers and distributed concurrent revisions"
+    },
+    {
+      "work_package": "W04/W05",
+      "path": "src/app/services/case_task_delivery.py",
+      "symbol": "case_task_intent",
+      "line": 26,
+      "function_lines": 8,
+      "file_lines": 171,
+      "git_state": "committed",
+      "sha256": "9e2f192068c70ae1705889b99c6ae056ab67a607136278e22dbfbc33a893e01c",
       "remaining": "summary/recall material revision stability and complete mixed-intent coverage"
     },
     {
       "work_package": "W04/W05",
       "path": "src/app/services/case_task_delivery.py",
       "symbol": "is_case_task_read",
-      "line": 30,
-      "function_lines": 13,
-      "file_lines": 140,
+      "line": 36,
+      "function_lines": 18,
+      "file_lines": 171,
       "git_state": "committed",
-      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "sha256": "9e2f192068c70ae1705889b99c6ae056ab67a607136278e22dbfbc33a893e01c",
       "remaining": "all explicit quantity, logistics, budget and workload amendments"
     },
     {
       "work_package": "W05/W06",
       "path": "src/app/services/case_task_delivery.py",
       "symbol": "deliver_case_task",
-      "line": 45,
-      "function_lines": 51,
-      "file_lines": 140,
+      "line": 56,
+      "function_lines": 53,
+      "file_lines": 171,
       "git_state": "committed",
-      "sha256": "c142b2dd6233b7bd6666e5ff7050ebda496cf2d856b2c5ffbf47ae185f0f4f99",
+      "sha256": "9e2f192068c70ae1705889b99c6ae056ab67a607136278e22dbfbc33a893e01c",
       "remaining": "owned contact selection and useful current cited market evidence"
     },
     {
@@ -7050,12 +7074,12 @@
   "committed_delta_by_scope": {
     "Application": {
       "files": 89,
-      "added": 4215,
+      "added": 4246,
       "removed": 1298
     },
     "Tests": {
-      "files": 145,
-      "added": 8080,
+      "files": 147,
+      "added": 8155,
       "removed": 1242
     },
     "Frontend": {
@@ -7080,13 +7104,13 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 27975,
+      "added": 28900,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 301,
-    "added": 43557,
+    "files": 303,
+    "added": 44588,
     "removed": 5010
   },
   "durable_image_gate": {
@@ -9313,5 +9337,188 @@
     },
     "source_manifest_sha256": "a3a9b8d23ab966d45f911d5eb04044e1eeec08a92f26bf862e90c37940be3820",
     "limitations": "Both browser assertions pass and 5720 copied inputs stay unchanged. First run dispatched no research; enrolled second run has 3 real HTTP-200 discovery receipts with hashes, but zero official fetches/claims. Publisher approval remains required and market evidence is blocked. Summary/recall advances material revisions even though facts remain retained."
+  },
+  "case_fact_recall_revision": {
+    "integration_commit": "e950facd",
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_case_read_revision.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-recall-material-revision-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 23.484,
+      "peaks": {
+        "rss_bytes": 279482368,
+        "handles": 1056,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_chat_case_read_revision.py",
+        "tests/services/test_case_fact_recall.py",
+        "tests/api/test_chat_shortfall_task_quantity.py",
+        "tests/api/test_chat_case_tasks.py",
+        "tests/services/test_case_task_shortfall_quantity.py",
+        "tests/services/test_shortfall_enquiry_preview.py",
+        "tests/services/test_market_context_delivery.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-recall-material-revision-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 46.125,
+      "peaks": {
+        "rss_bytes": 274681856,
+        "handles": 1129,
+        "threads": 39
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 54,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source": {
+      "sha256": {
+        "src/app/services/case_task_delivery.py": "9e2f192068c70ae1705889b99c6ae056ab67a607136278e22dbfbc33a893e01c",
+        "tests/api/test_chat_case_read_revision.py": "63e12384956f7646e4219193c9813e9b42038b4e3e019454a561793d82be871a",
+        "tests/services/test_case_fact_recall.py": "d2a48c9753d785a5131b3bfc54644ed7a2fc1b832836d1a753562fc765544809"
+      },
+      "candidate": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate"
+    },
+    "verification": {
+      "commit": "e950facd7f279ff37a691828eb2a058402afd94c",
+      "tested_files": [
+        "src/app/services/case_task_delivery.py",
+        "tests/api/test_chat_case_read_revision.py",
+        "tests/services/test_case_fact_recall.py"
+      ],
+      "other_candidate_python_files_matching_head": 2989,
+      "counts": {
+        "tests": 54,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "scope": "Two actual authenticated HTTP reds advanced revision 1 to 2. Fixed recalls preserve accepted selection/revision and visible 40-unit/AUD1500/Sydney facts. Mixed changes and research keep normal intake."
+    },
+    "browser": {
+      "complete": true,
+      "exit_code": 0,
+      "stats": {
+        "startTime": "2026-10-20T22:49:10.978Z",
+        "duration": 9622.224,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": [],
+      "changed_inputs": [],
+      "added_inputs": [],
+      "selected_inputs": 5723,
+      "diagnostic_spec_sha256": "dea575a39b165b908ef11a130de2fb4ddf8c043313071d153e707ea8f34822b6",
+      "owned_diagnostic_removed": true,
+      "ports_closed": {
+        "8100": true,
+        "5190": true
+      }
+    },
+    "browser_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_case_recall_browser_root.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 68.532,
+      "peaks": {
+        "rss_bytes": 291229696,
+        "handles": 1270,
+        "threads": 81
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "browser_source_manifest_sha256": "89b53c106173b338565aebd52be26adde47557b9e8b64cc647ada721e422aa98",
+    "limitations": "A bounded owned-fact read preserves revision and selection. Complete mixed-turn, multi-session and concurrent-consumer coverage remains open; the browser includes pending router/UI integration."
+  },
+  "case_origin_fetch_browser": {
+    "results": {
+      "scope": "Frozen preserved working tree; live research enabled, all commerce held",
+      "source": "13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef",
+      "complete": true,
+      "exit_code": 0,
+      "stats": {
+        "startTime": "2026-10-20T22:41:52.734Z",
+        "duration": 14041.514000000001,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "errors": [],
+      "changed_inputs": [],
+      "selected_inputs": 5721,
+      "ports_closed": {
+        "8100": true,
+        "5190": true
+      },
+      "origin_assessment": {
+        "discovery_http200": 3,
+        "official_origin_http200": 1,
+        "claim_count": 0,
+        "research_status": "zero_parser_yield",
+        "draft_requested_quantity": 40,
+        "draft_shortfall": null,
+        "market_status": "blocked"
+      }
+    },
+    "resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_live_publisher_origin.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 66.062,
+      "peaks": {
+        "rss_bytes": 292044800,
+        "handles": 1228,
+        "threads": 81
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "source_manifest_sha256": "b83651bfcb9fc1f8c1cbf6b2f4b20089c7de1eaf72107ae3587c3193216c4cd5",
+    "limitations": "5720 unchanged base inputs plus one explicit diagnostic spec. A separate buyer click permits the exact FreeCAD origin; an actual nonfixture HTTP-200 origin receipt is asserted. Homepage parser yields zero usable claims. This is neither global publisher verification nor complete product fit or useful market analysis."
   }
 }
