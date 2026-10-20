@@ -7,8 +7,9 @@ from src.app.observability import health
 
 
 def test_health_uses_cached_readiness_without_live_dependency_probe(monkeypatch):
+    monkeypatch.setenv('TEST_FAST_HEALTH','0')
     client = TestClient(create_app())
-    health._CACHE.update({
+    monkeypatch.setattr(health,'_CACHE',{
         "ts": int(time.time()),
         "payload": {
             "timestamp": int(time.time()), "overall": "healthy",

@@ -1437,9 +1437,8 @@ def create_app() -> FastAPI:
     _register_http_metrics(app)
 
     @app.get("/health")
-    def health():
+    def health(request: Request):
         from src.app.services.runtime_modes import runtime_mode_snapshot
-        from src.app.models.db import get_engine
         from src.app.observability.pilot_runtime_metrics import observe_database_pool
 
         def _commerce_features() -> dict[str, Any]:
@@ -1455,10 +1454,10 @@ def create_app() -> FastAPI:
         runtime_modes = runtime_mode_snapshot()
         commerce_features = _commerce_features()
         startup_capabilities = dict(
-            getattr(app.state, "startup_capabilities", {}) or {}
+            getattr(request.app.state, "startup_capabilities", {}) or {}
         )
         try:
-            database_pool = observe_database_pool(get_engine())
+            database_pool = observe_database_pool(request.app.state.engine)
         except Exception as exc:
             database_pool = {"status": "unavailable", "reason": type(exc).__name__}
         if str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on"):
@@ -1506,7 +1505,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz(deep: bool = False, force: bool = False):
+    def readyz(request: Request, deep: bool = False, force: bool = False):
         """Readiness probe.
 
         Default mode is intentionally fast and local for UI/test polling. Use
@@ -1561,7 +1560,7 @@ def create_app() -> FastAPI:
             _set_component("runtime_profile", False, {"error": "runtime_profile_check_failed"})
 
         try:
-            eng = getattr(app.state, "engine", None)
+            eng = getattr(request.app.state, "engine", None)
             if eng is None:
                 ok = False
                 reasons.append("no_engine")
@@ -1608,7 +1607,7 @@ def create_app() -> FastAPI:
             reasons.append("ready_check_failed")
             _set_component("db", False, {"error": "ready_check_failed"})
 
-        router_prewarm = getattr(app.state, "router_prewarm", None)
+        router_prewarm = getattr(request.app.state, "router_prewarm", None)
         if isinstance(router_prewarm, dict):
             router_ready = bool(router_prewarm.get("ready"))
             _set_component("router_model", router_ready, router_prewarm)
@@ -1759,12 +1758,12 @@ def create_app() -> FastAPI:
 
         return dependency_health_snapshot(force=force)
 
-    def _status_summary_payload() -> dict[str, Any]:
+    def _status_summary_payload(request: Request) -> dict[str, Any]:
         warn_count = 0
         err_count = 0
         outbound_count = 0
         try:
-            eng = getattr(app.state, "engine", None)
+            eng = getattr(request.app.state, "engine", None)
             if eng is not None:
                 with eng.connect() as conn:
                     try:
@@ -1801,14 +1800,14 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/status/summary")
-    def status_summary():
+    def status_summary(request: Request):
         """Public demo-friendly summary of key Email XDR counts."""
-        return ORJSONResponse(_status_summary_payload())
+        return ORJSONResponse(_status_summary_payload(request))
 
     @app.get("/api/v1/status/summary")
-    def status_summary_v1():
+    def status_summary_v1(request: Request):
         """Compatibility alias for frontend clients expecting /api/v1 prefix."""
-        return ORJSONResponse(_status_summary_payload())
+        return ORJSONResponse(_status_summary_payload(request))
 
     if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() in ("1", "true", "yes", "on"):
         @app.get("/demo", response_class=HTMLResponse)
