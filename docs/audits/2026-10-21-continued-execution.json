@@ -1,8 +1,12 @@
 {
-  "recorded_at": "2026-10-20T19:07:15.273466+00:00",
-  "checkpoint_head": "518cd5ff824c4d6d0a292245d9ecf79bd779a61d",
+  "recorded_at": "2026-10-20T19:24:24.208076+00:00",
+  "checkpoint_head": "f714dc924d95fecc4cbe07f6711b1c87de111450",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "f714dc92 Map refund PostgreSQL skip lineages to committed exact-effect concurrency controls",
+    "0f9be939 Bind refund claims and completion to exact effects, receipts and current worker ownership",
+    "bc10f677 Scope payment reconciliation and nested ledger work to their application database",
+    "2ffbfb47 Record strict Celery transport, native inventory deadlock and scheduler ownership evidence",
     "518cd5ff Map formerly skipped NumPy, task authentication and PostgreSQL races to strict execution evidence",
     "ab31dccc Bind reservation expiry workers to their app database and retain failed shutdown ownership",
     "bf680e4f Integrate atomic inventory reservations and expiry with ordered PostgreSQL transfer locks",
@@ -81,14 +85,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 68,
-      "insertions": 3181,
-      "deletions": 1065
+      "files": 74,
+      "insertions": 3426,
+      "deletions": 1153
     },
     "tests": {
-      "files": 119,
-      "insertions": 6300,
-      "deletions": 1222
+      "files": 124,
+      "insertions": 6806,
+      "deletions": 1227
     },
     "frontend": {
       "files": 16,
@@ -97,15 +101,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T19:06:17.266912+00:00",
-    "head": "518cd5ff824c4d6d0a292245d9ecf79bd779a61d",
+    "recorded_at": "2026-10-20T19:23:42.320076+00:00",
+    "head": "f714dc924d95fecc4cbe07f6711b1c87de111450",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 514,
-    "tracked_changed": 258,
-    "untracked": 256,
+    "git_status_entries": 509,
+    "tracked_changed": 255,
+    "untracked": 254,
     "staged": 0,
-    "files": 5694,
-    "text_lines": 977117,
+    "files": 5698,
+    "text_lines": 977558,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -210,24 +214,90 @@
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1324,
+      "src": 1325,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1535,
+      "tests": 1538,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19411,
+    "functions": 19445,
     "production_functions_over_200": 99,
-    "broad_production_handlers": 5589,
-    "swallowed_production_handlers": 2031,
+    "broad_production_handlers": 5588,
+    "swallowed_production_handlers": 2030,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W01",
+      "path": "src/app/models/database_ownership.py",
+      "symbol": "database_owner",
+      "line": 16,
+      "function_lines": 8,
+      "file_lines": 23,
+      "git_state": "committed",
+      "sha256": "ef6d16fd580b46631090f63c338dc6e554c66a3f5bda7998ff283da62b3937b6",
+      "remaining": "remaining workers/direct global database consumers and complete distributed lifecycle certification"
+    },
+    {
+      "work_package": "W01/W10",
+      "path": "src/app/services/payment_reconcile_scheduler.py",
+      "symbol": "run_once",
+      "line": 38,
+      "function_lines": 7,
+      "file_lines": 132,
+      "git_state": "committed",
+      "sha256": "14627ec63ab886780315913b2af314b40308d127928809eb45bf8754c838d040",
+      "remaining": "remaining downstream dispatch workers, provider uncertainty and recovery"
+    },
+    {
+      "work_package": "W09",
+      "path": "src/app/services/refund_authorization.py",
+      "symbol": "refund_permit_current",
+      "line": 15,
+      "function_lines": 8,
+      "file_lines": 22,
+      "git_state": "committed",
+      "sha256": "d45603a2cbc0182eb80528ca475c07f73c560e8964aec7999fd410408449cf06",
+      "remaining": "independent-person authorization and complete receipt/policy provenance boundaries"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/services/refund_execution.py",
+      "symbol": "execute_pending",
+      "line": 183,
+      "function_lines": 68,
+      "file_lines": 250,
+      "git_state": "committed",
+      "sha256": "548db0165ef9e2d3983cff3f93263c31aeb9c15c2d90ba9cb93bbe500fd794b3",
+      "remaining": "mandatory receipt field/currency matrix, provider review/backoff, all effect sinks and crash recovery"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/routers/payments.py",
+      "symbol": "refund_approve",
+      "line": 609,
+      "function_lines": 81,
+      "file_lines": 916,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "859d5d5abd8e8603013b9712bc1f89cf3c5aaa5b4c28e9e988b40b794c2d7a9d",
+      "remaining": "remaining shared provider execution-policy/offload WIP and independent person approval"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/services/refund_completion.py",
+      "symbol": "completed_refund_receipts",
+      "line": 5,
+      "function_lines": 22,
+      "file_lines": 26,
+      "git_state": "committed",
+      "sha256": "8bdab09f1f68025cf790ff39f707e9b4507baf3e7a73c44ff25aa8383783e22c",
+      "remaining": "remaining event provenance, conflict and provider status/action lifecycle coverage"
+    },
     {
       "work_package": "W11",
       "path": "src/app/workers/task_signing.py",
@@ -497,10 +567,10 @@
       "path": "src/app/models/db.py",
       "symbol": "db_session",
       "line": 1251,
-      "function_lines": 145,
-      "file_lines": 1551,
+      "function_lines": 149,
+      "file_lines": 1557,
       "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "f3bdf03f16544de96019eec541543ede7984e3b5acf95e4380ec262836a0678f",
+      "sha256": "b22af926a61926a7c7cf0a2900d865285236ce56ed2f686120fe7b59cb29500c",
       "remaining": "competing transactions, fault recovery and endurance"
     },
     {
@@ -2851,7 +2921,7 @@
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.141,
+    "seconds": 0.125,
     "findings": 0,
     "stderr": ""
   },
@@ -6136,7 +6206,7 @@
     "source": "partitioned v4, 591f4e1d",
     "skipped_test_ids": 246,
     "normalized_reason_groups": 63,
-    "later_executed_ids": 15,
+    "later_executed_ids": 19,
     "unchanged_history": true,
     "collection_skipped_modules_are_separate": true,
     "archived_v1": 21,
@@ -6145,7 +6215,10 @@
     "latest_additional_exact_ids": 9,
     "latest_expanded_successor_ids": 1,
     "original_ids_and_reasons_preserved": true,
-    "latest_note": "14 exact original IDs mapped plus the Celery original ID mapped to eight strict successor cases. Separate snapshot/profile passes are not one final-source gate.",
+    "latest_note": "Fourteen exact original IDs plus five original IDs with explicit committed successors (one Celery and four PostgreSQL refunds). Distinct frozen profiles are not a final unified gate.",
+    "exact_original_id_matches": 14,
+    "successor_mapped_original_ids": 5,
+    "latest_additional_successor_ids": 4,
     "path": "docs/audits/2026-10-21-required-profile-skip-ledger.csv",
     "normalized_reasons": {
       "total": 246,
@@ -6779,14 +6852,14 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 68,
-      "added": 3181,
-      "removed": 1065
+      "files": 74,
+      "added": 3426,
+      "removed": 1153
     },
     "Tests": {
-      "files": 119,
-      "added": 6300,
-      "removed": 1222
+      "files": 124,
+      "added": 6806,
+      "removed": 1227
     },
     "Frontend": {
       "files": 16,
@@ -6810,14 +6883,14 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 26064,
+      "added": 26774,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 254,
-    "added": 38832,
-    "removed": 4757
+    "files": 265,
+    "added": 40293,
+    "removed": 4850
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -7244,5 +7317,247 @@
       }
     },
     "limitations": "Direct canonical service and schema-isolated PostgreSQL races with fake providers; app-owned scheduler SQL on SQLite. Not every HTTP consumer, historical stock reconciliation, distributed recovery or full release."
+  },
+  "payment_database_owner": {
+    "negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_scheduler_ownership.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-owner-behavior-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-owner-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 19.953,
+      "peaks": {
+        "rss_bytes": 270200832,
+        "handles": 938,
+        "threads": 31
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 3,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "verified": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_payment_scheduler_ownership.py",
+        "tests/services/test_background_database_ownership.py",
+        "tests/services/test_payment_attempts.py",
+        "tests/bootstrap/test_business_background_lifecycle.py",
+        "tests/unit/test_app_factory_retention.py",
+        "tests/unit/test_pytest_database_ownership.py",
+        "tests/services/test_incident_scheduler_ownership.py",
+        "tests/services/test_inventory_expiry_scheduler.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\payment-owner-focused-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\payment-owner-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 26.75,
+      "peaks": {
+        "rss_bytes": 308228096,
+        "handles": 1410,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 38,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "tested_source": {
+      "base": "2ffbfb4709ac7c0716e46395b11e03d7e57c26a1",
+      "files": {
+        "src/app/models/database_ownership.py": "ef6d16fd580b46631090f63c338dc6e554c66a3f5bda7998ff283da62b3937b6",
+        "src/app/models/db.py": "1369335b6ed87cea0a8f068bd66eadae63ed83392b24b4212039bf07d4067918",
+        "src/app/services/payment_reconcile_scheduler.py": "14627ec63ab886780315913b2af314b40308d127928809eb45bf8754c838d040",
+        "tests/services/test_payment_scheduler_ownership.py": "8165b90b12b2bce6b477c0b7c7a682e608afc2f31deb315c6906d9f8b92daedd",
+        "tests/services/test_background_database_ownership.py": "d1437353f4ddf9a82253edfc56675ac02fa548f458b99bfec5bd51de4fc92bac"
+      },
+      "partial_staging": {
+        "src/app/models/db.py": "Only engine ownership changes; existing 29-line async_db_session append remains WIP."
+      }
+    },
+    "staging": {
+      "tested_file_sha256": "1369335b6ed87cea0a8f068bd66eadae63ed83392b24b4212039bf07d4067918",
+      "staged_blob_sha256": "86c8cc7edfca9d029b769f48c251037ea6f6df76c921669ddc4abdbe19fa5c56",
+      "normalized_content_equal": true,
+      "db_py_numstat": "8\t2\tsrc/app/models/db.py",
+      "preserved_async_append_lines": 29,
+      "check_exit_code": 0
+    },
+    "limitations": "Explicit database ownership, not independent-person authorization or every downstream task/process owner. Existing async_db_session WIP was excluded from the tested/staged db.py change."
+  },
+  "refund_effect_authority": {
+    "baseline_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_refund_execution.py::test_success_without_exact_receipt_cannot_settle",
+        "tests/services/test_refund_execution.py::test_expired_worker_cannot_overwrite_newer_settlement",
+        "tests/services/test_refund_execution.py::test_reused_refund_key_cannot_authorize_different_effect",
+        "tests/services/test_refund_execution.py::test_one_refund_receipt_cannot_settle_sibling_partial_refund",
+        "tests/api/test_payment_ledger_refunds.py::test_refund_approval_rolls_back_if_effect_permit_cannot_persist",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\refund-authority-behavior-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\refund-authority-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 18.359,
+      "peaks": {
+        "rss_bytes": 269205504,
+        "handles": 964,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 5,
+        "failures": 5,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "additional_negative_control": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_refund_execution.py::test_failed_or_unknown_provider_status_cannot_be_reported_submitted",
+        "tests/services/test_refund_execution.py::test_conflicting_refund_replay_cannot_commit_unrelated_caller_work",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\refund-status-and-caller-transaction-red\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\refund-authority-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 12.265,
+      "peaks": {
+        "rss_bytes": 265412608,
+        "handles": 897,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 6,
+        "failures": 6,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_refund_execution.py",
+        "tests/api/test_payment_ledger_refunds.py",
+        "tests/services/test_payment_attempts.py",
+        "tests/services/test_payment_scheduler_ownership.py",
+        "tests/services/test_background_database_ownership.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\refund-authority-focused-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\refund-authority-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 21.0,
+      "peaks": {
+        "rss_bytes": 268369920,
+        "handles": 1066,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 43,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "postgresql": {
+      "purpose": "Disposable PostgreSQL refund authority races; fake provider effects only",
+      "complete": true,
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 0,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/services/refund_authorization.py": "d45603a2cbc0182eb80528ca475c07f73c560e8964aec7999fd410408449cf06",
+        "src/app/services/refund_completion.py": "8bdab09f1f68025cf790ff39f707e9b4507baf3e7a73c44ff25aa8383783e22c",
+        "src/app/services/refund_execution.py": "548db0165ef9e2d3983cff3f93263c31aeb9c15c2d90ba9cb93bbe500fd794b3",
+        "src/app/routers/payments.py": "5bb34904401f450dd081710e674e6c3f2c8bb51b892b9831c6bd2ba496cc861d",
+        "tests/services/test_refund_execution.py": "1f5f20ad4728c683662b97c37ae4ea122a478c96c9d3c5813ac73c6c81f28438",
+        "tests/api/test_payment_ledger_refunds.py": "96344d527bcfa6f8c3f5eff5a400ee17b33b02fe42b784b8d1c2ff835e0810f7",
+        "tests/chaos/test_refund_authority_postgres.py": "eec04bda8543733f47008a931254a6c4c6038097a7764cfdb16bc073115fb9ef"
+      },
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 17.891
+    },
+    "postgresql_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_refund_postgres_final.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.359,
+      "peaks": {
+        "rss_bytes": 264019968,
+        "handles": 915,
+        "threads": 31
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "tested_source": {
+      "base": "bc10f677171d05c798f744b9c7b2848c75fa781b",
+      "files": {
+        "src/app/services/refund_authorization.py": "d45603a2cbc0182eb80528ca475c07f73c560e8964aec7999fd410408449cf06",
+        "src/app/services/refund_completion.py": "8bdab09f1f68025cf790ff39f707e9b4507baf3e7a73c44ff25aa8383783e22c",
+        "src/app/services/refund_execution.py": "548db0165ef9e2d3983cff3f93263c31aeb9c15c2d90ba9cb93bbe500fd794b3",
+        "src/app/routers/payments.py": "5bb34904401f450dd081710e674e6c3f2c8bb51b892b9831c6bd2ba496cc861d",
+        "tests/services/test_refund_execution.py": "1f5f20ad4728c683662b97c37ae4ea122a478c96c9d3c5813ac73c6c81f28438",
+        "tests/api/test_payment_ledger_refunds.py": "96344d527bcfa6f8c3f5eff5a400ee17b33b02fe42b784b8d1c2ff835e0810f7",
+        "tests/chaos/test_refund_authority_postgres.py": "eec04bda8543733f47008a931254a6c4c6038097a7764cfdb16bc073115fb9ef"
+      },
+      "partial_router_functions": [
+        "refund_approve",
+        "_apply_payment_webhook_event",
+        "_handle_payment_outbox_job",
+        "_ledger_txn_for_intent"
+      ],
+      "preserved_router_changes": "Shared payment policy/readiness and async webhook offload remain WIP outside this refund group.",
+      "provider_status_reference": "https://docs.stripe.com/api/refunds/object"
+    },
+    "provider_status_reference": "https://docs.stripe.com/api/refunds/object",
+    "limitations": "All providers are fakes. Effect identity/expiry/revocation/fencing and exact-refund completion do not establish independent-person authority, every mandatory receipt field/currency rule, provider review/backoff or complete effect crash recovery. Shared policy/readiness and async webhook offload remain router WIP."
   }
 }
