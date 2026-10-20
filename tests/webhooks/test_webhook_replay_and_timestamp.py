@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from src.app.main import create_app
 from src.app.deps import get_redis
+from tests.webhooks.test_webhook_signature import _clear_webhook_replay_state
 
 
 def _make_sig(secret: str, payload_bytes: bytes, ts: int) -> str:
@@ -22,14 +23,14 @@ def _make_sig(secret: str, payload_bytes: bytes, ts: int) -> str:
     return hmac.new(secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
 
 
-def test_generic_signature_timestamp_out_of_range_rejected():
-    os.environ["WEBHOOK_SECRET"] = "s3cr3t"
-    os.environ["WEBHOOK_SIGNATURE_HEADER"] = "x-webhook-signature"
-    os.environ["WEBHOOK_TIMESTAMP_HEADER"] = "x-webhook-timestamp"
-    os.environ["WEBHOOK_TOLERANCE_SECONDS"] = "1"  # very strict window
+def test_generic_signature_timestamp_out_of_range_rejected(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cr3t")
+    monkeypatch.setenv("WEBHOOK_SIGNATURE_HEADER", "x-webhook-signature")
+    monkeypatch.setenv("WEBHOOK_TIMESTAMP_HEADER", "x-webhook-timestamp")
+    monkeypatch.setenv("WEBHOOK_TOLERANCE_SECONDS", "1")  # very strict window
 
     app = create_app()
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(app, raise_server_exceptions=False, headers={"Content-Type": "application/json"})
 
     body = {"hello": "world"}
     payload = json.dumps(body).encode("utf-8")
@@ -40,18 +41,18 @@ def test_generic_signature_timestamp_out_of_range_rejected():
         "x-webhook-timestamp": str(ts),
         "x-api-key": "local-developer-key",
     }
-    r = client.post("/api/v1/admin/connectors/test", data=payload, headers=headers)
+    r = client.post("/api/v1/admin/connectors/test", content=payload, headers=headers)
     assert r.status_code == 401
 
 
 @pytest.mark.skipif(get_redis().__class__.__name__ == "DummyRedis", reason="Replay detection requires Redis")
-def test_replay_detected_with_event_id_in_body():
-    os.environ["WEBHOOK_SECRET"] = "s3cr3t"
-    os.environ["WEBHOOK_SIGNATURE_HEADER"] = "x-webhook-signature"
-    os.environ["WEBHOOK_TIMESTAMP_HEADER"] = "x-webhook-timestamp"
+def test_replay_detected_with_event_id_in_body(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cr3t")
+    monkeypatch.setenv("WEBHOOK_SIGNATURE_HEADER", "x-webhook-signature")
+    monkeypatch.setenv("WEBHOOK_TIMESTAMP_HEADER", "x-webhook-timestamp")
 
     app = create_app()
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(app, raise_server_exceptions=False, headers={"Content-Type": "application/json"})
 
     body = {"id": "evt_123", "type": "payment_intent.succeeded"}
     payload = json.dumps(body).encode("utf-8")
@@ -62,7 +63,7 @@ def test_replay_detected_with_event_id_in_body():
         "x-webhook-timestamp": str(ts),
         "x-api-key": "local-developer-key",
     }
-    r1 = client.post("/api/v1/admin/connectors/test", data=payload, headers=headers)
+    r1 = client.post("/api/v1/admin/connectors/test", content=payload, headers=headers)
     assert r1.status_code == 200
-    r2 = client.post("/api/v1/admin/connectors/test", data=payload, headers=headers)
+    r2 = client.post("/api/v1/admin/connectors/test", content=payload, headers=headers)
     assert r2.status_code == 409
