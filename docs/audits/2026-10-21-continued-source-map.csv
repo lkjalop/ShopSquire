@@ -1,4 +1,8 @@
 work_package,path,symbol,line,function_lines,file_lines,git_state,sha256,remaining
+W10,alembic/env.py,assert_preserving_downgrade,58,21,155,committed,5163783ec2496e0174812f110a8ba2c5907c9d75130309b798153241cc34cf70,"offline SQL guards, deployment rollback and commercial crash recovery"
+W03,src/app/services/case_contract_binding.py,gate_case_contract_consumption,108,18,160,committed,5b73894580a171494707ecedaab1ea8b904f150b227621f909117f14b6a6acc5,selection HTTP/UI integration and enabled governed source journeys
+W03,src/app/services/recommendation_core/contract_compilation_gate.py,gate_contract_claims,14,22,35,committed,63f15a15a7b1f6a829cf9c06d5819fdb29486bad2c2db3113a9bb740ffab12d8,full provider/context/revocation consumer matrix
+W11,src/app/security/webhook_security.py,_replay_seen,41,23,464,committed,37b02e4b47669d1386be463dfe35dcebf869741c710a104509419dfc50163f5d,"downstream effect crash recovery, persistence and provider retry policy"
 W11,src/app/security/auth.py,_verified_identity_claims,104,22,1073,committed,e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3,"broader identity, token revocation and effect/person boundaries"
 W11,src/app/security/auth.py,_auth_environment,200,3,1073,committed,e5896c11c3d9b57870e25eeb9a7b9bf560a73c63ae487b61252e74d7b40972c3,remaining configuration and deployment guard equivalence
 W04,src/app/services/recommendation_core/workload_refinement.py,workload_scale_relation,27,39,65,committed,4eea31a8c3c0cfaa9fe005635e9ced71f1748bd6d08a5ddf34d2c98152099e16,"complete live, replacement and unrelated-question continuity matrix"

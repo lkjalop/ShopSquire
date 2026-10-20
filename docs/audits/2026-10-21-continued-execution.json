@@ -1,8 +1,15 @@
 {
-  "recorded_at": "2026-10-20T16:18:35.719288+00:00",
-  "checkpoint_head": "cc43389b5768e6384573a027d13b7717628b626a",
+  "recorded_at": "2026-10-20T17:28:40.014931+00:00",
+  "checkpoint_head": "7d46bfa2af83594861a272ea104aa49e74170647",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "7d46bfa2 Atomically reserve signed webhook deliveries and block unavailable replay checks",
+    "a2d68053 Bind selected case contracts through evidence compilation and catalog use",
+    "f6b7573f db: integrate migration chain and preflight protected rollback",
+    "42d99865 test: own webhook replay state and preserve signed request bytes",
+    "867f881a test: align SDK fixtures and preserve tracked flag bytes",
+    "439ba336 test: generate an owned QR fixture for timeout isolation",
+    "31f7efab docs: record security repairs and bounded full-suite results",
     "cc43389b security: verify bearer identity and close missing-env defaults",
     "591f4e1d test: own scoring flags and playbook configuration files",
     "85857db3 security: expose quota admission and own HTTP budget tests",
@@ -62,14 +69,14 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 47,
-      "insertions": 2032,
-      "deletions": 842
+      "files": 62,
+      "insertions": 2708,
+      "deletions": 920
     },
     "tests": {
-      "files": 87,
-      "insertions": 3987,
-      "deletions": 765
+      "files": 105,
+      "insertions": 5067,
+      "deletions": 926
     },
     "frontend": {
       "files": 15,
@@ -78,15 +85,15 @@
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T16:15:38.638661+00:00",
-    "head": "cc43389b5768e6384573a027d13b7717628b626a",
+    "recorded_at": "2026-10-20T17:28:29.190688+00:00",
+    "head": "7d46bfa2af83594861a272ea104aa49e74170647",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 559,
-    "tracked_changed": 273,
-    "untracked": 286,
+    "git_status_entries": 523,
+    "tracked_changed": 261,
+    "untracked": 262,
     "staged": 0,
-    "files": 5684,
-    "text_lines": 975824,
+    "files": 5687,
+    "text_lines": 976233,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -132,7 +139,7 @@
       "agentLUMEN_v5_CONVERSATIONAL_MEMORY.md": 1,
       "agentLUMEN_v5_UPDATES_SUMMARY.md": 1,
       "alembic.ini": 1,
-      "alembic": 160,
+      "alembic": 161,
       "archive": 1,
       "claude.ps1": 1,
       "competitor_prices_template.csv": 1,
@@ -197,18 +204,62 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1529,
+      "tests": 1531,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19307,
+    "functions": 19342,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5590,
-    "swallowed_production_handlers": 2034,
+    "swallowed_production_handlers": 2032,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W10",
+      "path": "alembic/env.py",
+      "symbol": "assert_preserving_downgrade",
+      "line": 58,
+      "function_lines": 21,
+      "file_lines": 155,
+      "git_state": "committed",
+      "sha256": "5163783ec2496e0174812f110a8ba2c5907c9d75130309b798153241cc34cf70",
+      "remaining": "offline SQL guards, deployment rollback and commercial crash recovery"
+    },
+    {
+      "work_package": "W03",
+      "path": "src/app/services/case_contract_binding.py",
+      "symbol": "gate_case_contract_consumption",
+      "line": 108,
+      "function_lines": 18,
+      "file_lines": 160,
+      "git_state": "committed",
+      "sha256": "5b73894580a171494707ecedaab1ea8b904f150b227621f909117f14b6a6acc5",
+      "remaining": "selection HTTP/UI integration and enabled governed source journeys"
+    },
+    {
+      "work_package": "W03",
+      "path": "src/app/services/recommendation_core/contract_compilation_gate.py",
+      "symbol": "gate_contract_claims",
+      "line": 14,
+      "function_lines": 22,
+      "file_lines": 35,
+      "git_state": "committed",
+      "sha256": "63f15a15a7b1f6a829cf9c06d5819fdb29486bad2c2db3113a9bb740ffab12d8",
+      "remaining": "full provider/context/revocation consumer matrix"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/security/webhook_security.py",
+      "symbol": "_replay_seen",
+      "line": 41,
+      "function_lines": 23,
+      "file_lines": 464,
+      "git_state": "committed",
+      "sha256": "37b02e4b47669d1386be463dfe35dcebf869741c710a104509419dfc50163f5d",
+      "remaining": "downstream effect crash recovery, persistence and provider retry policy"
+    },
     {
       "work_package": "W11",
       "path": "src/app/security/auth.py",
@@ -1275,6 +1326,139 @@
       "commercial_effects": "sandbox/disabled",
       "counts": {
         "tests": 41,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "qr-decoupling-owned-fixture": {
+      "receipt_sha256": "ebb15aea39eda938932fe4b835ebaf80199073a312e45f2fac3030ac6f1f5b27",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_cv_security_decoupling.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\qr-decoupling-owned-fixture\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\qr-decoupling-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 35.39,
+      "peaks": {
+        "rss_bytes": 284610560,
+        "handles": 1042,
+        "threads": 59
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "sdk-fixture-continuation-verified": {
+      "receipt_sha256": "e6a76f28f2082f31fc04b4ffbea34940cf14afadf6c50596eef7f40519ff9cd2",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_conversation_router_group.py",
+        "tests/test_intelligence_router_group.py",
+        "tests/test_operational_router_group.py",
+        "tests/test_recommendation_router_group.py",
+        "tests/test_external_research_wiring.py",
+        "tests/test_rules_admin_api.py",
+        "tests/test_security_background_lifecycle.py",
+        "tests/test_rollout_and_killswitch.py",
+        "tests/test_cart_stock_gates.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\sdk-fixture-continuation-verified\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\sdk-fixture-continuation-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 49.171,
+      "peaks": {
+        "rss_bytes": 315604992,
+        "handles": 1552,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 36,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "schema-forward-consumers-complete": {
+      "receipt_sha256": "70184b6cac8566b54f9b9748fb0f582a3b2cc0ddd4d6bfb83fe1b43fecc5e8c8",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_roadmap_schema_upgrade.py",
+        "tests/services/test_fulfillment_intent_memory.py",
+        "tests/api/test_shopping_case_supplier_continuation.py",
+        "tests/services/test_shopping_case_supplier_continuation.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\schema-forward-consumers-complete\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\schema-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 132.422,
+      "peaks": {
+        "rss_bytes": 352595968,
+        "handles": 1424,
+        "threads": 39
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "case-contract-consumers-verified": {
+      "receipt_sha256": "ef369bef9aaf672cd077208176c51faae8e26ee28568945e4c63b5313391b7a6",
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_contract_compilation.py",
+        "tests/services/test_case_contract_binding.py",
+        "tests/services/test_v2_contract_binding.py",
+        "tests/services/test_requirement_contract.py",
+        "tests/services/test_requirement_compiler.py",
+        "tests/services/test_requirement_scope.py",
+        "tests/services/test_recommendation_evidence_stage.py",
+        "tests/services/test_product_shelves.py",
+        "tests/services/test_accepted_catalog_projection.py",
+        "tests/services/test_structured_requirement_claim_ids.py",
+        "tests/services/test_recommendation_facade.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-contract-consumers-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\case-contract-consumers-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 56.484,
+      "peaks": {
+        "rss_bytes": 287059968,
+        "handles": 1561,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 198,
         "failures": 0,
         "errors": 0,
         "skipped": 0
@@ -2352,7 +2536,7 @@
       "json"
     ],
     "exit_code": 0,
-    "seconds": 0.172,
+    "seconds": 0.171,
     "findings": 0,
     "stderr": ""
   },
@@ -3069,7 +3253,7 @@
     "source": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
     "head": "591f4e1d",
     "collection_total": 8319,
-    "complete": false,
+    "complete": true,
     "partitions": [
       {
         "bucket": 0,
@@ -3091,30 +3275,1552 @@
       },
       {
         "bucket": 1,
-        "state": "running",
+        "state": "finished",
         "collected": 8319,
-        "selected": 2351
+        "selected": 2351,
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 999.892,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 505892864,
+            "process_fds": 22,
+            "process_threads": 11
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": []
+        }
       },
       {
         "bucket": 2,
-        "state": "queued"
+        "state": "finished",
+        "collected": 8319,
+        "selected": 2706,
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 1147.947,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 475705344,
+            "process_fds": 26,
+            "process_threads": 13
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": []
+        }
       },
       {
         "bucket": 3,
-        "state": "running",
+        "state": "finished",
         "collected": 8319,
-        "selected": 1083
+        "selected": 1083,
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 545.053,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 470306816,
+            "process_fds": 26,
+            "process_threads": 13
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": [
+            {
+              "path": "config/feature_flags.json",
+              "before": "bf1c7807dc7ee0e3f833bf61e0eeeef0106d7f4b7e97dde64f9a67f72b872036",
+              "after": "708312370e10ad71ec0e2b50e977c75d43324755d4d4187483ef00fff3400905"
+            }
+          ]
+        }
       },
       {
         "bucket": 4,
-        "state": "queued"
+        "state": "finished",
+        "collected": 8319,
+        "selected": 1002,
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 733.006,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 880328704,
+            "process_fds": 30,
+            "process_threads": 20
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": []
+        }
       },
       {
         "bucket": 5,
-        "state": "queued"
+        "state": "finished",
+        "collected": 8319,
+        "selected": 824,
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 429.459,
+          "resource_violation": null,
+          "peaks": {
+            "process_rss_bytes": 518647808,
+            "process_fds": 63,
+            "process_threads": 26
+          },
+          "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+          "source_changes_in_disposable_copy": []
+        }
       }
     ],
-    "scope": "Working-tree diagnostic with all collected IDs partitioned; collection skips and monolithic ordering remain separate requirements"
+    "scope": "Working-tree diagnostic with all collected IDs partitioned; collection skips and monolithic ordering remain separate requirements",
+    "verification": {
+      "source_head": "591f4e1d",
+      "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+      "collected_ids": 8319,
+      "membership_union_exact": true,
+      "no_duplicate_selections": true,
+      "all_selected_ids_have_outcomes": true,
+      "outcomes": {
+        "passed": 8060,
+        "skipped": 246,
+        "failed": 13
+      },
+      "xfail_outcomes": 0,
+      "collection_skip_modules": [
+        [
+          "tests.pw.test_steg_image_assessment",
+          "('/workspace/repo/tests/pw/test_steg_image_assessment.py', 39, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        ],
+        [
+          "tests.pw.test_vision_upload_perf",
+          "('/workspace/repo/tests/pw/test_vision_upload_perf.py', 28, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        ],
+        [
+          "tests.security.test_red_team_simulation",
+          "('/workspace/repo/tests/security/test_red_team_simulation.py', 25, 'Skipped: Red-team E2E tests require a running API (set RUN_INTEGRATION=1 or RUN_REDTEAM_E2E=1).')"
+        ],
+        [
+          "tests.webhooks.test_webhook_replay_and_timestamp",
+          "('/workspace/repo/tests/webhooks/test_webhook_replay_and_timestamp.py', 7, 'Skipped: webhook security tests disabled (set RUN_WEBHOOK_SECURITY_TESTS=1 to enable)')"
+        ]
+      ],
+      "groups": [
+        {
+          "bucket": 0,
+          "selected": 353,
+          "outcomes": {
+            "passed": 352,
+            "skipped": 1
+          },
+          "receipt": {
+            "native_exit_code": 0,
+            "elapsed_seconds": 405.264,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 747229184,
+              "process_fds": 42,
+              "process_threads": 17
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": []
+          }
+        },
+        {
+          "bucket": 1,
+          "selected": 2351,
+          "outcomes": {
+            "passed": 2344,
+            "skipped": 7
+          },
+          "receipt": {
+            "native_exit_code": 0,
+            "elapsed_seconds": 999.892,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 505892864,
+              "process_fds": 22,
+              "process_threads": 11
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": []
+          }
+        },
+        {
+          "bucket": 2,
+          "selected": 2706,
+          "outcomes": {
+            "passed": 2705,
+            "skipped": 1
+          },
+          "receipt": {
+            "native_exit_code": 0,
+            "elapsed_seconds": 1147.947,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 475705344,
+              "process_fds": 26,
+              "process_threads": 13
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": []
+          }
+        },
+        {
+          "bucket": 3,
+          "selected": 1083,
+          "outcomes": {
+            "passed": 1040,
+            "failed": 9,
+            "skipped": 34
+          },
+          "receipt": {
+            "native_exit_code": 1,
+            "elapsed_seconds": 545.053,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 470306816,
+              "process_fds": 26,
+              "process_threads": 13
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": [
+              {
+                "path": "config/feature_flags.json",
+                "before": "bf1c7807dc7ee0e3f833bf61e0eeeef0106d7f4b7e97dde64f9a67f72b872036",
+                "after": "708312370e10ad71ec0e2b50e977c75d43324755d4d4187483ef00fff3400905"
+              }
+            ]
+          }
+        },
+        {
+          "bucket": 4,
+          "selected": 1002,
+          "outcomes": {
+            "passed": 930,
+            "skipped": 72
+          },
+          "receipt": {
+            "native_exit_code": 0,
+            "elapsed_seconds": 733.006,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 880328704,
+              "process_fds": 30,
+              "process_threads": 20
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": []
+          }
+        },
+        {
+          "bucket": 5,
+          "selected": 824,
+          "outcomes": {
+            "passed": 689,
+            "skipped": 131,
+            "failed": 4
+          },
+          "receipt": {
+            "native_exit_code": 1,
+            "elapsed_seconds": 429.459,
+            "resource_violation": null,
+            "peaks": {
+              "process_rss_bytes": 518647808,
+              "process_fds": 63,
+              "process_threads": 26
+            },
+            "source_fingerprint": "5883d58c2e706477e1f627b153cc0b11b59d90d2c2e7d8540ea4e5baa8cbe110",
+            "source_changes_in_disposable_copy": []
+          }
+        }
+      ],
+      "failures": [
+        {
+          "nodeid": "tests/test_cart_stock_gates.py::test_cart_age_warm_when_carried_over",
+          "details": "client_with_stock = <starlette.testclient.TestClient object at 0x72ceb83a8850>\n\n    def test_cart_age_warm_when_carried_over(client_with_stock):\n        \"\"\"Backdate the cart's last-touch 4h \u2192 it reads as WARM/carried with a truthful label (the demo case).\"\"\"\n        from datetime import datetime, timedelta\n        from src.app.models.db import db_session\n    \n        uid = \"age-carried-user\"\n        client_with_stock.post(\"/api/v1/cart/items\", json={\"uid\": uid, \"sku\": \"SKU-INSTOCK-5\", \"quantity\": 1})\n        ts = (datetime.utcnow() - timedelta(hours=4)).strftime(\"%Y-%m-%d %H:%M:%S\")\n        with db_session() as db:\n            db.execute(\"UPDATE draft_orders SET updated_at = :ts WHERE customer_id = :uid\", {\"ts\": ts, \"uid\": uid})\n            db.commit()\n    \n        age = client_with_stock.get(\"/api/v1/cart\", params={\"uid\": uid}).json()[\"age\"]\n>       assert age[\"tier\"] == \"warm\"\nE       AssertionError: assert 'unknown' == 'warm'\nE         \nE         - warm\nE         + unknown\n\ntests/test_cart_stock_gates.py:194: AssertionError"
+        },
+        {
+          "nodeid": "tests/test_conversation_router_group.py::test_conversation_group_registers_required_surfaces_without_silent_skip",
+          "details": "def test_conversation_group_registers_required_surfaces_without_silent_skip() -> None:\n        app = FastAPI()\n        registered = register_conversation_router_group(app)\n>       paths = {route.path for route in app.routes}\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_conversation_router_group.py:9: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\n.0 = <list_iterator object at 0x72ceb992d0f0>\n\n>   paths = {route.path for route in app.routes}\n             ^^^^^^^^^^\nE   AttributeError: '_IncludedRouter' object has no attribute 'path'\n\ntests/test_conversation_router_group.py:9: AttributeError"
+        },
+        {
+          "nodeid": "tests/test_external_research_wiring.py::test_explicit_consent_is_forwarded_without_restoring_v1_authority",
+          "details": "+ Exception Group Traceback (most recent call last):\n  |   File \"/usr/local/lib/python3.11/site-packages/starlette/_utils.py\", line 107, in create_collapsing_task_group\n  |     async with anyio.create_task_group() as tg:\n  |   File \"/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py\", line 815, in __aexit__\n  |     raise BaseExceptionGroup(\n  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)\n  +-+---------------- 1 ----------------\n    | Traceback (most recent call last):\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/runner.py\", line 361, in from_call\n    |     result: TResult | None = func()\n    |                              ^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/runner.py\", line 250, in <lambda>\n    |     lambda: runtest_hook(item=item, **kwds),\n    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_hooks.py\", line 512, in __call__\n    |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_manager.py\", line 120, in _hookexec\n    |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 167, in _multicall\n    |     raise exception\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/pytest_playwright/pytest_playwright.py\", line 129, in pytest_runtest_call\n    |     raise hard_failure\n    |   File \"/usr/local/lib/python3.11/site-packages/pytest_playwright/pytest_playwright.py\", line 124, in pytest_runtest_call\n    |     yield\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/logging.py\", line 865, in pytest_runtest_call\n    |     yield\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 53, in run_old_style_hookwrapper\n    |     return result.get_result()\n    |            ^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_result.py\", line 103, in get_result\n    |     raise exc.with_traceback(tb)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 38, in run_old_style_hookwrapper\n    |     res = yield\n    |           ^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/capture.py\", line 900, in pytest_runtest_call\n    |     return (yield)\n    |             ^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 53, in run_old_style_hookwrapper\n    |     return result.get_result()\n    |            ^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_result.py\", line 103, in get_result\n    |     raise exc.with_traceback(tb)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 38, in run_old_style_hookwrapper\n    |     res = yield\n    |           ^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/skipping.py\", line 268, in pytest_runtest_call\n    |     return (yield)\n    |             ^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 121, in _multicall\n    |     res = hook_impl.function(*args)\n    |           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/runner.py\", line 184, in pytest_runtest_call\n    |     item.runtest()\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/python.py\", line 1707, in runtest\n    |     self.ihook.pytest_pyfunc_call(pyfuncitem=self)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_hooks.py\", line 512, in __call__\n    |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_manager.py\", line 120, in _hookexec\n    |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 167, in _multicall\n    |     raise exception\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 139, in _multicall\n    |     teardown.throw(exception)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 53, in run_old_style_hookwrapper\n    |     return result.get_result()\n    |            ^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_result.py\", line 103, in get_result\n    |     raise exc.with_traceback(tb)\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 38, in run_old_style_hookwrapper\n    |     res = yield\n    |           ^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/pluggy/_callers.py\", line 121, in _multicall\n    |     res = hook_impl.function(*args)\n    |           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/_pytest/python.py\", line 167, in pytest_pyfunc_call\n    |     result = testfunction(**testargs)\n    |              ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/tests/test_external_research_wiring.py\", line 68, in test_explicit_consent_is_forwarded_without_restoring_v1_authority\n    |     body = _suggest(\"u-ext-on\", external_research_consent=\"true\")\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/tests/test_external_research_wiring.py\", line 24, in _suggest\n    |     response = client.get(\n    |                ^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 1066, in get\n    |     return self.request(\n    |            ^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 463, in request\n    |     return super().request(\n    |            ^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 837, in request\n    |     return self.send(request, auth=auth, follow_redirects=follow_redirects)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/egress_allowlist.py\", line 311, in _patched_send\n    |     return _orig_sync_send(self_client, request, *args, **kwargs)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 926, in send\n    |     response = self._send_handling_auth(\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 954, in _send_handling_auth\n    |     response = self._send_handling_redirects(\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 991, in _send_handling_redirects\n    |     response = self._send_single_request(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 1027, in _send_single_request\n    |     response = transport.handle_request(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 360, in handle_request\n    |     raise exc\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 357, in handle_request\n    |     portal.call(self.app, scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/anyio/from_thread.py\", line 338, in call\n    |     return cast(T_Retval, self.start_task_soon(func, *args).result())\n    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/concurrent/futures/_base.py\", line 456, in result\n    |     return self.__get_result()\n    |            ^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/concurrent/futures/_base.py\", line 401, in __get_result\n    |     raise self._exception\n    |   File \"/usr/local/lib/python3.11/site-packages/anyio/from_thread.py\", line 263, in _call_func\n    |     retval = await retval_or_awaitable\n    |              ^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1199, in __call__\n    |     await self._native_telemetry(\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py\", line 274, in __call__\n    |     await app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 96, in __call__\n    |     await self.middleware_stack(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    |     raise exc\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    |     await self.app(scope, receive, _send)\n    |   File \"/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/asgi/__init__.py\", line 779, in __call__\n    |     await self.app(scope, otel_receive, otel_send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    |     raise exc\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    |     await self.app(scope, receive, _send)\n    |   File \"/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/fastapi/__init__.py\", line 360, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py\", line 151, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/main.py\", line 173, in metrics_middleware\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/main.py\", line 1433, in request_id_middleware\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/main.py\", line 1406, in security_observer_middleware\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/main.py\", line 1177, in request_logger_middleware\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/main.py\", line 1149, in backpressure_middleware\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/workspace/repo/src/app/platform/trace_batch_middleware.py\", line 32, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/workspace/repo/src/app/platform/store_profile_middleware.py\", line 75, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/tls_fingerprint_middleware.py\", line 109, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/rate_limit.py\", line 237, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/workspace/repo/src/app/security/rate_limit.py\", line 213, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/request_shape.py\", line 69, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/workspace/repo/src/app/security/compliance.py\", line 135, in __call__\n    |     await self.app(scope, downstream_receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/pci_boundary.py\", line 28, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/admin_mfa.py\", line 30, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/idempotency.py\", line 67, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/internal_mtls.py\", line 88, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/security/webhook_security.py\", line 141, in dispatch\n    |     return await call_next(request)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    |     response = await self.dispatch_func(request, call_next)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/versioning.py\", line 63, in dispatch\n    |     response = await call_next(request)\n    |                ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    |     raise app_exc from app_exc.__cause__ or app_exc.__context__\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    |     await self.app(scope, receive_or_disconnect, send_no_error)\n    |   File \"/workspace/repo/src/app/security/csrf_middleware.py\", line 124, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/workspace/repo/src/app/security/headers.py\", line 94, in __call__\n    |     await self.app(scope, receive, send_wrapper)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py\", line 91, in __call__\n    |     await self.simple_response(scope, receive, send, request_headers=headers)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py\", line 149, in simple_response\n    |     await self.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py\", line 63, in __call__\n    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 53, in wrapped_app\n    |     raise exc\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 42, in wrapped_app\n    |     await app(scope, receive, sender)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py\", line 18, in __call__\n    |     await self.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/routing.py\", line 676, in __call__\n    |     await self.middleware_stack(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 2809, in app\n    |     await route.handle(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1837, in handle\n    |     await self.original_router.handle(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 2892, in handle\n    |     await included_router._handle_selected(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1863, in _handle_selected\n    |     await original_route.handle(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1326, in handle\n    |     await effective_context.app(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 166, in app\n    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 53, in wrapped_app\n    |     raise exc\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 42, in wrapped_app\n    |     await app(scope, receive, sender)\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 152, in app\n    |     response = await f(request)\n    |                ^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 745, in app\n    |     raw_response = await run_endpoint_function(\n    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 374, in run_endpoint_function\n    |     return await run_in_threadpool(\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/starlette/concurrency.py\", line 34, in run_in_threadpool\n    |     return await anyio.to_thread.run_sync(func)\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/anyio/to_thread.py\", line 65, in run_sync\n    |     return await get_async_backend().run_sync_in_worker_thread(\n    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py\", line 2641, in run_sync_in_worker_thread\n    |     return await future\n    |            ^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py\", line 1033, in run\n    |     result = context.run(func, *args)\n    |              ^^^^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_api.py\", line 244, in _run_sync_endpoint\n    |     return function(**arguments)\n    |            ^^^^^^^^^^^^^^^^^^^^^\n    |   File \"/workspace/repo/src/app/routers/recommend_compat.py\", line 56, in suggest\n    |     return serve_v2_compatibility(\n    |            ^^^^^^^^^^^^^^^^^^^^^^^\n    | TypeError: test_explicit_consent_is_forwarded_without_restoring_v1_authority.<locals>.fake_v2_compatibility() got an unexpected keyword argument 'response'\n    +------------------------------------\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/workspace/repo/tests/test_external_research_wiring.py\", line 68, in test_explicit_consent_is_forwarded_without_restoring_v1_authority\n    body = _suggest(\"u-ext-on\", external_research_consent=\"true\")\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/tests/test_external_research_wiring.py\", line 24, in _suggest\n    response = client.get(\n               ^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 1066, in get\n    return self.request(\n           ^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 463, in request\n    return super().request(\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 837, in request\n    return self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/egress_allowlist.py\", line 311, in _patched_send\n    return _orig_sync_send(self_client, request, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 926, in send\n    response = self._send_handling_auth(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 954, in _send_handling_auth\n    response = self._send_handling_redirects(\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 991, in _send_handling_redirects\n    response = self._send_single_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/httpx/_client.py\", line 1027, in _send_single_request\n    response = transport.handle_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 360, in handle_request\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/testclient.py\", line 357, in handle_request\n    portal.call(self.app, scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/anyio/from_thread.py\", line 338, in call\n    return cast(T_Retval, self.start_task_soon(func, *args).result())\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n  File \"/usr/local/lib/python3.11/site-packages/anyio/from_thread.py\", line 263, in _call_func\n    retval = await retval_or_awaitable\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/applications.py\", line 1199, in __call__\n    await self._native_telemetry(\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py\", line 274, in __call__\n    await app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/applications.py\", line 96, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/asgi/__init__.py\", line 779, in __call__\n    await self.app(scope, otel_receive, otel_send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 186, in __call__\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py\", line 164, in __call__\n    await self.app(scope, receive, _send)\n  File \"/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/fastapi/__init__.py\", line 360, in __call__\n    await self.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py\", line 151, in __call__\n    await self.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/main.py\", line 173, in metrics_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/main.py\", line 1433, in request_id_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/main.py\", line 1406, in security_observer_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/main.py\", line 1177, in request_logger_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/main.py\", line 1149, in backpressure_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/workspace/repo/src/app/platform/trace_batch_middleware.py\", line 32, in __call__\n    await self.app(scope, receive, send)\n  File \"/workspace/repo/src/app/platform/store_profile_middleware.py\", line 75, in __call__\n    await self.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/tls_fingerprint_middleware.py\", line 109, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/rate_limit.py\", line 237, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/workspace/repo/src/app/security/rate_limit.py\", line 213, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/request_shape.py\", line 69, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/workspace/repo/src/app/security/compliance.py\", line 135, in __call__\n    await self.app(scope, downstream_receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/pci_boundary.py\", line 28, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/admin_mfa.py\", line 30, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/idempotency.py\", line 67, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/internal_mtls.py\", line 88, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/security/webhook_security.py\", line 141, in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 197, in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/versioning.py\", line 63, in dispatch\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 173, in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py\", line 149, in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n  File \"/workspace/repo/src/app/security/csrf_middleware.py\", line 124, in __call__\n    await self.app(scope, receive, send)\n  File \"/workspace/repo/src/app/security/headers.py\", line 94, in __call__\n    await self.app(scope, receive, send_wrapper)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py\", line 91, in __call__\n    await self.simple_response(scope, receive, send, request_headers=headers)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py\", line 149, in simple_response\n    await self.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py\", line 63, in __call__\n    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 53, in wrapped_app\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 42, in wrapped_app\n    await app(scope, receive, sender)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py\", line 18, in __call__\n    await self.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/routing.py\", line 676, in __call__\n    await self.middleware_stack(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 2809, in app\n    await route.handle(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1837, in handle\n    await self.original_router.handle(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 2892, in handle\n    await included_router._handle_selected(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1863, in _handle_selected\n    await original_route.handle(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 1326, in handle\n    await effective_context.app(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 166, in app\n    await wrap_app_handling_exceptions(app, request)(scope, receive, send)\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 53, in wrapped_app\n    raise exc\n  File \"/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py\", line 42, in wrapped_app\n    await app(scope, receive, sender)\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 152, in app\n    response = await f(request)\n               ^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 745, in app\n    raw_response = await run_endpoint_function(\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/routing.py\", line 374, in run_endpoint_function\n    return await run_in_threadpool(\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/starlette/concurrency.py\", line 34, in run_in_threadpool\n    return await anyio.to_thread.run_sync(func)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/anyio/to_thread.py\", line 65, in run_sync\n    return await get_async_backend().run_sync_in_worker_thread(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py\", line 2641, in run_sync_in_worker_thread\n    return await future\n           ^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py\", line 1033, in run\n    result = context.run(func, *args)\n             ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_api.py\", line 244, in _run_sync_endpoint\n    return function(**arguments)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/repo/src/app/routers/recommend_compat.py\", line 56, in suggest\n    return serve_v2_compatibility(\n           ^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: test_explicit_consent_is_forwarded_without_restoring_v1_authority.<locals>.fake_v2_compatibility() got an unexpected keyword argument 'response'\n\nThe above exception was the direct cause of the following exception:\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x72cebbb1e990>\n\n    def test_explicit_consent_is_forwarded_without_restoring_v1_authority(monkeypatch):\n        from src.app.routers import recommend_compat\n    \n        captured = {}\n    \n        def fake_v2_compatibility(*, request, params, redis, db, role):\n            captured.update(params)\n            return {\n                \"assistant_message\": \"V2 compatibility response\",\n                \"results\": [{\"sku\": \"OWNED-1\"}],\n                \"evidence_items\": [],\n            }\n    \n        monkeypatch.setattr(\n            recommend_compat,\n            \"serve_v2_compatibility\",\n            fake_v2_compatibility,\n        )\n>       body = _suggest(\"u-ext-on\", external_research_consent=\"true\")\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_external_research_wiring.py:68: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \ntests/test_external_research_wiring.py:24: in _suggest\n    response = client.get(\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:1066: in get\n    return self.request(\n/usr/local/lib/python3.11/site-packages/starlette/testclient.py:463: in request\n    return super().request(\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:837: in request\n    return self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/egress_allowlist.py:311: in _patched_send\n    return _orig_sync_send(self_client, request, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:926: in send\n    response = self._send_handling_auth(\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:954: in _send_handling_auth\n    response = self._send_handling_redirects(\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:991: in _send_handling_redirects\n    response = self._send_single_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/httpx/_client.py:1027: in _send_single_request\n    response = transport.handle_request(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/testclient.py:360: in handle_request\n    raise exc\n/usr/local/lib/python3.11/site-packages/starlette/testclient.py:357: in handle_request\n    portal.call(self.app, scope, receive, send)\n/usr/local/lib/python3.11/site-packages/anyio/from_thread.py:338: in call\n    return cast(T_Retval, self.start_task_soon(func, *args).result())\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/concurrent/futures/_base.py:456: in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/concurrent/futures/_base.py:401: in __get_result\n    raise self._exception\n/usr/local/lib/python3.11/site-packages/anyio/from_thread.py:263: in _call_func\n    retval = await retval_or_awaitable\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/fastapi/applications.py:1199: in __call__\n    await self._native_telemetry(\n/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py:274: in __call__\n    await app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/applications.py:96: in __call__\n    await self.middleware_stack(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py:186: in __call__\n    raise exc\n/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py:164: in __call__\n    await self.app(scope, receive, _send)\n/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/asgi/__init__.py:779: in __call__\n    await self.app(scope, otel_receive, otel_send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py:186: in __call__\n    raise exc\n/usr/local/lib/python3.11/site-packages/starlette/middleware/errors.py:164: in __call__\n    await self.app(scope, receive, _send)\n/usr/local/lib/python3.11/site-packages/opentelemetry/instrumentation/fastapi/__init__.py:360: in __call__\n    await self.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_asgi.py:151: in __call__\n    await self.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/main.py:173: in metrics_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/main.py:1433: in request_id_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/main.py:1406: in security_observer_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/main.py:1177: in request_logger_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/main.py:1149: in backpressure_middleware\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\nsrc/app/platform/trace_batch_middleware.py:32: in __call__\n    await self.app(scope, receive, send)\nsrc/app/platform/store_profile_middleware.py:75: in __call__\n    await self.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/tls_fingerprint_middleware.py:109: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/rate_limit.py:237: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\nsrc/app/security/rate_limit.py:213: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/request_shape.py:69: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\nsrc/app/security/compliance.py:135: in __call__\n    await self.app(scope, downstream_receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/pci_boundary.py:28: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/admin_mfa.py:30: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/idempotency.py:67: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/internal_mtls.py:88: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/security/webhook_security.py:141: in dispatch\n    return await call_next(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:197: in __call__\n    response = await self.dispatch_func(request, call_next)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/app/versioning.py:63: in dispatch\n    response = await call_next(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:173: in call_next\n    raise app_exc from app_exc.__cause__ or app_exc.__context__\n/usr/local/lib/python3.11/site-packages/starlette/middleware/base.py:149: in coro\n    await self.app(scope, receive_or_disconnect, send_no_error)\nsrc/app/security/csrf_middleware.py:124: in __call__\n    await self.app(scope, receive, send)\nsrc/app/security/headers.py:94: in __call__\n    await self.app(scope, receive, send_wrapper)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py:91: in __call__\n    await self.simple_response(scope, receive, send, request_headers=headers)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/cors.py:149: in simple_response\n    await self.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/middleware/exceptions.py:63: in __call__\n    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py:53: in wrapped_app\n    raise exc\n/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py:42: in wrapped_app\n    await app(scope, receive, sender)\n/usr/local/lib/python3.11/site-packages/fastapi/middleware/asyncexitstack.py:18: in __call__\n    await self.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/routing.py:676: in __call__\n    await self.middleware_stack(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:2809: in app\n    await route.handle(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:1837: in handle\n    await self.original_router.handle(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:2892: in handle\n    await included_router._handle_selected(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:1863: in _handle_selected\n    await original_route.handle(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:1326: in handle\n    await effective_context.app(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:166: in app\n    await wrap_app_handling_exceptions(app, request)(scope, receive, send)\n/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py:53: in wrapped_app\n    raise exc\n/usr/local/lib/python3.11/site-packages/starlette/_exception_handler.py:42: in wrapped_app\n    await app(scope, receive, sender)\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:152: in app\n    response = await f(request)\n               ^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:745: in app\n    raw_response = await run_endpoint_function(\n/usr/local/lib/python3.11/site-packages/fastapi/routing.py:374: in run_endpoint_function\n    return await run_in_threadpool(\n/usr/local/lib/python3.11/site-packages/starlette/concurrency.py:34: in run_in_threadpool\n    return await anyio.to_thread.run_sync(func)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/anyio/to_thread.py:65: in run_sync\n    return await get_async_backend().run_sync_in_worker_thread(\n/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py:2641: in run_sync_in_worker_thread\n    return await future\n           ^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py:1033: in run\n    result = context.run(func, *args)\n             ^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/site-packages/fastapi/telemetry/_api.py:244: in _run_sync_endpoint\n    return function(**arguments)\n           ^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nrequest = <starlette.requests.Request object at 0x72ceab3d0190>\nuid = 'u-ext-on', query = 'gaming laptop under 1800', budget_max = None\nbudget_min = None, nqe_question_id = None, nqe_option_id = None\nnqe_option_label = None, nqe_option_value = None, image_labels = None\nimage_ocr_text = None, image_hash = None, image_intent = None\nimage_product_identity = None, image_cv_signals = None, fast_path = None\nturn_intent = None, include_summary = None, external_research_consent = True\ncopywriting_enabled = None, copywriting_profile = None\nresponse = <starlette.responses.Response object at 0x72ceab3d2e90>\nredis = <src.app.deps.DummyRedis object at 0x72cebbc51b90>, role = 'owner'\ndb = <sqlalchemy.orm.session.Session object at 0x72ceb9f72510>\n\n    @router.get(\"/suggest\", deprecated=True)\n    def suggest(\n        request: Request,\n        uid: str,\n        query: str,\n        budget_max: Optional[float] = None,\n        budget_min: Optional[float] = None,\n        nqe_question_id: Optional[str] = None,\n        nqe_option_id: Optional[str] = None,\n        nqe_option_label: Optional[str] = None,\n        nqe_option_value: Optional[str] = None,\n        image_labels: Optional[str] = None,\n        image_ocr_text: Optional[str] = None,\n        image_hash: Optional[str] = None,\n        image_intent: Optional[str] = None,\n        image_product_identity: Optional[str] = None,\n        image_cv_signals: Optional[str] = None,\n        fast_path: Optional[bool] = None,\n        turn_intent: Optional[str] = None,\n        include_summary: Optional[bool] = None,\n        external_research_consent: Optional[bool] = None,\n        copywriting_enabled: Optional[bool] = None,\n        copywriting_profile: Optional[str] = None,\n        response: Response = None,\n        redis=Depends(get_redis),\n        role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),\n        db=Depends(get_db),\n    ) -> Dict[str, Any]:\n        if response is not None:\n            response.headers[\"Deprecation\"] = \"true\"\n            response.headers[\"Sunset\"] = \"Wed, 30 Sep 2026 00:00:00 GMT\"\n            response.headers[\"Warning\"] = '299 ShopSquire \"/recommend/suggest is deprecated; use chat V2\"'\n            response.headers[\"Link\"] = '</api/v1/chat/query>; rel=\"successor-version\"'\n            response.headers[\"X-Recommendation-Engine\"] = \"v2-compatibility\"\n>       return serve_v2_compatibility(\n            request=request,\n            params={\n                \"uid\": uid,\n                \"query\": query,\n                \"budget_max\": budget_max,\n                \"budget_min\": budget_min,\n                \"nqe_question_id\": nqe_question_id,\n                \"nqe_option_id\": nqe_option_id,\n                \"nqe_option_label\": nqe_option_label,\n                \"nqe_option_value\": nqe_option_value,\n                \"image_labels\": image_labels,\n                \"image_ocr_text\": image_ocr_text,\n                \"image_hash\": image_hash,\n                \"image_intent\": image_intent,\n                \"image_product_identity\": image_product_identity,\n                \"image_cv_signals\": image_cv_signals,\n                \"fast_path\": fast_path,\n                \"turn_intent\": turn_intent,\n                \"include_summary\": include_summary,\n                \"external_research_consent\": bool(external_research_consent),\n                \"copywriting_enabled\": copywriting_enabled,\n                \"copywriting_profile\": copywriting_profile,\n                \"compatibility_requested_at\": datetime.now(timezone.utc).isoformat(),\n            },\n            redis=redis,\n            db=db,\n            role=role,\n            response=response,\n        )\nE       TypeError: test_explicit_consent_is_forwarded_without_restoring_v1_authority.<locals>.fake_v2_compatibility() got an unexpected keyword argument 'response'\n\nsrc/app/routers/recommend_compat.py:56: TypeError"
+        },
+        {
+          "nodeid": "tests/test_intelligence_router_group.py::test_intelligence_router_group_registers_expected_surfaces",
+          "details": "def test_intelligence_router_group_registers_expected_surfaces():\n        app = FastAPI()\n        registered = register_intelligence_router_group(app)\n>       paths = {route.path for route in app.routes}\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_intelligence_router_group.py:9: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\n.0 = <list_iterator object at 0x72ceb9c20d00>\n\n>   paths = {route.path for route in app.routes}\n             ^^^^^^^^^^\nE   AttributeError: '_IncludedRouter' object has no attribute 'path'\n\ntests/test_intelligence_router_group.py:9: AttributeError"
+        },
+        {
+          "nodeid": "tests/test_operational_router_group.py::test_operational_router_group_registers_required_surfaces",
+          "details": "def test_operational_router_group_registers_required_surfaces():\n        app = FastAPI()\n    \n        registered = register_operational_router_group(app)\n>       paths = {route.path for route in app.routes}\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_operational_router_group.py:10: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\n.0 = <list_iterator object at 0x72ceb9acb190>\n\n>   paths = {route.path for route in app.routes}\n             ^^^^^^^^^^\nE   AttributeError: '_IncludedRouter' object has no attribute 'path'\n\ntests/test_operational_router_group.py:10: AttributeError"
+        },
+        {
+          "nodeid": "tests/test_recommendation_router_group.py::test_recommendation_group_retains_compatibility_and_companion_surfaces",
+          "details": "def test_recommendation_group_retains_compatibility_and_companion_surfaces():\n        app = FastAPI()\n        registered = register_recommendation_router_group(app)\n>       paths = {route.path for route in app.routes}\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_recommendation_router_group.py:9: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\n.0 = <list_iterator object at 0x72ceb80fe3b0>\n\n>   paths = {route.path for route in app.routes}\n             ^^^^^^^^^^\nE   AttributeError: '_IncludedRouter' object has no attribute 'path'\n\ntests/test_recommendation_router_group.py:9: AttributeError"
+        },
+        {
+          "nodeid": "tests/test_rules_admin_api.py::test_rules_crud_and_preview",
+          "details": "def test_rules_crud_and_preview():\n        app = create_app()\n        client = TestClient(app)\n    \n        # Create\n        create_payload = {\n            \"title\": \"Intent: product_search\",\n            \"domain\": \"recommend\",\n            \"pattern\": r\"(?i)\\bshow\\s+me\\b\",\n            # Must outrank the migration-seeded product-search rule (priority 10).\n            # Equal-priority ordering is intentionally not an ownership contract.\n            \"priority\": 1,\n            \"active\": 1,\n        }\n        r = client.post(\"/api/v1/rules/\", headers=_owner_headers(), content=json.dumps(create_payload))\n>       assert r.status_code == 200\nE       assert 422 == 200\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/test_rules_admin_api.py:27: AssertionError"
+        },
+        {
+          "nodeid": "tests/test_rules_admin_api.py::test_rules_rejects_invalid_regex",
+          "details": "def test_rules_rejects_invalid_regex():\n        app = create_app()\n        client = TestClient(app)\n        bad = {\"title\": \"bad\", \"domain\": \"recommend\", \"pattern\": r\"(\", \"priority\": 10, \"active\": 1}\n        r = client.post(\"/api/v1/rules/\", headers=_owner_headers(), content=json.dumps(bad))\n>       assert r.status_code == 400\nE       assert 422 == 400\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/test_rules_admin_api.py:60: AssertionError"
+        },
+        {
+          "nodeid": "tests/test_security_background_lifecycle.py::test_background_lifecycle_records_registration_and_runtime_failure",
+          "details": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x72cebbadfbd0>\n\n    def test_background_lifecycle_records_registration_and_runtime_failure(monkeypatch):\n        calls = []\n    \n        def start(app):\n            calls.append((\"start\", app))\n    \n        def stop(_app):\n            raise RuntimeError(\"stop_failed\")\n    \n        monkeypatch.setattr(lifecycle, \"SECURITY_BACKGROUND_SERVICES\", (\n            lifecycle.BackgroundServiceRegistration(\"one\", \"fake.module\", \"start\", \"stop\"),\n        ))\n        monkeypatch.setattr(\n            lifecycle.importlib, \"import_module\",\n            lambda _name: SimpleNamespace(start=start, stop=stop),\n        )\n        app = FastAPI()\n    \n        assert lifecycle.register_security_background_lifecycle(app) == (\"one\",)\n>       asyncio.run(app.router.startup())\n                    ^^^^^^^^^^^^^^^^^^\nE       AttributeError: 'APIRouter' object has no attribute 'startup'\n\ntests/test_security_background_lifecycle.py:28: AttributeError"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_webhook_signature_valid_generic_secret",
+          "details": "def test_webhook_signature_valid_generic_secret():\n        if _httpx_post_patched():\n            pytest.skip(\"httpx Client.post patched; response assertions unreliable\")\n        os.environ[\"WEBHOOK_SECRET\"] = \"s3cr3t\"\n        os.environ[\"WEBHOOK_SIGNATURE_HEADER\"] = \"x-webhook-signature\"\n        os.environ[\"WEBHOOK_TIMESTAMP_HEADER\"] = \"x-webhook-timestamp\"\n    \n        app = create_app()\n        client = TestClient(app)\n    \n        body = {\"hello\": \"world\"}\n        payload = json.dumps(body).encode(\"utf-8\")\n        ts = int(time.time())\n        sig = _make_sig(\"s3cr3t\", payload, ts)\n        headers = {\n            \"x-webhook-signature\": f\"sha256={sig}\",\n            \"x-webhook-timestamp\": str(ts),\n            \"x-api-key\": \"local-developer-key\",\n        }\n        r = client.post(\"/api/v1/admin/connectors/test\", data=payload, headers=headers)\n>       assert r.status_code == 200\nE       assert 422 == 200\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/webhooks/test_webhook_signature.py:71: AssertionError"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_stripe_signature_valid",
+          "details": "def test_stripe_signature_valid():\n        if _httpx_post_patched():\n            pytest.skip(\"httpx Client.post patched; response assertions unreliable\")\n        os.environ[\"STRIPE_WEBHOOK_SECRET\"] = \"stripe_secret\"\n        app = create_app()\n        client = TestClient(app)\n        body = {\"type\": \"payment_intent.succeeded\", \"id\": \"pi_123\"}\n        payload = json.dumps(body).encode(\"utf-8\")\n        ts = int(time.time())\n        header = _make_stripe_header(\"stripe_secret\", payload, ts)\n        r = client.post(\n            \"/api/v1/admin/connectors/test\",\n            data=payload,\n            headers={\"stripe-signature\": header, \"x-api-key\": \"local-developer-key\"},\n        )\n>       assert r.status_code == 200\nE       assert 422 == 200\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/webhooks/test_webhook_signature.py:151: AssertionError"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_github_signature_valid",
+          "details": "def test_github_signature_valid():\n        if _httpx_post_patched():\n            pytest.skip(\"httpx Client.post patched; response assertions unreliable\")\n        os.environ[\"GITHUB_WEBHOOK_SECRET\"] = \"gh_secret\"\n        app = create_app()\n        client = TestClient(app)\n        payload = json.dumps({\"action\": \"opened\", \"issue\": {\"number\": 1}}).encode(\"utf-8\")\n        header = _make_github_header(\"gh_secret\", payload)\n        r = client.post(\n            \"/api/v1/admin/connectors/test\",\n            data=payload,\n            headers={\"x-hub-signature-256\": header, \"x-api-key\": \"local-developer-key\"},\n        )\n>       assert r.status_code == 200\nE       assert 422 == 200\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/webhooks/test_webhook_signature.py:207: AssertionError"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_slack_signature_valid",
+          "details": "def test_slack_signature_valid():\n        if _httpx_post_patched():\n            pytest.skip(\"httpx Client.post patched; response assertions unreliable\")\n        os.environ[\"SLACK_WEBHOOK_SECRET\"] = \"sl_secret\"\n        app = create_app()\n        client = TestClient(app)\n        payload = json.dumps({\"type\": \"event_callback\", \"event\": {\"type\": \"app_mention\"}}).encode(\"utf-8\")\n        ts = int(time.time())\n        headers = _make_slack_headers(\"sl_secret\", payload, ts)\n        headers[\"x-api-key\"] = \"local-developer-key\"\n        r = client.post(\"/api/v1/admin/connectors/test\", data=payload, headers=headers)\n>       assert r.status_code == 200\nE       assert 422 == 200\nE        +  where 422 = <Response [422 Unprocessable Entity]>.status_code\n\ntests/webhooks/test_webhook_signature.py:266: AssertionError"
+        }
+      ],
+      "skips": [
+        {
+          "nodeid": "tests/api/test_cv_security_decoupling.py::test_qr_survives_vision_llm_timeout",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/api/test_cv_security_decoupling.py', 34, 'Skipped: test image not present')"
+        },
+        {
+          "nodeid": "tests/services/test_image_downscale.py::test_real_fixtures_are_bounded",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_image_downscale.py', 80, 'Skipped: fixture missing: dump/test-cv/Dell 15 DC15255.webp')"
+        },
+        {
+          "nodeid": "tests/services/test_public_market_source_fetch.py::test_live_usgs_mcs_official_sciencebase_protocol",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_public_market_source_fetch.py', 515, 'Skipped: set RUN_LIVE_PUBLIC_SOURCE_TESTS=1 for official USGS protocol probe')"
+        },
+        {
+          "nodeid": "tests/services/test_recommendation_shadow_worker.py::test_real_stream_roundtrip_processed_acked_deleted",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_recommendation_shadow_worker.py', 365, 'Skipped: no reachable Redis (integration test)')"
+        },
+        {
+          "nodeid": "tests/services/test_recommendation_shadow_worker.py::test_real_crash_recovery_via_xautoclaim",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_recommendation_shadow_worker.py', 374, 'Skipped: no reachable Redis (integration test)')"
+        },
+        {
+          "nodeid": "tests/services/test_recommendation_shadow_worker.py::test_real_poison_dead_lettered",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_recommendation_shadow_worker.py', 385, 'Skipped: no reachable Redis (integration test)')"
+        },
+        {
+          "nodeid": "tests/services/test_recommendation_shadow_worker.py::test_real_malformed_dead_lettered",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_recommendation_shadow_worker.py', 395, 'Skipped: no reachable Redis (integration test)')"
+        },
+        {
+          "nodeid": "tests/services/test_recommendation_shadow_worker.py::test_real_two_consumers_split_work_no_double_process",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_recommendation_shadow_worker.py', 402, 'Skipped: no reachable Redis (integration test)')"
+        },
+        {
+          "nodeid": "tests/services/test_retrieval_scope_union.py::test_capability_query_retrieval_spans_host_union",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/services/test_retrieval_scope_union.py', 27, 'Skipped: no demo catalog: (sqlite3.OperationalError) unable to open database file\\n(Background on this error at: https://sqlalche.me/e/20/e3q8)')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_labels_set_brand_constraint",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 84, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_image_cv_signals_populate_security_payload",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 104, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestImageLabelWiring::test_qr_detected_triggers_reupload",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 128, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_payload_structure_on_benign_query",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 164, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestSecurityMatrixPopulation::test_security_matrix_includes_cv_signals_when_image_provided",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 179, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_budget_question_for_vague_query",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 209, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_generates_use_case_question",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 224, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_questions_have_options",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 238, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestNQEWiring::test_nqe_selection_applies_budget_constraint",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 259, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I'm a university student looking for a laptop for assignments-student]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 287, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need a laptop for gaming, playing Valorant and Fortnite-gamer]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 287, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[looking for a work from home setup, need Teams and Outlook-corporate]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 287, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[I do video editing on Premiere Pro and DaVinci Resolve-creative]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 287, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_persona_detected_from_query[need something lightweight for travel and commuting-traveler]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 287, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestPersonaDetection::test_low_confidence_persona_triggers_use_case_fallback",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 309, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestMultiTurnNQE::test_budget_persists_across_turns",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 331, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_cv_analyze_returns_case_id_and_analysis",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 373, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_macbook_qr_image_triggers_security_signal",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 397, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_clean_apple_mac_image_benign",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 425, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestCVAnalyzeWithRealImages::test_lenovo_image_labels_feed_recommend",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 449, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_nqe_security_matrix_e2e.py::TestQuestionPlanContract::test_question_plan_always_present",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_nqe_security_matrix_e2e.py', 479, 'Skipped: frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_returns_security_signals[macbook-1.png]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 70, 'Skipped: macbook-1.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_returns_security_signals[macbook-2.png]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 70, 'Skipped: macbook-2.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestVisionTriagePipeline::test_triage_not_fixed_screenshot",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 87, 'Skipped: not-fixed.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_macbook1_returns_200",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 111, 'Skipped: macbook-1.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_macbook2_returns_200",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 111, 'Skipped: macbook-2.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_response_has_security_details",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 111, 'Skipped: macbook-1.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_persists_trace_events",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 111, 'Skipped: macbook-1.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestCVAnalyzePipeline::test_analyze_multi_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 111, 'Skipped: macbook-1.png not found in dump/')"
+        },
+        {
+          "nodeid": "tests/test_cv_pipeline_integration.py::TestDecisionTraceRetrieval::test_decision_trace_endpoint",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_cv_pipeline_integration.py', 220, 'Skipped: macbook-1.png not found')"
+        },
+        {
+          "nodeid": "tests/test_fixed_image_security_pack.py::test_fixed_pack_macbook_qr_expected_signals",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_fixed_image_security_pack.py', 65, 'Skipped: macbook-QR.png missing in dump/test-cv')"
+        },
+        {
+          "nodeid": "tests/test_fixed_image_security_pack.py::test_fixed_pack_ms_texti_expected_signals",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_fixed_image_security_pack.py', 77, 'Skipped: ms-texti.png missing in dump/test-cv')"
+        },
+        {
+          "nodeid": "tests/test_fixed_image_security_pack.py::test_fixed_pack_recommend_route_consistency_for_ms_texti",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_fixed_image_security_pack.py', 89, 'Skipped: ms-texti.png missing in dump/test-cv')"
+        },
+        {
+          "nodeid": "tests/test_no_bundled_demo_key.py::test_no_bundled_demo_key_in_dist",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/test_no_bundled_demo_key.py', 29, 'Skipped: no frontend dist built \u2014 nothing to scan')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_carries_requirements_even_on_clarify",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 94, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_gaming_fit_verdicts_on_product_turn",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 104, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_a100_never_sells_laptops",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 115, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[photoshop and video editing laptop under 1600-gm-ps]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 124, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[unity game development laptop under 2000-gm-unity]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 124, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[stable diffusion image generation laptop under 1900-gm-sd]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 124, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[i want to fine tune a 7b model locally under 2500-gm-ft]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 124, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_workload_queries_answer_without_error[gaming and school laptop under 1500-gm-hybrid]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 124, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_golden_workload_matrix.py::test_golden_finetune_never_sells_pharmacy",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_golden_workload_matrix.py', 153, 'Skipped: live acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[fit_conflict-i need something for training llm models, is 3500 enough? if i go higher what then?]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 89, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[knowledge-what's the real difference between an 8gb and 16gb gpu for AI work?]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 89, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[game_fit-gaming laptop for valorant under 1900]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 89, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[payment-i want to spend around 25000 on machines for my team \\u2014 do you offer payment plans?]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 89, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_hard_query_reaches_buyer_with_prose[budget_yn-is 1800 enough for gaming?]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 89, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[off_catalog-i need 5 rack-mount GPU servers with A100s, budget 80k]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 102, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[contradiction-i need 12 dell laptops and a monitor and 2 headsets under 1500 total]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 102, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_correct_by_design_stays_deterministic[ai_honesty-i want to fine tune a 7b model locally under 2500]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 102, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_off_catalog_returns_no_laptops",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 113, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/acceptance/test_swap_rate_battery.py::test_ai_query_returns_no_accessory_noise",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/acceptance/test_swap_rate_battery.py', 119, 'Skipped: live model acceptance not explicitly enabled')"
+        },
+        {
+          "nodeid": "tests/chaos/test_demand_allocation_concurrency_postgres.py::test_eight_simultaneous_allocators_cannot_exceed_atp",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_demand_allocation_concurrency_postgres.py', 62, 'Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_concurrent_purchase_order_dispatch_has_one_provider_effect",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 12, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_refund_permit_revocation_and_unbound_legacy_fail_closed",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 56, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_refund_payload_changed_between_read_and_claim_cannot_dispatch",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 72, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_concurrent_outbound_workers_transmit_once",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 90, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_concurrent_refund_completion_is_exact_and_replay_safe",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 122, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_effect_sink_postgres.py::test_duplicate_refund_jobs_cannot_double_append_ledger",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_effect_sink_postgres.py', 142, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_money_concurrency_http.py::test_concurrent_order_transitions_one_winner_postgres",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_money_concurrency_http.py', 171, 'Skipped: TEST_POSTGRES_URL (Postgres) required for the true order-transition race')"
+        },
+        {
+          "nodeid": "tests/chaos/test_money_concurrency_postgres.py::test_refund_slot_has_one_winner",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_money_concurrency_postgres.py', 51, 'Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests')"
+        },
+        {
+          "nodeid": "tests/chaos/test_money_concurrency_postgres.py::test_inventory_release_credits_stock_once",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_money_concurrency_postgres.py', 63, 'Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests')"
+        },
+        {
+          "nodeid": "tests/chaos/test_money_concurrency_postgres.py::test_cancel_and_mark_paid_cannot_both_win",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_money_concurrency_postgres.py', 90, 'Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests')"
+        },
+        {
+          "nodeid": "tests/chaos/test_money_concurrency_postgres.py::test_concurrent_refund_workers_call_provider_once",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_money_concurrency_postgres.py', 117, 'Skipped: TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests')"
+        },
+        {
+          "nodeid": "tests/chaos/test_release_integrity_postgres.py::test_dmarc_postgres_ownership_and_weighted_summary",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_release_integrity_postgres.py', 33, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_release_integrity_postgres.py::test_transaction_tenant_binding_survives_commit_and_pool_reuse",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_release_integrity_postgres.py', 45, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_release_integrity_postgres.py::test_category_cap_serializes_across_internal_commits",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_release_integrity_postgres.py', 83, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_release_integrity_postgres.py::test_actual_evaluation_migration_preserves_legacy_scores_as_unverified",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_release_integrity_postgres.py', 106, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/chaos/test_release_integrity_postgres.py::test_audit_recovery_replays_crash_after_durable_decision_once",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/chaos/test_release_integrity_postgres.py', 132, 'Skipped: TEST_POSTGRES_URL is required')"
+        },
+        {
+          "nodeid": "tests/integration/test_celery_task_signing_runtime.py::test_celery_runtime_rejects_unsigned_and_bad_signature",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_celery_task_signing_runtime.py', 45, 'Skipped: Celery test transport accepted unsigned task; header propagation not enforced in this runtime')"
+        },
+        {
+          "nodeid": "tests/integration/test_db_postgres_timescale_matrix.py::test_postgres_source_of_truth_connectivity",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_db_postgres_timescale_matrix.py', 25, 'Skipped: Postgres/Timescale matrix requires postgres engine + ENABLE_DB_MATRIX=1')"
+        },
+        {
+          "nodeid": "tests/integration/test_db_postgres_timescale_matrix.py::test_timescale_extension_and_time_bucket_or_skip",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_db_postgres_timescale_matrix.py', 31, 'Skipped: Postgres/Timescale matrix requires postgres engine + ENABLE_DB_MATRIX=1')"
+        },
+        {
+          "nodeid": "tests/integration/test_e2e.py::test_e2e_full_flow",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_e2e.py', 24, 'Skipped: Integration tests disabled. Set RUN_INTEGRATION=1 to enable.')"
+        },
+        {
+          "nodeid": "tests/integration/test_e2e_full_flow_v2.py::test_e2e_customer_flow_with_orders_and_memory",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_e2e_full_flow_v2.py', 25, 'Skipped: Integration tests disabled. Set RUN_INTEGRATION=1 to enable.')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_separate_instances_share_only_exact_scope_and_observe_erasure",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 37, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_partitioned_worker_cannot_reveal_locally_retained_erased_value",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 52, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_conversation_erasure_reaches_another_local_store",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 74, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_failed_index_command_never_persists_an_orphan_conversation",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 89, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_concurrent_writes_and_subject_erasure_leave_no_unindexed_values",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 104, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_owned_redis_semantic_scope.py::test_real_worker_processes_observe_erasure_through_partition_and_restart",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_owned_redis_semantic_scope.py', 158, 'Skipped: separately owned Redis required')"
+        },
+        {
+          "nodeid": "tests/integration/test_recommend_contract_stability.py::test_image_match_shape",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_recommend_contract_stability.py', 250, 'Skipped: roadmap \u00a78 TODO: image-match shape needs a multipart upload fixture, not reachable via plain GET')"
+        },
+        {
+          "nodeid": "tests/integration/test_recommend_contract_stability.py::test_security_block_shape",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/integration/test_recommend_contract_stability.py', 255, 'Skipped: roadmap \u00a78 TODO: security/Maestro block shape not reliably triggered by injection-text GET; needs policy-gate fixture')"
+        },
+        {
+          "nodeid": "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_describes_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_diffusion_spectral.py', 257, 'Skipped: Ollama llava not available')"
+        },
+        {
+          "nodeid": "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_llava_diffusion_image_description",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_diffusion_spectral.py', 263, 'Skipped: Ollama llava not available')"
+        },
+        {
+          "nodeid": "tests/security/test_diffusion_spectral.py::TestDiffusionLlavaIntegration::test_spectral_score_vs_llava_judgement",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_diffusion_spectral.py', 274, 'Skipped: Ollama llava not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_high_entropy_image_flagged_suspicious",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 53, 'Skipped: numpy/Pillow not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_known_steg_lolbin_image_flagged",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 116, 'Skipped: steg test image not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_known_steg_prompt_injection_image_flagged",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 136, 'Skipped: steg test image not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestEmailAttachmentStegParser::test_steg_explanations_present_when_suspicious",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 53, 'Skipped: numpy/Pillow not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_strict_threshold_suppresses_alert",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 53, 'Skipped: numpy/Pillow not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_attachment_steg.py::TestPerTenantStegThreshold::test_loose_threshold_flags_borderline_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_attachment_steg.py', 53, 'Skipped: numpy/Pillow not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_eval_matrix.py::test_email_eval_matrix_builds_expected_cases_when_fixtures_present",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_eval_matrix.py', 9, 'Skipped: Heavy integration test (steg + QR on real attachments). Set PYTEST_FULL_INTEGRATION=1 to enable.')"
+        },
+        {
+          "nodeid": "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png-lolbin_command_sequence]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_explainability_card_p2.py', 248, 'Skipped: steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-prompt_injection_hidden-Dell_15_DC15255.png-prompt_injection_hidden]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_explainability_card_p2.py', 248, 'Skipped: steg-prompt_injection_hidden-Dell_15_DC15255.png not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-c2_beacon_simulation-apple-mac.png-c2_beacon_pattern]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_explainability_card_p2.py', 248, 'Skipped: steg-c2_beacon_simulation-apple-mac.png not available')"
+        },
+        {
+          "nodeid": "tests/security/test_email_explainability_card_p2.py::test_hidden_payloads_are_promoted_to_structured_findings[steg-data_exfiltration_instruction-lenovo-pro7 (1).png-data_exfiltration_instruction]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_email_explainability_card_p2.py', 248, 'Skipped: steg-data_exfiltration_instruction-lenovo-pro7 (1).png not available')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_ollama_embed_returns_vector",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 116, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_jailbreak_seeds_have_high_mutual_cosine",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 121, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_benign_vs_jailbreak_cosine_gap",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 130, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_semantic_variant_detected_with_ollama",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 147, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_seed_cache_populated",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 162, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_jailbreak_embedding_ollama.py::TestOllamaSemanticEmbeddings::test_50_benign_queries_false_positive_rate",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_jailbreak_embedding_ollama.py', 170, 'Skipped: Ollama not reachable at http://127.0.0.1:1')"
+        },
+        {
+          "nodeid": "tests/security/test_model_theft_ollama_probe.py::test_ollama_generates_extraction_queries_caught_by_guard",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_model_theft_ollama_probe.py', 364, \"Skipped: Ollama model 'llama3.2:3b' not available at http://127.0.0.1:1\")"
+        },
+        {
+          "nodeid": "tests/security/test_model_theft_ollama_probe.py::test_ollama_high_volume_probe_triggers_rate_limit",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_model_theft_ollama_probe.py', 423, \"Skipped: Ollama model 'llama3.2:3b' not available at http://127.0.0.1:1\")"
+        },
+        {
+          "nodeid": "tests/security/test_model_theft_ollama_probe.py::test_ollama_benign_shopping_queries_pass",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/security/test_model_theft_ollama_probe.py', 473, \"Skipped: Ollama model 'llama3.2:3b' not available at http://127.0.0.1:1\")"
+        },
+        {
+          "nodeid": "tests/browser/test_filters_and_security.py::test_price_spec_query_not_security_blocked[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/browser/test_filters_and_security.py', 15, 'Skipped: E2E_FRONTEND_URL not set')"
+        },
+        {
+          "nodeid": "tests/browser/test_filters_and_security.py::test_pci_query_triggers_security_review[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/browser/test_filters_and_security.py', 25, 'Skipped: E2E_FRONTEND_URL not set')"
+        },
+        {
+          "nodeid": "tests/browser/test_trace_panel.py::test_trace_panel_opens[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/browser/test_trace_panel.py', 10, 'Skipped: E2E_FRONTEND_URL not set')"
+        },
+        {
+          "nodeid": "tests/pw/test_admin_bi_security_trend_panels.py::test_admin_bi_panels_render_security_matrix_and_decision_replay[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_admin_bi_security_trend_panels.py', 72, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_admin_dashboards.py::test_admin_ragas_dashboards_links_present[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_admin_dashboards.py', 5, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_admin_escalations_matrix_gate_ui.py::test_escalations_shows_matrix_gate_error_on_409[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_admin_escalations_matrix_gate_ui.py', 74, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_answer_first_parity.py::test_widget_results_match_backend[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_answer_first_parity.py', 26, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_answer_first_parity.py::test_widget_no_results_is_graceful_not_blank[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_answer_first_parity.py', 73, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_decision_trace_e2e.py::test_decision_trace_modal_and_trace_api[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_decision_trace_e2e.py', 1, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_decision_trace_modal.py::test_decision_trace_gear_modal[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_decision_trace_modal.py', 1, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_decision_trace_nlp_panels.py::test_decision_trace_nlp_panels[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_decision_trace_nlp_panels.py', 6, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_decision_trace_timeline.py::test_timeline_renders_events[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_decision_trace_timeline.py', 6, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_decision_trace_timeline.py::test_event_drilldown[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_decision_trace_timeline.py', 24, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_email_lab_security_matrix_flow.py::test_email_lab_analyze_populates_trace_and_security_matrix[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_email_lab_security_matrix_flow.py', 4, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_followup_chips.py::test_followup_chips_render_and_are_clickable[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_followup_chips.py', 5, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_followup_chips_e2e.py::test_followup_chips_e2e[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_followup_chips_e2e.py', 23, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_forensics_ui_placeholder.py::test_forensics_ui_route[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_forensics_ui_placeholder.py', 1, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_product_detail.py::test_product_detail_not_found[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_product_detail.py', 1, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_recommend_playwright_e2e.py::test_storefront_search_triggers_recommend[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_recommend_playwright_e2e.py', 10, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_right_panel_and_comparison.py::test_right_side_panel_grid_and_comparison[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_right_panel_and_comparison.py', 5, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_chat_with_admin_click_path_opens_escalation_room[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_two_browser_buyer_and_authenticated_staff_exchange_messages[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 179, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_rotated_staff_token_is_rejected_and_new_token_uses_sse[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 247, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-applied-applied the change to your cart]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 334, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_human_substitute_apply_and_stale_revision_are_buyer_visible[chromium-stale_cart-cart changed since I proposed that]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 334, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_frontend_smoke.py::test_storefront_shows_assistant_not_admin[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_frontend_smoke.py', 74, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_trace_sse_policy_gate.py::test_trace_id_and_sse_events[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_trace_sse_policy_gate.py', 31, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_trace_sse_policy_gate.py::test_policy_gate_logged_and_visible[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_trace_sse_policy_gate.py', 52, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_vision_triage_e2e.py::test_vision_triage_image_upload[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_vision_triage_e2e.py', 4, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_widget_interactions.py::test_widget_opens_and_queries[chromium]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_widget_interactions.py', 6, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/certification/test_postgres_draft_boundary.py::test_explicit_sourcing_is_durable_idempotent_and_never_enqueues_dispatch",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/certification/test_postgres_draft_boundary.py', 36, 'Skipped: explicit isolated PostgreSQL certificate required')"
+        },
+        {
+          "nodeid": "tests/cv/test_cv_provider_llava_available.py::test_ollama_llava_installed",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/cv/test_cv_provider_llava_available.py', 9, 'Skipped: Ollama executable not found on expected path; skipping env check')"
+        },
+        {
+          "nodeid": "tests/cv/test_cv_real_sample_pack_contract.py::test_cv_real_sample_pack_present_for_manual_certification",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/cv/test_cv_real_sample_pack_contract.py', 18, \"Skipped: CV certification not run: local licensed/real sample pack is absent; missing=['apple-mac.jpg', 'macbook-QR.png', 'lenovo-pro7.webp']\")"
+        },
+        {
+          "nodeid": "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[llava]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/cv/test_vision_models_presence.py', 29, 'Skipped: Explicit owned Ollama runtime and enrolled models required')"
+        },
+        {
+          "nodeid": "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[qwen2.5-vl]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/cv/test_vision_models_presence.py', 29, 'Skipped: Explicit owned Ollama runtime and enrolled models required')"
+        },
+        {
+          "nodeid": "tests/cv/test_vision_models_presence.py::test_ollama_vision_models_basic[minicpm-v]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/cv/test_vision_models_presence.py', 29, 'Skipped: Explicit owned Ollama runtime and enrolled models required')"
+        },
+        {
+          "nodeid": "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_baseline_adaptation_off",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_adaptive_growth_playwright.py', 73, 'Skipped: backend not reachable; skip gate-1')"
+        },
+        {
+          "nodeid": "tests/e2e/test_adaptive_growth_playwright.py::test_gate1_market_intelligence_on",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_adaptive_growth_playwright.py', 81, 'Skipped: set GATE1_INTEL_ON=1 against a HIPPOGRAPH_FEEDBACK_ENABLED deployment')"
+        },
+        {
+          "nodeid": "tests/e2e/test_adaptive_growth_playwright.py::test_gate2_finding_to_hippograph_to_narration_to_trace",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_adaptive_growth_playwright.py', 94, 'Skipped: set GATE2_FULLSTACK=1 with API+DB+Redis+Celery up and signals seeded')"
+        },
+        {
+          "nodeid": "tests/e2e/test_adaptive_growth_playwright.py::test_gate3_assignment_and_visible_ranking_delta",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_adaptive_growth_playwright.py', 134, 'Skipped: set GATE3_LIVE_RANKING=1 against a RANKING_NUDGE_EXPERIMENT_ENABLED + live experiment')"
+        },
+        {
+          "nodeid": "tests/e2e/test_cv_upload_api.py::test_cv_upload_flow_api_noninteractive",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_cv_upload_api.py', 14, 'Skipped: Manual run: requires local server')"
+        },
+        {
+          "nodeid": "tests/e2e/test_cv_upload_playwright.py::test_camera_ui_capture_and_upload",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_cv_upload_playwright.py', 8, 'Skipped: Manual run: requires Playwright and running server')"
+        },
+        {
+          "nodeid": "tests/e2e/test_full_platform_e2e.py::test_full_recommend_and_decision_trace_tabs",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_full_platform_e2e.py', 153, 'Skipped: frontend not reachable')"
+        },
+        {
+          "nodeid": "tests/e2e/test_full_platform_e2e.py::test_image_upload_cv_pipeline",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_full_platform_e2e.py', 361, 'Skipped: backend not reachable')"
+        },
+        {
+          "nodeid": "tests/e2e/test_full_platform_e2e.py::test_shopping_cart_and_upsell",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_full_platform_e2e.py', 425, 'Skipped: backend not reachable')"
+        },
+        {
+          "nodeid": "tests/e2e/test_full_platform_e2e.py::test_browser_recommend_to_cart_upsell",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_full_platform_e2e.py', 542, 'Skipped: frontend not reachable')"
+        },
+        {
+          "nodeid": "tests/e2e/test_full_platform_e2e.py::test_platform_latency_budget",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_full_platform_e2e.py', 692, 'Skipped: backend not reachable')"
+        },
+        {
+          "nodeid": "tests/e2e/test_live_allocation_workbench.py::test_eight_buyer_pressure_wave_and_partial_recovery_are_visible",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_live_allocation_workbench.py', 16, 'Skipped: requires running backend and admin frontend')"
+        },
+        {
+          "nodeid": "tests/e2e/test_live_policy_trace.py::test_policy_question_uses_typed_chat_and_projects_authority_boundaries",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_live_policy_trace.py', 16, 'Skipped: requires the running demo stack')"
+        },
+        {
+          "nodeid": "tests/e2e/test_live_procurement_closed_loop.py::test_exact_cart_line_amendment_requires_delivery_reconfirmation",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_live_procurement_closed_loop.py', 23, 'Skipped: requires the running demo stack')"
+        },
+        {
+          "nodeid": "tests/e2e/test_procurement_journey_playwright.py::test_full_governed_procurement_journey_api",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_procurement_journey_playwright.py', 56, 'Skipped: set GATE_PROCUREMENT=1 against a live stack')"
+        },
+        {
+          "nodeid": "tests/e2e/test_procurement_journey_playwright.py::test_fluid_sourcing_journey_api",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_procurement_journey_playwright.py', 96, 'Skipped: set GATE_PROCUREMENT=1 against a live stack')"
+        },
+        {
+          "nodeid": "tests/e2e/test_procurement_journey_playwright.py::test_buyer_storefront_renders_procurement_check",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_procurement_journey_playwright.py', 136, 'Skipped: set GATE_PROCUREMENT=1 against a live stack')"
+        },
+        {
+          "nodeid": "tests/e2e/test_procurement_malicious_reply_playwright.py::test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_procurement_malicious_reply_playwright.py', 17, 'Skipped: requires running backend and admin frontend')"
+        },
+        {
+          "nodeid": "tests/e2e/test_returns_wrong_image_e2e.py::test_returns_wrong_image_e2e",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_returns_wrong_image_e2e.py', 14, 'Skipped: Integration tests disabled. Set RUN_INTEGRATION=1 to enable.')"
+        },
+        {
+          "nodeid": "tests/e2e/test_returns_wrong_item_sku_e2e.py::test_returns_wrong_item_sku_mismatch_e2e",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_returns_wrong_item_sku_e2e.py', 15, 'Skipped: Integration tests disabled. Set RUN_INTEGRATION=1 to enable.')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_storefront_playwright_basic",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 259, 'Skipped: storefront not reachable; skip playwright e2e')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_frontend_storefront_shell_smoke",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 272, 'Skipped: frontend not reachable; skip storefront shell smoke')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_decision_trace_contract",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 302, 'Skipped: backend not reachable; skip contract trace test')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_decision_trace_populates_after_chat",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 384, 'Skipped: live Playwright tests disabled (set LIVE_PLAYWRIGHT_TESTS=1)')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_decision_trace_multimodal_tabs_regression",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 445, 'Skipped: live Playwright tests disabled (set LIVE_PLAYWRIGHT_TESTS=1)')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_playwright.py::test_storefront_http_fallback",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_playwright.py', 543, 'Skipped: storefront not reachable; skip e2e check')"
+        },
+        {
+          "nodeid": "tests/e2e/test_storefront_upload_threshold_calibration_playwright.py::test_storefront_upload_threshold_calibration_playwright",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_storefront_upload_threshold_calibration_playwright.py', 107, 'Skipped: UI not reachable: http://127.0.0.1:5173')"
+        },
+        {
+          "nodeid": "tests/e2e/test_visual_fastpath_regression.py::test_compromised_images_render_products_trace_tabs_and_healthz",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/e2e/test_visual_fastpath_regression.py', 119, 'Skipped: live Playwright regression disabled; set LIVE_PLAYWRIGHT_TESTS=1')"
+        },
+        {
+          "nodeid": "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[llama3:8b]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/llm/test_text_models_presence.py', 37, \"Skipped: Ollama text model 'llama3:8b' not available; skipping\")"
+        },
+        {
+          "nodeid": "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[mistral:latest]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/llm/test_text_models_presence.py', 37, \"Skipped: Ollama text model 'mistral:latest' not available; skipping\")"
+        },
+        {
+          "nodeid": "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[qwen2.5:latest]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/llm/test_text_models_presence.py', 37, \"Skipped: Ollama text model 'qwen2.5:latest' not available; skipping\")"
+        },
+        {
+          "nodeid": "tests/pw/test_cv_escalation_rules.py::test_cv_escalation_rules_create_ticket",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_cv_escalation_rules.py', 21, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_cv_upload_escalation.py::test_cv_upload_triggers_escalation_and_ticket",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_cv_upload_escalation.py', 22, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_cv_analyze_msi_qr",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 120, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_vision_triage_msi_qr",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 175, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestMsiQrSecurity::test_chat_query_with_msi_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 202, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_cv_analyze_apple_not_laptop",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 250, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_vision_triage_apple",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 285, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestAppleWrongCategory::test_complaint_triage_apple_not_in_catalog",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 308, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_cv_analyze_cracked_mac",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 349, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_submit_complaint_cracked_mac",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 389, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_case_status_after_submit",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 440, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_add_images_to_existing_case",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 456, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestCrackedMacReturn::test_chat_query_damaged_return",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 479, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_support_answer_bsod_query",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 532, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_complaint_triage_bsod_technical",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 555, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_cv_analyze_bsod_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 580, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestBsodFaqFlow::test_chat_query_bsod_with_image",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 610, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_low_fraud_legitimate_return",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 664, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_triage_high_fraud_chargeback_threat",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 688, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_submit_complaint_with_cracked_mac_order",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 725, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestFraudReturnSignals::test_guest_submit_with_apple_as_receipt",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 769, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_demo_e2e_clickthrough.py::TestBrowserDemoClickthrough::test_browser_skipped",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_demo_e2e_clickthrough.py', 1113, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_followup_budget_envelope.py::test_exact_followup_keeps_budget_and_result_envelope",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_followup_budget_envelope.py', 81, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_nlp_contract_fixture.py::test_deterministic_fixture_basic",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_nlp_contract_fixture.py', 4, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_budget_max_hard_cap_no_over_products",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 48, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_budget_max_strict_filter_text_only",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 65, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a high school student looking for a laptop-high_school]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[engineering student who needs AutoCAD and SolidWorks-engineering_student]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I train ML models with PyTorch on large datasets-ai_ml_workstation]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[I'm a content creator doing 4K video editing in Premiere Pro-content_creator]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[corporate laptop for Microsoft Teams and Excel presentations-corporate]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_returns_results_not_just_nqe[university student for assignments and lectures-student]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 84, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_high_school_routes_correctly_not_university_general",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 124, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_llm_response_no_technical_token_leakage",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 149, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_llm_response_no_think_block_leak",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 163, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_budget_question_gets_llm_response",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 177, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_security_flagged_image_does_not_500",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 194, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_recommend_with_flagged_image_still_returns_products",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 217, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_truly_open_ended_query_triggers_nqe",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 236, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_persona_budget_quality.py::test_persona_query_does_not_trigger_nqe_gate_early_return",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_persona_budget_quality.py', 247, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_recommend_spec_price_trace.py::test_recommend_price_and_spec_filters_api",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_recommend_spec_price_trace.py', 21, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_recommend_spec_price_trace.py::test_decision_trace_followup",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_recommend_spec_price_trace.py', 86, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_recommend_spec_price_trace.py::test_security_escalation_on_pci_query",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_recommend_spec_price_trace.py', 111, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestStegImages::test_steg_image_cv_analyze[NOTSET]",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 156, 'Skipped: got empty parameter set for (entry)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestStegImages::test_clean_1x1_does_not_fire",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 257, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_wire_transfer_pdf_bec_detection",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 317, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_xlsm_macro_lolbin_detection",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 413, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_vba_source_prompt_injection_and_lolbin",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 486, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestAdversarialAttachments::test_multi_attachment_combined_severity",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 578, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_registry_returns_15_agents",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 687, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_risk_tier_filter",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 711, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_violation_counts_flag",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 725, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_single_agent_lookup",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 743, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_boundary_unknown_agent_returns_404",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 756, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestMaestroApi::test_each_agent_has_required_fields",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 764, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_email_evaluate_warm_path_latency",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 784, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_cv_analyze_single_image_latency",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 807, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestPerformanceSummary::test_maestro_boundaries_latency",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 828, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_sec_files_e2e.py::TestBrowserSecFilesE2E::test_browser_skipped",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_sec_files_e2e.py', 1050, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/pw/test_storefront_chat_with_admin_flow.py::test_revoked_and_expired_staff_tokens_are_rejected",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/pw/test_storefront_chat_with_admin_flow.py', 293, 'Skipped: Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)')"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_webhook_signature_replay_detected_with_redis",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/webhooks/test_webhook_signature.py', 101, 'Skipped: Replay detection requires Redis')"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_stripe_signature_replay",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/webhooks/test_webhook_signature.py', 172, 'Skipped: Replay detection requires Redis')"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_github_signature_replay",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/webhooks/test_webhook_signature.py', 226, 'Skipped: Replay detection requires Redis')"
+        },
+        {
+          "nodeid": "tests/webhooks/test_webhook_signature.py::test_slack_signature_replay",
+          "xfail": null,
+          "details": "('/workspace/repo/tests/webhooks/test_webhook_signature.py', 283, 'Skipped: Replay detection requires Redis')"
+        }
+      ],
+      "scope": "Frozen WIP diagnostic partition, not release or monolithic-order certification. Four collection-skip modules are outside the collected ID universe."
+    },
+    "assessment": "All 8319 collected IDs selected exactly once and have outcomes; 8060 passed, 13 failed, 246 skipped. Four collection-skipped modules are outside this universe. WIP diagnostic, not release certification."
   },
   "configuration_source_ownership": {
     "before": {
@@ -3129,5 +4835,374 @@
     },
     "changed": [],
     "test_exit": 0
+  },
+  "fifth_root_diagnostic": {
+    "reported_phases": 1091,
+    "outcomes": {
+      "passed": 1056,
+      "failed": 1,
+      "skipped": 34
+    },
+    "failed_tests": [
+      {
+        "nodeid": "tests/test_cart_mutations_endpoint.py::test_apply_endpoint_idempotent_double_submit",
+        "phase": "call"
+      }
+    ],
+    "receipt": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 573.809,
+      "resource_violation": null,
+      "peaks": {
+        "process_rss_bytes": 469909504,
+        "process_fds": 28,
+        "process_threads": 12
+      },
+      "source_fingerprint": "ecabfd5af71a4d363ca1ca1565a08009291a7e795271a47a518b3d35e4bb804b",
+      "source_changes_in_disposable_copy": []
+    },
+    "source": {
+      "source_fingerprint": "ecabfd5af71a4d363ca1ca1565a08009291a7e795271a47a518b3d35e4bb804b",
+      "head": "f6b7573ff469f4547b24854659ea54fcf290f11e",
+      "file_count": 5662,
+      "command": [
+        "/usr/local/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "--run-slow",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--junitxml=/evidence/tests.xml",
+        "-p",
+        "roadmap_partition_plugin"
+      ],
+      "network": "none",
+      "uid": 1000,
+      "diagnostic_gc_interval": 0,
+      "selected": "partition 3",
+      "release_gate": false
+    },
+    "assessment": "1056 passed, one cart-plan lookup failed, 34 skipped. Source unchanged. Old cart-age failure did not recur; neither intermittent failure is certified repaired."
+  },
+  "native_postgresql_schema": {
+    "purpose": "Disposable PostgreSQL migration/RLS/backup proof; no commercial effects",
+    "complete": true,
+    "baseline_tenant_columns": {
+      "security_events": [
+        "id",
+        "event_time",
+        "path",
+        "severity",
+        "verdict_score",
+        "details",
+        "escalated",
+        "blocked",
+        "ground_truth",
+        "analyst_verdict",
+        "correction_ts",
+        "correction_notes"
+      ],
+      "incidents": [
+        "id",
+        "event_id",
+        "created_at",
+        "created_by",
+        "severity",
+        "title",
+        "description",
+        "status",
+        "assigned_to",
+        "team",
+        "sla_status",
+        "sla_due_at",
+        "sla_breach_alerted_at",
+        "runbook_id",
+        "runbook_run_id",
+        "runbook_failure_alerted_at",
+        "tenant_id",
+        "case_id",
+        "trace_id"
+      ],
+      "decision_logs": [
+        "id",
+        "tenant_id",
+        "actor_id",
+        "actor_role",
+        "event_type",
+        "agent_name",
+        "valid_from",
+        "valid_to",
+        "system_from",
+        "system_to",
+        "input_data",
+        "retrieved_context",
+        "agent_reasoning",
+        "proposed_action",
+        "policy_version",
+        "approval_required",
+        "approved_by",
+        "approved_at",
+        "execution_status",
+        "error_message",
+        "evaluator_model",
+        "created_at",
+        "session_id"
+      ]
+    },
+    "image": "sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b",
+    "old_rows_preserved": true,
+    "repeated_head": true,
+    "legacy_evaluation_unverified": true,
+    "legacy_effect_permits_absent": true,
+    "rls_without_context_empty": true,
+    "rls_scoped_read_and_write": true,
+    "rls_cross_tenant_write_denied": true,
+    "protected_downgrade_preflight": true,
+    "separate_pg_dump_restore": true,
+    "backup_sha256": "dfc769f6b3f41e73e85ab9be45985444efcef99def6f49fe7884908c889f4167",
+    "restored_reupgrade": true,
+    "forward_92_repair": true,
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "elapsed_seconds": 13.344
+  },
+  "webhook_serial_owned_redis": {
+    "complete": true,
+    "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+    "baseline": {
+      "exit_code": 1,
+      "counts": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "unrelated_canary_retained": false
+    },
+    "corrected": {
+      "exit_code": 0,
+      "counts": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "unrelated_canary_retained": true,
+      "remaining_test_namespace_keys": 0
+    },
+    "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+    "actual_redis_ping": true,
+    "exact_signed_bytes": true,
+    "private_namespace_cleanup": true,
+    "wrong_signature_and_replay_and_timestamp_controls": true,
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "elapsed_seconds": 37.109
+  },
+  "webhook_atomic_owned_redis": {
+    "complete": true,
+    "backend": "owned real Redis; ephemeral, not a persistence/recovery proof",
+    "corrected": {
+      "exit_code": 0,
+      "counts": {
+        "tests": 31,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "unrelated_canary_retained": true,
+      "remaining_test_namespace_keys": 0
+    },
+    "image": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+    "actual_redis_ping": true,
+    "exact_signed_bytes": true,
+    "private_namespace_cleanup": true,
+    "wrong_signature_and_replay_and_timestamp_controls": true,
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "elapsed_seconds": 20.531
+  },
+  "case_contract_tested_source": {
+    "tests": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_contract_compilation.py",
+        "tests/services/test_case_contract_binding.py",
+        "tests/services/test_v2_contract_binding.py",
+        "tests/services/test_requirement_contract.py",
+        "tests/services/test_requirement_compiler.py",
+        "tests/services/test_requirement_scope.py",
+        "tests/services/test_recommendation_evidence_stage.py",
+        "tests/services/test_product_shelves.py",
+        "tests/services/test_accepted_catalog_projection.py",
+        "tests/services/test_structured_requirement_claim_ids.py",
+        "tests/services/test_recommendation_facade.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\case-contract-consumers-verified\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\case-contract-consumers-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 56.484,
+      "peaks": {
+        "rss_bytes": 287059968,
+        "handles": 1561,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 198,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "files": [
+      {
+        "path": "src/app/services/case_contract_binding.py",
+        "tested_sha256": "5b73894580a171494707ecedaab1ea8b904f150b227621f909117f14b6a6acc5",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/case_binding.py",
+        "tested_sha256": "e678140fc1a5020198b68851bc975ac1d3906f15e89b9db194227990d16460ce",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/contract_compilation_gate.py",
+        "tested_sha256": "63f15a15a7b1f6a829cf9c06d5819fdb29486bad2c2db3113a9bb740ffab12d8",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/evidence_stage.py",
+        "tested_sha256": "4ddaa86b62691382a12941f2ad0ca9aa6a7ea3829000f31c6d95926bc22468af",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/product_shelves.py",
+        "tested_sha256": "4047bb8d8c69a46f7aa39372c297e84487d04ca5aff3c76035a7c96b1f9cca93",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/research_contracts.py",
+        "tested_sha256": "877890f8850f84e9699d3bb264bef38f53f34c8b6d31aabb3f6ce7bf57333d3b",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/requirement_compiler.py",
+        "tested_sha256": "113d31f6658dc027951c9beddab525280dd3660ae6f6b76e43a91435236bc8ac",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/requirement_scope.py",
+        "tested_sha256": "f9dbb21cbc5a87c42b538d809378c6e4edee61460d574dfa4b653da027ca27a0",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_core/legacy_adapter.py",
+        "tested_sha256": "931ccf40ecf2da9538f41c3a4210c98d4e1d252f4cff39ae5d6eba805eb13e52",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/recommendation_facade.py",
+        "tested_sha256": "16fd84cf69d71334c45179c542fe3483edd3724adfc49788a7bd6262df8b10af",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/shopping_case_enrolled_research.py",
+        "tested_sha256": "83bd17414514ee7d8c1c9f84272cafac0643901c1872172f4d30054f4019c068",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/structured_requirement_claims.py",
+        "tested_sha256": "5b61059d09e156afe6ba895978310a48595929b5d543db05097ed6ed9abf93e5",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "tests/services/test_contract_compilation.py",
+        "tested_sha256": "9e2dc2fd824a5828db0a8beea9e1483ddad205a9416ba51825eb450c6fb0c6f1",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "tests/services/test_case_contract_binding.py",
+        "tested_sha256": "8f4bf8ecf62be3390957cbb800bd349efe6fcf9e66f265a917208c9a990b3a12",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "tests/services/test_v2_contract_binding.py",
+        "tested_sha256": "58af2f99ae04a9d292be7f7603758e2f74dd37af616d7a109f2126ad60257a0b",
+        "root_same_as_candidate": true
+      },
+      {
+        "path": "src/app/services/accepted_catalog_projection.py",
+        "tested_sha256": "07e029c74332f19f49e6b5e2849efcb0c332e4e95963edf4d520c8a419982b3e",
+        "root_same_as_candidate": false
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "tested_sha256": "4edb583d8dd14ea889d48824ecac2ea4f857cffe6cda3b90c53be0118e5dc517",
+        "root_same_as_candidate": false
+      },
+      {
+        "path": "src/app/services/recommendation_core/trace_ontology.py",
+        "tested_sha256": "1f0a298bec8862f9ce5be90323b083e1e9f1f14074e0bb32f7fd30c04582de5a",
+        "root_same_as_candidate": false
+      },
+      {
+        "path": "tests/services/test_requirement_contract.py",
+        "tested_sha256": "4de473295602b36b7c832d16148cde24e3347706fed0af1f317c8cb744e71721",
+        "root_same_as_candidate": false
+      },
+      {
+        "path": "tests/services/test_accepted_catalog_projection.py",
+        "tested_sha256": "218981b0faf166d262ba95a73d1d646ca738407a49fbcdf4bdcc7786fe267d52",
+        "root_same_as_candidate": true
+      }
+    ]
+  },
+  "cart_windows_full_collection_diagnostic": {
+    "command": [
+      "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+      "-m",
+      "pytest",
+      "-p",
+      "cart_ownership_diagnostic",
+      "tests",
+      "-q",
+      "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-ownership-full-collection-diagnostic\\tests.xml"
+    ],
+    "cwd": ".artifacts\\roadmap-execution-2026-10-20\\cart-ownership-diagnostic-candidate",
+    "native_exit_code": 0,
+    "elapsed_seconds": 118.109,
+    "peaks": {
+      "rss_bytes": 431955968,
+      "handles": 1930,
+      "threads": 38
+    },
+    "resource_violation": null,
+    "offline_models": true,
+    "commercial_effects": "sandbox/disabled",
+    "counts": {
+      "tests": 156,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 4
+    }
+  },
+  "cart_instrumented_linux_root": {
+    "reported_phases": 368,
+    "outcomes": {
+      "passed": 338,
+      "skipped": 30
+    },
+    "failed_tests": [],
+    "state": "running",
+    "receipt": null,
+    "assessment": "Same older frozen v5 source with SQL engine/connection instrumentation. A pass without a causal repair does not close an intermittent failure."
   }
 }
