@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ["tests.owned_security_runtime"]
+
 
 # ---------------------------------------------------------------------------
 # Per-test hang backstop (pytest-timeout is not installed in this venv)
