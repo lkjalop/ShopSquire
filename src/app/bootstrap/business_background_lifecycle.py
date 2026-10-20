@@ -57,6 +57,7 @@ def register_business_background_lifecycle(app: FastAPI) -> tuple[str, ...]:
         ("retention", "src.app.services.retention", "start_retention_loop", "stop_retention_loop"),
         ("incident_sla", "src.app.services.incident_sla_scheduler", "start_incident_sla_scheduler", "stop_incident_sla_scheduler"),
         ("payment_reconcile", "src.app.services.payment_reconcile_scheduler", "start_payment_reconcile_scheduler", "stop_payment_reconcile_scheduler"),
+        ("inventory_expiry", "src.app.services.inventory_expiry_scheduler", "start_inventory_expiry_scheduler", "stop_inventory_expiry_scheduler"),
     )
     for name, module_name, start_name, stop_name in definitions:
         try:

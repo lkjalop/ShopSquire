@@ -13,8 +13,9 @@ def test_business_background_lifecycle_records_registration_truth(monkeypatch):
     projection = app.state.business_background_lifecycle
     assert tuple(projection["registered"]) == registered
     assert isinstance(projection["optional_failures"], dict)
-    assert {"retention", "incident_sla", "payment_reconcile", "security_observer"}.issuperset(registered)
-    assert "security_observer" in registered
+    assert {"retention", "incident_sla", "payment_reconcile", "inventory_expiry", "security_observer"}.issuperset(registered)
+    assert 'security_observer' in registered
+    assert 'inventory_expiry' in registered
 
 
 def test_custom_lifespan_runs_business_pairs_once_and_stops_in_reverse_order():
