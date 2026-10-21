@@ -4,12 +4,10 @@ Locks the per-product + response contract the FRONTEND renders (App.tsx /
 ProductGrid.tsx / ChatOverlay.tsx) so attribution / hippograph / availability fields
 cannot silently drift as the response grows.
 
-ENDPOINT CHOICE: the frontend calls POST /api/v1/chat/query, but that handler makes an
-internal HTTP self-call to /api/v1/recommend/suggest (chat.py:1628-1629,1741) — not
-reachable from an in-process TestClient. chat.py then maps `results[] -> products[]`
-1:1 and only *adds* price↔price_cents symmetry (chat.py:1859-1927). So this gate asserts
-the SOURCE-OF-TRUTH `results[]` item contract via /recommend/suggest (reliable in CI);
-the live /chat/query DOM render parity is covered by tests/pw/test_answer_first_parity.py.
+ENDPOINT CHOICE: the frontend calls POST /api/v1/chat/query, which delegates
+in process to the V2 recommendation compatibility boundary. This gate checks
+its source results contract directly; ordinary chat and DOM behavior have
+separate browser gates.
 
 Drift classes locked here (have bitten us or will):
   * price / price_cents — the "$0" rendering bug
@@ -24,20 +22,18 @@ Contract-shape only (no value assertions — those depend on LLM/seed/ranking an
 """
 from __future__ import annotations
 
-import os
-
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
 
 from src.app.main import create_app
-from src.app.models.db import db_session, get_engine, set_engine
-from src.app.models.orm import Base
+from src.app.models.db import create_runtime_engine, db_session, get_engine, set_engine
+from src.app.models.database_ownership import database_owner
 from tests.utils import default_headers, write_feature_flags
 from tests.v2_catalog_fixture import grounded_v2_catalog
 
-_FLAGS_PATH = os.environ["FEATURE_FLAGS_PATH"]
 # Deterministic product-path flags so the gate is order-independent (other test
 # modules leave varying flag state in the global feature_flags.json).
 _PRODUCT_PATH_FLAGS = {
@@ -63,44 +59,28 @@ _VALID_STOCK = {"in_stock", "low_stock", "very_low_stock", "out_of_stock", None}
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _seed():
+def _seed(tmp_path_factory):
     original_engine = get_engine()
-    isolated_engine = create_engine(
-        "sqlite://", future=True, poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(isolated_engine)
-    set_engine(isolated_engine)
-    _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    write_feature_flags(_PRODUCT_PATH_FLAGS)
-    _orig_narration = os.environ.get("RECOMMEND_NARRATION_MODE")
-    _orig_mock = os.environ.get("USE_MOCK_LLM")
-    _orig_fallback = os.environ.get("TASK_ALLOW_INPROCESS_FALLBACK")
-    os.environ["RECOMMEND_NARRATION_MODE"] = "skip"  # fast + deterministic
-    os.environ["USE_MOCK_LLM"] = "1"
-    os.environ["TASK_ALLOW_INPROCESS_FALLBACK"] = "0"
-    with grounded_v2_catalog(
-        _CATALOG,
-        node_handle="el-6-6",
-        source="frontend_backend_parity",
-    ):
-        yield
-    if _orig_narration is None:
-        os.environ.pop("RECOMMEND_NARRATION_MODE", None)
-    else:
-        os.environ["RECOMMEND_NARRATION_MODE"] = _orig_narration
-    if _orig_mock is None:
-        os.environ.pop("USE_MOCK_LLM", None)
-    else:
-        os.environ["USE_MOCK_LLM"] = _orig_mock
-    if _orig_fallback is None:
-        os.environ.pop("TASK_ALLOW_INPROCESS_FALLBACK", None)
-    else:
-        os.environ["TASK_ALLOW_INPROCESS_FALLBACK"] = _orig_fallback
-    set_engine(original_engine)
-    if _orig_flags is not None:
-        with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
-            f.write(_orig_flags)
+    directory = tmp_path_factory.mktemp("frontend-backend-parity")
+    database_url = f"sqlite+pysqlite:///{directory / 'catalog.sqlite3'}"
+    isolated_engine = create_runtime_engine(database_url)
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setenv("DATABASE_URL", database_url)
+            patch.setenv("DATABASE_URL_RO", database_url)
+            patch.setenv("FEATURE_FLAGS_PATH", str(directory / "feature-flags.json"))
+            patch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+            patch.setenv("USE_MOCK_LLM", "1")
+            patch.setenv("TASK_ALLOW_INPROCESS_FALLBACK", "0")
+            command.upgrade(Config("alembic.ini"), "head")
+            set_engine(isolated_engine)
+            write_feature_flags(_PRODUCT_PATH_FLAGS)
+            with database_owner(isolated_engine):
+                with grounded_v2_catalog(_CATALOG, node_handle="el-6-6", source="frontend_backend_parity"):
+                    yield isolated_engine
+    finally:
+        set_engine(original_engine)
+        isolated_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -114,14 +94,19 @@ def _contract_router(monkeypatch):
 
 
 def _suggest(uid: str, query: str) -> dict:
+    selected_engine = get_engine()
     app = create_app()
-    app.state.engine = get_engine()
-    client = TestClient(app, headers=default_headers())
-    r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
-    assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:400]}"
-    body = r.json()
-    assert isinstance(body, dict), f"{uid}: body is {type(body).__name__}"
-    return body
+    created_engine = getattr(app.state, "engine", None)
+    if getattr(app.state, "owns_engine", False) and created_engine is not selected_engine and created_engine is not None:
+        created_engine.dispose()
+    app.state.engine = selected_engine
+    app.state.owns_engine = False
+    with TestClient(app, headers=default_headers()) as client:
+        r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
+        assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:400]}"
+        body = r.json()
+        assert isinstance(body, dict), f"{uid}: body is {type(body).__name__}"
+        return body
 
 
 def _items(body: dict) -> list:
