@@ -191,6 +191,18 @@ def enqueue_recommendation_audit(
 
 
 def execute_recommendation_audit_job(payload: dict[str, Any]) -> None:
+    from src.app.platform.tenant_context import set_active_tenant_id, reset_active_tenant_id
+    tenant = str(payload.get('tenant_id') or '')
+    if not tenant:
+        raise ValueError('recommendation_audit_identity_required')
+    token = set_active_tenant_id(tenant)
+    try:
+        _execute_recommendation_audit_job(payload)
+    finally:
+        reset_active_tenant_id(token)
+
+
+def _execute_recommendation_audit_job(payload: dict[str, Any]) -> None:
     from src.app.models.db import db_session
     from src.app.services.decision_log import log_decision
 
@@ -218,8 +230,12 @@ def execute_recommendation_audit_job(payload: dict[str, Any]) -> None:
             RecommendationAuditOutboxRecord.outbox_id == outbox_id,
         )).scalar_one()
         decision_payload = dict(record.payload_json or {})
+        trace_id = record.trace_id
 
     try:
+        if (decision_payload.get('tenant_id') != tenant_id
+                or decision_payload.get('decision_id') != trace_id):
+            raise ValueError('recommendation_audit_payload_identity_mismatch')
         persisted = log_decision(**decision_payload)
         if not persisted:
             raise RuntimeError("recommendation_decision_not_persisted")

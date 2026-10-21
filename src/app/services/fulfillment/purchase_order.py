@@ -1,24 +1,22 @@
-"""Purchase-order finalization (agnostic CORE) — the last act after the buyer selects.
+"""Purchase-order proposal and dispatch through the durable fulfillment workflow.
 
-Completes the journey SELECTED → PROCUREMENT_APPROVAL_REQUIRED → PROCUREMENT_IN_PROGRESS →
-READY_TO_SHIP → COMPLETED, each through the workflow chokepoint (so the gates + bitemporal audit hold):
-  • propose  — AGENT builds a draft PO from the buyer's selection + the validated quote + the supplier.
-  • execute  — HUMAN approves (purchase_order_approved) AND creates it (purchase_order_created), but only
-               if the quote is still valid (not expired) and within the approved commercial scope.
-               IDEMPOTENT — a double-clicked execute creates exactly one PO. SANDBOX: it records a
-               provider-like PO ref; it does NOT transmit to a real ERP (deferred to production adapters).
-  • complete — marks the order COMPLETED.
+A dispatch intent is committed before contacting the configured provider. A
+confirmed provider receipt advances the case; ambiguous outcomes and process loss
+leave the intent blocked for reconciliation. Sandbox is the default transport.
 
-Vertical-blind; best-effort; never raises into a caller.
+Legacy execute still combines role-based approval and dispatch. It does not yet
+establish independent-person approval, and complete is not proof of delivery.
+Do not enable real commerce on the strength of these workflow checks alone.
 """
 from __future__ import annotations
 
 import uuid
+from datetime import datetime,timezone
 from typing import Any, Dict, Optional
 
 from src.app.services.fulfillment import workflow
 from src.app.services.fulfillment.domain import Actor, ActorType
-from src.app.services.fulfillment.po_transport import get_po_transport
+from src.app.services.fulfillment.po_transport import get_po_transport, HttpErpTransport
 
 
 def propose(db, *, case_id: str, actor: Actor, tenant_id: str = "default",
@@ -54,23 +52,33 @@ def propose(db, *, case_id: str, actor: Actor, tenant_id: str = "default",
 def execute(db, *, case_id: str, actor: Actor, idempotency_key: Optional[str] = None,
             today: Optional[str] = None, po_transport: Optional[Any] = None, tenant_id: str = "default",
             now_iso: Optional[str] = None, trace_id: Optional[str] = None) -> workflow.TransitionResult:
-    """HUMAN approves + creates the PO (APPROVAL_REQUIRED → IN_PROGRESS → READY_TO_SHIP). Refuses if the
-    quote has expired or the PO is out of the approved scope. Idempotent (one PO per key) — incl. the
-    transport side-effect. PO creation goes through the transport seam (SANDBOX by default; ERP at deploy);
-    a real ERP failure returns po_create_failed and records NO creation (the case stays IN_PROGRESS)."""
+    """Validate scope, commit dispatch intent, then require a provider receipt.
+
+    Uncertain or failed attempts stay blocked for operator reconciliation.
+    Authenticated distinct-person approval is still required for live commerce.
+    """
     cur = workflow.repository.current_version(db, case_id, tenant_id)
     po = (cur.state_json.get("purchase_order") if cur else None) or {}
     scope = (cur.state_json.get("draft", {}).get("commercial_scope") if cur else None) or {}
+    if po.get('status') == 'dispatching':
+        return workflow.TransitionResult(False,case_id,cur.state,'po_reconciliation_required',http_status=409)
 
     # guard: quote not expired
     expiry = po.get("quote_expires_at")
-    day = today or (now_iso or "")[:10]
+    day = today or (now_iso or datetime.now(timezone.utc).isoformat())[:10]
     if expiry and day and str(expiry) < str(day):
         return workflow.TransitionResult(False, case_id, cur.state if cur else None, "quote_expired", http_status=409)
     # guard: within approved scope (quantity not above what was approved)
     approved_qty = int(scope.get("quantity") or 0)
     if approved_qty and int(po.get("quantity") or 0) > approved_qty:
         return workflow.TransitionResult(False, case_id, cur.state if cur else None, "out_of_scope", http_status=409)
+
+    tx = po_transport or get_po_transport()
+    if isinstance(tx,HttpErpTransport):
+        # This legacy command has no authenticated requester/approver grant.
+        # Transport configuration and an operator role cannot supply one.
+        return workflow.TransitionResult(False,case_id,cur.state if cur else None,
+            'independent_po_approval_unavailable',http_status=403)
 
     key = idempotency_key or f"po-{case_id}"
     r1 = workflow.transition(db, case_id=case_id, event="purchase_order_approved", actor=actor,
@@ -86,15 +94,20 @@ def execute(db, *, case_id: str, actor: Actor, idempotency_key: Optional[str] = 
         return workflow.TransitionResult(True, case_id, st.value if st else None, "idempotent_replay",
                                          version_id=already)
 
-    tx = po_transport or get_po_transport()
+    dispatch=workflow.transition(db,case_id=case_id,event='purchase_order_dispatch_started',actor=actor,
+        reason_code='durable_po_dispatch_intent',idempotency_key=f'{key}-dispatch',
+        evidence={'provider_idempotency_key':f'{key}-create'},
+        state_patch={'purchase_order':{**po,'status':'dispatching'}},tenant_id=tenant_id,now_iso=now_iso,trace_id=trace_id)
+    if not dispatch.ok or dispatch.reason=='idempotent_replay':
+        return workflow.TransitionResult(False,case_id,cur.state,'po_reconciliation_required',http_status=409)
     made = tx.create(supplier_ref=str(po.get("supplier_ref") or ""), item_ref=str(po.get("item_ref") or ""),
                      quantity=po.get("quantity"), unit_amount_cents=po.get("unit_amount_cents"),
                      total_amount_cents=po.get("total_amount_cents"), idempotency_key=f"{key}-create")
     if getattr(made, "status", "failed") != "created":
-        # real ERP did not create the PO → do NOT record creation; the case stays PROCUREMENT_IN_PROGRESS.
+        # A missing confirmation is not proof that the provider performed no effect.
         return workflow.TransitionResult(False, case_id, workflow.current_state(db, case_id, tenant_id).value
                                          if workflow.current_state(db, case_id, tenant_id) else None,
-                                         "po_create_failed", http_status=502)
+                                         "po_create_failed" if made.status=='failed' else 'po_outcome_unknown', http_status=502)
     sandbox = getattr(made, "detail", "") == "sandbox"
     return workflow.transition(
         db, case_id=case_id, event="purchase_order_created", actor=actor,

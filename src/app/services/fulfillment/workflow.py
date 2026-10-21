@@ -142,7 +142,8 @@ def transition(
         vid = repository.append_version(db, case_id=case_id, new_state=dst.value, event=event,
                                         reason_code=reason_code, actor_type=actor.type.value, actor_id=actor.id,
                                         evidence=evidence, state_patch=state_patch,
-                                        idempotency_key=idempotency_key, tenant_id=tenant_id, now_iso=now_iso)
+                                        idempotency_key=idempotency_key, tenant_id=tenant_id, now_iso=now_iso,
+                                        expected_version_id=cur.version_id)
         if not vid:
             return TransitionResult(False, case_id, state.value, "persist_failed", http_status=409)
 

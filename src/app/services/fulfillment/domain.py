@@ -243,6 +243,8 @@ TRANSITIONS: Tuple[Transition, ...] = (
     Transition("approval_rejected", _S.PROCUREMENT_APPROVAL_REQUIRED, _S.SELECTED, frozenset({_A.HUMAN_OPERATOR})),
     Transition("purchase_order_created", _S.PROCUREMENT_IN_PROGRESS, _S.READY_TO_SHIP,
                frozenset({_A.HUMAN_OPERATOR, _A.SYSTEM}), requires_evidence=True),
+    Transition("purchase_order_dispatch_started", _S.PROCUREMENT_IN_PROGRESS, _S.PROCUREMENT_IN_PROGRESS,
+               frozenset({_A.HUMAN_OPERATOR}), requires_evidence=True, note="durable dispatch intent; uncertain outcomes require reconciliation"),
     Transition("shipment_plan_created", _S.PROCUREMENT_IN_PROGRESS, _S.PARTIALLY_READY, frozenset({_A.SYSTEM})),
 
     # ── 3-WAY MATCH inputs: record goods-receipt + invoice (self-loops; no state change). These accumulate

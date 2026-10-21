@@ -340,37 +340,44 @@ def _decision_log_columns(db) -> list[str]:
     return cols
 
 
+def _close_decision_validity_in_session(db, decision_id, *, valid_to, system_to, tenant_id):
+    rowcount = db.execute(
+        text(
+            """
+            UPDATE decision_logs
+            SET valid_to = :valid_to, system_to = :system_to
+            WHERE id = :id AND tenant_id = :tenant
+              AND (valid_to IS NULL OR valid_to = 'infinity')
+              AND (system_to IS NULL OR system_to = 'infinity')
+            """
+        ),
+        {"id": decision_id, "valid_to": valid_to, "system_to": system_to, "tenant": tenant_id},
+    ).rowcount
+    return bool(int(rowcount or 0) > 0)
+
+
 def close_decision_validity(
     decision_id: str,
     *,
     valid_to: str | None = None,
     system_to: str | None = None,
+    tenant_id: str | None = None,
 ) -> bool:
     """Close open-ended bitemporal ranges for a decision id."""
     if not decision_id:
         return False
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = tenant_id or current_tenant_id()
     now_ts = __import__("datetime").datetime.utcnow().isoformat()
     vt = valid_to or now_ts
     st = system_to or now_ts
     try:
         with db_session() as db:
-            rowcount = db.execute(
-                text(
-                    """
-                    UPDATE decision_logs
-                    SET valid_to = :valid_to, system_to = :system_to
-                    WHERE id = :id
-                      AND (valid_to IS NULL OR valid_to = 'infinity')
-                      AND (system_to IS NULL OR system_to = 'infinity')
-                    """
-                ),
-                {"id": decision_id, "valid_to": vt, "system_to": st},
-            ).rowcount
-            try:
-                db.commit()
-            except Exception:
-                pass
-            return bool(int(rowcount or 0) > 0)
+            changed = _close_decision_validity_in_session(
+                db, decision_id, valid_to=vt, system_to=st, tenant_id=tenant_id,
+            )
+            db.commit()
+            return changed
     except Exception:
         return False
 
@@ -395,15 +402,17 @@ def log_decision(
 
     Returns the decision id or None on failure.
     """
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = tenant_id or current_tenant_id()
     now_ts = __import__("datetime").datetime.utcnow().isoformat()
     dec_id = decision_id or str(uuid.uuid4())
     try:
-        if supersedes_decision_id:
-            try:
-                close_decision_validity(supersedes_decision_id, valid_to=now_ts, system_to=now_ts)
-            except Exception:
-                pass
         with db_session() as db:
+            if decision_id:
+                existing = db.execute(text('SELECT tenant_id FROM decision_logs WHERE id = :id'),
+                                      {'id': decision_id}).fetchone()
+                if existing is not None:
+                    return dec_id if existing[0] == tenant_id else None
             safe_input = redact_for_trace(security_sanitize(input_data or {}))
             safe_context = redact_for_trace(security_sanitize(retrieved_context or {}))
             safe_action = redact_for_trace(security_sanitize(proposed_action or {}))
@@ -460,10 +469,19 @@ def log_decision(
                     db.execute(_DECISION_LOG_INSERT_MINIMAL, payload)
                 except Exception:
                     logging.exception("decision_logs minimal insert failed")
+                    db.rollback()
+                    return None
             try:
+                if supersedes_decision_id:
+                    _close_decision_validity_in_session(
+                        db, supersedes_decision_id, valid_to=now_ts, system_to=now_ts,
+                        tenant_id=tenant_id,
+                    )
                 db.commit()
             except Exception:
-                logging.exception("Failed to commit decision_logs insert")
+                logging.exception("Failed to persist decision_logs transaction")
+                db.rollback()
+                return None
 
         # Evaluate PolicyGraph controls best-effort
         try:

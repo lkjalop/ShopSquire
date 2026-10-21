@@ -237,7 +237,7 @@ def find_idempotent_version(db, case_id: str, event: str, key: str,
 def append_version(db, *, case_id: str, new_state: str, event: str, reason_code: str, actor_type: str,
                    actor_id: str, evidence: Optional[Dict[str, Any]], state_patch: Optional[Dict[str, Any]],
                    idempotency_key: Optional[str] = None, tenant_id: str = DEFAULT_TENANT,
-                   now_iso: Optional[str] = None) -> Optional[str]:
+                   now_iso: Optional[str] = None, expected_version_id: Optional[str] = None) -> Optional[str]:
     """Close the current open version (SCD-2: valid_to=system_to=now) and insert the new one, merging
     ``state_patch`` into the prior state_json so the case accumulates domain data. Updates the case
     status. Returns the new version id, or None. Does NOT commit (the workflow owns the transaction)."""
@@ -248,11 +248,15 @@ def append_version(db, *, case_id: str, new_state: str, event: str, reason_code:
         tid = _tid(tenant_id)
         now = _now_iso(now_iso)
         cur = current_version(db, case_id, tid)
+        if cur is None or (expected_version_id is not None and cur.version_id != expected_version_id):
+            return None
         merged = dict(cur.state_json) if cur else {}
         merged.update(dict(state_patch or {}))
         if cur is not None:
-            db.execute(text("UPDATE fulfillment_case_version SET valid_to=:n, system_to=:n "
-                            "WHERE id=:v AND valid_to IS NULL"), {"n": now, "v": cur.version_id})
+            claimed=db.execute(text("UPDATE fulfillment_case_version SET valid_to=:n, system_to=:n "
+                            "WHERE id=:v AND tenant_id=:t AND valid_to IS NULL"), {"n": now, "v": cur.version_id,'t':tid})
+            if claimed.rowcount!=1:
+                return None
         vid = _insert_version(db, case_id=case_id, tenant_id=tid, state=new_state, event=event,
                               reason_code=reason_code, actor_type=actor_type, actor_id=actor_id,
                               state_json=merged, evidence=dict(evidence or {}),
