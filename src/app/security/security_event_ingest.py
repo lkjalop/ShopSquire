@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from sqlalchemy import inspect, text
 
@@ -21,20 +21,10 @@ _TENANT_STORAGE_POLICY_KEY = "security_event_storage_policy"
 _tenant_cfg_store = TenantConfigStore(cache_ttl=5)
 _SECURITY_EVENT_TABLE_READY = False
 _ACTOR_STATE_TABLE_READY = False
-_TRACE_CORRELATION_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _risk_band_rank(value: Any) -> int:
-    band = str(value or "low").strip().lower()
-    if band == "high":
-        return 3
-    if band == "medium":
-        return 2
-    return 1
 
 
 def _parse_ts(raw: Any) -> str:
@@ -527,9 +517,11 @@ def ensure_security_event_ingest_table() -> None:
             # Legacy SQLite fixtures can predate the canonical migration.  Only
             # repair a genuinely missing column; executing ALTER-and-catching
             # "already exists" poisons PostgreSQL's whole transaction.
+            # Inspect the DDL transaction itself: a new PostgreSQL connection
+            # cannot see the table until this session commits its creation.
             existing = {
                 str(column["name"])
-                for column in inspect(db.get_bind()).get_columns("security_event_ingest")
+                for column in inspect(db.connection()).get_columns("security_event_ingest")
             }
             for name, sql_type in (
                 ("geo_country", "TEXT"), ("asn", "INTEGER"),
@@ -711,39 +703,9 @@ def ingest_security_event(
         blk_path = root / uid[:2] / f"{uid}.json"
         storage_results["block"] = _append_jsonl(blk_path, record)
 
-    trace_id = str(canonical.get("trace_id") or "").strip()
-    tenant_key = str(canonical.get("tenant_id") or "default")
-    cache_key = (tenant_key, trace_id) if trace_id else None
-    if cache_key and "database" in targets:
-        cache_entry = _TRACE_CORRELATION_CACHE.get(cache_key)
-        if db_stored and not db_deduped:
-            highest_rank = max(_risk_band_rank(policy.get("risk_band")), int(cache_entry.get("highest_rank") or 1)) if cache_entry else _risk_band_rank(policy.get("risk_band"))
-            sources = set(cache_entry.get("sources") or []) if cache_entry else set()
-            sources.add(str(canonical.get("vendor") or "unknown"))
-            cache_entry = {
-                "event_count": (int(cache_entry.get("event_count") or 0) + 1) if cache_entry else 1,
-                "sources": sorted(sources),
-                "highest_rank": highest_rank,
-            }
-            _TRACE_CORRELATION_CACHE[cache_key] = cache_entry
-        if cache_entry:
-            corr = {
-                "trace_id": trace_id,
-                "tenant_id": tenant_key,
-                "event_count": int(cache_entry.get("event_count") or 0),
-                "sources": list(cache_entry.get("sources") or []),
-                "highest_risk_band": "high" if int(cache_entry.get("highest_rank") or 1) >= 3 else "medium" if int(cache_entry.get("highest_rank") or 1) == 2 else "low",
-                "multi_source": len(list(cache_entry.get("sources") or [])) >= 2,
-            }
-        else:
-            corr = correlate_by_trace(trace_id=trace_id, tenant_id=tenant_key)
-            _TRACE_CORRELATION_CACHE[cache_key] = {
-                "event_count": int(corr.get("event_count") or 0),
-                "sources": list(corr.get("sources") or []),
-                "highest_rank": _risk_band_rank(corr.get("highest_risk_band")),
-            }
-    else:
-        corr = correlate_by_trace(trace_id=canonical.get("trace_id"), tenant_id=canonical.get("tenant_id"))
+    # The durable owner is authoritative after replacement, deletion and pool
+    # changes. Process-local incremental state cannot reconstruct that history.
+    corr = correlate_by_trace(trace_id=canonical.get("trace_id"), tenant_id=canonical.get("tenant_id"))
     return {
         "ok": True,
         "id": rid,
@@ -762,43 +724,27 @@ def correlate_by_trace(trace_id: Any, tenant_id: Any) -> Dict[str, Any]:
     ten = str(tenant_id or "").strip() or "default"
     if not tid:
         return {"trace_id": None, "tenant_id": ten, "event_count": 0, "sources": [], "highest_risk_band": "low"}
-    event_count = 0
-    source_count = 0
-    highest_rank = 1
-    sources: List[str] = []
     with db_session() as db:
         try:
-            row = db.execute(
+            rows = db.execute(
                 text(
                     """
                     SELECT
+                      vendor,
                       COUNT(1) AS event_count,
-                      COUNT(DISTINCT vendor) AS source_count,
-                      MAX(CASE risk_band WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) AS highest_rank,
-                      GROUP_CONCAT(DISTINCT vendor) AS vendors
+                      MAX(CASE risk_band WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) AS highest_rank
                     FROM security_event_ingest
                     WHERE trace_id = :t AND tenant_id = :ten
+                    GROUP BY vendor
                     """
                 ),
                 {"t": tid, "ten": ten},
-            ).fetchone()
+            ).fetchall()
         except Exception:
-            row = None
-    if row:
-        try:
-            event_count = int(row[0] or 0)
-        except Exception:
-            event_count = 0
-        try:
-            source_count = int(row[1] or 0)
-        except Exception:
-            source_count = 0
-        try:
-            highest_rank = int(row[2] or 1)
-        except Exception:
-            highest_rank = 1
-        vendors_blob = str(row[3] or "").strip()
-        sources = sorted([part.strip() for part in vendors_blob.split(",") if part.strip()]) if vendors_blob else []
+            rows = []
+    event_count = sum(int(row[1] or 0) for row in rows)
+    highest_rank = max((int(row[2] or 1) for row in rows), default=1)
+    sources = sorted(str(row[0]).strip() for row in rows if row[0] is not None and str(row[0]).strip())
     highest_band = "high" if highest_rank >= 3 else "medium" if highest_rank == 2 else "low"
     return {
         "trace_id": tid,
@@ -806,7 +752,7 @@ def correlate_by_trace(trace_id: Any, tenant_id: Any) -> Dict[str, Any]:
         "event_count": event_count,
         "sources": sources,
         "highest_risk_band": highest_band,
-        "multi_source": source_count >= 2,
+        "multi_source": len(sources) >= 2,
     }
 
 
