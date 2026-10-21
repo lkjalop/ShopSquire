@@ -1,0 +1,173 @@
+{
+  "source_head": "4289fe36af5b938236ac0ad63458b499579878f1",
+  "captured_at": "2026-10-21T18:17:18.585083+00:00",
+  "dirty_paths_before_publication": 334,
+  "staged_paths": [],
+  "repairs": [
+    {
+      "label": "pricing-integrity",
+      "commit": "745d40d1f981be426259368f5149982a397c66fc",
+      "parent": "aa15dc028182c3d8be213e71f7152b05663befbf",
+      "files": [
+        {
+          "path": "src/app/routers/pricing.py",
+          "sha256": "f3b7e6294c5d629c60a65d461da97e0a33952370794c9a8e19e8e5d7b1117d32"
+        },
+        {
+          "path": "tests/unit/test_pricing_execution_integrity.py",
+          "sha256": "35c46a5e4bd08f5dd69e2dd826101188e2fd4a95fbd2ee9ff5222c8b33bae6d1"
+        },
+        {
+          "path": "tests/test_chaos.py",
+          "sha256": "6bc4c645c00fdeb7e7382aae518bebbbe150562567db10986600d8d1673eb703"
+        }
+      ],
+      "effect": "Pricing no longer recognizes a pytest test-name substring and returns an empty success before running the application. The same real proposal path executes independently of test metadata. Persistence retains strict, relaxed or unset verifier configuration instead of writing process-global DECISION_VERIFIER_STRICT=0. Five targeted integrity cases and12combined functional/policy/budget neighbors pass. The existing HTTP chaos test now requires proposal/firewall fields while retaining every original assertion and the150ms limit. Four final parent failures are three integrity failures and the real empty-response contract failure; an earlier ordering hit latency first and is excluded as proof of the empty response.",
+      "limits": "Integrity/security repair, not latency or release green. The real HTTP response satisfies the new body contract, but the preserved150ms latency gate fails at0.7890839576721191seconds; sixofseven cases pass in that gate. Worker-thread profiling is diagnostic, not a qualification run: roughly0.512sof0.910sinside pricing is a separately constructed semantic-cache Redis connection attempt; SQL audit commits also contribute. The first main-thread profile merely measured waiting; the first worker profiler failed preflight on deferred routes and executed no assertions. Default cache-owner wiring and total pricing latency require follow-up. Unit persistence is a controlled observation seam, not deployed financial approval certification. Frozen fullV4source151retains the historical shortcut and cannot qualify this later repair."
+    },
+    {
+      "label": "orchestrator-cache-owner",
+      "commit": "4289fe36af5b938236ac0ad63458b499579878f1",
+      "parent": "745d40d1f981be426259368f5149982a397c66fc",
+      "files": [
+        {
+          "path": "src/app/services/orchestrator.py",
+          "sha256": "6a9ad0ecb4dcfcab71d28d8bdf56e0bcac81ab0da9907a166c3eb06f67a184a0"
+        },
+        {
+          "path": "tests/services/test_orchestrator_cache_owner.py",
+          "sha256": "be0a5d2e58713272a85fbd1cbaec5eeeb98303ac8d15f6bdea01870fdc0999a6"
+        }
+      ],
+      "effect": "The default tier cache borrows the request Memory Redis client. A declared local fallback remains local instead of independently opening the ambient Redis URL again. Explicit flags.REDIS_URL keeps its prior override behavior. Exact requestA/requestB owners are read without opening an ambient backend or closing borrowed clients. Parent4cases3failures become4passes; combined29ownership/tiering/autonomy/budget/HTTP tests pass, including both original chaos timing inequalities and real proposal/firewall response assertions. Original150mslimit is unchanged and now passes on actual work. The actual forty-requested/fifteen-held/twenty-five-shortfall and reload browser passes with owned Redis and no assertion changes.",
+      "limits": "No actual provider or commercial effects; the browser market outcome remains safe unavailable. Explicit operator cache URLs retain the prior separately created client behavior and its lifetime/disposal review gap. This does not qualify all cache/privacy/erasure planes; unrelated semantic_cache.py privacy WIP remains unstaged. One bounded pricing latency gate is not an endurance distribution or a repair certificate for the historical151.56ssecurity request. Earlier source153latency0.789s failure and source151full-process outcomes remain historical. Current ROOTstaticcapture has sixremainingfunction ratchet failures and49file warnings; no ceiling was raised."
+    }
+  ],
+  "delta_since_source152": [
+    {
+      "path": "src/app/routers/pricing.py",
+      "added": "0",
+      "removed": "12"
+    },
+    {
+      "path": "src/app/services/orchestrator.py",
+      "added": "4",
+      "removed": "3"
+    },
+    {
+      "path": "tests/services/test_orchestrator_cache_owner.py",
+      "added": "72",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_chaos.py",
+      "added": "4",
+      "removed": "1"
+    },
+    {
+      "path": "tests/unit/test_pricing_execution_integrity.py",
+      "added": "76",
+      "removed": "0"
+    }
+  ],
+  "root_static_ratchets": {
+    "check_function_sizes.py": {
+      "native_exit_code": 1,
+      "failures": [
+        "src/app/models/db.py:_bootstrap_minimal_sqlite_tables: 1057 > 200",
+        "src/app/routers/chat.py:_chat_query_impl: 4528 > 4482",
+        "src/app/services/decision_log.py:log_trace_event: 301 > 300",
+        "src/app/services/recommendation_compatibility.py:serve_v2_compatibility: 404 > 389",
+        "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision: 230 > 221",
+        "src/app/services/recommendation_core/turn_router.py:_route_turn_raw: 1351 > 1347"
+      ],
+      "warnings": 0
+    },
+    "check_source_file_sizes.py": {
+      "native_exit_code": 0,
+      "failures": [],
+      "warnings": 49
+    }
+  },
+  "gates": {
+    "pricing_parent": {
+      "tests": 7,
+      "failures": 4
+    },
+    "pricing_integrity_cases": {
+      "passes": 5
+    },
+    "pricing_neighbors": {
+      "passes": 12,
+      "skips": 0
+    },
+    "pricing_before_owner_latency": {
+      "passes": 6,
+      "failures": 1,
+      "required_seconds": 0.15,
+      "observed_seconds": 0.7890839576721191
+    },
+    "cache_owner_parent": {
+      "tests": 4,
+      "failures": 3
+    },
+    "cache_owner_combined": {
+      "passes": 29,
+      "failures": 0,
+      "skips": 0
+    },
+    "cache_owner_browser": {
+      "passes": 1,
+      "failures": 0,
+      "skips": 0
+    }
+  },
+  "full_v4": {
+    "source_head": "47ab0acc9791e7d23a4ba39ab92625db695c86b7",
+    "status": "running",
+    "collected": 8466,
+    "reported": {
+      "call:passed": 1132,
+      "setup:skipped": 202,
+      "call:skipped": 17,
+      "call:failed": 3
+    },
+    "phase_seconds": {
+      "setup": 144.0863458038075,
+      "call": 770.0996979011688,
+      "teardown": 570.8750730979955
+    },
+    "reported_failures": [
+      {
+        "nodeid": "tests/integration/test_adaptive_growth_pipeline.py::test_gate2_signal_to_finding_to_recall_to_narration",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_chat_with_image_emits_multimodal_and_intent_routing_events",
+        "phase": "call"
+      },
+      {
+        "nodeid": "tests/integration/test_recommend_contract_stability.py::test_success_shape_full_ui_contract",
+        "phase": "call"
+      }
+    ],
+    "guards": {
+      "deadline_seconds": 5400,
+      "rss_bytes": 2147483648,
+      "handles": 5000,
+      "host_available_bytes": 1073741824,
+      "per_call_seconds": 180
+    },
+    "qualification": "Incomplete earlier-source process; no pass inferred."
+  },
+  "outputs": [
+    "docs/ROADMAP_PRICING_AND_CACHE_CHECKPOINT_2026-10-22.md",
+    "docs/audits/2026-10-22-pricing-cache-roadmap-work-items.csv",
+    "docs/audits/2026-10-22-pricing-cache-source-map.csv",
+    "docs/audits/2026-10-22-pricing-cache-execution.json"
+  ],
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "all_line_semantic_review_complete": false,
+  "pushed": false
+}
