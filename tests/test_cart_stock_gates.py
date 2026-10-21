@@ -8,7 +8,7 @@ Covers:
   - PUT /api/v1/cart/items: duplicate SKUs aggregated before stock check
   - POST /api/v1/cart/voucher: disabled by default (feature flag)
 
-All tests use an in-memory SQLite engine with products + inventory rows so
+All tests use a temporary file-backed SQLite engine with products + inventory rows so
 they run without a live Postgres or Redis dependency.
 """
 
@@ -18,17 +18,15 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
 
 from tests.utils import default_headers
 
 # ── App + engine helpers ──────────────────────────────────────────────────────
 
-def _make_engine():
+def _make_engine(database_url: str):
     eng = create_engine(
-        "sqlite+pysqlite:///:memory:",
+        database_url,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
         future=True,
     )
     schema_path = pathlib.Path("db/schema.sql")
@@ -75,13 +73,14 @@ def _seed(eng, products_and_stock: list[dict]) -> None:
 
 
 @pytest.fixture()
-def client_with_stock(monkeypatch):
+def client_with_stock(monkeypatch, tmp_path):
     """Return (TestClient, engine) with isolated DB seeded for stock tests."""
-    monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'cart-stock.sqlite3'}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
     monkeypatch.setenv("VOUCHER_ENDPOINT_ENABLED", "0")
 
-    eng = _make_engine()
+    eng = _make_engine(database_url)
 
     import src.app.models.db as _dbmod
     orig_engine = _dbmod.engine
@@ -89,28 +88,25 @@ def client_with_stock(monkeypatch):
     _dbmod.engine = eng
     try:
         _dbmod.set_engine(eng)
-    except Exception:
-        pass
+        from src.app.main import create_app
+        app = create_app()
+        app.state.engine = eng
 
-    from src.app.main import create_app
-    app = create_app()
-    app.state.engine = eng
+        _seed(eng, [
+            {"sku": "SKU-INSTOCK-5",  "name": "In-Stock Widget",  "price_cents": 9900,  "stock": 5},
+            {"sku": "SKU-INSTOCK-1",  "name": "Last Unit Widget",  "price_cents": 9900,  "stock": 1},
+            {"sku": "SKU-OOS",        "name": "Out-of-Stock Widget", "price_cents": 5000, "stock": 0},
+            {"sku": "SKU-NO-INV",     "name": "No Inventory Row",  "price_cents": 3000,  "stock": 0},
+        ])
 
-    _seed(eng, [
-        {"sku": "SKU-INSTOCK-5",  "name": "In-Stock Widget",  "price_cents": 9900,  "stock": 5},
-        {"sku": "SKU-INSTOCK-1",  "name": "Last Unit Widget",  "price_cents": 9900,  "stock": 1},
-        {"sku": "SKU-OOS",        "name": "Out-of-Stock Widget", "price_cents": 5000, "stock": 0},
-        {"sku": "SKU-NO-INV",     "name": "No Inventory Row",  "price_cents": 3000,  "stock": 0},
-    ])
-
-    with TestClient(app, headers=default_headers(), raise_server_exceptions=False) as c:
-        yield c
-
-    _dbmod.engine = orig_engine
-    try:
-        _dbmod.set_engine(orig_engine)
-    except Exception:
-        pass
+        with TestClient(app, headers=default_headers(), raise_server_exceptions=False) as c:
+            yield c
+    finally:
+        _dbmod.engine = orig_engine
+        try:
+            _dbmod.set_engine(orig_engine)
+        finally:
+            eng.dispose()
 
 
 UID = "test-user-stock-gate"
