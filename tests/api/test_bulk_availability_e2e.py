@@ -10,6 +10,8 @@ x-skip-observer avoids the cold-start observer latency.
 from __future__ import annotations
 
 import uuid
+from tempfile import TemporaryDirectory
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -62,20 +64,39 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
         "src.app.services.recommendation_core.evidence.grounding_status",
         lambda *args, **kwargs: "grounded",
     )
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import StaticPool
-    from src.app.models.db import set_engine
-    from src.app.models.orm import Base
-    engine = create_engine(
-        "sqlite://", future=True, poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    set_engine(engine)
-    app = create_app()
-    app.state.engine = engine
-    _seed_catalog()  # GAM-* gaming laptops ($1,199–1,799) WITH inventory (stock > 10)
-    client = TestClient(app)
+    from alembic import command
+    from alembic.config import Config
+    from src.app.models.db import create_runtime_engine, get_engine, set_engine
+    from src.app.models.database_ownership import database_owner
+
+    original_engine = get_engine()
+    with TemporaryDirectory(prefix="bulk-availability-") as directory:
+        database_url = f"sqlite+pysqlite:///{Path(directory) / 'catalog.sqlite3'}"
+        engine = create_runtime_engine(database_url)
+        try:
+            with monkeypatch.context() as patch:
+                patch.setenv("DATABASE_URL", database_url)
+                patch.setenv("DATABASE_URL_RO", database_url)
+                patch.setenv("FEATURE_FLAGS_PATH", str(Path(directory) / "flags.json"))
+                command.upgrade(Config("alembic.ini"), "head")
+                set_engine(engine)
+                _seed_catalog(engine)
+                app = create_app()
+                created_engine = getattr(app.state, "engine", None)
+                if getattr(app.state, "owns_engine", False) and created_engine is not engine and created_engine is not None:
+                    created_engine.dispose()
+                app.state.engine = engine
+                app.state.owns_engine = False
+                with database_owner(engine), TestClient(app) as client:
+                    body = _request_availability(client)
+        finally:
+            set_engine(original_engine)
+            engine.dispose()
+
+    _assert_availability(body)
+
+
+def _request_availability(client):
     r = client.get(
         "/api/v1/recommend/suggest",
         params={
@@ -85,7 +106,10 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
         headers={"x-skip-observer": "1", "x-api-key": "local-merchant-key"},
     )
     assert r.status_code == 200, r.text
-    body = r.json()
+    return r.json()
+
+
+def _assert_availability(body):
     n = len(body.get("results") or body.get("products") or [])
     avail = body.get("availability")
     assert isinstance(avail, dict) and avail.get("applicable") is True, f"availability not attached (n_results={n})"
@@ -95,4 +119,10 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
         "in_stock", "reorder_within_horizon", "reorder_exceeds_horizon", "reorder_required",
     )
     msg = str(body.get("assistant_message") or body.get("message") or "").lower()
-    assert "on availability" in msg                 # the plain line reached the answer
+    # Preview stock is not dated carrier evidence. Verify the commercial facts
+    # and required escalation rather than pinning an obsolete sentence prefix.
+    deadline = body.get("delivery_feasibility") or {}
+    assert deadline.get("feasibility") != "met"
+    assert body.get("human_escalation")
+    assert str(avail["requested_qty"]) in msg
+    assert str(avail["horizon_days"]) in msg
