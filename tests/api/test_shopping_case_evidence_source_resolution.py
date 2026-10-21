@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+import pytest
+from tests.buyer_identity_helpers import configure_buyer,signed_buyer_headers,install_tenant_context
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -9,13 +11,21 @@ from src.app.models.orm import Base
 from src.app.routers.shopping_cases import router
 
 
+@pytest.fixture(autouse=True)
+def identity(monkeypatch):
+    configure_buyer(monkeypatch,subject='buyer-link')
+
+
 def _client() -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:", future=True,
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    from tests.migration_helpers import apply_revision
+    apply_revision(engine,'20260853_conversation_case_state.py')
     app = FastAPI()
+    install_tenant_context(app)
     app.include_router(router)
     # Async case routes run their transaction on a bounded worker and resolve
     # the engine from app state rather than the request dependency override.
@@ -26,7 +36,7 @@ def _client() -> TestClient:
             yield db
 
     app.dependency_overrides[get_db] = db_override
-    return TestClient(app)
+    return TestClient(app,headers=signed_buyer_headers('buyer-link'))
 
 
 def _case(client: TestClient) -> str:

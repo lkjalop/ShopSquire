@@ -9,9 +9,10 @@ def _make_app():
     return create_app()
 
 
-def test_admin_chat_tools_endpoints_smoke():
+def test_admin_chat_tools_endpoints_smoke(monkeypatch):
+    monkeypatch.setenv('OWNER_API_KEY','test-admin-tools-owner')
     app = _make_app()
-    client = TestClient(app)
+    client = TestClient(app,headers={'x-api-key':'test-admin-tools-owner'})
 
     # Rules evaluate
     r = client.post(

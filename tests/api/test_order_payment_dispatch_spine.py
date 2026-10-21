@@ -6,6 +6,8 @@ test_payments_webhook_failclosed) with an in-memory engine swapped into db_sessi
 from __future__ import annotations
 
 import json
+import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -18,6 +20,13 @@ from src.app.routers import payments, shipping_webhooks
 
 @pytest.fixture()
 def client(monkeypatch):
+    # Explicit simulated-payment profile; never inherit a developer's provider
+    # keys or the disabled browser demo policy. Provider-specific tests stub IO.
+    monkeypatch.setenv('PAYMENT_EXECUTION_ENABLED', '1')
+    monkeypatch.setenv('ALLOW_DEMO_CHECKOUT', '1')
+    monkeypatch.setattr(payments, 'get_settings', lambda: SimpleNamespace(
+        app_env='test', stripe_api_key='', paypal_client_id='', paypal_client_secret='',
+        feature_flags_path=os.environ['FEATURE_FLAGS_PATH']))
     eng = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False},
                         poolclass=StaticPool, future=True)
     import src.app.models.db as _dbmod
@@ -39,10 +48,12 @@ def client(monkeypatch):
     app.include_router(payments.router)
     app.include_router(shipping_webhooks.router)
     try:
-        yield TestClient(app)
+        with TestClient(app) as test_client:
+            yield test_client
     finally:
         _dbmod.engine = orig
         _dbmod.set_engine(orig)
+        eng.dispose()
 
 
 def test_full_spine_created_paid_dispatched_shipped(client, monkeypatch):

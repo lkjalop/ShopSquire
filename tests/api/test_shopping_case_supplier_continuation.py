@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.app.models.db import get_db
 from src.app.security.idempotency import IdempotencyMiddleware
 from tests.utils import default_headers
+from tests.buyer_client import BuyerTestClient, TEST_SIGNING_KEY
 
 
 def _engine(database_path: pathlib.Path):
@@ -29,6 +30,7 @@ def _engine(database_path: pathlib.Path):
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
+    monkeypatch.setenv('JWT_SIGNING_KEY', TEST_SIGNING_KEY)
     database_path = tmp_path / "supplier-continuation.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{database_path.as_posix()}")
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
@@ -73,7 +75,7 @@ def client(monkeypatch, tmp_path):
             yield db
 
     app.dependency_overrides[get_db] = db_override
-    with TestClient(app, headers=default_headers(), raise_server_exceptions=False) as test_client:
+    with BuyerTestClient(app, headers=default_headers(), raise_server_exceptions=False) as test_client:
         yield test_client, engine
     dbmod.engine = original
     dbmod.set_engine(original)

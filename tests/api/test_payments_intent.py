@@ -5,6 +5,8 @@ from src.app.main import create_app
 
 
 def test_payment_intent_idempotency(tmp_path, monkeypatch):
+    # This test substitutes Stripe IO; opt into that synthetic effect explicitly.
+    monkeypatch.setenv('PAYMENT_EXECUTION_ENABLED', '1')
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
     monkeypatch.setenv("STRIPE_API_KEY", "sk_test_123")
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path/'pay.sqlite'}")

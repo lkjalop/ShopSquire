@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import pytest
+from tests.buyer_identity_helpers import configure_buyer,signed_buyer_headers,install_tenant_context
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -18,12 +20,19 @@ from src.app.services.procurement_decision_run import (
 )
 
 
+@pytest.fixture(autouse=True)
+def identity(monkeypatch):
+    configure_buyer(monkeypatch,subject='buyer',tenant='portfolio')
+
+
 def _client():
     engine = create_engine(
         "sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    from tests.migration_helpers import apply_revision
+    apply_revision(engine,'20260853_conversation_case_state.py')
     with Session(engine) as db:
         db.add(ShoppingCase(
             case_id="case-trace", tenant_id="portfolio", uid="buyer", status="active",
@@ -43,6 +52,7 @@ def _client():
         )
         persist_decision_run(db, run)
     app = FastAPI()
+    install_tenant_context(app)
     app.include_router(router)
 
     def db_override():
@@ -50,7 +60,7 @@ def _client():
             yield db
 
     app.dependency_overrides[get_db] = db_override
-    return TestClient(app)
+    return TestClient(app,headers=signed_buyer_headers('buyer','portfolio'))
 
 
 def test_owner_can_read_revisioned_decision_trace_without_commerce_authority():
