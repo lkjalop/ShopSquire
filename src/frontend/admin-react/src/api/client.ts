@@ -3,7 +3,6 @@
 // import from here so each domain can be tested + mocked independently.
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
-const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
 // Hydrate from sessionStorage so a hard navigation (e.g. ?tab=procurement) keeps the key without
 // re-prompting. sessionStorage (not localStorage) = cleared on tab close; production should prefer an
 // HttpOnly cookie/session over any browser-stored key.
@@ -34,7 +33,7 @@ function getCsrfToken(): string {
 }
 
 function getApiKey(): string {
-  return VOLATILE_API_KEY || API_KEY_ENV || '';
+  return VOLATILE_API_KEY || '';
 }
 
 export function setClientApiKey(key: string) {

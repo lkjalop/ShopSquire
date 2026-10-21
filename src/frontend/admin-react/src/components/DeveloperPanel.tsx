@@ -46,13 +46,6 @@ export function DeveloperPanel({ role }: Props) {
         setCvRegistry({});
         setCvRegistryText('{}');
       });
-    try {
-      const k = (import.meta.env.VITE_API_KEY as string) || '';
-      if (k) {
-        setClientApiKey(k);
-        setCurrentKey(k);
-      }
-    } catch {}
   }, []);
 
   useEffect(() => {

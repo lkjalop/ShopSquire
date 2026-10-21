@@ -3,6 +3,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { http } from './client';
 
 describe('admin API request deadlines', () => {
+  it('clears the selected key without falling back to a build credential', async () => {
+    vi.stubEnv('VITE_API_KEY', 'unselected-build-credential');
+    vi.resetModules();
+    const client = await import('./client');
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}'));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      client.setClientApiKey('selected-operator');
+      await client.http('/api/v1/admin/me');
+      client.clearClientApiKey();
+      await client.http('/api/v1/admin/me');
+      expect(fetchMock.mock.calls[0][1].headers['x-api-key']).toBe('selected-operator');
+      expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty('x-api-key');
+      expect(sessionStorage.getItem('shopsquire_admin_api_key')).toBeNull();
+    } finally {
+      client.clearClientApiKey();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
   it('uses the explicitly saved key ahead of the build-time default', async () => {
     vi.stubEnv('VITE_API_KEY', 'build-default');
     vi.resetModules();
