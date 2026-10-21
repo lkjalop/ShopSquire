@@ -35,7 +35,7 @@ def _optional_rows(db, table_name: str, statement: str, params: Dict[str, Any] |
     fallback. Inspect first and retain a savepoint for schema drift between the
     inspection and the read.
     """
-    if not inspect(db.get_bind()).has_table(table_name):
+    if not inspect(db.connection()).has_table(table_name):
         return []
     try:
         with db.begin_nested():
@@ -71,7 +71,7 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
     if (
         not sales_rows
         and tenant_id == "default"
-        and inspect(db.get_bind()).has_table("sales_metrics")
+        and inspect(db.connection()).has_table("sales_metrics")
     ):
         rows = _optional_rows(
             db,
@@ -112,7 +112,7 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
             if _as_utc(row[5]) and _as_utc(row[5]) >= now - timedelta(days=1)
         ]
         inventory_status = "observed" if inventory_rows else "insufficient_data"
-    elif inspect(db.get_bind()).has_table("inventory_atp_fact"):
+    elif inspect(db.connection()).has_table("inventory_atp_fact"):
         inventory_status = "insufficient_data"
     rows = _optional_rows(
         db,
@@ -125,7 +125,7 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
             "WHERE COALESCE(f.tenant_id,'default')=:tenant"
         ),
         {"tenant": tenant_id},
-    ) if inspect(db.get_bind()).has_table("fulfillment_case_version") else []
+    ) if inspect(db.connection()).has_table("fulfillment_case_version") else []
     if rows:
         for case_id, raw, occurred_at in rows:
             try:
