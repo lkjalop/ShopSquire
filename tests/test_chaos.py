@@ -45,4 +45,7 @@ def test_no_chaos_latency_when_disabled():
     r = client.get("/api/v1/pricing/suggest", params={"uid": "normal", "cart_total_cents": 12000})
     assert r.status_code == 200
     elapsed = time.time() - start
+    body = r.json()
+    assert "proposal" in body
+    assert isinstance(body.get("firewall"), dict)
     assert elapsed < 0.15

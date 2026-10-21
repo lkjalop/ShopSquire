@@ -52,13 +52,6 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
         except Exception:
             pass
 
-        # Test-only fast path for the no-chaos latency check to reduce flakiness.
-        try:
-            if "test_chaos.py::test_no_chaos_latency_when_disabled" in os.getenv("PYTEST_CURRENT_TEST", ""):
-                return Response(content="{}", media_type="application/json", status_code=200)
-        except Exception:
-            pass
-
         budget = TokenBudget(redis)
         tier = infer_tier(uid)
         est_tokens = estimate_tokens(f"{uid}:{cart_total_cents}:{sku or ''}", response_tokens=200)
@@ -250,11 +243,6 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
         try:
             if flags.get("DECISION_LOG_WRITES_ENABLED", False) and _rget("proposal"):
                 from src.app.services.persistence import persist_decision_and_audits
-                # Relax strict verifier in test/local to avoid 'review_required' default
-                try:
-                    os.environ["DECISION_VERIFIER_STRICT"] = "0"
-                except Exception:
-                    pass
                 _ = persist_decision_and_audits(
                     uid=uid,
                     agent_name="pricing_agent",
