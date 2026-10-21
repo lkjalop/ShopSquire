@@ -23,52 +23,33 @@ def _request() -> Request:
     })
 
 
-def test_in_process_recommend_preserves_v2_compatibility_dependencies(monkeypatch):
+def test_in_process_recommend_preserves_typed_facade_dependencies(monkeypatch):
     captured = {}
     dispatches = []
-
-    def fake_compatibility(**kwargs):
-        captured.update(kwargs)
-        return {"results": [{"sku": "LAP-1"}], "requested_quantity": 20}
-
-    monkeypatch.setattr(
-        "src.app.services.recommendation_compatibility.serve_v2_compatibility",
-        fake_compatibility,
-    )
-    monkeypatch.setattr(
-        "src.app.observability.metrics.record_recommendation_dispatch",
-        lambda **fields: dispatches.append(fields),
-    )
-    redis = object()
-    db = object()
+    def facade(db, redis, **kwargs):
+        captured.update(db=db, redis=redis, **kwargs)
+        return FacadeOutcome(status="served", payload={"requested_quantity": 20}, lane="PROCUREMENT")
+    monkeypatch.setattr("src.app.services.recommendation_facade.dispatch_recommendation_core_typed", facade)
+    monkeypatch.setattr("src.app.observability.metrics.record_recommendation_dispatch", lambda **fields: dispatches.append(fields))
+    monkeypatch.setattr("src.app.services.recommendation_compatibility.serve_v2_compatibility",
+                        lambda **_: (_ for _ in ()).throw(AssertionError('single facade must not retry compatibility')))
+    redis, db = object(), object()
+    request = _request()
+    from types import SimpleNamespace
+    request.state.operator_identity = SimpleNamespace(tenant_id="tenant-a")
     status, body = asyncio.run(_call_recommend_in_process(
-        _request(),
-        {
-            "uid": "buyer-1",
-            "query": "quote 20 laptops",
-            "budget_max": 55000,
-            "turn_intent": "PROCUREMENT",
-            "external_research_consent": "true",
-        },
-        redis=redis,
-        db=db,
-        role="merchant",
-    ))
-
-    assert status == 200
+        request, {"uid":"buyer-1", "query":"quote 20 laptops", "budget_max":55000,
+                     "turn_intent":"PROCUREMENT", "external_research_consent":"true"},
+        redis=redis, db=db, role="merchant"))
+    assert status == 200 and body["execution_mode"] == "v2_served"
     assert body["requested_quantity"] == 20
-    assert body["execution_mode"] == "v2_compatibility"
-    assert captured["params"]["uid"] == "buyer-1"
-    assert captured["params"]["turn_intent"] == "PROCUREMENT"
-    assert captured["request"].headers["x-tenant-id"] == "tenant-a"
-    assert captured["redis"] is redis
-    assert captured["db"] is db
+    assert captured["db"] is db and captured["redis"] is redis
+    assert captured["tenant_id"] == "tenant-a" and captured["uid"] == "buyer-1"
+    assert captured["external_research_consent"] is True
+    assert captured["intent_hint"] == "PROCUREMENT" and captured["budget_max"] == 55000
     assert captured["role"] == "merchant"
-    assert dispatches == [{
-        "outcome": "v2_compatibility",
-        "lane": "PROCUREMENT",
-        "reason": "mode_off",
-    }]
+    assert captured["source_ip"] == '127.0.0.1'
+    assert dispatches == [{'outcome': 'v2_served', 'lane': 'PROCUREMENT', 'reason': 'served'}]
 
 
 def test_in_process_recommend_returns_typed_facade_service_without_compatibility(monkeypatch):
@@ -163,40 +144,18 @@ def test_v2_deadline_fails_closed_with_revision_safe_authority_envelope():
     assert body["action_executed"] is False
 
 
-def test_v2_compatibility_failure_is_observable(monkeypatch):
+def test_typed_facade_failure_is_observable(monkeypatch):
     dispatches = []
-    monkeypatch.setattr(
-        "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
-        lambda *_args, **_kwargs: FacadeOutcome(
-            status="delegate", reason="outside_pilot_cohort", lane="SEARCH",
-        ),
-    )
-    monkeypatch.setattr(
-        "src.app.services.recommendation_compatibility.serve_v2_compatibility",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("compatibility failed")
-        ),
-    )
-    monkeypatch.setattr(
-        "src.app.observability.metrics.record_recommendation_dispatch",
-        lambda **fields: dispatches.append(fields),
-    )
-
-    try:
+    def fail(*args, **kwargs):
+        raise RuntimeError("facade failed")
+    monkeypatch.setattr("src.app.services.recommendation_facade.dispatch_recommendation_core_typed", fail)
+    monkeypatch.setattr("src.app.observability.metrics.record_recommendation_dispatch", lambda **fields: dispatches.append(fields))
+    import pytest
+    with pytest.raises(RuntimeError, match="facade failed"):
         asyncio.run(_call_recommend_in_process(
-            _request(), {"uid": "buyer-1", "query": "gaming laptop"},
-            redis=object(), db=object(), role="merchant",
-        ))
-    except RuntimeError as exc:
-        assert str(exc) == "compatibility failed"
-    else:
-        raise AssertionError("delegate failure must propagate to the chat error boundary")
-
-    assert dispatches == [{
-        "outcome": "error",
-        "lane": "SEARCH",
-        "reason": "outside_pilot_cohort",
-    }]
+            _request(), {"uid":"buyer-1", "query":"gaming laptop"},
+            redis=object(), db=object(), role="merchant"))
+    assert dispatches == [{'outcome': 'error', 'lane': None, 'reason': 'core_error'}]
 
 
 def test_typed_and_spoken_input_share_one_semantic_dispatch_contract(monkeypatch):

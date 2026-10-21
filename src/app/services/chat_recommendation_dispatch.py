@@ -91,7 +91,7 @@ async def dispatch_chat_recommendation(
     tenant_id_resolver: Callable[[Request], str],
     cancellation: Any = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Dispatch chat through the typed recommendation facade and V2 cutover."""
+    """Dispatch chat through the single typed recommendation facade."""
     from src.app.services.recommendation_delegation_policy import (
         v2_only_unavailable_response,
     )
@@ -102,41 +102,53 @@ async def dispatch_chat_recommendation(
         from src.app.observability.metrics import record_recommendation_dispatch
 
         tenant_id = tenant_id_resolver(request)
-        facade = dispatch_recommendation_core_typed(
-            db, redis,
-            query=command.query, uid=command.uid,
-            tenant_id=tenant_id,
-            budget_max=command.raw_params.get("budget_max"),
-            budget_min=command.raw_params.get("budget_min"),
-            trace_id=command.trace_id,
-            image_labels=command.raw_params.get("image_labels"),
-            image_ocr=command.raw_params.get("image_ocr_text"),
-            image_hash=command.raw_params.get("image_hash"),
-            image_intent=command.raw_params.get("image_intent"),
-            image_product_identity=command.raw_params.get("image_product_identity"),
-            image_cv_signals=command.raw_params.get("image_cv_signals"),
-            external_research_consent=command.external_research_consent,
-            clarification_answer=(
-                command.raw_params.get("clarification_answer")
-                if isinstance(command.raw_params.get("clarification_answer"), dict) else None
-            ),
-            intent_hint=command.raw_params.get("turn_intent"), role=role, request=request,
-            confirmed_slots=(
-                command.raw_params.get("confirmed_slots")
-                if isinstance(command.raw_params.get("confirmed_slots"), dict) else None
-            ),
-            canonical_case=(
-                command.raw_params.get("canonical_case")
-                if isinstance(command.raw_params.get("canonical_case"), dict) else None
-            ),
-            case_patch_idempotency_key=str(
-                command.raw_params.get("case_patch_idempotency_key") or ""
-            )[:128] or None,
-            session_epoch=command.session_epoch,
-            memory_enabled=command.memory_enabled,
-            source_ip=request.client.host if request.client else None,
-            cancellation=cancellation,
-        )
+        try:
+            facade = dispatch_recommendation_core_typed(
+                db, redis,
+                query=command.query, uid=command.uid,
+                tenant_id=tenant_id,
+                budget_max=command.raw_params.get("budget_max"),
+                budget_min=command.raw_params.get("budget_min"),
+                trace_id=command.trace_id,
+                image_labels=command.raw_params.get("image_labels"),
+                image_ocr=command.raw_params.get("image_ocr_text"),
+                image_hash=command.raw_params.get("image_hash"),
+                image_intent=command.raw_params.get("image_intent"),
+                image_product_identity=command.raw_params.get("image_product_identity"),
+                image_cv_signals=command.raw_params.get("image_cv_signals"),
+                external_research_consent=command.external_research_consent,
+                clarification_answer=(
+                    command.raw_params.get("clarification_answer")
+                    if isinstance(command.raw_params.get("clarification_answer"), dict) else None
+                ),
+                intent_hint=command.raw_params.get("turn_intent"), role=role, request=request,
+                confirmed_slots=(
+                    command.raw_params.get("confirmed_slots")
+                    if isinstance(command.raw_params.get("confirmed_slots"), dict) else None
+                ),
+                canonical_case=(
+                    command.raw_params.get("canonical_case")
+                    if isinstance(command.raw_params.get("canonical_case"), dict) else None
+                ),
+                case_patch_idempotency_key=str(
+                    command.raw_params.get("case_patch_idempotency_key") or ""
+                )[:128] or None,
+                session_epoch=command.session_epoch,
+                memory_enabled=command.memory_enabled,
+                source_ip=request.client.host if request.client else None,
+                cancellation=cancellation,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            try:
+                record_recommendation_dispatch(
+                    outcome="error", lane=command.observed_lane, reason="core_error",
+                )
+            except Exception:
+                # Telemetry must not replace the failure seen by the chat boundary.
+                pass
+            raise
         if facade.served:
             record_recommendation_dispatch(
                 outcome="v2_served", lane=facade.lane or command.observed_lane, reason="served",
