@@ -47,8 +47,8 @@ jobs:
     timeout-minutes: 25
     strategy:
       matrix:
-        # YAML parses an unquoted 3.10 as the number 3.1.
-        python-version: ["3.10", "3.11"]
+        # Quote interpreter versions in matrices.
+        python-version: ["3.11"]
     services:
       postgres:
         # Match the production-shaped migration/browser workflow and include

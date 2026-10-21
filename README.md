@@ -1,5 +1,7 @@
 # ShopSquire
 
+Python 3.11 is the verified baseline and minimum. The image-decoding security baseline uses Pillow 13.
+
 > An evidence-governed commerce decision and bounded-agent platform.
 
 ShopSquire adds a native intelligence and control layer to commerce operations. It can

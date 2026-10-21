@@ -1,6 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS dependency-inputs
 
-ENV POETRY_VERSION=1.7.1 \
+ENV POETRY_VERSION=2.4.1 \
     POETRY_HTTP_TIMEOUT=120 \
     PIP_DEFAULT_TIMEOUT=120 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -32,13 +32,20 @@ RUN apt-get update \
     # Smoke-test: ensure tesseract binary is on PATH
     && tesseract --version
 
-RUN pip install --no-cache-dir --retries 10 --timeout 120 poetry==${POETRY_VERSION}
+COPY requirements/bootstrap-runtime.txt /tmp/shopsquire-bootstrap.txt
+RUN python -m pip install --no-cache-dir --retries 10 --timeout 120 -r /tmp/shopsquire-bootstrap.txt \
+    && python -m pip install --no-cache-dir --retries 10 --timeout 120 poetry==${POETRY_VERSION}
 
 WORKDIR /app
 
-COPY pyproject.toml /app/
+COPY pyproject.toml poetry.lock README.md /app/
+RUN poetry check --lock
+
+FROM dependency-inputs AS runtime
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main --extras azure --no-root
+    && poetry config installer.max-workers 2 \
+    && poetry install --no-interaction --no-ansi --only main --extras azure --no-root \
+    && python -m pip check
 
 # Optional: install PyTorch Geometric for GNN fraud-ring detection.
 # Skipped by default (adds ~1.5GB to image). Set INSTALL_PYGEOMETRIC=1 to enable.
@@ -59,7 +66,6 @@ COPY config /app/config
 COPY db /app/db
 COPY docs /app/docs
 COPY scripts /app/scripts
-COPY README.md /app/
 # Bake static assets (SVG product images) into the image so product cards
 # have images even on read-only container filesystems.
 COPY static /app/static

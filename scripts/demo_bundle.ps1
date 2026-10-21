@@ -11,7 +11,7 @@ Usage:
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo_bundle.ps1
 
 Notes:
-- Expects virtualenv at .venv and Python 3.10+
+- Expects virtualenv at .venv and Python 3.11+
 - If the server is already running, the script will skip startup
 #>
 
