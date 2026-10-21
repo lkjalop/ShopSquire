@@ -62,6 +62,7 @@ def merge_rrf(
     *ranked_lists: List[Dict[str, Any]],
     k: int = 60,
     top_n: int = 20,
+    identity_key: str = 'sku',
 ) -> List[Dict[str, Any]]:
     """Merge multiple ranked candidate lists using Reciprocal Rank Fusion.
 
@@ -86,7 +87,7 @@ def merge_rrf(
         for rank, item in enumerate(ranked or [], start=1):
             if not isinstance(item, dict):
                 continue
-            sku = str(item.get("sku") or "").strip()
+            sku = str(item.get(identity_key) or "").strip()
             if not sku:
                 continue
             scores[sku] = scores.get(sku, 0.0) + 1.0 / (k + rank)

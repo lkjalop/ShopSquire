@@ -1,0 +1,22 @@
+{
+  "id": "fictional-electronics-replenishment-v1",
+  "tenant_id": "synthetic-market-pilot",
+  "sku": "LAP-01B48B57",
+  "currency": "AUD",
+  "scenario_id": "electronics_memory_allocation",
+  "seed": 41,
+  "days": 180,
+  "start_date": "2026-04-04",
+  "as_of": "2026-09-30T23:59:00+00:00",
+  "quote": {
+    "supplier_id": "simulation:market-pilot-supplier",
+    "lead_time_days": 9,
+    "capacity_units": 100,
+    "minimum_order_units": 1,
+    "landed_unit_cost_minor": 67130,
+    "observed_at": "2026-09-30T00:00:00+00:00",
+    "expires_at": "2026-10-03T00:00:00+00:00",
+    "source_id": "simulation:fictional-electronics-quote-v1",
+    "simulation_only": true
+  }
+}

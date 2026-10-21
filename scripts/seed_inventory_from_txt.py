@@ -30,7 +30,9 @@ _SECTION = {
 
 
 def _price_cents(block: str) -> Optional[int]:
-    m = re.search(r"price[:\s]*\$?\s*([\d,]+(?:\.\d{1,2})?)", block, re.IGNORECASE)
+    if re.search(r"^\s*price\s*:\s*CONFLICT", block, re.IGNORECASE | re.MULTILINE):
+        return None
+    m = re.search(r"^\s*price[:\s]*\$?\s*([\d,]+(?:\.\d{1,2})?)", block, re.IGNORECASE | re.MULTILINE)
     if not m:
         return None
     try:
@@ -94,6 +96,12 @@ def _category(name: str, block: str, section: str) -> str:
     # "Hard drive" header, and a tablet can follow "Monitors" — so a stale section must never override
     # an unambiguous name).
     n, b = name.lower(), block.lower()
+    if re.search(r"\bimac\b|all.in.one (?:computer|pc|desktop)", n):
+        return "all_in_one"
+    if re.search(r"\bmini (?:pc|form.factor|g1a)\b|\bz2 mini\b", n):
+        return "mini_pc"
+    if re.search(r"desktop tower|gaming pc|desktop computer", n):
+        return "desktop_tower"
     if any(k in n for k in ("backpack", "brief", "folio", "attache", "rucksack", "sleeve")):
         return "bag"
     if "monitor" in n:
@@ -156,8 +164,14 @@ def _laptop_specs(name: str, block: str, price_cents: Optional[int]) -> Dict[str
         specs["webcam"] = "1080p webcam"
     elif re.search(r"webcam", block, re.IGNORECASE):
         specs["webcam"] = "HD webcam"
-    if re.search(r"thunderbolt", block, re.IGNORECASE):
-        specs["docking"] = "Thunderbolt 4"
+    # Only retain an explicit positive generation; a mention is not port support.
+    port_claims = []
+    for line in block.splitlines():
+        if re.search(r"\b(?:no|none|not|unknown|conflict)\b", line, re.IGNORECASE):
+            continue
+        port_claims.extend(re.findall(r"\bThunderbolt\s+([345])(?:\.0)?\b", line, re.IGNORECASE))
+    if len(set(port_claims)) == 1:
+        specs["docking"] = f"Thunderbolt {port_claims[0]}"
     bl = re.search(r"Battery life\s*(?:Up to\s*)?(\d+)\s*Hours", block, re.IGNORECASE)
     if bl:
         specs["battery_hours"] = int(bl.group(1))
@@ -189,6 +203,8 @@ def parse_inventory(text: str) -> List[Dict[str, Any]]:
         lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
         if not lines:
             continue
+        if re.match(r"SHOPSQUIRE INVENTORY INGEST|PENDING\b|FORM-FACTOR / CLASS TAXONOMY|INGESTION NOTES FOR THE PIPELINE", lines[0], re.IGNORECASE):
+            continue
         # name = lines until the Price line (or first 2 lines)
         name_lines = []
         for ln in lines:
@@ -210,11 +226,40 @@ def parse_inventory(text: str) -> List[Dict[str, Any]]:
             r = _first_int(r"RAM\s*\(GB\)\s*(\d+)|(\d+)\s*GB\s*RAM", b)
             if r:
                 specs["ram_gb"] = r
-        sku_prefix = {"laptop": "LAP", "tablet": "TAB", "monitor": "MON", "bag": "BAG",
+        explicit_conflict = bool(re.search(r"^\s*price\s*:\s*CONFLICT", b, re.IGNORECASE | re.MULTILINE))
+        specs["catalog_import"] = {
+            "status": "held_price_conflict" if explicit_conflict else "unverified_snapshot",
+            "fit_authority": "none", "commerce_authority": "none",
+            "observations": [{"sha256": hashlib.sha256(b.encode('utf-8')).hexdigest(),
+                              "raw_text": b, "price_cents": price}],
+        }
+        sku_prefix = {"mini_pc": "MIN", "desktop_tower": "DES", "all_in_one": "AIO",
+                      "laptop": "LAP", "tablet": "TAB", "monitor": "MON", "bag": "BAG",
                       "router": "NET", "headset": "AUD", "printer": "PRN", "hard_drive": "HDD"}.get(category, "ACC")
         sku = f"{sku_prefix}-{hashlib.sha1(name.encode('utf-8')).hexdigest()[:8].upper()}"
         products.append({"sku": sku, "name": name, "price_cents": price, "category": category, "specs": specs})
-    return products
+    return _reconcile_import_rows(products)
+
+
+def _reconcile_import_rows(products):
+    """Conserve duplicate observations; title identity is provisional, not verified."""
+    merged = {}
+    for row in products:
+        prior = merged.get(row["sku"])
+        if prior is None:
+            merged[row["sku"]] = row
+            continue
+        audit = prior["specs"]["catalog_import"]
+        incoming = row["specs"]["catalog_import"]
+        known = {item["sha256"] for item in audit["observations"]}
+        audit["observations"].extend(item for item in incoming["observations"] if item["sha256"] not in known)
+        conflict = prior["price_cents"] != row["price_cents"] or "held_price_conflict" in (audit["status"], incoming["status"])
+        # Differing records need identity review even where the quoted price agrees.
+        if len(audit["observations"]) > 1:
+            prior["price_cents"] = None
+            audit["status"] = "held_price_conflict" if conflict else "held_identity_review"
+            prior["specs"] = {"category": prior["category"], "catalog_import": audit}
+    return list(merged.values())
 
 
 def _write_svgs(products: List[Dict[str, Any]]) -> int:
@@ -239,6 +284,8 @@ def _write_svgs(products: List[Dict[str, Any]]) -> int:
 
 def seed(db, products: List[Dict[str, Any]]) -> Dict[str, int]:
     from sqlalchemy import text as _t
+    from scripts.backfill_brand_from_title import _brand_list, match_brand
+    brands = _brand_list()
     inserted = 0
     for i, p in enumerate(products):
         if p["price_cents"] is None:
@@ -250,9 +297,10 @@ def seed(db, products: List[Dict[str, Any]]) -> Dict[str, int]:
         else:
             pid = str(uuid.uuid4())
             db.execute(_t(
-                "INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url) "
-                "VALUES (:id, :sku, :name, :pc, 'AUD', :specs, 1, :ua, :img)"),
+                "INSERT INTO products (id, sku, name, brand, category, price_cents, currency, specs, active, updated_at, image_url) "
+                "VALUES (:id, :sku, :name, :brand, :category, :pc, 'AUD', :specs, 1, :ua, :img)"),
                 {"id": pid, "sku": sku, "name": p["name"], "pc": p["price_cents"],
+                 "brand": match_brand(p['name'], brands), "category": p['category'],
                  "specs": json.dumps(p["specs"]), "ua": datetime.utcnow(), "img": f"/static/images/{sku}.svg"})
             inserted += 1
         has_inv = db.execute(_t("SELECT 1 FROM inventory WHERE product_id = :pid LIMIT 1"), {"pid": pid}).fetchone()

@@ -1,0 +1,11 @@
+{
+  "tenant_id": "synthetic-bundles",
+  "version": "fictional-product-offers-v1",
+  "base": {"sku": "LAP-37144522", "label": "Fictional base laptop"},
+  "candidates": [
+    {"sku": "LAP-234E845E", "label": "Fictional memory upgrade", "kind": "upgrade", "need": "memory_capacity", "supported": true, "benefit": "The simulated upgrade has greater memory capacity for the selected memory-capacity need."},
+    {"sku": "HDD-3A5E65F1", "label": "Fictional compatible backup drive", "kind": "cross_sell", "need": "portable_backup", "supported": true, "benefit": "The simulated drive supports this exact simulated laptop connection and provides portable backup storage."},
+    {"sku": "BAG-FD488ABA", "label": "Fictional incompatible bag", "kind": "cross_sell", "need": "portable_backup", "supported": false, "benefit": "The fixture records this pairing as incompatible; no suitability is established."},
+    {"sku": "BAG-34615AD7", "label": "Bag with unknown compatibility", "kind": "cross_sell", "need": "portable_backup", "supported": null, "benefit": null}
+  ]
+}

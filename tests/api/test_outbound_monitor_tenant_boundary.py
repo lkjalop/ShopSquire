@@ -1,16 +1,34 @@
 from contextlib import contextmanager
 from uuid import uuid4
 
+import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from src.app.main import create_app
-from src.app.models.db import db_session
+from src.app.models.db import create_runtime_engine, db_session
+from src.app.models.database_ownership import database_owner
 from src.app.services import outbound_email_monitor as monitor
 from src.app.services.operator_tenant_membership import grant_membership, principal_hash_for_api_key
 
 
-def test_authenticated_outbound_reader_and_simulator_cannot_cross_tenants(monkeypatch):
+@pytest.fixture
+def owned_database(tmp_path, monkeypatch):
+    url = f"sqlite+pysqlite:///{tmp_path/'outbound-monitor.sqlite3'}"
+    monkeypatch.setenv('DATABASE_URL', url)
+    monkeypatch.setenv('DATABASE_URL_RO', url)
+    command.upgrade(Config('alembic.ini'), 'head')
+    engine = create_runtime_engine(url)
+    try:
+        with database_owner(engine):
+            yield engine
+    finally:
+        engine.dispose()
+
+
+def test_authenticated_outbound_reader_and_simulator_cannot_cross_tenants(monkeypatch, owned_database):
     key = 'outbound-scope-test-key'
     tenant = 'outbound-' + uuid4().hex
     foreign = tenant + '-foreign'
@@ -26,7 +44,13 @@ def test_authenticated_outbound_reader_and_simulator_cannot_cross_tenants(monkey
                 VALUES (:id,:id,:scope,'same-agent','high',:reasons,1,1)'''),
                 dict(id=uuid4().hex, scope=scope, reasons='["'+scope+'-CANARY"]'))
         db.commit()
-    with TestClient(create_app(), headers={'x-api-key':key, 'x-tenant-id':tenant}) as client:
+    app = create_app()
+    created_engine = getattr(app.state, 'engine', None)
+    if getattr(app.state, 'owns_engine', False) and created_engine is not None and created_engine is not owned_database:
+        created_engine.dispose()
+    app.state.engine = owned_database
+    app.state.owns_engine = False
+    with TestClient(app, headers={'x-api-key':key, 'x-tenant-id':tenant}) as client:
         response = client.get('/api/v1/admin/email_security/outbound/anomalies')
         assert response.status_code == 200, response.text
         assert {item['tenant_id'] for item in response.json()['items']} == {tenant}

@@ -7,7 +7,8 @@ authoritative operational read model.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import hashlib
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,152 @@ def _observation(
     )
 
 
+def _append_lifecycle_probes(observations, *, days, event_plan, history, scenario_id, target, location_a, location_b, current_price, currency, profile, tenant):
+    def planned_day(name: str, fallback: int) -> tuple[int, str]:
+        index = min(days - 1, max(0, int(event_plan.get(name, fallback))))
+        return index, str(history["daily_history"][index]["date"])
+
+    transfer_day, transfer_date = planned_day("transfer_day", days // 4)
+    observations.append(_observation(
+        "transfer",
+        f"{scenario_id}:transfer:{transfer_day}",
+        _stamp(transfer_date, hour=11),
+        {
+            "variant_id": target,
+            "from_location_id": location_a,
+            "to_location_id": location_b,
+            "quantity": {"value": 1, "uom": "EA"},
+            "status": "received",
+        },
+    ))
+    planned_return_day, _ = planned_day("return_day", days // 3)
+    sale_days = [
+        int(row["day_index"])
+        for row in history["daily_history"]
+        if int(row["observed_sales_units"]) > 0
+    ]
+    eligible_sale_days = [
+        day_index for day_index in sale_days if day_index <= planned_return_day
+    ]
+    return_order_day = (
+        eligible_sale_days[-1]
+        if eligible_sale_days
+        else sale_days[0] if sale_days else None
+    )
+    if return_order_day is None:
+        raise ValueError("synthetic_return_requires_fulfilled_order")
+    return_day = max(planned_return_day, return_order_day)
+    return_date = str(history["daily_history"][return_day]["date"])
+    observations.append(_observation(
+        "return",
+        f"{scenario_id}:return:{return_day}",
+        _stamp(return_date, hour=14),
+        {
+            "order_external_id": f"{scenario_id}:order:{return_order_day}",
+            "variant_id": target,
+            "location_id": location_a,
+            "quantity": {"value": 1, "uom": "EA"},
+            "physical_disposition": "quarantine",
+            "financial_disposition": "refunded",
+        },
+    ))
+    markdown_day, markdown_date = planned_day("markdown_day", int(days * 0.8))
+    observations.append(_observation(
+        "markdown",
+        f"{scenario_id}:markdown:{markdown_day}",
+        _stamp(markdown_date, hour=9),
+        {
+            "variant_id": target,
+            "location_id": location_a,
+            "original_price": {
+                "amount_minor": current_price,
+                "currency": currency,
+            },
+            "new_price": {
+                "amount_minor": max(
+                    int(profile["unit_cost_minor"]),
+                    round(current_price * 0.9),
+                ),
+                "currency": currency,
+            },
+            "reason_code": "synthetic_stale_stock",
+            "effective_at": _stamp(markdown_date, hour=9),
+            "approved_by": "synthetic-policy",
+        },
+    ))
+    disposal_day, disposal_date = planned_day("disposal_day", int(days * 0.9))
+    observations.append(_observation(
+        "disposal",
+        f"{scenario_id}:disposal:{disposal_day}",
+        _stamp(disposal_date, hour=10),
+        {
+            "variant_id": target,
+            "location_id": location_a,
+            "quantity": {"value": 1, "uom": "EA"},
+            "reason_code": (
+                "synthetic_expiry"
+                if profile.get("shelf_life_days")
+                else "synthetic_damage"
+            ),
+            "writeoff": {
+                "amount_minor": int(profile["unit_cost_minor"]),
+                "currency": currency,
+            },
+            "approved_by": "synthetic-policy",
+        },
+    ))
+
+    correction_day, correction_date = planned_day("correction_day", days // 8)
+    adjustment = _observation(
+        "inventory_adjustment",
+        f"{scenario_id}:cycle-count:{correction_day}",
+        _stamp(correction_date, hour=10),
+        {
+            "variant_id": target,
+            "location_id": location_a,
+            "quantity_delta": -1,
+            "uom": "EA",
+            "reason_code": "synthetic_cycle_count",
+            "approved_by": "synthetic-operator",
+        },
+    )
+    observations.append(adjustment)
+    adjustment_id = business_observation_id(
+        tenant_id=tenant,
+        source=SOURCE,
+        observation=adjustment,
+    )
+    correction = _observation(
+        "inventory_adjustment",
+        f"{scenario_id}:cycle-count:{correction_day}:correction",
+        _stamp(correction_date, hour=11),
+        {
+            "variant_id": target,
+            "location_id": location_a,
+            "quantity_delta": -2,
+            "uom": "EA",
+            "reason_code": "synthetic_cycle_count_corrected",
+            "approved_by": "synthetic-operator",
+        },
+        corrects=adjustment_id,
+    )
+    observations.append(correction)
+    correction_id = business_observation_id(
+        tenant_id=tenant,
+        source=SOURCE,
+        observation=correction,
+    )
+    reversal_day, reversal_date = planned_day("reversal_day", correction_day + 1)
+    observations.append(_observation(
+        "inventory_adjustment",
+        f"{scenario_id}:cycle-count:{reversal_day}:reversal",
+        _stamp(reversal_date, hour=11),
+        dict(correction.payload),
+        reverses=correction_id,
+    ))
+
+
+
 def materialize_canonical_replay(
     scenario_id: str,
     *,
@@ -62,15 +209,24 @@ def materialize_canonical_replay(
     days: int,
     tenant_id: str,
     path: str | Path | None = None,
+    start_date: date = date(2025, 1, 1),
+    target_variant_id: str | None = None,
+    currency: str = "USD",
+    include_lifecycle_probes: bool = True,
 ) -> dict[str, Any]:
     tenant = str(tenant_id or "").strip()
     if not tenant:
         raise ValueError("synthetic_replay_tenant_required")
+    if target_variant_id and not tenant.startswith("synthetic-"):
+        raise ValueError("catalog_bound_replay_requires_synthetic_tenant")
+    if len(currency) != 3 or not currency.isalpha() or currency != currency.upper():
+        raise ValueError("currency_requires_uppercase_iso_code")
     history = generate_commerce_history(
         scenario_id,
         seed=seed,
         days=days,
         path=path,
+        start_date=start_date,
     )
     supply = generate_supply_scenario(scenario_id, seed=seed, path=path)
     for family in ("nodes", "edges", "signals"):
@@ -84,6 +240,26 @@ def materialize_canonical_replay(
     )
     event_plan = dict(profile.get("event_plan") or {})
     target = str(profile["target_node_id"])
+    if target_variant_id:
+        replacement = str(target_variant_id).strip()
+        if not replacement:
+            raise ValueError("catalog_variant_required")
+        for node in supply['nodes']:
+            if node['id'] == target:
+                node['id'] = replacement
+        for edge in supply['edges']:
+            for key in ('from_node_id', 'to_node_id'):
+                if edge.get(key) == target:
+                    edge[key] = replacement
+        for signal in supply['signals']:
+            if signal.get('subject_node_id') == target:
+                signal['subject_node_id'] = replacement
+        for row in history['daily_history'] + history['purchase_orders']:
+            row['target_node_id'] = replacement
+        profile['target_node_id'] = replacement
+        target = replacement
+    for row in history['purchase_orders']:
+        row['currency'] = currency
     supplier = next(
         (
             str(node["id"])
@@ -92,7 +268,6 @@ def materialize_canonical_replay(
         ),
         "supplier:synthetic",
     )
-    currency = "USD"
     location_a = "location:primary"
     location_b = "location:secondary"
     current_price = int(
@@ -315,148 +490,10 @@ def materialize_canonical_replay(
             ),
         ])
 
-    def planned_day(name: str, fallback: int) -> tuple[int, str]:
-        index = min(days - 1, max(0, int(event_plan.get(name, fallback))))
-        return index, str(history["daily_history"][index]["date"])
-
-    transfer_day, transfer_date = planned_day("transfer_day", days // 4)
-    observations.append(_observation(
-        "transfer",
-        f"{scenario_id}:transfer:{transfer_day}",
-        _stamp(transfer_date, hour=11),
-        {
-            "variant_id": target,
-            "from_location_id": location_a,
-            "to_location_id": location_b,
-            "quantity": {"value": 1, "uom": "EA"},
-            "status": "received",
-        },
-    ))
-    planned_return_day, _ = planned_day("return_day", days // 3)
-    sale_days = [
-        int(row["day_index"])
-        for row in history["daily_history"]
-        if int(row["observed_sales_units"]) > 0
-    ]
-    eligible_sale_days = [
-        day_index for day_index in sale_days if day_index <= planned_return_day
-    ]
-    return_order_day = (
-        eligible_sale_days[-1]
-        if eligible_sale_days
-        else sale_days[0] if sale_days else None
-    )
-    if return_order_day is None:
-        raise ValueError("synthetic_return_requires_fulfilled_order")
-    return_day = max(planned_return_day, return_order_day)
-    return_date = str(history["daily_history"][return_day]["date"])
-    observations.append(_observation(
-        "return",
-        f"{scenario_id}:return:{return_day}",
-        _stamp(return_date, hour=14),
-        {
-            "order_external_id": f"{scenario_id}:order:{return_order_day}",
-            "variant_id": target,
-            "location_id": location_a,
-            "quantity": {"value": 1, "uom": "EA"},
-            "physical_disposition": "quarantine",
-            "financial_disposition": "refunded",
-        },
-    ))
-    markdown_day, markdown_date = planned_day("markdown_day", int(days * 0.8))
-    observations.append(_observation(
-        "markdown",
-        f"{scenario_id}:markdown:{markdown_day}",
-        _stamp(markdown_date, hour=9),
-        {
-            "variant_id": target,
-            "location_id": location_a,
-            "original_price": {
-                "amount_minor": current_price,
-                "currency": currency,
-            },
-            "new_price": {
-                "amount_minor": max(
-                    int(profile["unit_cost_minor"]),
-                    round(current_price * 0.9),
-                ),
-                "currency": currency,
-            },
-            "reason_code": "synthetic_stale_stock",
-            "effective_at": _stamp(markdown_date, hour=9),
-            "approved_by": "synthetic-policy",
-        },
-    ))
-    disposal_day, disposal_date = planned_day("disposal_day", int(days * 0.9))
-    observations.append(_observation(
-        "disposal",
-        f"{scenario_id}:disposal:{disposal_day}",
-        _stamp(disposal_date, hour=10),
-        {
-            "variant_id": target,
-            "location_id": location_a,
-            "quantity": {"value": 1, "uom": "EA"},
-            "reason_code": (
-                "synthetic_expiry"
-                if profile.get("shelf_life_days")
-                else "synthetic_damage"
-            ),
-            "writeoff": {
-                "amount_minor": int(profile["unit_cost_minor"]),
-                "currency": currency,
-            },
-            "approved_by": "synthetic-policy",
-        },
-    ))
-
-    correction_day, correction_date = planned_day("correction_day", days // 8)
-    adjustment = _observation(
-        "inventory_adjustment",
-        f"{scenario_id}:cycle-count:{correction_day}",
-        _stamp(correction_date, hour=10),
-        {
-            "variant_id": target,
-            "location_id": location_a,
-            "quantity_delta": -1,
-            "uom": "EA",
-            "reason_code": "synthetic_cycle_count",
-            "approved_by": "synthetic-operator",
-        },
-    )
-    observations.append(adjustment)
-    adjustment_id = business_observation_id(
-        tenant_id=tenant,
-        source=SOURCE,
-        observation=adjustment,
-    )
-    correction = _observation(
-        "inventory_adjustment",
-        f"{scenario_id}:cycle-count:{correction_day}:correction",
-        _stamp(correction_date, hour=11),
-        {
-            "variant_id": target,
-            "location_id": location_a,
-            "quantity_delta": -2,
-            "uom": "EA",
-            "reason_code": "synthetic_cycle_count_corrected",
-            "approved_by": "synthetic-operator",
-        },
-        corrects=adjustment_id,
-    )
-    observations.append(correction)
-    correction_id = business_observation_id(
-        tenant_id=tenant,
-        source=SOURCE,
-        observation=correction,
-    )
-    reversal_day, reversal_date = planned_day("reversal_day", correction_day + 1)
-    observations.append(_observation(
-        "inventory_adjustment",
-        f"{scenario_id}:cycle-count:{reversal_day}:reversal",
-        _stamp(reversal_date, hour=11),
-        dict(correction.payload),
-        reverses=correction_id,
-    ))
+    if include_lifecycle_probes:
+        _append_lifecycle_probes(observations,days=days,event_plan=event_plan,history=history,scenario_id=scenario_id,
+            target=target,location_a=location_a,location_b=location_b,current_price=current_price,
+            currency=currency,profile=profile,tenant=tenant)
 
     observations.sort(
         key=lambda row: (row.event_time, row.entity_type, row.external_id)
@@ -480,6 +517,13 @@ def materialize_canonical_replay(
         "projection_allowed": False,
         "inventory_projection_authority": "shadow_only",
     }
+    binding = dict(target_variant_id=target, currency=currency, tenant_id=tenant,
+                   include_lifecycle_probes=include_lifecycle_probes)
+    manifest['catalog_binding'] = binding
+    manifest['parameter_hash'] = hashlib.sha256(json.dumps(
+        {'history_hash': history['manifest']['parameter_hash'], 'binding': binding},
+        sort_keys=True, separators=(',', ':'),
+    ).encode()).hexdigest()
     return {
         "manifest": manifest,
         "history": history,
