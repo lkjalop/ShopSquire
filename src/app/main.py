@@ -1434,6 +1434,8 @@ def create_app() -> FastAPI:
         response.headers["x-request-id"] = rid
         return response
 
+    from src.app.models.request_database_middleware import RequestDatabaseOwnerMiddleware
+    app.add_middleware(RequestDatabaseOwnerMiddleware)
     _register_http_metrics(app)
 
     @app.get("/health")
