@@ -7,6 +7,7 @@ import {
   fetchUserBehavioralModel,
   fetchUserProfile,
 } from '../api';
+import type { TrustedClaim } from '../api';
 
 interface CitationStats {
   total_claims: number;
@@ -25,13 +26,14 @@ interface BehavioralModel {
   recurring_constraints: Record<string, number>;
 }
 
-interface TrustedClaim {
-  agent_name: string;
-  claim_type: string;
-  claim_key: string;
-  claim_value: string;
-  trust_score: number;
-  confidence: number;
+function isTrustedClaim(value: unknown): value is TrustedClaim {
+  if (!value || typeof value !== 'object') return false;
+  const claim = value as Record<string, unknown>;
+  return ['id', 'agent_name', 'claim_type', 'claim_key'].every(key => typeof claim[key] === 'string')
+    && ['trust_score', 'confidence'].every(key => {
+      const score = claim[key];
+      return typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 1;
+    });
 }
 
 interface ObservationSummary {
@@ -43,6 +45,7 @@ interface ObservationSummary {
 function CitationMemorySection() {
   const [stats, setStats] = useState<CitationStats | null>(null);
   const [claims, setClaims] = useState<TrustedClaim[]>([]);
+  const [claimsError, setClaimsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,7 +54,9 @@ function CitationMemorySection() {
       fetchTrustedClaims({ minTrust: 0.6, limit: 20 }),
     ]).then(([s, c]) => {
       if (s.status === 'fulfilled') setStats(s.value);
-      if (c.status === 'fulfilled') setClaims(Array.isArray(c.value) ? c.value : []);
+      if (c.status === 'fulfilled' && Array.isArray(c.value?.claims)
+          && c.value.claims.every(isTrustedClaim)) setClaims(c.value.claims);
+      else setClaimsError('Trusted claims could not be loaded.');
       setLoading(false);
     });
   }, []);
@@ -61,6 +66,7 @@ function CitationMemorySection() {
   return (
     <>
       <h3 className="section-title">Citation Memory - Layer 4</h3>
+      {claimsError && <div role="alert" className="callout">{claimsError}</div>}
       <div className="card-row">
         <div className="stat-card">
           <div className="stat-label">Total Claims</div>

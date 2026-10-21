@@ -38,9 +38,14 @@ export async function fetchCitationMemoryStats(): Promise<any> {
   return http(`/api/v1/merchant/intelligence/citation_memory/stats`);
 }
 
-export async function fetchTrustedClaims(params?: { minTrust?: number; limit?: number }): Promise<any[]> {
+export type TrustedClaim = { id: string; agent_name: string; claim_type: string; claim_key: string;
+  claim_value: unknown; trust_score: number; confidence: number };
+export type TrustedClaimsResponse = { agent_name: string | null; claim_type: string | null; count: number; claims: TrustedClaim[] };
+export async function fetchTrustedClaims(params?: { minTrust?: number; limit?: number; agentName?: string; claimType?: string }): Promise<TrustedClaimsResponse> {
   const q = new URLSearchParams();
   q.set('min_trust', String(params?.minTrust ?? 0.6));
+  if (params?.agentName) q.set('agent_name', params.agentName);
+  if (params?.claimType) q.set('claim_type', params.claimType);
   q.set('limit', String(params?.limit ?? 20));
   return http(`/api/v1/merchant/intelligence/citation_memory/trusted_claims?${q.toString()}`);
 }
