@@ -1,8 +1,7 @@
 """E1 + E2 end-to-end: an order created from a recommendation is attributed back to it.
 
-Uses an ALIGNED-engine harness (one in-memory engine for seed + request + verify) because the
-attribution writes happen during the request (request engine = app.state.engine), which a bare
-module-level db_session would not see. Mirrors tests/test_cart_stock_gates.py's proven recipe.
+Uses one owned file database for seed, request and verification. Independent
+connections preserve transaction isolation while the app's background work runs.
 
   E1: the order carries the recommendation trace_id (orders.trace_id).
   E2: create_order links the order to the decision that proposed the SKU (conversion_event).
@@ -10,55 +9,67 @@ module-level db_session would not see. Mirrors tests/test_cart_stock_gates.py's 
 from __future__ import annotations
 
 import pytest
+import json
+import os
+from pathlib import Path
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
+from src.app.models.db import create_runtime_engine
+from src.app.models.database_ownership import database_owner
 
 from tests.utils import default_headers
 
 
 @pytest.fixture()
-def stack(monkeypatch):
+def stack(monkeypatch, tmp_path):
     monkeypatch.setenv("ATTRIBUTION_ENABLED", "1")
     monkeypatch.setenv("INVENTORY_RESERVATION_ENFORCED", "0")  # skip stock reservation for the test
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
     monkeypatch.setenv("AUTO_SEED_CATALOG_ON_START", "0")
     monkeypatch.setenv("AUTO_SEED_GAMING_CATALOG_ON_START", "0")
+    # Attribution reads the effective flags file, not this environment alias.
+    # Keep opt-in local even after an earlier test disabled capture.
+    previous_flags = Path(os.environ["FEATURE_FLAGS_PATH"])
+    flags = json.loads(previous_flags.read_text(encoding="utf-8"))
+    flags["ATTRIBUTION_ENABLED"] = True
+    isolated_flags = tmp_path / "flags.json"
+    isolated_flags.write_text(json.dumps(flags), encoding="utf-8")
+    monkeypatch.setenv("FEATURE_FLAGS_PATH", str(isolated_flags))
 
-    eng = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        future=True,
-    )
+    database_url = 'sqlite+pysqlite:///' + (tmp_path / 'attribution.sqlite3').as_posix()
+    monkeypatch.setenv('DATABASE_URL', database_url)
+    monkeypatch.setenv('DATABASE_URL_RO', database_url)
+    eng = create_runtime_engine(database_url)
     import src.app.models.db as _dbmod
     orig = _dbmod.engine
     _dbmod.engine = eng
     _dbmod.set_engine(eng)
 
-    from src.app.main import create_app
-    app = create_app()
-    app.state.engine = eng
+    try:
+        import src.app.main as main
+        # The shared pytest app can retain ownership of a different engine.
+        app = getattr(main, "_original_create_app", main.create_app)()
+        assert app.state.engine is eng and app.state.owns_engine is False
 
-    with TestClient(app, headers=default_headers(), raise_server_exceptions=False) as client:
-        from src.app.services import attribution
-        from src.app.models.db import db_session
-        with db_session() as db:
-            db.execute(text(
-                "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
-                "VALUES ('ATTR-1','ATTR-1','Attribution Test Laptop',119900,'USD','{}',1)"))
-            db.execute(text(
-                "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
-                "VALUES ('inv-attr-1','ATTR-1',9,'default')"))
-            attribution.ensure_tables(db)
-            # E0 substrate: a decision that proposed ATTR-1.
-            attribution.record_decision(db, trace_id="ATTR-T", decision_id="ATTR-D",
-                                        uid_hash="seed", skus=["ATTR-1"])
-            db.commit()
-        yield client
-
-    _dbmod.engine = orig
-    _dbmod.set_engine(orig)
+        with database_owner(eng), TestClient(app, headers=default_headers(), raise_server_exceptions=False) as client:
+            from src.app.services import attribution
+            from src.app.models.db import db_session
+            with db_session() as db:
+                db.execute(text(
+                    "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
+                    "VALUES ('ATTR-1','ATTR-1','Attribution Test Laptop',119900,'USD','{}',1)"))
+                db.execute(text(
+                    "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
+                    "VALUES ('inv-attr-1','ATTR-1',9,'default')"))
+                attribution.ensure_tables(db)
+                # E0 substrate: a decision that proposed ATTR-1.
+                attribution.record_decision(db, trace_id="ATTR-T", decision_id="ATTR-D",
+                                            uid_hash="seed", skus=["ATTR-1"])
+                db.commit()
+            yield client
+    finally:
+        _dbmod.set_engine(orig)
+        eng.dispose()
 
 
 def test_order_attributes_to_decision(stack):
