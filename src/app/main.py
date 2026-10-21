@@ -96,6 +96,18 @@ def _is_non_dev_env() -> bool:
     return env not in ("local", "dev", "development", "test")
 
 
+def _test_request_bypass_enabled() -> bool:
+    # A caller-controlled header must never disable production controls, even
+    # when a test flag is accidentally carried into another environment.
+    from src.app.security.runtime_test_controls import isolated_test_controls_enabled
+    return isolated_test_controls_enabled()
+
+
+def _test_request_bypass(request: Request) -> bool:
+    return (_test_request_bypass_enabled()
+            and request.headers.get("x-skip-observer", "").strip().lower() in ("1", "true", "yes"))
+
+
 def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     from src.app.services.ocr_runtime import ocr_runtime_snapshot
     return ocr_runtime_snapshot(provider)
@@ -1054,7 +1066,7 @@ def create_app() -> FastAPI:
                 import random
                 # Skip chaos injection for explicit test skips or when observer skip list includes the path
                 try:
-                    if str(request.headers.get("x-skip-observer", "0")) in ("1", "true", "yes"):
+                    if _test_request_bypass(request):
                         prob = 0.0
                 except Exception:
                     pass
@@ -1077,7 +1089,7 @@ def create_app() -> FastAPI:
         try:
             rl = int(app.state.rate_limit_per_min or 0)
             try:
-                if str(request.headers.get("x-skip-observer", "0")) in ("1", "true", "yes"):
+                if _test_request_bypass(request):
                     rl = 0
             except Exception:
                 pass
@@ -1272,9 +1284,9 @@ def create_app() -> FastAPI:
             return await call_next(request)
         if path.startswith("/api/v1/vision/triage"):
             return await call_next(request)
-        # Allow per-request skip via header (for performance tests)
+        # Explicit isolated tests can opt in; client headers alone grant no bypass.
         try:
-            if request.headers.get("x-skip-observer", "").strip() in ("1", "true", "yes"):
+            if _test_request_bypass(request):
                 return await call_next(request)
         except Exception:
             pass
@@ -1282,7 +1294,7 @@ def create_app() -> FastAPI:
         if path.startswith("/api/v1/pricing"):
             return await call_next(request)
         # Optional: allow test-only skip for additional endpoints via env
-        skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
+        skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "") if _test_request_bypass_enabled() else ""
         if skip_list:
             prefixes = [p.strip() for p in skip_list.split(",") if p.strip()]
             if any(path.startswith(p) for p in prefixes):

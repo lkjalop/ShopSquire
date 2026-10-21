@@ -23,6 +23,7 @@ def owned_clients(tmp_path, monkeypatch):
     monkeypatch.setenv('DISABLE_TRACING', '1')
     monkeypatch.setenv('OTEL_SDK_DISABLED', 'true')
     monkeypatch.setenv('INVENTORY_WORKER_ENABLED', '0')
+    monkeypatch.setenv('ALLOW_TEST_REQUEST_BYPASS', '1')
     engines = []
     for index in range(3):
         engine = create_engine('sqlite:///' + str(tmp_path / f'owner-{index}.sqlite3'))

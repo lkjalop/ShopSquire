@@ -838,7 +838,8 @@ def log_trace_event(
         # skipped, avoid expensive durable trace writes for high-throughput
         # benchmark tests.
         try:
-            skipped = str(os.getenv("SKIP_OBSERVER_ENDPOINTS", "") or "")
+            from src.app.security.runtime_test_controls import isolated_test_controls_enabled
+            skipped = str(os.getenv("SKIP_OBSERVER_ENDPOINTS", "") or "") if isolated_test_controls_enabled() else ""
             if "/api/v1/recommend" in skipped:
                 return
         except Exception:

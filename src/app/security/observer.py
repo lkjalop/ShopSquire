@@ -833,7 +833,8 @@ def compute_severity(payload: Dict[str, Any]) -> str:
 def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | None = None, request: Optional[Request] = None) -> None:
     # Global skip list to avoid overhead on hot paths during load/chaos tests
     try:
-        skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
+        from src.app.security.runtime_test_controls import isolated_test_controls_enabled
+        skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "") if isolated_test_controls_enabled() else ""
         prefixes = [p.strip() for p in skip_list.split(",") if p.strip()]
         if prefixes and any(path.startswith(p) for p in prefixes):
             return None

@@ -199,7 +199,8 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
             out_analysis = analyze_payload({"uid": uid, "proposal": prop}) if prop else {"severity": "info", "details": {}}
         # Avoid extra overhead when chaos instrumentation is disabled or when endpoint is configured to skip
         try:
-            skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
+            from src.app.security.runtime_test_controls import isolated_test_controls_enabled
+            skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "") if isolated_test_controls_enabled() else ""
             should_skip = False
             if skip_list:
                 prefixes = [p.strip() for p in skip_list.split(",") if p.strip()]
