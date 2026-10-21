@@ -1,19 +1,7 @@
 from src.app.services.memory import Memory
 
 
-class _Redis:
-    def __init__(self):
-        self.data = {}
-
-    def setex(self, key, _ttl, value):
-        self.data[key] = value
-
-    def get(self, key):
-        return self.data.get(key)
-
-    def delete(self, *keys):
-        for key in keys:
-            self.data.pop(key, None)
+from tests.services.test_memory_scope_contract import _Redis
 
 
 def test_pending_clarification_is_tenant_scoped_and_consumable():
