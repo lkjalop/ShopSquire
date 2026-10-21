@@ -1,0 +1,133 @@
+source_head,profile,spec,frozen_line,title,project,expected_status,actual_status,attempts,duration_ms,actor_and_scope,application_overlay_files,test_overlay_files,first_error
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,ordinary-chat-shortfall.spec.ts,5,ordinary-chat-shortfall.spec.ts / ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload,chromium,passed,passed,1,3240,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,5,platform-audit-memory.spec.ts / deadline corrections survive unrelated turns and reload without promising delivery,chromium,passed,passed,1,2472,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,24,platform-audit-memory.spec.ts / audit real browser retains and amends quantity over five messages and reload,chromium,passed,passed,1,1829,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,61,platform-audit-memory.spec.ts / recall preserves currency total budget and destination corrections,chromium,passed,passed,1,1379,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,83,platform-audit-memory.spec.ts / unresolved product fit preserves quantity and asks material budget scope,chromium,passed,passed,1,753,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,100,platform-audit-memory.spec.ts / audit consented external research reports unavailable without qualification,chromium,passed,passed,1,686,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,110,platform-audit-memory.spec.ts / audit direct authority injection cannot grant commerce authority,chromium,passed,passed,1,424,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,platform-audit-memory.spec.ts,119,platform-audit-memory.spec.ts / audit twenty real turns retain amended procurement facts,chromium,passed,passed,1,5909,signed buyer plus shared operator-header fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,browser-native-tenant-procurement.spec.ts,5,browser-native-tenant-procurement.spec.ts / ordinary signed-buyer requests retain their selected tenant without harness headers,chromium,passed,passed,1,2854,signed buyer; operator-key requests denied and audited,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,decision-trace-navigation.spec.ts,212,"decision-trace-navigation.spec.ts / consolidated Decision Trace preserves requests, keyboard use, and every deep link",chromium,passed,passed,1,2072,mocked trace routes/EventSource; UI navigation only,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,decision-trace-navigation.spec.ts,261,decision-trace-navigation.spec.ts / qualified evidence chain remains visibly human gated,chromium,passed,passed,1,353,mocked trace routes/EventSource; UI navigation only,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,artifact-security-boundary.spec.ts,21,artifact-security-boundary.spec.ts / rejected attachment remains visible and cannot become an attachment-free recommendation,chromium,passed,passed,1,740,legacy unauthenticated browser/API fixture,0,0,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,artifact-security-boundary.spec.ts,46,"artifact-security-boundary.spec.ts / malicious or incompletely inspected image is blocked, traced, and records monitoring outcome",chromium,passed,failed,1,90863,legacy unauthenticated browser/API fixture,0,0,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/^(Analysis pending|Under Review|Analysis degraded)$/)
+Expected: visible
+Timeout: 90000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 90000ms
+  - waiting for getByText(/^(Analysis pending|Under Review|Analysis degraded)$/)
+
+
+  59 |   // terminal authority states and must still expose the same trace and monitoring proof.
+  60 |   await expect(page.getByText(/^(Analysis pending|Under Review|Analysis degraded)$/))
+> 61 |     .toBeVisible({ timeout: 90_000 });
+     |      ^
+  62 |   const traceButton = page.getByTitle('Decision Trace').last();
+  63 |   await expect(traceButton).toBeVisible({ timeout: 90_000 });
+  64 |   await traceButton.click();
+    at [review-candidate]\frontend\e2e\artifact-security-boundary.spec.ts:61:6"
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,bulk-order-economics-live.spec.ts,34,"bulk-order-economics-live.spec.ts / bulk order within budget keeps one canonical role, amount and order result",chromium,passed,failed,1,607,legacy unauthenticated browser/API fixture,0,0,"Error: expect(received).toMatchObject(expected)
+
+- Expected  - 13
++ Received  +  1
+
+  Object {
+-   ""action_executed"": false,
+-   ""bulk_budget"": Object {
+-     ""budget_scope"": ""total"",
+-     ""budget_shortfall_cents"": 0,
+-     ""quantity"": 10,
+-     ""total_budget_cents"": 3000000,
+-     ""verdict"": ""fits"",
+-   },
+-   ""canonical_budget"": Object {
+-     ""budget_max"": 30000,
+-   },
+-   ""requested_quantity"": 10,
+-   ""subject_role"": ""PROCURE_SUBJECT"",
++   ""detail"": ""Invalid or missing API key"",
+  }
+
+  37 |   const answer = await send(page, 'I need 10 laptops with a total budget of AUD 30,000');
+  38 |
+> 39 |   expect(answer).toMatchObject({
+     |                  ^
+  40 |     subject_role: 'PROCURE_SUBJECT',
+  41 |     requested_quantity: 10,
+  42 |     canonical_budget: { budget_max: 30_000 },
+    at [review-candidate]\frontend\e2e\bulk-order-economics-live.spec.ts:39:18"
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,bulk-order-economics-live.spec.ts,59,bulk-order-economics-live.spec.ts / underfunded bulk order reports exact shortfall with no false fitting shelf,chromium,passed,failed,1,596,legacy unauthenticated browser/API fixture,0,0,"Error: expect(received).toMatchObject(expected)
+
+- Expected  - 15
++ Received  +  1
+
+  Object {
+-   ""action_executed"": false,
+-   ""bulk_budget"": Object {
+-     ""budget_scope"": ""total"",
+-     ""budget_shortfall_cents"": 774000,
+-     ""max_affordable_quantity"": 47,
+-     ""quantity"": 60,
+-     ""required_total_cents"": 3774000,
+-     ""total_budget_cents"": 3000000,
+-     ""verdict"": ""over_budget"",
+-   },
+-   ""canonical_budget"": Object {
+-     ""budget_max"": 30000,
+-   },
+-   ""requested_quantity"": 60,
+-   ""subject_role"": ""PROCURE_SUBJECT"",
++   ""detail"": ""Invalid or missing API key"",
+  }
+
+  62 |   const answer = await send(page, 'I need 60 laptops with a total budget of AUD 30,000');
+  63 |
+> 64 |   expect(answer).toMatchObject({
+     |                  ^
+  65 |     subject_role: 'PROCURE_SUBJECT',
+  66 |     requested_quantity: 60,
+  67 |     canonical_budget: { budget_max: 30_000 },
+    at [review-candidate]\frontend\e2e\bulk-order-economics-live.spec.ts:64:18"
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,context-retention.spec.ts,44,context-retention.spec.ts / budget context survives raise + cut across turns (one session),chromium,passed,failed,1,219,legacy unauthenticated browser/API fixture,0,0,"Error: chat/query failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  35 |     timeout: 90_000,
+  36 |   });
+> 37 |   expect(r.ok(), `chat/query failed (${r.status()})`).toBeTruthy();
+     |                                                       ^
+  38 |   return r.json();
+  39 | }
+  40 |
+    at chat ([review-candidate]\frontend\e2e\context-retention.spec.ts:37:55)
+    at [review-candidate]\frontend\e2e\context-retention.spec.ts:48:23
+    at [review-candidate]\frontend\e2e\context-retention.spec.ts:47:3"
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-browser-review,context-retention.spec.ts,79,context-retention.spec.ts / bulk quantity survives non-qty turns; a fresh amendment wins and then holds,chromium,passed,failed,1,238,legacy unauthenticated browser/API fixture,0,0,"Error: chat/query failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  35 |     timeout: 90_000,
+  36 |   });
+> 37 |   expect(r.ok(), `chat/query failed (${r.status()})`).toBeTruthy();
+     |                                                       ^
+  38 |   return r.json();
+  39 | }
+  40 |
+    at chat ([review-candidate]\frontend\e2e\context-retention.spec.ts:37:55)
+    at [review-candidate]\frontend\e2e\context-retention.spec.ts:81:14"
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,19,__user_review_buyer_memory.spec.ts / deadline corrections survive unrelated turns and reload without promising delivery,chromium,passed,passed,1,2171,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,38,__user_review_buyer_memory.spec.ts / audit real browser retains and amends quantity over five messages and reload,chromium,passed,passed,1,1770,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,75,__user_review_buyer_memory.spec.ts / recall preserves currency total budget and destination corrections,chromium,passed,passed,1,1413,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,97,__user_review_buyer_memory.spec.ts / unresolved product fit preserves quantity and asks material budget scope,chromium,passed,passed,1,740,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,114,__user_review_buyer_memory.spec.ts / audit consented external research reports unavailable without qualification,chromium,passed,passed,1,583,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,124,__user_review_buyer_memory.spec.ts / audit direct authority injection cannot grant commerce authority,chromium,passed,passed,1,459,signed buyer; operator-key requests denied and audited,0,1,
+abde83af58dae631d1782e25ef4e6ddfa993c23f,user-buyer-memory-review,__user_review_buyer_memory.spec.ts,133,__user_review_buyer_memory.spec.ts / audit twenty real turns retain amended procurement facts,chromium,passed,passed,1,5796,signed buyer; operator-key requests denied and audited,0,1,

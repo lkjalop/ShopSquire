@@ -1,0 +1,1143 @@
+source_head,profile,path,frozen_test_line,title,project,expected_status,actual_status,report_outcome,attempts,duration_ms,frozen_test_sha256,current_root_test_content_matches,first_error
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-01-artifact-security-boundary,frontend/e2e/artifact-security-boundary.spec.ts,21,artifact-security-boundary.spec.ts / rejected attachment remains visible and cannot become an attachment-free recommendation,chromium,passed,passed,expected,1,796,10a8cb5acdab820b06a9aee9fa27ac401d4c4e8401e38d41cd66a16ea8ff53d1,False,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-01-artifact-security-boundary,frontend/e2e/artifact-security-boundary.spec.ts,46,"artifact-security-boundary.spec.ts / malicious or incompletely inspected image is blocked, traced, and records monitoring outcome",chromium,passed,failed,unexpected,1,90866,10a8cb5acdab820b06a9aee9fa27ac401d4c4e8401e38d41cd66a16ea8ff53d1,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/^(Analysis pending|Under Review|Analysis degraded)$/)
+Expected: visible
+Timeout: 90000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 90000ms
+  - waiting for getByText(/^(Analysis pending|Under Review|Analysis degraded)$/)
+
+
+  59 |   // terminal authority states and must still expose the same trace and monitoring proof.
+  60 |   await expect(page.getByText(/^(Analysis pending|Under Review|Analysis degraded)$/))
+> 61 |     .toBeVisible({ timeout: 90_000 });
+     |      ^
+  62 |   const traceButton = page.getByTitle('Decision Trace').last();
+  63 |   await expect(traceButton).toBeVisible({ timeout: 90_000 });
+  64 |   await traceButton.click();
+    at [source167]\frontend\e2e\artifact-security-boundary.spec.ts:61:6"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-02-browser-native-tenant-procurement,frontend/e2e/browser-native-tenant-procurement.spec.ts,5,browser-native-tenant-procurement.spec.ts / ordinary signed-buyer requests retain their selected tenant without harness headers,chromium,passed,passed,expected,1,4384,23f9d9085f37db347f316470c5e398e53facd977ba5ebbd384723a5646efb8ab,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-03-budget-subject-rfq-live,frontend/e2e/budget-subject-rfq-live.spec.ts,29,budget-subject-rfq-live.spec.ts / software budget truth is consistent and off-catalog sourcing is explicit and draft-only,chromium,passed,passed,expected,1,2029,147ef54eb2b64d0b8de12873aee12ad1ffe8ffa886b42a1f87483130edea6be8,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-04-bulk-order-economics-live,frontend/e2e/bulk-order-economics-live.spec.ts,34,"bulk-order-economics-live.spec.ts / bulk order within budget keeps one canonical role, amount and order result",chromium,passed,failed,unexpected,1,693,6ec26573f33f27703deff1e31a60d9ad4fd97766d473887566c906782918cffa,False,"Error: expect(received).toMatchObject(expected)
+
+- Expected  - 13
++ Received  +  1
+
+  Object {
+-   ""action_executed"": false,
+-   ""bulk_budget"": Object {
+-     ""budget_scope"": ""total"",
+-     ""budget_shortfall_cents"": 0,
+-     ""quantity"": 10,
+-     ""total_budget_cents"": 3000000,
+-     ""verdict"": ""fits"",
+-   },
+-   ""canonical_budget"": Object {
+-     ""budget_max"": 30000,
+-   },
+-   ""requested_quantity"": 10,
+-   ""subject_role"": ""PROCURE_SUBJECT"",
++   ""detail"": ""Invalid or missing API key"",
+  }
+
+  37 |   const answer = await send(page, 'I need 10 laptops with a total budget of AUD 30,000');
+  38 |
+> 39 |   expect(answer).toMatchObject({
+     |                  ^
+  40 |     subject_role: 'PROCURE_SUBJECT',
+  41 |     requested_quantity: 10,
+  42 |     canonical_budget: { budget_max: 30_000 },
+    at [source167]\frontend\e2e\bulk-order-economics-live.spec.ts:39:18"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-04-bulk-order-economics-live,frontend/e2e/bulk-order-economics-live.spec.ts,59,bulk-order-economics-live.spec.ts / underfunded bulk order reports exact shortfall with no false fitting shelf,chromium,passed,failed,unexpected,1,707,6ec26573f33f27703deff1e31a60d9ad4fd97766d473887566c906782918cffa,False,"Error: expect(received).toMatchObject(expected)
+
+- Expected  - 15
++ Received  +  1
+
+  Object {
+-   ""action_executed"": false,
+-   ""bulk_budget"": Object {
+-     ""budget_scope"": ""total"",
+-     ""budget_shortfall_cents"": 774000,
+-     ""max_affordable_quantity"": 47,
+-     ""quantity"": 60,
+-     ""required_total_cents"": 3774000,
+-     ""total_budget_cents"": 3000000,
+-     ""verdict"": ""over_budget"",
+-   },
+-   ""canonical_budget"": Object {
+-     ""budget_max"": 30000,
+-   },
+-   ""requested_quantity"": 60,
+-   ""subject_role"": ""PROCURE_SUBJECT"",
++   ""detail"": ""Invalid or missing API key"",
+  }
+
+  62 |   const answer = await send(page, 'I need 60 laptops with a total budget of AUD 30,000');
+  63 |
+> 64 |   expect(answer).toMatchObject({
+     |                  ^
+  65 |     subject_role: 'PROCURE_SUBJECT',
+  66 |     requested_quantity: 60,
+  67 |     canonical_budget: { budget_max: 30_000 },
+    at [source167]\frontend\e2e\bulk-order-economics-live.spec.ts:64:18"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-05-buyer-evidence-source-live,frontend/e2e/buyer-evidence-source-live.spec.ts,8,buyer-evidence-source-live.spec.ts / buyer checks an official URL locally then explicitly authorizes canonical research,chromium,skipped,skipped,skipped,1,0,1c9a86f1e9c52bcd2154056becdaf3be7dc0ae70d531bb51bf4fe26b93c12c7a,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-06-buyer-flow,frontend/e2e/buyer-flow.spec.ts,27,buyer-flow.spec.ts / shopper storefront / T1 — search shows products with no internal ranker tags leaked to the buyer,chromium,passed,passed,expected,1,546,86460540f5aadd771e8e492abbb5c18cd1c2ea090c3256f69110eb4d9187a8ca,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-06-buyer-flow,frontend/e2e/buyer-flow.spec.ts,38,"buyer-flow.spec.ts / shopper storefront / T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)",chromium,passed,passed,expected,1,1946,86460540f5aadd771e8e492abbb5c18cd1c2ea090c3256f69110eb4d9187a8ca,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-07-buyer-only-procurement,frontend/e2e/buyer-only-procurement.spec.ts,5,buyer-only-procurement.spec.ts / a signed buyer without an operator API key retains the exact shortage draft,chromium,passed,passed,expected,1,3126,1db08c1688d237e97fe03aae7b9020a7d4041c1ae9187729f6200705ef23c4b1,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-08-canonical-ambiguous-procurement,frontend/e2e/canonical-ambiguous-procurement.spec.ts,49,canonical-ambiguous-procurement.spec.ts / ambiguous workload explores locally before optional research without cart authority,chromium,passed,failed,unexpected,1,201,417d304f47a522fe40038e9f4bb8af306a9d111933d1ed16e18169d2bb50b852,False,"Error: expect(received).not.toEqual(expected) // deep equality
+
+Expected: not """"
+
+
+  53 |   await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
+  54 |   const key = devApiKey();
+> 55 |   expect(key).not.toEqual('');
+     |                   ^
+  56 |   for (const [sku, quantity] of [['LAP-0003', 30], ['LAP-0004', 30]] as const) {
+  57 |     const seeded = await page.request.put(`/api/v1/cart/items/${sku}`, {
+  58 |       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+    at [source167]\frontend\e2e\canonical-ambiguous-procurement.spec.ts:55:19"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-09-cart-clear-outage,frontend/e2e/cart-clear-outage.spec.ts,3,cart-clear-outage.spec.ts / a failed cart clear stays visible and can recover without a false success,chromium,passed,passed,expected,1,936,f7baf21c1284be406f152fd43572582cd42a58618c71b37ae8033b3732ff1140,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-10-cart-clear-restore,frontend/e2e/cart-clear-restore.spec.ts,3,cart-clear-restore.spec.ts / clearing a real two-line cart immediately offers an exact one-time restore,chromium,passed,passed,expected,1,1144,922570b2fc03defe09bf23f9c49806bfaefb5f160ccda45d785455c962d88107,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-11-case-panel-trace-consistency,frontend/e2e/case-panel-trace-consistency.spec.ts,3,case-panel-trace-consistency.spec.ts / shopping-case panel and Decision Trace consume the same truth projection,chromium,passed,passed,expected,1,494,c1bed864823a6ff98b3eeff0ceea32a2ad58bd8f87c4e3818a52579cf66d984d,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-12-context-retention,frontend/e2e/context-retention.spec.ts,44,context-retention.spec.ts / budget context survives raise + cut across turns (one session),chromium,passed,failed,unexpected,1,212,591cb6b501b27b75112c85fdbae8d28a12765825bb2a227f682526ae15ff7d3e,False,"Error: chat/query failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  35 |     timeout: 90_000,
+  36 |   });
+> 37 |   expect(r.ok(), `chat/query failed (${r.status()})`).toBeTruthy();
+     |                                                       ^
+  38 |   return r.json();
+  39 | }
+  40 |
+    at chat ([source167]\frontend\e2e\context-retention.spec.ts:37:55)
+    at [source167]\frontend\e2e\context-retention.spec.ts:48:23
+    at [source167]\frontend\e2e\context-retention.spec.ts:47:3"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-12-context-retention,frontend/e2e/context-retention.spec.ts,79,context-retention.spec.ts / bulk quantity survives non-qty turns; a fresh amendment wins and then holds,chromium,passed,failed,unexpected,1,213,591cb6b501b27b75112c85fdbae8d28a12765825bb2a227f682526ae15ff7d3e,False,"Error: chat/query failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  35 |     timeout: 90_000,
+  36 |   });
+> 37 |   expect(r.ok(), `chat/query failed (${r.status()})`).toBeTruthy();
+     |                                                       ^
+  38 |   return r.json();
+  39 | }
+  40 |
+    at chat ([source167]\frontend\e2e\context-retention.spec.ts:37:55)
+    at [source167]\frontend\e2e\context-retention.spec.ts:81:14"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-13-conversational-integrity,frontend/e2e/conversational-integrity.spec.ts,48,conversational-integrity.spec.ts / prospective arrival request reaches fulfilment instead of post-purchase refusal,chromium,passed,failed,unexpected,1,60773,ddeda9d415c0edf1d14f54bc689048d14613516814d223b8da42ec162ecf5d46,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 60000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 60000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  53 |
+  54 |   await sendToChat(page, 'I need gaming laptops for a studio.');
+> 55 |   await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 60_000 });
+     |                                                           ^
+  56 |
+  57 |   const response = await sendToChat(page, 'I need 15 of the top one. When can they all arrive?');
+  58 |   expect(response.ok()).toBe(true);
+    at [source167]\frontend\e2e\conversational-integrity.spec.ts:55:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-13-conversational-integrity,frontend/e2e/conversational-integrity.spec.ts,63,conversational-integrity.spec.ts / ordinary gaming catalog exploration renders products without requiring research,chromium,passed,failed,unexpected,1,488,ddeda9d415c0edf1d14f54bc689048d14613516814d223b8da42ec162ecf5d46,True,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: true
+Received: false
+
+  68 |
+  69 |   const response = await sendToChat(page, 'help me with a gaming laptop? is 4000 ok?');
+> 70 |   expect(response.ok()).toBe(true);
+     |                         ^
+  71 |   await expect(page.getByRole('button', { name: /^(Add|Add to Cart)$/i }).first()).toBeVisible({ timeout: 60_000 });
+  72 |   await expect(page.getByTestId('ambiguity-exploration')).toHaveCount(0);
+  73 |   await expect(page.getByText(/needs current external requirements before I can qualify products/i)).toHaveCount(0);
+    at [source167]\frontend\e2e\conversational-integrity.spec.ts:70:25"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-13-conversational-integrity,frontend/e2e/conversational-integrity.spec.ts,76,conversational-integrity.spec.ts / commercial turns remain bound to an ambiguous case and preserve its purpose,chromium,passed,failed,unexpected,1,60772,ddeda9d415c0edf1d14f54bc689048d14613516814d223b8da42ec162ecf5d46,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 60000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 60000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  83 |
+  84 |   const panel = page.getByTestId('ambiguity-exploration');
+> 85 |   await expect(panel).toBeVisible({ timeout: 60_000 });
+     |                       ^
+  86 |   const caseId = initialAnswer.shopping_case_id || initialAnswer.ambiguity_exploration?.case_id;
+  87 |   expect(caseId).toMatch(/^sc-/);
+  88 |
+    at [source167]\frontend\e2e\conversational-integrity.spec.ts:85:23"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-13-conversational-integrity,frontend/e2e/conversational-integrity.spec.ts,116,conversational-integrity.spec.ts / a product swap preserves the CAD purpose and quantity,chromium,passed,failed,unexpected,1,563,ddeda9d415c0edf1d14f54bc689048d14613516814d223b8da42ec162ecf5d46,True,"TypeError: expect(received).toMatch(expected)
+
+Matcher error: received value must be a string
+
+Received has value: undefined
+
+  123 |   const initialAnswer = await latestAnswer(initialResponse);
+  124 |   const caseId = initialAnswer.shopping_case_id || initialAnswer.ambiguity_exploration?.case_id;
+> 125 |   expect(caseId).toMatch(/^sc-/);
+      |                  ^
+  126 |
+  127 |   const swapResponse = await sendToChat(
+  128 |     page,
+    at [source167]\frontend\e2e\conversational-integrity.spec.ts:125:18"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-14-conversational-spatiotemporal-certificate,frontend/e2e/conversational-spatiotemporal-certificate.spec.ts,7,conversational-spatiotemporal-certificate.spec.ts / two-turn procurement decision lab renders and seals the canonical certificate,chromium,passed,failed,unexpected,1,62075,f928d28bdcd8e5683971bb72c62f2f7d59e503f79746ca867821c5e83199599f,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('procurement-certification-showcase')
+Expected: visible
+Timeout: 60000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 60000ms
+  - waiting for getByTestId('procurement-certification-showcase')
+
+
+   9 |   await page.goto('/?surface=procurement-certification');
+  10 |   const showcase = page.getByTestId('procurement-certification-showcase');
+> 11 |   await expect(showcase).toBeVisible({ timeout: 60_000 });
+     |                          ^
+  12 |   await expect(showcase).toContainText('Sydney');
+  13 |   await expect(showcase).toContainText('45 units');
+  14 |   await expect(showcase).toContainText('Perth');
+    at [source167]\frontend\e2e\conversational-spatiotemporal-certificate.spec.ts:11:26"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-15-decision-run-disturbance,frontend/e2e/decision-run-disturbance.spec.ts,4,decision-run-disturbance.spec.ts / inventory disturbance projects selective invalidation and unresolved delivery conflict,chromium,passed,passed,expected,1,581,d2c3a58b0e4f420a03100994196b2080dc5846299f5d92a304e03e992c3ba5b6,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-16-decision-trace-live-audit,frontend/e2e/decision-trace-live-audit.spec.ts,21,"decision-trace-live-audit.spec.ts / live Decision Trace is durable, factual, and honest across all leaves",chromium,passed,failed,unexpected,1,234,32de61c36d3739d96b7ed45125cfb23e4f0de2494df888f64ce7bd43f1d3483f,True,"Error: seed failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  30 |     timeout: 60_000,
+  31 |   });
+> 32 |   expect(seeded.ok(), `seed failed (${seeded.status()})`).toBeTruthy();
+     |                                                           ^
+  33 |   const recommendation = await seeded.json();
+  34 |   const traceId = String(recommendation.trace_id || recommendation.decision_trace_id || '');
+  35 |   expect(traceId).not.toBe('');
+    at [source167]\frontend\e2e\decision-trace-live-audit.spec.ts:32:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-17-decision-trace-navigation,frontend/e2e/decision-trace-navigation.spec.ts,212,"decision-trace-navigation.spec.ts / consolidated Decision Trace preserves requests, keyboard use, and every deep link",chromium,passed,passed,expected,1,2033,717885bf40e9d179532a1aedbb2af14012c015fb922a0dd1318f56a6a8fca5e1,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-17-decision-trace-navigation,frontend/e2e/decision-trace-navigation.spec.ts,261,decision-trace-navigation.spec.ts / qualified evidence chain remains visibly human gated,chromium,passed,passed,expected,1,317,717885bf40e9d179532a1aedbb2af14012c015fb922a0dd1318f56a6a8fca5e1,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-18-decision-trace-procurement-operations,frontend/e2e/decision-trace-procurement-operations.spec.ts,4,"decision-trace-procurement-operations.spec.ts / Commercial Journey renders governed supplier pressure, wave and route evidence",chromium,passed,passed,expected,1,601,6c0c73b1ec09acd3eb64bcca36802cb958b1e67952d5c30bb6c68ef3b4e2c9b0,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-19-decision-trace-temporal-contact,frontend/e2e/decision-trace-temporal-contact.spec.ts,27,decision-trace-temporal-contact.spec.ts / weekend email transmits while supplier response SLA remains paused,chromium,passed,passed,expected,1,470,8af859a5b8adf00eb688ecb3fb1f3993cf86d21e2928d15200c1ec1fb70c0489,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-19-decision-trace-temporal-contact,frontend/e2e/decision-trace-temporal-contact.spec.ts,40,decision-trace-temporal-contact.spec.ts / phone-only supplier stays queued and opens a procurement human room,chromium,passed,passed,expected,1,338,8af859a5b8adf00eb688ecb3fb1f3993cf86d21e2928d15200c1ec1fb70c0489,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-20-fit-deadline-trace,frontend/e2e/fit-deadline-trace.spec.ts,10,"fit-deadline-trace.spec.ts / typed fit, quantity and deadline semantics produce governed alternatives",chromium,passed,failed,unexpected,1,20891,dbc2fe7f6a4f8985fa28bf9614a12a5967864221590cea6a6cd9251bf6b70b69,True,"Error: expect(locator).toContainText(expected) failed
+
+Locator: getByTestId('buyer-research-status')
+Expected pattern: /external research has not produced evidence/i
+Timeout: 20000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toContainText"" with timeout 20000ms
+  - waiting for getByTestId('buyer-research-status')
+
+
+  20 |
+  21 |   await send(page, 'I need 30 laptops in 2 days to run Factory I/O for PLC simulation.');
+> 22 |   await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
+     |                                                           ^
+  23 |   await expect(page.getByRole('region', { name: 'Provisional product shelves' })).toBeVisible();
+  24 |
+  25 |   await page.getByRole('button', { name: 'Research approved sources' }).click();
+    at [source167]\frontend\e2e\fit-deadline-trace.spec.ts:22:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: exact-1,chromium,passed,failed,unexpected,1,30655,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: exact-2,chromium,passed,failed,unexpected,1,30732,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: exact-3,chromium,passed,failed,unexpected,1,30733,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: personal-one,chromium,passed,failed,unexpected,1,30542,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: fleet-thirty-days,chromium,passed,failed,unexpected,1,30655,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: fleet-two-days,chromium,passed,failed,unexpected,1,30718,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: budgeted-fleet,chromium,passed,failed,unexpected,1,30665,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-21-five-year-fleet-consent-regression,frontend/e2e/five-year-fleet-consent-regression.spec.ts,55,five-year-fleet-consent-regression.spec.ts / five-year fleet consent is consequential and bounded: named-model,chromium,passed,failed,unexpected,1,30710,b7b417351e666490b8e60739b05bb35d024e618d4de2a0095e1f910039b64fe8,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  40 |
+  41 | async function createCase(page: Page, prompt: string) {
+> 42 |   const responsePromise = page.waitForResponse(
+     |                                ^
+  43 |     response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
+  44 |     { timeout: 30_000 },
+  45 |   );
+    at createCase ([source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:42:32)
+    at [source167]\frontend\e2e\five-year-fleet-consent-regression.spec.ts:58:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-22-governed-conversation-lifecycle,frontend/e2e/governed-conversation-lifecycle.spec.ts,33,governed-conversation-lifecycle.spec.ts / 20-turn corrections and pronouns retain one browser session and explicit product anchor,chromium,passed,passed,expected,1,1926,8d5db68492d02d57da54d2c78240c0a544d8a551805737fcff5f0448e3d2fdbd,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-23-legacy-review-failure,frontend/e2e/legacy-review-failure.spec.ts,4,legacy-review-failure.spec.ts / failed requirement acceptance never becomes a completed review,chromium,passed,passed,expected,1,727,f05e8e94924a03988b6c4ae2a10d0017cc6a572bfa551da4c19ea3e87defef1a,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-24-live-acceptance-budget,frontend/e2e/live-acceptance-budget.spec.ts,4,live-acceptance-budget.spec.ts / live manual acceptance preserves case budget and cannot verify partial evidence (stretch=false),chromium,passed,failed,unexpected,1,151110,28115793d66b71d4a588005fb1d1b755d49dc5e9765bc8e3d3eba4eea72d62ef,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByRole('button', { name: 'Enter specifications', exact: true })
+Expected: visible
+Timeout: 150000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 150000ms
+  - waiting for getByRole('button', { name: 'Enter specifications', exact: true })
+
+
+  14 |   await page.getByPlaceholder('Type your message...').press('Enter');
+  15 |   const manual = page.getByRole('button', { name: 'Enter specifications', exact: true });
+> 16 |   await expect(manual).toBeVisible({ timeout: 150_000 });
+     |                        ^
+  17 |   await manual.click();
+  18 |   await page.getByRole('textbox', { name: 'Manual specifications' }).fill('RAM 32GB minimum');
+  19 |   await page.getByRole('button', { name: 'Review extracted requirements', exact: true }).click();
+    at [source167]\frontend\e2e\live-acceptance-budget.spec.ts:16:24"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-24-live-acceptance-budget,frontend/e2e/live-acceptance-budget.spec.ts,4,live-acceptance-budget.spec.ts / live manual acceptance preserves case budget and cannot verify partial evidence (stretch=true),chromium,passed,failed,unexpected,1,151184,28115793d66b71d4a588005fb1d1b755d49dc5e9765bc8e3d3eba4eea72d62ef,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByRole('button', { name: 'Enter specifications', exact: true })
+Expected: visible
+Timeout: 150000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 150000ms
+  - waiting for getByRole('button', { name: 'Enter specifications', exact: true })
+
+
+  14 |   await page.getByPlaceholder('Type your message...').press('Enter');
+  15 |   const manual = page.getByRole('button', { name: 'Enter specifications', exact: true });
+> 16 |   await expect(manual).toBeVisible({ timeout: 150_000 });
+     |                        ^
+  17 |   await manual.click();
+  18 |   await page.getByRole('textbox', { name: 'Manual specifications' }).fill('RAM 32GB minimum');
+  19 |   await page.getByRole('button', { name: 'Review extracted requirements', exact: true }).click();
+    at [source167]\frontend\e2e\live-acceptance-budget.spec.ts:16:24"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,43,"live-buyer-regression-matrix.spec.ts / covered gaming, university, and corporate searches stay on the normal buyer path",chromium,passed,failed,unexpected,1,478,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"Error: expect(received).toMatch(expected)
+
+Expected pattern: /option|match|gaming|laptop|budget/i
+Received string:  """"
+
+  73 |     const { context, page } = await openBuyer(browser, scenario.label);
+  74 |     const answer = await send(page, scenario.query);
+> 75 |     expect(String(answer.assistant_message || '')).toMatch(scenario.answer);
+     |                                                    ^
+  76 |     expect(answer.products?.length || 0).toBeGreaterThan(0);
+  77 |     expect((answer.products || []).slice(0, 3).map((item: any) => item.name || item.title).join(' ')).toMatch(scenario.product);
+  78 |     if (scenario.label === 'gaming') {
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:75:52"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,93,live-buyer-regression-matrix.spec.ts / a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled research with buyer authorization,chromium,passed,failed,unexpected,1,683,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"Error: expect(received).toBeTruthy()
+
+Received: undefined
+
+  106 |   );
+  107 |   const emulateCaseId = emulate.shopping_case_id || emulate.ambiguity_exploration?.case_id;
+> 108 |   expect(emulateCaseId).toBeTruthy();
+      |                         ^
+  109 |   if (gaming.shopping_case_id) expect(emulateCaseId).not.toBe(gaming.shopping_case_id);
+  110 |   expect(emulate.shopping_case_retained_purpose).toMatch(/Rockwell Emulate3D/i);
+  111 |   expect(emulate.decision?.subject_action).toBe('switch');
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:108:25 | Error: page.waitForRequest: Test ended.
+
+   97 |   expect(gaming.ambiguity_exploration).toBeFalsy();
+   98 |
+>  99 |   const researchRequest = page.waitForRequest(
+      |                                ^
+  100 |     request => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(request.url()),
+  101 |     { timeout: 60_000 },
+  102 |   );
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:99:32"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,171,live-buyer-regression-matrix.spec.ts / BG3 affordability plus Emulate3D additive workload retains budget and researches the combined case,chromium,passed,failed,unexpected,1,445,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: 3000
+Received: undefined
+
+  174 |
+  175 |   const bg3 = await send(page, ""Is AUD 3,000 excessive for Baldur's Gate 3"");
+> 176 |   expect(bg3.confirmed_slots?.budget_max).toBe(3000);
+      |                                           ^
+  177 |   expect(bg3.price_intent).toMatchObject({
+  178 |     mode: 'affordability_check', target: 3000, hard_ceiling: 3000,
+  179 |   });
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:176:43"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,256,"live-buyer-regression-matrix.spec.ts / an unseen Steam title resolves live identity, release state, requirements, and catalog fit",chromium,skipped,skipped,skipped,1,2,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,293,live-buyer-regression-matrix.spec.ts / natural workload replacements advance one revision and never project the prior subject,chromium,passed,failed,unexpected,1,432,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"Error: expect(received).toMatchObject(expected)
+
+Matcher error: received value must be a non-null object
+
+Received has value: undefined
+
+  296 |
+  297 |   const bg3 = await send(page, ""Is AUD 3,000 excessive for Baldur's Gate 3?"");
+> 298 |   expect(bg3.workload_authorization?.evidence?.[0]).toMatchObject({
+      |                                                     ^
+  299 |     canonical_title: ""Baldur's Gate 3"",
+  300 |     provider_id: 'steam',
+  301 |     requirements_completeness: 'minimum_and_recommended',
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:298:53"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,391,live-buyer-regression-matrix.spec.ts / chat-pasted official URL and specifications enter their governed review paths,chromium,passed,failed,unexpected,1,502,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"TypeError: Cannot read properties of undefined (reading 'resolution')
+
+  400 |   const sourcePayload = sourceAnswer.buyer_evidence_source_resolution;
+  401 |   const input = page.getByPlaceholder('Type your message...');
+> 402 |   expect(sourcePayload.resolution?.status).toBe('resolved');
+      |                        ^
+  403 |   expect(sourcePayload.resolution?.selected_source_id).toBe(
+  404 |     'rockwell_emulate3d_official_requirements',
+  405 |   );
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:402:24"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-25-live-buyer-regression-matrix,frontend/e2e/live-buyer-regression-matrix.spec.ts,461,live-buyer-regression-matrix.spec.ts / light and strenuous Emulate3D scopes remain separate and fail closed before evidence,chromium,passed,failed,unexpected,1,456,04b6c5d093e40ac65643b6d29234c4c3ad79399634597fc071d6de4861d817db,True,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: ""I need a mobile laptop for light Rockwell Emulate 3D training with one small PLC demo cell.""
+Received: undefined
+
+  469 |     const { context, page } = await openBuyer(browser, `emulate3d-scale-${index}`);
+  470 |     const answer = await send(page, prompt);
+> 471 |     expect(answer.ambiguity_exploration?.retained_purpose).toBe(prompt);
+      |                                                            ^
+  472 |     expect(answer.products || []).toHaveLength(0);
+  473 |     expect(answer.cart_mutation || 'not_authorized').not.toBe('executed');
+  474 |     expect(answer.ambiguity_exploration?.source_candidate_ids?.[0]).toBe(
+    at [source167]\frontend\e2e\live-buyer-regression-matrix.spec.ts:471:60"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-26-live-external-ot-research-certification,frontend/e2e/live-external-ot-research-certification.spec.ts,28,live-external-ot-research-certification.spec.ts / live OT research stays in one case and exposes real provider receipts,chromium,skipped,skipped,skipped,1,187,28e397ce9f6510b39f53aa7e802d72c470694e3fff035370e13f0f223b768342,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-27-live-external-search-battery,frontend/e2e/live-external-search-battery.spec.ts,86,live-external-search-battery.spec.ts / A-H live external intelligence battery is revision-bound and fail-closed,chromium,skipped,skipped,skipped,1,1,89eb5c0d23e24475f050055b89eeeb6b19bbbecf97fdb4373d2d7a90243d3896,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,83,live-novel-title-intelligence.spec.ts / evidence delivery preserves official values without qualifying partial requirements,chromium,skipped,skipped,skipped,1,1,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,123,live-novel-title-intelligence.spec.ts / scope and stock: chair,chromium,skipped,skipped,skipped,1,1,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,123,live-novel-title-intelligence.spec.ts / scope and stock: unrelated,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,123,live-novel-title-intelligence.spec.ts / scope and stock: bulk,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,154,live-novel-title-intelligence.spec.ts / evidence delivery never binds FreeCAD to AutoCAD requirements,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,179,live-novel-title-intelligence.spec.ts / unseen title mio resolves without an application alias,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,179,live-novel-title-intelligence.spec.ts / unseen title pragmata resolves without an application alias,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,179,live-novel-title-intelligence.spec.ts / unseen title dawnwalker resolves without an application alias,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,237,live-novel-title-intelligence.spec.ts / non-instructive continuation resolves its clean subject span,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-28-live-novel-title-intelligence,frontend/e2e/live-novel-title-intelligence.spec.ts,266,live-novel-title-intelligence.spec.ts / low-confidence cited identity asks for confirmation without fetching,chromium,skipped,skipped,skipped,1,0,edec571674e4fa674179d9b32a63b0d2c66a5035a91c4c01fd5c247d5843f9aa,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-29-live-procurement-disturbance-certificate,frontend/e2e/live-procurement-disturbance-certificate.spec.ts,8,live-procurement-disturbance-certificate.spec.ts / real backend seals a topology-neutral side-effect-free disturbance matrix,chromium,skipped,skipped,skipped,1,0,d5fd6f0cdd0062482d1ff5909235ed939e4932d9a4cc0c4406ae3442f323992b,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-30-live-turn-trace-continuity,frontend/e2e/live-turn-trace-continuity.spec.ts,37,live-turn-trace-continuity.spec.ts / live category and quantity turns retain their own trace and recorded history,chromium,passed,failed,unexpected,1,181198,cc63217b78d8a324da9210081f7df3bf413e648c84fef8eef0e4c4dc6d994600,False,"Error: No terminal turn outcome
+
+  15 |   let timer: ReturnType<typeof setTimeout>;
+  16 |   const answer = new Promise<any>((resolve, reject) => {
+> 17 |     timer = setTimeout(() => reject(new Error('No terminal turn outcome')), 180_000);
+     |                                     ^
+  18 |     handler = async response => {
+  19 |       if (!/\/chat\/(query|stream)|\/operations\//.test(response.url())) return;
+  20 |       try {
+    at Timeout.<anonymous> ([source167]\frontend\e2e\live-turn-trace-continuity.spec.ts:17:37)"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-31-live-unresolved-purchase-boundary,frontend/e2e/live-unresolved-purchase-boundary.spec.ts,11,live-unresolved-purchase-boundary.spec.ts / live preflight cannot replace executed provider requirements,chromium,passed,failed,unexpected,1,1096,b2d26e12875a231cc16cb25b096b38bbd1e82455bf8346f4619e8e7a81ed44f2,False,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: false
+Received: true
+
+  17 |   const provider = evidence.find((item: any) => item.app_id === '1086940');
+  18 |   expect(provider).toBeDefined();
+> 19 |   expect(provider.cached).toBe(false);
+     |                           ^
+  20 |   expect(provider.live_allowed).toBe(true);
+  21 |   const attributes = provider.compiled_requirements.map((claim: any) => claim.attribute_key);
+  22 |   expect(attributes).toEqual(expect.arrayContaining(['cpu_model', 'gpu_model']));
+    at [source167]\frontend\e2e\live-unresolved-purchase-boundary.spec.ts:19:27"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-31-live-unresolved-purchase-boundary,frontend/e2e/live-unresolved-purchase-boundary.spec.ts,30,live-unresolved-purchase-boundary.spec.ts / live complete-evidence qualified-product delivery gate,chromium,passed,failed,unexpected,1,782,b2d26e12875a231cc16cb25b096b38bbd1e82455bf8346f4619e8e7a81ed44f2,False,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: ""complete""
+Received: ""partial""
+
+  36 |   await info.attach('positive-delivery-outcome', { body: JSON.stringify(terminal), contentType: 'application/json' });
+  37 |   expect(terminal.research_outcome.accepted_claim_count).toBeGreaterThan(0);
+> 38 |   expect(terminal.research_outcome.requirement_completeness).toBe('complete');
+     |                                                              ^
+  39 |   expect(terminal.research_outcome.catalog_authority).toBe('permitted');
+  40 |   const qualified = (terminal.product_shelves?.shelves || []).flatMap((shelf: any) => [...shelf.initial, ...shelf.remaining])
+  41 |     .filter((item: any) => item.fit_status === 'qualified');
+    at [source167]\frontend\e2e\live-unresolved-purchase-boundary.spec.ts:38:62"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-31-live-unresolved-purchase-boundary,frontend/e2e/live-unresolved-purchase-boundary.spec.ts,46,live-unresolved-purchase-boundary.spec.ts / approximate budget keeps its literal anchor without automatic stretch,chromium,passed,passed,expected,1,1440,b2d26e12875a231cc16cb25b096b38bbd1e82455bf8346f4619e8e7a81ed44f2,False,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-31-live-unresolved-purchase-boundary,frontend/e2e/live-unresolved-purchase-boundary.spec.ts,70,live-unresolved-purchase-boundary.spec.ts / held workload cannot answer a new unresolved purchase,chromium,passed,failed,unexpected,1,605,b2d26e12875a231cc16cb25b096b38bbd1e82455bf8346f4619e8e7a81ed44f2,False,"Error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received:   0
+
+  77 |   await page.getByRole('button', { name: 'Ask Me!', exact: true }).click();
+  78 |   const first = await send(page, 'I need a laptop under AUD 3000 that can run Rockwell Emulate3D locally');
+> 79 |   expect(first.terminal_outcome.research_outcome.held_claim_count).toBeGreaterThan(0);
+     |                                                                    ^
+  80 |   const second = await send(page, 'actually i need something with better disaster recovery like a raid 5? what else to buy?');
+  81 |   const terminal = second.terminal_outcome;
+  82 |   await info.attach('boundary-outcomes', { body: JSON.stringify({ first: first.terminal_outcome, second: terminal }), contentType: 'application/json' });
+    at [source167]\frontend\e2e\live-unresolved-purchase-boundary.spec.ts:79:68"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-32-market-adaptation,frontend/e2e/market-adaptation.spec.ts,54,"market-adaptation.spec.ts / adaptive storefront — strong signal adapts, weak signal is governed, clearing reverts",chromium,passed,failed,unexpected,1,226,b3c837d1fd544e21f69e61ded09760b9bbec57035fa0f11256e49505881db4bd,True,"Error: demo signal failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  40 |     data: { direction, confidence, severity },
+  41 |   });
+> 42 |   expect(response.ok(), `demo signal failed (${response.status()})`).toBeTruthy();
+     |                                                                      ^
+  43 |   return response.json();
+  44 | }
+  45 |
+    at seedDemand ([source167]\frontend\e2e\market-adaptation.spec.ts:42:70)
+    at [source167]\frontend\e2e\market-adaptation.spec.ts:56:20
+    at [source167]\frontend\e2e\market-adaptation.spec.ts:55:3"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-33-model-offline-turn-outcome,frontend/e2e/model-offline-turn-outcome.spec.ts,29,model-offline-turn-outcome.spec.ts / Ollama offline preserves canonical order truth and fails closed,chromium,skipped,skipped,skipped,1,0,a27e7863d2035098027b77145f5218b5b4a3da431c032a65ef1df5c085033cd4,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-34-official-research-authorization,frontend/e2e/official-research-authorization.spec.ts,25,official-research-authorization.spec.ts / production-enrolled official evidence compiles into product authorization under one trace,chromium,skipped,skipped,skipped,1,0,a62556bcc2072f0e1da0024df63a5fa21cdbb51b1526df54b3734b52adcc12f5,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-35-open-world-unseen-live-matrix,frontend/e2e/open-world-unseen-live-matrix.spec.ts,22,open-world-unseen-live-matrix.spec.ts / unseen 1: consent dispatches free discovery without granting authority,chromium,passed,failed,unexpected,1,65683,7dcd9d0a30de7de246b22f25f246b105abc73553d1ee6fc542e6c9983f24f281,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  28 |
+  29 |     const exploration = page.getByTestId('ambiguity-exploration');
+> 30 |     await expect(exploration).toBeVisible({ timeout: 65_000 });
+     |                               ^
+  31 |     await expect(exploration.getByTestId('buyer-research-status'))
+  32 |       .toContainText(/external research has not produced evidence/i);
+  33 |     await expect(exploration).toContainText(/external calls: 0/i);
+    at [source167]\frontend\e2e\open-world-unseen-live-matrix.spec.ts:30:31"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-35-open-world-unseen-live-matrix,frontend/e2e/open-world-unseen-live-matrix.spec.ts,22,open-world-unseen-live-matrix.spec.ts / unseen 2: consent dispatches free discovery without granting authority,chromium,passed,failed,unexpected,1,65837,7dcd9d0a30de7de246b22f25f246b105abc73553d1ee6fc542e6c9983f24f281,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  28 |
+  29 |     const exploration = page.getByTestId('ambiguity-exploration');
+> 30 |     await expect(exploration).toBeVisible({ timeout: 65_000 });
+     |                               ^
+  31 |     await expect(exploration.getByTestId('buyer-research-status'))
+  32 |       .toContainText(/external research has not produced evidence/i);
+  33 |     await expect(exploration).toContainText(/external calls: 0/i);
+    at [source167]\frontend\e2e\open-world-unseen-live-matrix.spec.ts:30:31"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-35-open-world-unseen-live-matrix,frontend/e2e/open-world-unseen-live-matrix.spec.ts,22,open-world-unseen-live-matrix.spec.ts / unseen 3: consent dispatches free discovery without granting authority,chromium,passed,failed,unexpected,1,65698,7dcd9d0a30de7de246b22f25f246b105abc73553d1ee6fc542e6c9983f24f281,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  28 |
+  29 |     const exploration = page.getByTestId('ambiguity-exploration');
+> 30 |     await expect(exploration).toBeVisible({ timeout: 65_000 });
+     |                               ^
+  31 |     await expect(exploration.getByTestId('buyer-research-status'))
+  32 |       .toContainText(/external research has not produced evidence/i);
+  33 |     await expect(exploration).toContainText(/external calls: 0/i);
+    at [source167]\frontend\e2e\open-world-unseen-live-matrix.spec.ts:30:31"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-35-open-world-unseen-live-matrix,frontend/e2e/open-world-unseen-live-matrix.spec.ts,22,open-world-unseen-live-matrix.spec.ts / unseen 4: consent dispatches free discovery without granting authority,chromium,passed,failed,unexpected,1,65804,7dcd9d0a30de7de246b22f25f246b105abc73553d1ee6fc542e6c9983f24f281,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  28 |
+  29 |     const exploration = page.getByTestId('ambiguity-exploration');
+> 30 |     await expect(exploration).toBeVisible({ timeout: 65_000 });
+     |                               ^
+  31 |     await expect(exploration.getByTestId('buyer-research-status'))
+  32 |       .toContainText(/external research has not produced evidence/i);
+  33 |     await expect(exploration).toContainText(/external calls: 0/i);
+    at [source167]\frontend\e2e\open-world-unseen-live-matrix.spec.ts:30:31"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-35-open-world-unseen-live-matrix,frontend/e2e/open-world-unseen-live-matrix.spec.ts,22,open-world-unseen-live-matrix.spec.ts / unseen 5: consent dispatches free discovery without granting authority,chromium,passed,failed,unexpected,1,65815,7dcd9d0a30de7de246b22f25f246b105abc73553d1ee6fc542e6c9983f24f281,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  28 |
+  29 |     const exploration = page.getByTestId('ambiguity-exploration');
+> 30 |     await expect(exploration).toBeVisible({ timeout: 65_000 });
+     |                               ^
+  31 |     await expect(exploration.getByTestId('buyer-research-status'))
+  32 |       .toContainText(/external research has not produced evidence/i);
+  33 |     await expect(exploration).toContainText(/external calls: 0/i);
+    at [source167]\frontend\e2e\open-world-unseen-live-matrix.spec.ts:30:31"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,80,open-world-workload-regression.spec.ts / novel suitability request stays provisional and exposes a durable research plan,chromium,passed,failed,unexpected,1,708,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"Error: expect(received).not.toBe(expected) // Object.is equality
+
+Expected: not """"
+
+  94 |   );
+  95 |   const unresolvedTraceId = String(unresolved.decision_trace_id || unresolved.trace_id || '');
+> 96 |   expect(unresolvedTraceId).not.toBe('');
+     |                                 ^
+  97 |   expect(unresolved.qualification_authority ?? 'none').toBe('none');
+  98 |
+  99 |   await expect(page.getByTestId('buyer-research-status')).toContainText(
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:96:33"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,133,open-world-workload-regression.spec.ts / held-out future-game alias resolves identity but cannot invent fit or budget sufficiency,chromium,passed,failed,unexpected,1,665,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: ""blocked""
+Received: undefined
+
+  147 |   expect(products).toEqual([]);
+  148 |   expect(String(result.assistant_message || result.message || '')).not.toMatch(/\b(ample|enough|insufficient)\b/i);
+> 149 |   expect(result.execution_state_envelope?.catalog_authority).toBe('blocked');
+      |                                                              ^
+  150 |   expect(result.execution_state_envelope?.commerce_authority).toBe('none');
+  151 |   // The exact utterance does not itself grant network authority. A deployment
+  152 |   // may grant it through an enrolled tenant auto-research policy; identity can
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:149:62"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,195,open-world-workload-regression.spec.ts / first-turn Emulate3D URL creates its case and source-security receipt without a bridge race,chromium,passed,failed,unexpected,1,746,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TypeError: Cannot read properties of undefined (reading 'case_id')
+
+  209 |   const source = result.buyer_evidence_source_resolution;
+  210 |
+> 211 |   expect(source.case_id).toBe(result.ambiguity_exploration.case_id);
+      |                 ^
+  212 |   expect(source.resolution.status).toBe('resolved');
+  213 |   expect(source.resolution.selected_source_id).toBe('rockwell_emulate3d_official_requirements');
+  214 |   expect(source.research_status).toMatch(/not_authorized|claims_pending_review/);
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:211:17"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,245,open-world-workload-regression.spec.ts / digital twin to Heroes III Remake supersedes evidence and consent but retains budget,chromium,passed,failed,unexpected,1,683,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TypeError: Cannot read properties of undefined (reading 'case_id')
+
+  255 |     'I need an AUD 3000 computer for a digital twin. Link: https://store.sim3d.com/demo3d_2025/system_requirements',
+  256 |     true);
+> 257 |   const firstCase = first.ambiguity_exploration.case_id;
+      |                                                 ^
+  258 |   expect(first.buyer_evidence_source_resolution.resolution.status).toBe('resolved');
+  259 |
+  260 |   const switched = await send(page,
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:257:49"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,278,open-world-workload-regression.spec.ts / Heroes III Remake to BG3 resolves the new canonical Steam identity,chromium,passed,failed,unexpected,1,735,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TypeError: Cannot read properties of undefined (reading 'case_id')
+
+  287 |   const heroes = await send(page,
+  288 |     'I want a laptop to play the new remastered Heroes of Might and Magic 3. Is AUD 2500 enough?', true);
+> 289 |   const heroesCase = heroes.ambiguity_exploration.case_id;
+      |                                                   ^
+  290 |   const bg3 = await send(page,
+  291 |     ""What about Baldur's Gate 3? You may check the enrolled official requirements."", true);
+  292 |   expect(bg3.ambiguity_exploration?.case_id || bg3.shopping_case_id).not.toBe(heroesCase);
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:289:51"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,304,open-world-workload-regression.spec.ts / unenrolled Larian URL is rejected with a visible zero-fetch security receipt,chromium,passed,failed,unexpected,1,764,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TypeError: Cannot read properties of undefined (reading 'resolution')
+
+  315 |     true);
+  316 |   const source = result.buyer_evidence_source_resolution;
+> 317 |   expect(source.resolution.status).toBe('not_enrolled');
+      |                 ^
+  318 |   expect(source.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+  319 |   expect(JSON.stringify(source)).not.toContain('do-not-store');
+  320 |   expect(source.source_intake_certificate.security).toMatchObject({
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:317:17"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,332,open-world-workload-regression.spec.ts / private-IP source is blocked before fetch with one visible SSRF receipt,chromium,passed,failed,unexpected,1,584,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TypeError: Cannot read properties of undefined (reading 'resolution')
+
+  342 |     'I need a laptop. Inspect https://127.0.0.1/admin?token=do-not-store', true);
+  343 |   const source = result.buyer_evidence_source_resolution;
+> 344 |   expect(source.resolution.status).toBe('invalid');
+      |                 ^
+  345 |   expect(source.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+  346 |   expect(JSON.stringify(source)).not.toContain('do-not-store');
+  347 |   expect(source.source_intake_certificate.security).toMatchObject({
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:344:17"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,369,open-world-workload-regression.spec.ts / demo URL policy strips ad tracking and rejects a purpose-mismatched community page,chromium,passed,failed,unexpected,1,654,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"Error: expect(received).toMatchObject(expected)
+
+Matcher error: received value must be a non-null object
+
+Received has value: undefined
+
+  380 |     + 'https://www.cupix.com/home-1?utm_source=google&utm_medium=cpc&gclid=demo-secret', true);
+  381 |   const trackedAssessment = tracked.buyer_evidence_source_resolution?.resolution?.link_assessment;
+> 382 |   expect(trackedAssessment).toMatchObject({
+      |                             ^
+  383 |     source_class: 'official_publisher',
+  384 |     relevance: 'likely_relevant_context_only',
+  385 |     requirement_authority: 'none',
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:382:29"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,415,open-world-workload-regression.spec.ts / explicit furniture and pharmacy categories cannot inherit laptop shelves,chromium,passed,failed,unexpected,1,653,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: ""catalog-boundary-v1""
+Received: undefined
+
+  429 |   ]) {
+  430 |     const boundary = await send(page, request);
+> 431 |     expect(boundary.schema_version).toBe('catalog-boundary-v1');
+      |                                     ^
+  432 |     expect(boundary.catalog_boundary.status).toBe('out_of_category');
+  433 |     expect(boundary.catalog_boundary.configuration_ids).toEqual([]);
+  434 |     expect(boundary.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:431:37"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-36-open-world-workload-regression,frontend/e2e/open-world-workload-regression.spec.ts,442,"open-world-workload-regression.spec.ts / novel publisher is approved case-only, fetched, reviewed, and reranked in one case",chromium,passed,failed,unexpected,1,30581,abf5833a7dc3f81a1e87cb7b7a9032d65404ff026ea705a6c95df07ec5ecb478,True,"TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event ""response""
+
+  454 |   // read-only discovery automatically. Manual profiles still expose the
+  455 |   // explicit discovery button and are certified by the same response contract.
+> 456 |   const discoveryResponse = page.waitForResponse(
+      |                                  ^
+  457 |     response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
+  458 |     { timeout: 30_000 },
+  459 |   );
+    at [source167]\frontend\e2e\open-world-workload-regression.spec.ts:456:34"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-37-ordinary-case-requirements,frontend/e2e/ordinary-case-requirements.spec.ts,4,ordinary-case-requirements.spec.ts / ordinary chat exposes owned requirements and rejects stale or foreign selection,chromium,passed,passed,expected,1,1765,ef9812cdea415ededf5b127ebe00cab8eb152679fed15969ab21669674c2d78d,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-38-ordinary-chat-shortfall,frontend/e2e/ordinary-chat-shortfall.spec.ts,5,ordinary-chat-shortfall.spec.ts / ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload,chromium,passed,passed,expected,1,3232,60e19df42b56426a6ef0e2c134f3e6caf226ab7b246113c3e4d3847680b629b2,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,5,platform-audit-memory.spec.ts / deadline corrections survive unrelated turns and reload without promising delivery,chromium,passed,passed,expected,1,2892,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,24,platform-audit-memory.spec.ts / audit real browser retains and amends quantity over five messages and reload,chromium,passed,passed,expected,1,2185,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,61,platform-audit-memory.spec.ts / recall preserves currency total budget and destination corrections,chromium,passed,passed,expected,1,1775,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,83,platform-audit-memory.spec.ts / unresolved product fit preserves quantity and asks material budget scope,chromium,passed,passed,expected,1,938,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,100,platform-audit-memory.spec.ts / audit consented external research reports unavailable without qualification,chromium,passed,passed,expected,1,731,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,110,platform-audit-memory.spec.ts / audit direct authority injection cannot grant commerce authority,chromium,passed,passed,expected,1,653,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-39-platform-audit-memory,frontend/e2e/platform-audit-memory.spec.ts,119,platform-audit-memory.spec.ts / audit twenty real turns retain amended procurement facts,chromium,passed,passed,expected,1,8153,3629d9bd2ad08672d614e4cb2fd4bf583156536fd8b811fc1221440c8b2ef2cb,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-40-portfolio-narration-preview,frontend/e2e/portfolio-narration-preview.spec.ts,8,"portfolio-narration-preview.spec.ts / local narration is buyer-triggered, critic-accepted and commercially powerless",chromium,skipped,skipped,skipped,1,0,75f6382c8ccb7a473db14744b56ead93153de0477eb932751cf9eb2bcbc243f7,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-41-portfolio-recording-walkthrough,frontend/e2e/portfolio-recording-walkthrough.spec.ts,55,portfolio-recording-walkthrough.spec.ts / deterministic portfolio recording walkthrough,chromium,passed,failed,unexpected,1,23977,d3b7e52acf8bbb8fc7d117ade51bf5eb2cc5a23a74d928bd6cd37c05c4285503,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/Target-price fit/i).first()
+Expected: visible
+Timeout: 20000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 20000ms
+  - waiting for getByText(/Target-price fit/i).first()
+
+
+  58 |   await openFreshBuyer(page, 'gaming');
+  59 |   await send(page, 'I need a gaming laptop. Is AUD 4,000 okay?');
+> 60 |   await expect(page.getByText(/Target-price fit/i).first()).toBeVisible();
+     |                                                             ^
+  61 |   await expect(page.getByText(/Qualified value options/i).first()).toBeVisible();
+  62 |   await pause(page, 2);
+  63 |
+    at [source167]\frontend\e2e\portfolio-recording-walkthrough.spec.ts:60:61"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-42-portfolio-supplier-continuation,frontend/e2e/portfolio-supplier-continuation.spec.ts,22,portfolio-supplier-continuation.spec.ts / high-value bulk request shows governed fulfilment choices and explicit exact confirmation,chromium,skipped,skipped,skipped,1,0,9248890383e8370b9d1b0a02bd3cafe31dbf92793ab6743540430e8cf4aa52ad,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-42-portfolio-supplier-continuation,frontend/e2e/portfolio-supplier-continuation.spec.ts,176,portfolio-supplier-continuation.spec.ts / unavailable flagship offers a proportionate conditional substitute without silent cart change,chromium,skipped,skipped,skipped,1,0,9248890383e8370b9d1b0a02bd3cafe31dbf92793ab6743540430e8cf4aa52ad,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-42-portfolio-supplier-continuation,frontend/e2e/portfolio-supplier-continuation.spec.ts,224,portfolio-supplier-continuation.spec.ts / buyer can review wait and split paths then cancel without changing the cart,chromium,skipped,skipped,skipped,1,0,9248890383e8370b9d1b0a02bd3cafe31dbf92793ab6743540430e8cf4aa52ad,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-43-privacy-session-isolation,frontend/e2e/privacy-session-isolation.spec.ts,4,privacy-session-isolation.spec.ts / temporary chat rotates the browser epoch and marks requests no-memory,chromium,passed,passed,expected,1,829,c3118bedf4d62f777ac7fc96c6822daf9d61e8dd1c2355145455d13a7c99c74a,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-44-procurement-amendment-permutations,frontend/e2e/procurement-amendment-permutations.spec.ts,19,procurement-amendment-permutations.spec.ts / relative bulk amendment preserves the cart line and exposes one confirmation authority,chromium,passed,failed,unexpected,1,225,9708c18fbf612832b1305c3321ae7d281d5ec607c3a94c2ebc1075cbc022f439,True,"Error: {""detail"":""Invalid or missing API key""}
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  24 |     data: { uid, sku: 'RGAM-0007', quantity: 20 },
+  25 |   });
+> 26 |   expect(seeded.ok(), await seeded.text()).toBeTruthy();
+     |                                            ^
+  27 |
+  28 |   await page.goto('/');
+  29 |   await page.getByRole('button', { name: /Ask Me/i }).click();
+    at [source167]\frontend\e2e\procurement-amendment-permutations.spec.ts:26:44"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-44-procurement-amendment-permutations,frontend/e2e/procurement-amendment-permutations.spec.ts,51,procurement-amendment-permutations.spec.ts / read-only follow-up preserves exact identity without granting unverified fit authority,chromium,passed,failed,unexpected,1,20642,9708c18fbf612832b1305c3321ae7d281d5ec607c3a94c2ebc1075cbc022f439,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/Found \d+ products|Provisional shortlist/i)
+Expected: visible
+Timeout: 20000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 20000ms
+  - waiting for getByText(/Found \d+ products|Provisional shortlist/i)
+
+
+  57 |   await send(page, 'We need 18 RGAM-0007 laptops for a design studio, AUD 85000 total');
+  58 |   await expect(page.getByText(/HP OMEN MAX 16/i).first()).toBeVisible({ timeout: 40_000 });
+> 59 |   await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible();
+     |                                                                             ^
+  60 |   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+  61 |
+  62 |   await send(page, 'summarise this procurement case without changing it');
+    at [source167]\frontend\e2e\procurement-amendment-permutations.spec.ts:59:77"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-45-procurement-journey,frontend/e2e/procurement-journey.spec.ts,15,"procurement-journey.spec.ts / demo procurement journey: clear, exact cart line, amendment and delivery reconfirmation",chromium,passed,failed,unexpected,1,689,a3efffe5fc75e9dea641ed8a8f8c1e3471c898a86fa1f077022bac2d992244ec,True,"Error: {""detail"":""Invalid or missing API key""}
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  26 |     data: { uid: UID, sku: 'RGAM-0007', quantity: 10 },
+  27 |   });
+> 28 |   expect(seeded.ok(), await seeded.text()).toBeTruthy();
+     |                                            ^
+  29 |
+  30 |   await send(page, 'increase the total units by another 5');
+  31 |   const apply = page.getByRole('button', { name: /Apply change|Confirm.*apply to cart/i });
+    at [source167]\frontend\e2e\procurement-journey.spec.ts:28:44"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-46-procurement-trace,frontend/e2e/procurement-trace.spec.ts,43,"procurement-trace.spec.ts / procurement decision trace — drafted supplier RFQ + audit, re-routes per product",chromium,passed,failed,unexpected,1,238,a902adb59e7e77ca0c62648325d291d11385fe29e5ed5535f9d2bcc61662a067,True,"Error: VITE_API_KEY must be readable from .env.local
+
+expect(received).not.toEqual(expected) // deep equality
+
+Expected: not """"
+
+
+  27 | async function seedDraftedCase(page: Page, { uid, trace, sku, qty }: { uid: string; trace: string; sku: string; qty: number }): Promise<void> {
+  28 |   const key = envValue('VITE_API_KEY');
+> 29 |   expect(key, 'VITE_API_KEY must be readable from .env.local').not.toEqual('');
+     |                                                                    ^
+  30 |   const h = { 'x-api-key': key, 'Content-Type': 'application/json' };
+  31 |   await page.request.put(`/api/v1/cart/items/${sku}`, { headers: h, data: { uid, sku, quantity: qty, allow_sourcing: true } });
+  32 |   const cc = await page.request.post('/api/v1/fulfillment/cases/confirm-cart', {
+    at seedDraftedCase ([source167]\frontend\e2e\procurement-trace.spec.ts:29:68)
+    at [source167]\frontend\e2e\procurement-trace.spec.ts:51:11
+    at [source167]\frontend\e2e\procurement-trace.spec.ts:49:3"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-47-qualified-commercial-journey,frontend/e2e/qualified-commercial-journey.spec.ts,10,qualified-commercial-journey.spec.ts / ambiguous research continues into an explicit synthetic supplier decision,chromium,passed,failed,unexpected,1,20872,5d2b3df626b9dd810a38708b5ceafb44ea4ee8d39306fb4cbbcd62b4bc1dd3e8,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/Which named software and version/i)
+Expected: visible
+Timeout: 20000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 20000ms
+  - waiting for getByText(/Which named software and version/i)
+
+
+  20 |   );
+  21 |
+> 22 |   await expect(page.getByText(/Which named software and version/i)).toBeVisible();
+     |                                                                     ^
+  23 |   await expect(page.getByRole('region', { name: 'Provisional product shelves' })).toBeVisible();
+  24 |   await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
+  25 |   await expect(page.getByRole('button', { name: 'Review option' })).toHaveCount(0);
+    at [source167]\frontend\e2e\qualified-commercial-journey.spec.ts:22:69"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-48-research-degradation-live,frontend/e2e/research-degradation-live.spec.ts,8,research-degradation-live.spec.ts / unreachable discovery degrades to canonical origin without hanging or claiming discovery,chromium,skipped,skipped,skipped,1,0,6966c8149382865f957c9af02c875b6a49c1c1d104e08d934ca6083e872157d2,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-49-research-disconnect-live,frontend/e2e/research-disconnect-live.spec.ts,5,research-disconnect-live.spec.ts / buyer disconnect during live discovery does not strand backend responsiveness,chromium,passed,failed,unexpected,1,65780,bbaaf256f13c2d452a716b09eb9e5b706435708cc44e7a693976749864855c49,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 65000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 65000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  18 |   await input.press('Enter');
+  19 |   const panel = page.getByTestId('ambiguity-exploration');
+> 20 |   await expect(panel).toBeVisible({ timeout: 65_000 });
+     |                       ^
+  21 |   const research = panel.getByRole('button', {
+  22 |     name: /Discover official sources|Research approved sources/i,
+  23 |   });
+    at [source167]\frontend\e2e\research-disconnect-live.spec.ts:20:23"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-49-research-disconnect-live,frontend/e2e/research-disconnect-live.spec.ts,38,research-disconnect-live.spec.ts / forced disconnect cooperatively stops undispatched discovery queries,chromium,skipped,skipped,skipped,1,218,bbaaf256f13c2d452a716b09eb9e5b706435708cc44e7a693976749864855c49,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-50-research-origin-degradation-kind,frontend/e2e/research-origin-degradation-kind.spec.ts,9,"research-origin-degradation-kind.spec.ts /  remains honest, bounded, and offers buyer evidence fallback",chromium,skipped,skipped,skipped,1,0,fed20f2b2a9f12ac949d373e20b1a806a6214319a917033d1cb87082e2936ed0,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-51-research-partial-engine-live,frontend/e2e/research-partial-engine-live.spec.ts,8,research-partial-engine-live.spec.ts / one failed search engine remains visible while free discovery succeeds,chromium,skipped,skipped,skipped,1,0,0653c8d637cbac53b13f1a9a16219bc90d2c2e1846aad73bd8367a2a86a72b37,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-52-rotating-intelligence-certificate,frontend/e2e/rotating-intelligence-certificate.spec.ts,58,rotating-intelligence-certificate.spec.ts / seeded official-feed titles exercise generic identity and fail-closed behavior,chromium,skipped,skipped,skipped,1,165,1e14e89171d58d4d57f1990736ab792a96dce333660fc1fdae3b31f8bc407fba,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-53-semantic-resolution-journey,frontend/e2e/semantic-resolution-journey.spec.ts,11,semantic-resolution-journey.spec.ts / unfamiliar capability request plans research before buyer-specific clarification,chromium,passed,failed,unexpected,1,30555,f3ef41169e6b43e2b7e7353e31b1ca3e5b2571bc83877bb01fbe81553bbcc986,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/created a provisional shopping case.*local catalog exploration/i).last()
+Expected: visible
+Timeout: 30000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 30000ms
+  - waiting for getByText(/created a provisional shopping case.*local catalog exploration/i).last()
+
+
+  28 |   expect(Date.now() - started).toBeLessThan(1_500);
+  29 |   await expect(page.getByText(/created a provisional shopping case.*local catalog exploration/i).last())
+> 30 |     .toBeVisible({ timeout: 30_000 });
+     |      ^
+  31 |   await expect(page.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
+  32 |   await expect(page.getByRole('button', { name: /Research approved sources/i })).toBeVisible();
+  33 |   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+    at [source167]\frontend\e2e\semantic-resolution-journey.spec.ts:30:6"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-54-shopping-case-fast-lane-timing,frontend/e2e/shopping-case-fast-lane-timing.spec.ts,3,shopping-case-fast-lane-timing.spec.ts / shopping-case fast lane returns provisional shelves before external research,chromium,passed,failed,unexpected,1,20554,b2c7b554e9dd48aef7c28a24106f444a8ac1b3e45dc475c524c679e689d82d01,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 20000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 20000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  14 |
+  15 |   const panel = page.getByTestId('ambiguity-exploration');
+> 16 |   await expect(panel).toBeVisible();
+     |                       ^
+  17 |   await expect(panel.getByTestId('buyer-research-status')).toContainText(/external research has not produced evidence/i);
+  18 |   await expect(panel).toContainText(/external calls: 0/i);
+  19 |   await expect(page.getByTestId('product-shelves')).toBeVisible();
+    at [source167]\frontend\e2e\shopping-case-fast-lane-timing.spec.ts:16:23"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-55-shopping-case-sse-revision-supersession,frontend/e2e/shopping-case-sse-revision-supersession.spec.ts,28,shopping-case-sse-revision-supersession.spec.ts / SSE reconnect observes canonical shopping-case revision supersession,chromium,passed,failed,unexpected,1,579,195e7dc12765a1c8ee35f4038759d84a1afce491bae5037016e372f8906e4e4d,True,"Error: expect(received).toBeTruthy()
+
+Received: false
+
+  39 |     },
+  40 |   });
+> 41 |   expect(created.ok()).toBeTruthy();
+     |                        ^
+  42 |   const initial = await created.json();
+  43 |   expect(initial.interpretation_job.case_revision).toBe(1);
+  44 |
+    at [source167]\frontend\e2e\shopping-case-sse-revision-supersession.spec.ts:41:24"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: manufacturing digital twin and predictive maintenance,chromium,skipped,skipped,skipped,1,220,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: CGI rendering,chromium,skipped,skipped,skipped,1,143,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: large CAD and point clouds,chromium,skipped,skipped,skipped,1,138,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: PLC factory and OT cyber range,chromium,skipped,skipped,skipped,1,133,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: large BIM and real-time walkthroughs,chromium,skipped,skipped,skipped,1,137,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-56-six-prompt-live-research-certification,frontend/e2e/six-prompt-live-research-certification.spec.ts,78,six-prompt-live-research-certification.spec.ts / live case-bound research: Unreal Engine Nanite and Lumen,chromium,skipped,skipped,skipped,1,134,497f94ac7a16ff8683a9b5b6d1bd61e41b7a9ae6856149177452bbfc961d7cee,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-57-split-fulfillment,frontend/e2e/split-fulfillment.spec.ts,46,"split-fulfillment.spec.ts / pre-payment split-fulfilment — ships now + supplier-ETA follow-up, buyer confirms before checkout",chromium,passed,failed,unexpected,1,203,bc6550c1561d5af042e7d5cd2e53bff85fb63910d58c25f57bc4fea47ce21d25,True,"Error: VITE_API_KEY must be readable from .env.local for the API seed
+
+expect(received).not.toEqual(expected) // deep equality
+
+Expected: not """"
+
+
+  36 | async function seedSplittingCart(page: Page) {
+  37 |   const key = devApiKey();
+> 38 |   expect(key, 'VITE_API_KEY must be readable from .env.local for the API seed').not.toEqual('');
+     |                                                                                     ^
+  39 |   const res = await page.request.put(`/api/v1/cart/items/${SKU}`, {
+  40 |     headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+  41 |     data: { uid: UID, sku: SKU, quantity: QTY, allow_sourcing: true },
+    at seedSplittingCart ([source167]\frontend\e2e\split-fulfillment.spec.ts:38:85)
+    at [source167]\frontend\e2e\split-fulfillment.spec.ts:50:11
+    at [source167]\frontend\e2e\split-fulfillment.spec.ts:49:3"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-58-terminal-response-race,frontend/e2e/terminal-response-race.spec.ts,7,terminal-response-race.spec.ts / new terminal survives late success,chromium,passed,passed,expected,1,1012,ee27737ee1607aa25534b624e4094c06873b5e36b753f94d885ca170d1c6a26d,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-58-terminal-response-race,frontend/e2e/terminal-response-race.spec.ts,7,terminal-response-race.spec.ts / new terminal survives late failure,chromium,passed,passed,expected,1,656,ee27737ee1607aa25534b624e4094c06873b5e36b753f94d885ca170d1c6a26d,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,45,terminal-turn-helper.spec.ts / terminal helper accepts a completed JSON turn and releases its listener,chromium,passed,passed,expected,1,211,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,52,terminal-turn-helper.spec.ts / terminal helper exposes HTTP 401 instead of waiting for a successful answer,chromium,passed,passed,expected,1,227,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,52,terminal-turn-helper.spec.ts / terminal helper exposes HTTP 403 instead of waiting for a successful answer,chromium,passed,passed,expected,1,261,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,59,terminal-turn-helper.spec.ts / terminal helper preserves multiline CRLF SSE data,chromium,passed,passed,expected,1,196,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,65,terminal-turn-helper.spec.ts / terminal helper keeps the pending operation through its actual POST poll,chromium,passed,passed,expected,1,263,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,70,terminal-turn-helper.spec.ts / terminal helper ignores another query response,chromium,passed,passed,expected,1,270,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,75,terminal-turn-helper.spec.ts / terminal helper ignores another actor response,chromium,passed,passed,expected,1,244,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,81,terminal-turn-helper.spec.ts / terminal helper cannot replace its pending operation with a foreign completed operation,chromium,passed,passed,expected,1,232,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,87,terminal-turn-helper.spec.ts / terminal helper rejects inconsistent envelope and terminal operation identities,chromium,passed,passed,expected,1,186,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,92,terminal-turn-helper.spec.ts / terminal helper exposes malformed JSON instead of hiding the parser failure,chromium,passed,passed,expected,1,188,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-59-terminal-turn-helper,frontend/e2e/terminal-turn-helper.spec.ts,97,terminal-turn-helper.spec.ts / terminal helper retains its deadline when no completed turn arrives,chromium,passed,passed,expected,1,259,4b5f1bf75e412ea779e0e4881cd673f8b293026ebad0f8438b2d2bccc697e95e,True,
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-60-turn-transition-revision-matrix,frontend/e2e/turn-transition-revision-matrix.spec.ts,37,turn-transition-revision-matrix.spec.ts / every conversational transition publishes one matching case revision,chromium,passed,failed,unexpected,1,76,f5771aba4ce0dbb3dca6dcba35066197508db8c23cb26d1d553ae3f2e8ecd62e,False,"Error: chat/query failed (401)
+
+expect(received).toBeTruthy()
+
+Received: false
+
+  22 |   };
+  23 |   let response = await request.post('/api/v1/chat/query', { headers, data: payload, timeout: 90_000 });
+> 24 |   expect(response.ok(), `chat/query failed (${response.status()})`).toBeTruthy();
+     |                                                                     ^
+  25 |   let data = await response.json();
+  26 |   const deadline = Date.now() + 60_000;
+  27 |   while (data?.status === 'in_progress' && Date.now() < deadline) {
+    at completedTurn ([source167]\frontend\e2e\turn-transition-revision-matrix.spec.ts:24:69)
+    at [source167]\frontend\e2e\turn-transition-revision-matrix.spec.ts:56:18"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-61-unresolved-workload-authority,frontend/e2e/unresolved-workload-authority.spec.ts,45,unresolved-workload-authority.spec.ts / product noun cannot bypass unresolved workload authority,chromium,passed,failed,unexpected,1,586,16133317214f2592536848f608b340420f22ae01566c87851877ed161683ef2f,False,"Error: expect(received).not.toBe(expected) // Object.is equality
+
+Expected: not """"
+
+  60 |     const result = await send(page, scenario.query);
+  61 |     const traceId = String(result.decision_trace_id || result.trace_id || '');
+> 62 |     expect(traceId).not.toBe('');
+     |                         ^
+  63 |     await expect(page.getByText(
+  64 |       /provisional shopping case|external research not yet authorized|approved-source research/i,
+  65 |     ).first())
+    at [source167]\frontend\e2e\unresolved-workload-authority.spec.ts:62:25"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-61-unresolved-workload-authority,frontend/e2e/unresolved-workload-authority.spec.ts,45,unresolved-workload-authority.spec.ts / noun-free paraphrase has the same unresolved workload authority,chromium,passed,failed,unexpected,1,672,16133317214f2592536848f608b340420f22ae01566c87851877ed161683ef2f,False,"Error: expect(received).not.toBe(expected) // Object.is equality
+
+Expected: not """"
+
+  60 |     const result = await send(page, scenario.query);
+  61 |     const traceId = String(result.decision_trace_id || result.trace_id || '');
+> 62 |     expect(traceId).not.toBe('');
+     |                         ^
+  63 |     await expect(page.getByText(
+  64 |       /provisional shopping case|external research not yet authorized|approved-source research/i,
+  65 |     ).first())
+    at [source167]\frontend\e2e\unresolved-workload-authority.spec.ts:62:25"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-62-uploaded-requirements-journey,frontend/e2e/uploaded-requirements-journey.spec.ts,44,uploaded-requirements-journey.spec.ts / requirements screenshot becomes reviewable provisional claims,chromium,passed,failed,unexpected,1,45623,4c58e3534e384c4ff76762db9510ff201e3553dad2539b1ddb05e9c78566f9a3,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 45000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 45000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  56 |   await input.fill('I need a laptop for digital-twin simulation of factory equipment and predicting breakdowns.');
+  57 |   await input.press('Enter');
+> 58 |   await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
+     |                                                           ^
+  59 |
+  60 |   await page.locator(""input[type='file']"").last().setInputFiles({
+  61 |     name: 'buyer-requirements.png',
+    at [source167]\frontend\e2e\uploaded-requirements-journey.spec.ts:58:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-62-uploaded-requirements-journey,frontend/e2e/uploaded-requirements-journey.spec.ts,93,uploaded-requirements-journey.spec.ts / PDF requirements use the same review and correction contract,chromium,passed,failed,unexpected,1,45667,4c58e3534e384c4ff76762db9510ff201e3553dad2539b1ddb05e9c78566f9a3,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 45000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 45000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  103 |   await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  104 |   await input.press('Enter');
+> 105 |   await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
+      |                                                           ^
+  106 |   await page.locator(""input[type='file'][accept*='.pdf']"").setInputFiles({
+  107 |     name: 'buyer-requirements.pdf',
+  108 |     mimeType: 'application/pdf',
+    at [source167]\frontend\e2e\uploaded-requirements-journey.spec.ts:105:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-62-uploaded-requirements-journey,frontend/e2e/uploaded-requirements-journey.spec.ts,137,uploaded-requirements-journey.spec.ts / plain-text requirements use the same provisional review contract,chromium,passed,failed,unexpected,1,45830,4c58e3534e384c4ff76762db9510ff201e3553dad2539b1ddb05e9c78566f9a3,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 45000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 45000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  147 |   await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  148 |   await input.press('Enter');
+> 149 |   await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
+      |                                                           ^
+  150 |
+  151 |   await page.locator(""input[type='file'][accept*='.pdf']"").setInputFiles({
+  152 |     name: 'buyer-requirements.txt',
+    at [source167]\frontend\e2e\uploaded-requirements-journey.spec.ts:149:59"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-62-uploaded-requirements-journey,frontend/e2e/uploaded-requirements-journey.spec.ts,187,uploaded-requirements-journey.spec.ts / manual specifications use the same editable same-case corroboration contract,chromium,passed,failed,unexpected,1,45755,4c58e3534e384c4ff76762db9510ff201e3553dad2539b1ddb05e9c78566f9a3,False,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByTestId('ambiguity-exploration')
+Expected: visible
+Timeout: 45000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 45000ms
+  - waiting for getByTestId('ambiguity-exploration')
+
+
+  199 |
+  200 |   const panel = page.getByTestId('ambiguity-exploration');
+> 201 |   await expect(panel).toBeVisible({ timeout: 45_000 });
+      |                       ^
+  202 |   await panel.getByRole('button', { name: 'Enter specifications' }).click();
+  203 |   const entry = panel.getByTestId('manual-requirement-entry');
+  204 |   await entry.getByLabel('Manual specifications').fill(
+    at [source167]\frontend\e2e\uploaded-requirements-journey.spec.ts:201:23"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,vitest-patch-broad-browser-63-voice-v2-pilot,frontend/e2e/voice-v2-pilot.spec.ts,6,voice-v2-pilot.spec.ts / spoken input shares the canonical V2 fail-closed recommendation path,chromium,passed,failed,unexpected,1,91060,7f2752e9c8eb66c69cdf0cafce13c8180ec000865f4007819e14aeb17c267651,True,"Error: expect(locator).toBeVisible() failed
+
+Locator: getByText(/Found \d+ products|Provisional shortlist/i)
+Expected: visible
+Timeout: 90000ms
+Error: element(s) not found
+
+Call log:
+  - Expect ""toBeVisible"" with timeout 90000ms
+  - waiting for getByText(/Found \d+ products|Provisional shortlist/i)
+
+
+  86 |   await expect(page.getByText(SPOKEN_QUERY, { exact: false })).toBeVisible();
+  87 |   await expect(page.getByTitle('Sent via voice')).toBeVisible();
+> 88 |   await expect(page.getByText(/Found \d+ products|Provisional shortlist/i)).toBeVisible({ timeout: 90_000 });
+     |                                                                             ^
+  89 |   // A production-shaped fixture may positively qualify individual products and
+  90 |   // expose buyer-triggered Add controls. Voice must never trigger one itself.
+  91 |   await expect(page.getByText('Cart (0)', { exact: true })).toBeVisible();
+    at [source167]\frontend\e2e\voice-v2-pilot.spec.ts:88:77"

@@ -1,0 +1,172 @@
+commit,short,authored_at,subject
+abde83af58dae631d1782e25ef4e6ddfa993c23f,abde83af,2026-10-22T09:40:39+11:00,Keep the triage publisher import within the existing function-size limit
+78bde545c19557d528964e2c0ccfcbbd1d96eecc,78bde545,2026-10-22T09:36:37+11:00,Keep sandbox publication off the request loop and independent of result subscriptions
+a7a9af7ad9b6ebba33917f5f93b822476b1ed5fb,a7a9af7a,2026-10-22T09:23:29+11:00,Bound market snapshots to current physical stock and valid event times
+da404dda28a58ef8af0e3b0a0aa929ce6bb80dad,da404dda,2026-10-22T08:59:56+11:00,"Map security repairs, complete coverage lines and remaining roadmap gates"
+0e177ea449b6dc2c7095c8c23b5ee4e01eb046b4,0e177ea4,2026-10-22T08:40:47+11:00,Patch Vitest mock registration and Windows redirect traversal advisories
+a517f22ed3961f065635e6f7294668b7736e16ac,a517f22e,2026-10-22T08:31:53+11:00,Patch image and certificate dependencies and reproduce Python 3.11 installations
+5dbc01fa1e4ed149a39a8961f63193f3421393d1,5dbc01fa,2026-10-22T08:11:06+11:00,Ground SKU guardrails in an owned V2 catalogue with positive retrieval controls
+985444c2cb8d29106550132919081f2eb5fb84b9,985444c2,2026-10-22T07:59:30+11:00,Keep market projection schema reads on the caller transaction
+44742add4fb5ea3d9f58e22aba00bbf0412a92cf,44742add,2026-10-22T07:51:10+11:00,Use managed SQLite engine policy for the session test database
+f7d2f1971d03a5598d694b4e7935c555c1709a64,f7d2f197,2026-10-22T06:35:16+11:00,Exclude local credentials and private artifacts from Docker build contexts
+84cd3de714cea2bb25f193960d00c7b07073e2ee,84cd3de7,2026-10-22T06:29:46+11:00,"Map runtime ownership repairs, full-suite deadline and remaining roadmap"
+17fdb4ec0ab2ecd0b45468ffb5b230d4507af414,17fdb4ec,2026-10-22T06:24:23+11:00,Bound full heap scans while collecting released test owners immediately
+95dc0e1afa60de4ae5afe4124774af5d7404bcbf,95dc0e1a,2026-10-22T06:14:52+11:00,Retain local model ownership until quarantined transport work finishes
+98110abfff68ea4646690eb8f687bbed255d8df8,98110abf,2026-10-22T06:09:21+11:00,Keep local model dispatch and verification within the remaining budget
+c9b42da916b97409416765edf7e75a8c564ef73d,c9b42da9,2026-10-22T05:48:56+11:00,Preserve declared simulation status through market projection evidence
+cb5f70fcf7f22dd48e73b53efa22d458946b3202,cb5f70fc,2026-10-22T05:31:30+11:00,Own the contract test application and migrated catalog without replacing cached resources
+057d4b5c46eaed830d9e4bc8773781a1d042b53b,057d4b5c,2026-10-22T05:18:13+11:00,Record honest pricing latency and verifier integrity evidence with remaining roadmap
+4289fe36af5b938236ac0ad63458b499579878f1,4289fe36,2026-10-22T05:12:34+11:00,Borrow the request memory cache client instead of reopening ambient Redis
+745d40d1f981be426259368f5149982a397c66fc,745d40d1,2026-10-22T05:05:46+11:00,Remove pricing test-name shortcut and preserve configured verifier policy
+aa15dc028182c3d8be213e71f7152b05663befbf,aa15dc02,2026-10-22T04:54:32+11:00,Record market and browser repair deltas with complete source-mapped roadmap
+47ab0acc9791e7d23a4ba39ab92625db695c86b7,47ab0acc,2026-10-22T04:48:27+11:00,Bound public market response reads and distinguish denied network policy
+5d4505e0c176518cc619895ba6165e43fb4ac523,5d4505e0,2026-10-22T04:41:07+11:00,Run unresolved purchase browser assertions as a signed buyer with bounded observation
+127ff0c315b156ac99146257b9abc4c36eb59bc0,127ff0c3,2026-10-22T04:36:39+11:00,Preserve market read transactions and budget only admitted evidence
+04f62acb2f80b0ef911cb03eb1bd69dddd863664,04f62acb,2026-10-22T04:23:30+11:00,Publish complete frozen Python observations and remaining roadmap gates
+956e101eab2ddedf416a2ba0bd78e5073e7256bc,956e101e,2026-10-22T04:06:58+11:00,Reject return partner redirects before following and type outbound policy denials
+472bfd5adcc42596b0903e7d35509bf77b55c0cf,472bfd5a,2026-10-22T03:57:47+11:00,Observe owned terminal turns and expose HTTP denials without stale response reuse
+1b7a41598000c17d95704f6a01a91b851a2f4e68,1b7a4159,2026-10-22T03:30:28+11:00,Publish the completed browser ledger and tenant isolation roadmap
+9b9d10842d105b96eab3f4f03e9b90a0557e02b0,9b9d1084,2026-10-22T03:23:08+11:00,Verify read session isolation with restricted PostgreSQL logins
+e9f5da69cedab2a86d766d093da89c9a5b22b8f7,e9f5da69,2026-10-22T03:21:07+11:00,Wait for the real cart and select its exact snapshot restore control
+1b9a03afa23491c9a3de75641af1f4e1e560e895,1b9a03af,2026-10-22T03:15:53+11:00,Build invalid future bearer timestamps at test execution time
+68e208b384edaffca31e6d3537633c5ff44affbc,68e208b3,2026-10-22T03:09:48+11:00,Render supplier requirement labels from the active store profile
+0b1a33961382e39fb099f6925f5a492b3fe1c0af,0b1a3396,2026-10-22T03:04:00+11:00,Cache only owned read replicas and preserve the serving primary pool
+620810e7d4c3a17babb36b3ad005b64663d759db,620810e7,2026-10-22T02:51:23+11:00,Bind read sessions to their tenant within the owned cleanup lifetime
+21ed130a5c695ab266f2f55a31bef43704ce659c,21ed130a,2026-10-22T02:28:41+11:00,"Record verified evidence, watchdog ownership and the continuing roadmap"
+c7777e2b4a832f07bf4cc436a5603b1cb584fc96,c7777e2b,2026-10-22T02:22:40+11:00,Keep typed chat dispatch failures observable without masking their cause
+c3309ad8201faef27b04c5a97915d002fda185dc,c3309ad8,2026-10-22T02:11:55+11:00,Release completed pytest timeout callbacks after successful cancellation
+9edd1d804737ac8d684830f2dee7555ae1e4e23b,9edd1d80,2026-10-22T02:04:16+11:00,Require current verified evidence for positive workload qualification
+a80091cabc237dcd6646d316e9415bcb47f2ec9e,a80091ca,2026-10-22T01:54:08+11:00,Give attribution tests independent owned database transactions
+0f2933b05a1dddc5113d1a4deb8d80464e2b97a2,0f2933b0,2026-10-22T01:45:08+11:00,Exercise rejected case patches against a persisted owned case
+6abfa6420a848db35a254715aaacfc20b70beefa,6abfa642,2026-10-22T01:43:01+11:00,Recognize and type the existing requirement contract response receipt
+ede083088154915014f39430735c5188e6708cf7,ede08308,2026-10-22T01:37:26+11:00,Record complete clean-suite observations and the source-mapped October 22 roadmap
+e3b7b06f55063691344d23c0f77d3511e333bda1,e3b7b06f,2026-10-22T01:35:28+11:00,Use the complete Redis contract stub for pending clarification memory tests
+51615a3314a6ec5bad7e70d01b5836721e2c01d2,51615a33,2026-10-22T01:31:40+11:00,Extract security startup callback within the existing lifespan size budget
+7df4f29d7bcf3d6e64a212886b065f96aedb5f9f,7df4f29d,2026-10-22T01:28:52+11:00,Keep inventory support and trust threshold fixtures in their owned flag file
+774463c8b38c4d12db6bbf2b1795891af5e9e581,774463c8,2026-10-22T01:24:50+11:00,Scope security schema readiness to its live database pool
+5766605cae571c6898967fac0c120c5444dbd832,5766605c,2026-10-22T00:55:59+11:00,Preserve exact certification corpus seals across Git exports
+6dc19217c55db3312fad4760ea2f3e7a2bb7dc5d,6dc19217,2026-10-22T00:50:32+11:00,Recover security correlations from the scoped durable database
+3da0636f16b1cb25c11a7d292baad179bf4cae12,3da0636f,2026-10-22T00:34:29+11:00,Bind application startup and shutdown to the serving database owner
+f71d4d5a5536de7a99725de676821308de1a99f8,f71d4d5a,2026-10-22T00:17:09+11:00,Give DMARC window tests current owned reports and historical controls
+6b0aa6368bfc231dae49da547ebda5fb2e05d4bd,6b0aa636,2026-10-22T00:09:54+11:00,Render trusted-claim envelopes and surface unavailable admin evidence
+ab1036b869c5865f3d205449f824d0ab677b391c,ab1036b8,2026-10-22T00:07:50+11:00,Keep commercial quantities and budget qualifiers separate from product identity
+9c6506adae7c1147dc5325e11348e199bd2ae78e,9c6506ad,2026-10-21T23:52:13+11:00,"Record full outcome ledgers, resource limits and source-mapped roadmap"
+af18ae17ac98f1afc837474d45eff4eac6e99814,af18ae17,2026-10-21T23:45:37+11:00,Keep build credentials out of admin bundles and cleared sessions
+4b9071af020d3dbe74197961f1c992276c67bc79,4b9071af,2026-10-21T23:28:41+11:00,Release API fixture databases and portals after each case
+15b7179efbabb441fbdb2fc408e11c3dcc920cd6,15b7179e,2026-10-21T23:06:03+11:00,Isolate legacy endpoint setup from test collection
+582dd8a208ae96e41165b329a4e6893626925ddd,582dd8a2,2026-10-21T22:40:44+11:00,Reduce HTTP histogram locks while preserving every latency bucket
+657ab41586c9a576dfd4cf93a84c32b60256d746,657ab415,2026-10-21T22:20:34+11:00,Patch Vite editor-launch advisories in both frontend locks
+68cbd8298ada9b2e597548ea2a887043047aa2c2,68cbd829,2026-10-21T22:11:48+11:00,Keep admin request deadlines active through response body reads
+0778168ed428d3ef18cff4f453af77e4cf7cff0c,0778168e,2026-10-21T22:05:15+11:00,Honor the operator-selected admin credential before build defaults
+bd9b5e31780548f628b338b191040e827bf0ced6,bd9b5e31,2026-10-21T21:56:24+11:00,Own the migrated database for bulk availability integration
+9a56bea9a0c56095cd2a17123bbd70d3e0d01b49,9a56bea9,2026-10-21T21:04:14+11:00,"Record native guards, ordinary buyer progress and exact prerequisite ledgers"
+3131768e5379fea5baddf9724077837512d45726,3131768e,2026-10-21T20:52:51+11:00,Carry storefront tenant headers in ordinary buyer requests
+bae1189edf4f3a0a79be86fc68e71783be0723c1,bae1189e,2026-10-21T20:49:58+11:00,Fence purchase-order dispatch and persist tenant-owned audit history atomically
+c3a2b42407e4b86977bc41a8ce65b258185384d1,c3a2b424,2026-10-21T20:32:19+11:00,Integrate reproducible browser fixtures and conservative catalogue ingestion
+cbb0f4981b6ef44a96d67f245bcc439a0100aa8d,cbb0f498,2026-10-21T20:03:46+11:00,Own parity requests and use migrated runtime SQLite fixtures
+2f63446d4b5f730a279c87e19db5c935e06c0dd3,2f63446d,2026-10-21T19:39:43+11:00,"Record source-bound workflow progress, frozen test coverage and remaining roadmap"
+d68f37ac3cc01f6afa93c5a39a506d5b74b410c1,d68f37ac,2026-10-21T19:18:57+11:00,Give cart test requests independent SQLite transactions and guaranteed owner cleanup
+b548cf07e9ebacbff0baf167fb46e72e7cd39273,b548cf07,2026-10-21T19:04:37+11:00,Publish research shelves and retained buyer facts through one case-bound terminal response
+80c33dd33ab45bc10a973d30fbf4244866f7357b,80c33dd3,2026-10-21T18:57:29+11:00,Scope outbound monitoring to the operator tenant and repair CV circuit audit
+bf4db849c11fb28b1bef4ec5e9157fc74b1b9d99,bf4db849,2026-10-21T18:31:50+11:00,Integrate owned requirement selection and simulated stock controls with buyer case APIs
+fde5ef56de735b0a2e48a548eb9761ea0c7fa2e0,fde5ef56,2026-10-21T18:21:33+11:00,Preserve owned selected-scope research across router outages and switch proposals
+a986e17d61217e4df4ca5612edb11b109a749bc2,a986e17d,2026-10-21T16:22:48+11:00,Restore streamed database results and redact privacy failure channels
+11ec4cd0b7814bf5e0c9c217d4f455ac76f83af5,11ec4cd0,2026-10-21T13:44:04+11:00,"Record complete fresh-shop browser ledger and bounded API, ownership and cart progress"
+8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266,8dc3f3f5,2026-10-21T13:36:18+11:00,Confirm cart clears before reporting success and expose recovery after failure
+9affa8ba2ac010d2cacf69d65570ddc6666ef0e2,9affa8ba,2026-10-21T13:33:09+11:00,Run buyer browser fixtures with signed identities and real current product SKUs
+3d82d28fefaa5b3dc00db4f5fb333cf3f14730cb,3d82d28f,2026-10-21T13:33:07+11:00,Expose current cart undo and prevent stale snapshot recovery after cache failure
+5af7d8d73f948ab31e5861801dd154513b59f084,5af7d8d7,2026-10-21T13:18:26+11:00,Align positive API fixtures with signed identities and explicit simulated payments
+8f39db21c790044630d21dded541afab24f1c178,8f39db21,2026-10-21T13:08:46+11:00,Require explicit isolated-test opt-in for request and audit bypasses
+e05326125a4732ed3a42535035a5d3296494fd34,e0532612,2026-10-21T12:47:30+11:00,Bind database ownership across HTTP and WebSocket requests without global fallback
+73bbda5b21895800e82d25d67c0795c7d3b2c96a,73bbda5b,2026-10-21T11:56:19+11:00,Integrate scoped enquiry recovery and serialize concurrent recovery observations
+6b4d5e117b7c4999eafe9b43f2a6f6a2896092f7,6b4d5e11,2026-10-21T09:51:39+11:00,Record revision-preserving recall and real case-approved origin fetch evidence
+e950facd7f279ff37a691828eb2a058402afd94c,e950facd,2026-10-21T09:47:28+11:00,Keep owned fact recall on the accepted material case revision
+9ec5f12301070c582d443941f77457aa4403e096,9ec5f123,2026-10-21T09:39:22+11:00,Record named-shortfall retention and separate live discovery from source and market completion
+13761e98e7ac3adcf6efffcb2cf5af0f2d3273ef,13761e98,2026-10-21T09:30:11+11:00,Keep named shortfall counts separate from total requested case quantity
+d86386bb3c2714f44cbaab8fa35cb38aff751c4f,d86386bb,2026-10-21T09:19:58+11:00,Record scoped privacy and person-bound enquiry integration with remaining roadmap gates
+8c397ee4d5af24be03a0b7f495b6ccb222ecf872,8c397ee4,2026-10-21T09:18:32+11:00,Integrate person-bound supplier enquiries and fence uncertain outbound attempts
+99425cabb56f8eea5d7261f2682448709bde5704,99425cab,2026-10-21T09:03:52+11:00,Isolate named-controller privacy inventory and reject incomplete memory exports
+32d760f69dbd797cb359c86fd890330822452b2b,32d760f6,2026-10-21T06:46:34+11:00,"Record shared effect policy, webhook responsiveness and honest native payment capability gaps"
+d4eb4de09e25d4f806d0d4c0e68b9fb4fe7f4210,d4eb4de0,2026-10-21T06:41:51+11:00,Require usable native payment interfaces before reporting configured checkout readiness
+81d15f211fb7788221a1107f89af3bd650b5cf9c,81d15f21,2026-10-21T06:35:17+11:00,Offload synchronous payment webhook transactions while preserving request database ownership
+b30ce4d15681a4f1465ae81b215599949a7bff57,b30ce4d1,2026-10-21T06:30:29+11:00,Enforce shared payment execution policy before HTTP and SDK provider dispatch
+afeaab1accc20da7207985e5afbd6c95dda5741c,afeaab1a,2026-10-21T06:24:50+11:00,"Record payment database isolation, refund authority races and remaining delivery boundaries"
+f714dc924d95fecc4cbe07f6711b1c87de111450,f714dc92,2026-10-21T06:23:35+11:00,Map refund PostgreSQL skip lineages to committed exact-effect concurrency controls
+0f9be9391e96510ec6d4dfc2a07ab8de2f7d003f,0f9be939,2026-10-21T06:22:17+11:00,"Bind refund claims and completion to exact effects, receipts and current worker ownership"
+bc10f677171d05c798f744b9c7b2848c75fa781b,bc10f677,2026-10-21T06:13:23+11:00,Scope payment reconciliation and nested ledger work to their application database
+2ffbfb4709ac7c0716e46395b11e03d7e57c26a1,2ffbfb47,2026-10-21T06:07:39+11:00,"Record strict Celery transport, native inventory deadlock and scheduler ownership evidence"
+518cd5ff824c4d6d0a292245d9ecf79bd779a61d,518cd5ff,2026-10-21T06:05:56+11:00,"Map formerly skipped NumPy, task authentication and PostgreSQL races to strict execution evidence"
+ab31dcccbbdb736623025be956958286fc1f34d8,ab31dccc,2026-10-21T06:03:59+11:00,Bind reservation expiry workers to their app database and retain failed shutdown ownership
+bf680e4f326ce63889f6e1aec54efb5534b36376,bf680e4f,2026-10-21T06:00:38+11:00,Integrate atomic inventory reservations and expiry with ordered PostgreSQL transfer locks
+23f89431ce2d9365fe77180fc5cc7ce14d2fd3e6,23f89431,2026-10-21T05:58:49+11:00,Authenticate Celery broker frames at worker intake and fail closed without signing material
+3debb90b8432437869b8f6608e7b0fd1b14d96ef,3debb90b,2026-10-21T05:54:09+11:00,Make email attachment security fixtures execute under NumPy 2 and require measured detection
+700c0c4070501bb05e90d93a0d56925b161c539f,700c0c40,2026-10-21T05:38:42+11:00,"Record complete line deltas, required profile execution and remaining roadmap gates"
+00515e0eee16749a3bf96d83d9d7cfed7915c45a,00515e0e,2026-10-21T05:33:34+11:00,Add a reproducible image security gate with owned process and resource cleanup
+609f5f912bcd643691d174ae220dd2383bb32240,609f5f91,2026-10-21T05:17:58+11:00,Inventory all 246 skipped diagnostic cases and their remaining execution requirements
+ba86d9e91f19635ecf418c249e5a6c3360aeda2a,ba86d9e9,2026-10-21T05:14:43+11:00,"Bind cached image analysis to tenant, case context and detector policy"
+afb3e4988f5dd17b97f454c819be8730dd1d0865,afb3e498,2026-10-21T04:58:24+11:00,Execute required image profiles on migrated data and the real owned storefront
+d9b2dcdc2e9214e742895f240d052c620acc14c1,d9b2dcdc,2026-10-21T04:39:47+11:00,Require owned red-team outcomes and strip inherited message connector credentials
+91d87ac90d2f2c51d4de923cc3d25aeaa98e8323,91d87ac9,2026-10-21T04:29:21+11:00,"Refresh roadmap with reconciled broad coverage and contract, schema, replay repairs"
+7d46bfa2af83594861a272ea104aa49e74170647,7d46bfa2,2026-10-21T04:27:19+11:00,Atomically reserve signed webhook deliveries and block unavailable replay checks
+a2d68053e943c86adf416257b2023a146caf7278,a2d68053,2026-10-21T04:21:11+11:00,Bind selected case contracts through evidence compilation and catalog use
+f6b7573ff469f4547b24854659ea54fcf290f11e,f6b7573f,2026-10-21T03:55:55+11:00,db: integrate migration chain and preflight protected rollback
+42d998654520f691e7e339eb200cdaaa0a43b919,42d99865,2026-10-21T03:53:14+11:00,test: own webhook replay state and preserve signed request bytes
+867f881ab7768d246d5c3b1d109c9fb899adcf46,867f881a,2026-10-21T03:36:59+11:00,test: align SDK fixtures and preserve tracked flag bytes
+439ba336bb58b262933b6d316c3af205df78038b,439ba336,2026-10-21T03:28:20+11:00,test: generate an owned QR fixture for timeout isolation
+31f7efabc3527db810d600b46e5aefc63dcbadf1,31f7efab,2026-10-21T03:18:36+11:00,docs: record security repairs and bounded full-suite results
+cc43389b5768e6384573a027d13b7717628b626a,cc43389b,2026-10-21T03:14:02+11:00,security: verify bearer identity and close missing-env defaults
+591f4e1dd89538461552ddabef1cf6dc50f6b61a,591f4e1d,2026-10-21T03:04:21+11:00,test: own scoring flags and playbook configuration files
+85857db3d3b6f00d9fd81261dc84f0756f8001e0,85857db3,2026-10-21T03:04:20+11:00,security: expose quota admission and own HTTP budget tests
+8c27a68aea6fde3be051e93b0b119fd6609824cd,8c27a68a,2026-10-21T02:53:40+11:00,chat: bind workload scale answers to the owned question
+7d2081cedbb21d960f33cce09088c9fcda8d3870,7d2081ce,2026-10-21T02:47:16+11:00,deps: declare and verify official HTML parser runtime
+0e1f33835b217594cdfce7ad3e533c0ca5876a6e,0e1f3383,2026-10-21T02:41:36+11:00,security: fingerprint credentials in audit attribution
+afa1d7c2fa480ece577f5c4132b626e2f32c7728,afa1d7c2,2026-10-21T02:29:58+11:00,test: own checkout and security fixture inputs in broad profiles
+b7c99f3ec5809b7d1100404c81a9f735e4d12529,b7c99f3e,2026-10-21T02:20:47+11:00,"docs: record current draft workflow, restore proof and remaining release gates"
+29c041bb0c7f3b033db4aee3bcb1f1fe2fa5ed74,29c041bb,2026-10-21T02:15:11+11:00,fix(memory): synchronize accepted fulfillment quantity and SKU atomically
+459794af7300e889776037e97a5e2a26a9bcdba7,459794af,2026-10-21T02:08:05+11:00,test(browser): release synchronous drivers at module ownership boundary
+5e2bcc8843aa8b4c887ba65787a834799deb5a38,5e2bcc88,2026-10-21T01:58:19+11:00,"fix(procurement): preserve unknown price, supply and technical fit"
+bce1a444a0957d2bf965dfcf07cffbafdf4b30f9,bce1a444,2026-10-21T01:52:08+11:00,test(security): inspect effective HTTP routes and installed middleware
+1ecdbb25e806091c288a6c0d3894f7e630e14712,1ecdbb25,2026-10-21T01:48:11+11:00,fix(security): bind playbook approvals to the exact reviewed payload
+228a6a734cffdff74742a96546eab282c39b1a8f,228a6a73,2026-10-21T01:41:11+11:00,test(fixtures): attest fictional configuration identity explicitly
+1354e0f78bcd520a33c560574117599946940787,1354e0f7,2026-10-21T01:36:48+11:00,test(fixtures): create explicit current fictional qualification observations
+1143c9c9288bd507f9ece4139017ff9e441aec44,1143c9c9,2026-10-21T01:35:54+11:00,test(browser): share pytest driver without closing borrowed browser
+2491700be89e93efd40e41883694ab7345fa4a98,2491700b,2026-10-21T01:23:14+11:00,style(test): normalize contract test line endings
+d42b1c02cc76e50e7e9e5ee7ad053f4bf233e91e,d42b1c02,2026-10-21T01:22:36+11:00,feat(requirements): integrate explicit workload coverage contracts
+a9bea44ea9ec5a384a70234928592d849ee2a85e,a9bea44e,2026-10-21T01:18:55+11:00,test(browser): release module backends and assert unavailable checkout
+9926f8f6934802166369a77c094de831beb4cea1,9926f8f6,2026-10-21T01:17:39+11:00,fix(chat): retain added buyer workloads in committed narration
+41dffc4d0cc1f290d384f1e77fdd4980871e2257,41dffc4d,2026-10-21T01:12:59+11:00,test(browser): own adversarial runtime and verify explicit QR evidence
+b87aca074c24ca00e0b78fa21cd1b3dfbf3f9d2f,b87aca07,2026-10-21T01:06:40+11:00,fix(test): bind imported app to the owned migrated session database
+9585ab4bd2fa1b9662476a57f182b22a400610d4,9585ab4b,2026-10-21T00:50:24+11:00,fix(router): preserve literal budget amendments and extract brand guards
+6f5e12cef6f477c00b81cf4a9c5d13b92159b529,6f5e12ce,2026-10-21T00:48:22+11:00,fix(storefront): keep operator credentials out of public catalog HTML
+94844225380ec424efd0b33743e49f72ac652a55,94844225,2026-10-21T00:25:03+11:00,fix(runtime): avoid retaining app factories through probe endpoint closures
+9f5c875261cab13aa15979711565cd94e715988f,9f5c8752,2026-10-21T00:11:54+11:00,docs: record verified runtime delta and outstanding roadmap gates
+f0ec1e74f4341ebed2a298ddf2778d8b0e6b9f79,f0ec1e74,2026-10-21T00:05:26+11:00,fix(privacy): scope redaction and report interrupted or incomplete work
+4929bc4d84a6776416afa1492c3ac529d07648e3,4929bc4d,2026-10-20T23:53:57+11:00,test(browser): isolate the backend process and explicit checkout profiles
+2b007d9f00da92747fc4b9d21481accbddb2b985,2b007d9f,2026-10-20T23:50:14+11:00,test(routes): inspect effective contexts for nested router ownership
+645e8f7866afd56715f49462ce51c29969b0b064,645e8f78,2026-10-20T23:39:51+11:00,test(runtime): release unreachable app cycles after fixture ownership cleanup
+8cc6c3ead7386feaff1c17bd8a1016a62bb557df,8cc6c3ea,2026-10-20T23:34:21+11:00,fix(citations): scope claim learning and optional admin reads by tenant
+f5368104e135dba158a7b468a58145b3e6d642c1,f5368104,2026-10-20T23:22:28+11:00,build(runtime): install pinned profiles and verify owned HTTP in CI
+e032bee3c6daa7728a2cceed68656363d84336fb,e032bee3,2026-10-20T23:18:36+11:00,fix(privacy): match decision ownership by exact JSON subject
+85e7513d062c2fb7737f20df3d633b1f4ac26fe6,85e7513d,2026-10-20T22:51:48+11:00,fix(ocr): verify provider prerequisites without loading inference in readiness
+0a5abf68b716499d55440ca09fc4e3012e177bfc,0a5abf68,2026-10-20T22:27:17+11:00,fix(deps): upgrade vulnerable evaluator transitives with verified NumPy 2 profiles
+8ca02b421816b5280c131f1782e5c8ee84cbced0,8ca02b42,2026-10-20T22:20:28+11:00,test: register one owned security runtime before cross-directory collection
+9fb2215c6d043a975f4b9716a72d6e5032fd035e,9fb2215c,2026-10-20T19:24:26+11:00,test(security): own the migrated HTTP runtime without replacing parent state
+2de7d98968cf506a63c508c86d1f808f13bcc23f,2de7d989,2026-10-20T19:09:36+11:00,fix(privacy): isolate controller state and reject unacknowledged storage
+77b2787bbcf9d23a9882ffab313b13a9a65f3d53,77b2787b,2026-10-20T18:59:38+11:00,docs: record runtime OCR browser evidence and remaining dependency gaps
+18e3f469c6a279d2a0796f955638a123204ac1ee,18e3f469,2026-10-20T18:49:06+11:00,fix: preserve UTF-8 application factory diagnostics
+5a84ac43430bdf9dbbf8f267f645eb2df49bd58f,5a84ac43,2026-10-20T18:46:56+11:00,fix(runtime): bound observer workers and retain shutdown ownership
+8adeddf2b1e9ba46a4bc411bb404b39e015b66d8,8adeddf2,2026-10-20T18:38:56+11:00,fix(vision): pin one OpenCV owner and verify isolated Paddle CPU inference
+f24159dfeb324ad48b73e6a5aa3bce227fd4a7aa,f24159df,2026-10-20T18:36:57+11:00,test(security): remove collection-time database engine replacement
+ab4b729618be625e9cd62f4decb5f901bbca7f2d,ab4b7296,2026-10-20T18:28:48+11:00,fix(security): isolate observer transactions from request business work
+ea4442a6e6668f74ac39145c4f435d9814340e38,ea4442a6,2026-10-20T10:25:55+11:00,Rebuild case task display snapshots from canonical facts instead of saved views
+5262e30dffbb4968d1247c2cfb37aaa61179a68e,5262e30d,2026-10-20T10:12:30+11:00,Record verified roadmap execution delta and remaining release gates
+559aea5a6ae954e6895c66113b00d70859467728,559aea5a,2026-10-20T10:05:55+11:00,Deliver owned case email drafts and cited market reads without advancing material revisions
+037a9028f1d334a599169a3bd3e3be51340626e3,037a9028,2026-10-20T09:47:19+11:00,Deliver scoped current market citations and expose provider failures
+36007573027643fd91da3d3f62d11235683e2109,36007573,2026-10-20T09:47:09+11:00,Initialize SQLite schema once per owned pool and preserve insert integrity
+b590323df47918361c412de97386097e3c46907b,b590323d,2026-10-20T09:39:56+11:00,Own ASGI worker cleanup and bound HTTP metric resource usage
+cd7df1e8faff95c51022229d3b3729a1cd8e05b1,cd7df1e8,2026-10-20T09:35:25+11:00,Bind first and replacement upload proposals to the final owned case
+3c19dd49c81bd84c41389e33637566bdf12035ac,3c19dd49,2026-10-20T09:31:53+11:00,Upgrade pinned runtime and test profiles with nested admin authorization compatibility
+0474709b7a72788e9567e25551f5cb2227b0ec7e,0474709b,2026-10-20T09:22:12+11:00,Keep trusted evidence review bound to its owned shopping case
+ec383e176e6a2037e51d66e62a8761b3d9c92b72,ec383e17,2026-10-20T08:53:59+11:00,Preserve pending workload and evidence intake continuity during router outages
+da532ace606f850c7abc6e49c111078d54200d23,da532ace,2026-10-20T08:39:24+11:00,Integrate tenant-scoped native buyer access with verified frontend type prerequisites
+1d9a14080ade9bd41ec264f170dfab4bf10cb73a,1d9a1408,2026-10-20T08:28:45+11:00,Release incident transactions before alert writes and own scheduler workers

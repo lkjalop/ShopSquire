@@ -1,0 +1,153 @@
+{
+  "source_head": "abde83af58dae631d1782e25ef4e6ddfa993c23f",
+  "cases": [
+    {
+      "spec": "artifact-security-boundary",
+      "trace_case": "artifact-security-boundary-51443-achment-free-recommendation-chromium",
+      "api_responses": [
+        {
+          "method": "GET",
+          "path": "/api/v1/cart",
+          "status": 401
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/fulfillment/market/storefront-emphasis",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/consumer/ingest",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/vision/triage",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/vision/triage",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "spec": "artifact-security-boundary",
+      "trace_case": "artifact-security-boundary-ed6cf--records-monitoring-outcome-chromium",
+      "api_responses": [
+        {
+          "method": "GET",
+          "path": "/api/v1/cart",
+          "status": 401
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/fulfillment/market/storefront-emphasis",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/consumer/ingest",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/vision/triage",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/vision/triage",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "spec": "bulk-order-economics-live",
+      "trace_case": "bulk-order-economics-live--241a0-ole-amount-and-order-result-chromium",
+      "api_responses": [
+        {
+          "method": "GET",
+          "path": "/api/v1/cart",
+          "status": 401
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/fulfillment/market/storefront-emphasis",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/consumer/ingest",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/stream",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/query",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "spec": "bulk-order-economics-live",
+      "trace_case": "bulk-order-economics-live--28716-with-no-false-fitting-shelf-chromium",
+      "api_responses": [
+        {
+          "method": "GET",
+          "path": "/api/v1/cart",
+          "status": 401
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/fulfillment/market/storefront-emphasis",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/consumer/ingest",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/query",
+          "status": 401
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/stream",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "spec": "context-retention",
+      "trace_case": "context-retention-budget-c-d7ced-t-across-turns-one-session--chromium",
+      "api_responses": [
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/query",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "spec": "context-retention",
+      "trace_case": "context-retention-bulk-qua-d07e9-endment-wins-and-then-holds-chromium",
+      "api_responses": [
+        {
+          "method": "POST",
+          "path": "/api/v1/chat/query",
+          "status": 401
+        }
+      ]
+    }
+  ],
+  "scope": "Request method/path/HTTP status only; no headers, cookies, tokens, query strings or response bodies published",
+  "artifact_failure_screenshot": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\user-review-artifact-failure.png"
+}
