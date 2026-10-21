@@ -16,7 +16,7 @@ def _catalog_subject_scope(db, *, tenant_id: str, result_skus: List[str]) -> tup
     if db is None or not result_skus:
         return [], []
     try:
-        from sqlalchemy import text
+        from sqlalchemy import inspect, text
         normalized = list(dict.fromkeys(str(sku) for sku in result_skus if str(sku)))
         params = {f"sku_{idx}": sku for idx, sku in enumerate(normalized)}
         placeholders = ", ".join(f":sku_{idx}" for idx in range(len(normalized)))
@@ -24,7 +24,12 @@ def _catalog_subject_scope(db, *, tenant_id: str, result_skus: List[str]) -> tup
             "SELECT DISTINCT node_handle FROM product_classification "
             f"WHERE tenant_id=:tenant AND status='approved' AND sku IN ({placeholders})"
         )
-        rows = db.execute(stmt, {"tenant": tenant_id, **params}).fetchall()
+        # Optional schema drift must not abort the caller's business transaction.
+        # Inspect its connection so ownership and pending writes stay intact.
+        with db.begin_nested():
+            if not inspect(db.connection()).has_table("product_classification"):
+                return [], []
+            rows = db.execute(stmt, {"tenant": tenant_id, **params}).fetchall()
         nodes = sorted({str(row[0]) for row in rows if row and row[0]})
         from src.app.services.taxonomy_registry import ancestors
         parent_nodes = sorted({a.handle for node in nodes for a in ancestors(node)})
@@ -197,7 +202,10 @@ def _structured_evidence(findings: List[Dict[str, Any]], insights: List[Dict[str
 def format_evidence_for_narration(findings: List[Dict[str, Any]], *, max_items: int = 4) -> str:
     from src.app.services.market_evidence_admission import market_evidence_admission
     lines = []
-    for finding in (findings or [])[:max_items]:
+    limit = max(0, int(max_items))
+    for finding in findings or []:
+        if len(lines) >= limit:
+            break
         if market_evidence_admission(finding) is not None:
             continue
         summary = finding.get("summary") or f"{finding.get('finding_type')} ({finding.get('severity')})"
@@ -245,7 +253,7 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
             raw = load_recent_findings(db, limit=max(int(max_findings) * 4, 12),
                                        tenant_id=tenant_id, raise_on_error=True)
             scoped = _scope_findings(raw, result_skus=seed_skus, taxonomy_nodes=taxonomy_nodes,
-                                     ancestor_nodes=ancestor_nodes)[:int(max_findings)]
+                                     ancestor_nodes=ancestor_nodes)
             out["market_findings"] = []
             for finding in scoped:
                 item = _finding_dict(finding, tenant_id=tenant_id)
@@ -261,11 +269,13 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
             finding["admission_status"] = "withheld" if reason else "admitted"
             finding["admission_reason"] = reason
             (withheld if reason else accepted).append(finding)
+        limit = max(0, int(max_findings))
+        accepted = accepted[:limit]
         out["withheld_market_findings"] = withheld
-        # Preserve diagnostics in market_findings; only admitted observations
-        # enter the structured evidence and narrator input.
+        # Budget admitted evidence first; retain rejected records as diagnostics.
+        out["market_findings"] = (accepted + withheld)[:limit]
         out["market_evidence"] = _structured_evidence(accepted, out["hippograph_insights"])
-        out["narration_note"] = format_evidence_for_narration(out["market_findings"])
+        out["narration_note"] = format_evidence_for_narration(accepted)
         if out["needs_market_evidence"]:
             out["delivery_status"] = "available" if accepted else "blocked"
             out["delivery_reason"] = None if accepted else "no_current_scoped_evidence"
