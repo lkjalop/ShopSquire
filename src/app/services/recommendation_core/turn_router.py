@@ -735,6 +735,12 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             envelope.buyer_query or envelope.query,
         ):
             subject_action = "continue"
+    from src.app.services.recommendation_core.case_binding import continues_selected_scope_research
+    if continues_selected_scope_research(db, envelope):
+        subject_action = "continue"
+        prior = get_node(str(session.get("prior_node") or ""))
+        if prior is not None and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True:
+            node = prior
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
     if pending_budget_answer and node is None and not unresolved_case:
         prior = get_node(str(session.get("prior_node") or ""))
@@ -1794,6 +1800,9 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     # the closed operation grammar above has higher authority over *continuity only*: it cannot
     # select a SKU or mutate state; it merely binds the turn back to the accepted case subject.
     context_operation = _is_active_case_context_operation(envelope.query, session)
+    from src.app.services.recommendation_core.case_binding import continues_selected_scope_research
+    if continues_selected_scope_research(db, envelope):
+        subject_action = "continue"
     if context_operation:
         lane = "PROCUREMENT"
         subject_action = "continue"
