@@ -1,8 +1,16 @@
 {
-  "recorded_at": "2026-10-20T22:51:36.930724+00:00",
-  "checkpoint_head": "e950facd7f279ff37a691828eb2a058402afd94c",
+  "recorded_at": "2026-10-21T02:41:34.243912+00:00",
+  "checkpoint_head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "8dc3f3f5 Confirm cart clears before reporting success and expose recovery after failure",
+    "9affa8ba Run buyer browser fixtures with signed identities and real current product SKUs",
+    "3d82d28f Expose current cart undo and prevent stale snapshot recovery after cache failure",
+    "5af7d8d7 Align positive API fixtures with signed identities and explicit simulated payments",
+    "8f39db21 Require explicit isolated-test opt-in for request and audit bypasses",
+    "e0532612 Bind database ownership across HTTP and WebSocket requests without global fallback",
+    "73bbda5b Integrate scoped enquiry recovery and serialize concurrent recovery observations",
+    "6b4d5e11 Record revision-preserving recall and real case-approved origin fetch evidence",
     "e950facd Keep owned fact recall on the accepted material case revision",
     "9ec5f123 Record named-shortfall retention and separate live discovery from source and market completion",
     "13761e98 Keep named shortfall counts separate from total requested case quantity",
@@ -96,31 +104,31 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 89,
-      "insertions": 4246,
-      "deletions": 1298
+      "files": 95,
+      "insertions": 4479,
+      "deletions": 1310
     },
     "tests": {
-      "files": 147,
-      "insertions": 8155,
-      "deletions": 1242
+      "files": 163,
+      "insertions": 9211,
+      "deletions": 1248
     },
     "frontend": {
-      "files": 16,
-      "insertions": 78,
-      "deletions": 15
+      "files": 22,
+      "insertions": 212,
+      "deletions": 56
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-20T22:50:23.466371+00:00",
-    "head": "e950facd7f279ff37a691828eb2a058402afd94c",
+    "recorded_at": "2026-10-21T02:39:06.681517+00:00",
+    "head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 483,
-    "tracked_changed": 238,
-    "untracked": 245,
+    "git_status_entries": 472,
+    "tracked_changed": 233,
+    "untracked": 239,
     "staged": 0,
-    "files": 5710,
-    "text_lines": 978543,
+    "files": 5721,
+    "text_lines": 979473,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -190,7 +198,7 @@
       "dump": 10,
       "env.production.template": 1,
       "eval": 8,
-      "frontend": 324,
+      "frontend": 326,
       "full_pytest_after_finalfix.log": 1,
       "full_pytest_after_fix.log": 1,
       "full_pytest_after_flags_fix.log": 1,
@@ -225,24 +233,101 @@
       "sdk": 6,
       "shopsquire-live-multiimage-cart-2026-06-22.png": 1,
       "sitecustomize.py": 1,
-      "src": 1326,
+      "src": 1328,
       "start_cart_validation.ps1": 1,
       "start_demo.ps1": 1,
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1549,
+      "tests": 1556,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19513,
+    "functions": 19586,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5587,
-    "swallowed_production_handlers": 2028,
+    "swallowed_production_handlers": 2027,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W01",
+      "path": "src/app/models/database_ownership.py",
+      "symbol": "request_database_owner",
+      "line": 24,
+      "function_lines": 13,
+      "file_lines": 47,
+      "git_state": "committed",
+      "sha256": "c593831ed4f28b140f0b069d6873f4400eed797ce393dc6f75098e3c4b757f64",
+      "remaining": "remaining captured globals, async owners and distributed application lifecycles"
+    },
+    {
+      "work_package": "W01",
+      "path": "src/app/models/request_database_middleware.py",
+      "symbol": "__call__",
+      "line": 12,
+      "function_lines": 24,
+      "file_lines": 35,
+      "git_state": "committed",
+      "sha256": "b44efb3b1d8590974fbc0113c06e0a5e27126f82c6ad8bf0449d60ac5358a72b",
+      "remaining": "all mounted applications and deployed HTTP/WebSocket consumers"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/services/supplier_enquiry_recovery.py",
+      "symbol": "_authorized",
+      "line": 8,
+      "function_lines": 9,
+      "file_lines": 76,
+      "git_state": "committed",
+      "sha256": "9d69b56e5a01f5d8111f4002fe2f5e0ebd76da4a89ea5a1ae949bfaf4e57c0d3",
+      "remaining": "real operator authentication, provider evidence and complete crash windows"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/security/runtime_test_controls.py",
+      "symbol": "isolated_test_controls_enabled",
+      "line": 5,
+      "function_lines": 3,
+      "file_lines": 7,
+      "git_state": "committed",
+      "sha256": "cce018b40e3d56a5961e3196e3debd3c6444a8856155e8a68250027133041a5f",
+      "remaining": "complete production security defaults and all configured sampling/exclusions"
+    },
+    {
+      "work_package": "W01/W11",
+      "path": "tests/security/test_request_bypass_boundary.py",
+      "symbol": "test_skip_header_cannot_disable_ip_admission",
+      "line": 63,
+      "function_lines": 10,
+      "file_lines": 158,
+      "git_state": "committed",
+      "sha256": "a2b80a733fcc8c1c68c4c0bbf2bda5e8445836820c5b0ac8b2949676ea4b75ad",
+      "remaining": "deployed production admission and remaining security profiles"
+    },
+    {
+      "work_package": "W01/W12",
+      "path": "tests/test_cart_clear_undo_projection.py",
+      "symbol": "test_clear_response_exposes_two_line_snapshot_and_restore_is_exact",
+      "line": 30,
+      "function_lines": 15,
+      "file_lines": 106,
+      "git_state": "committed",
+      "sha256": "0e96b279d0a6acc5730c6488161e3601e8d8e3a3197e887207607d4d7ac33fc5",
+      "remaining": "legacy asynchronous SQLite cart intermittence and complete consumer coverage"
+    },
+    {
+      "work_package": "W01/W12",
+      "path": "src/app/routers/cart.py",
+      "symbol": "clear_cart",
+      "line": 750,
+      "function_lines": 54,
+      "file_lines": 1113,
+      "git_state": "committed",
+      "sha256": "366da7bc26d6251afc3b54582f52916e34856747b09990f5d512d5307184cfcc",
+      "remaining": "all cart mutation atomicity, recovery and unavailable snapshot behavior"
+    },
     {
       "work_package": "W04/W05",
       "path": "src/app/services/case_task_delivery.py",
@@ -456,11 +541,11 @@
       "work_package": "W01",
       "path": "src/app/models/database_ownership.py",
       "symbol": "database_owner",
-      "line": 16,
+      "line": 40,
       "function_lines": 8,
-      "file_lines": 23,
+      "file_lines": 47,
       "git_state": "committed",
-      "sha256": "ef6d16fd580b46631090f63c338dc6e554c66a3f5bda7998ff283da62b3937b6",
+      "sha256": "c593831ed4f28b140f0b069d6873f4400eed797ce393dc6f75098e3c4b757f64",
       "remaining": "remaining workers/direct global database consumers and complete distributed lifecycle certification"
     },
     {
@@ -775,11 +860,11 @@
       "work_package": "W01",
       "path": "src/app/main.py",
       "symbol": "create_app",
-      "line": 186,
-      "function_lines": 2214,
-      "file_lines": 2409,
+      "line": 198,
+      "function_lines": 2216,
+      "file_lines": 2423,
       "git_state": "committed",
-      "sha256": "a6452da1ee19d8291a72c2c9d1ad1656999997c6b7db0c75711374e992f8d5f4",
+      "sha256": "11b1ab375af05214a1fc38e217ac20711a1cf4cd19f595c3536b2096594f9af3",
       "remaining": "remaining startup/error paths and scheduler owners"
     },
     {
@@ -919,10 +1004,10 @@
       "path": "src/app/services/fulfillment/operator_recovery.py",
       "symbol": "resolve",
       "line": 23,
-      "function_lines": 32,
-      "file_lines": 54,
-      "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "3fb84fc402dfd2f2f724ec1aa542bb40f87a25d263b95301e5d1a21fadaa9cc6",
+      "function_lines": 38,
+      "file_lines": 60,
+      "git_state": "committed",
+      "sha256": "82b278c68f1c3699a640e890f4fbb0eaf8d19de5027cebb5a5cd368cc4b60058",
       "remaining": "crash windows, reviewed recovery and restore/rollback"
     },
     {
@@ -7073,19 +7158,19 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 89,
-      "added": 4246,
-      "removed": 1298
+      "files": 95,
+      "added": 4479,
+      "removed": 1310
     },
     "Tests": {
-      "files": 147,
-      "added": 8155,
-      "removed": 1242
+      "files": 163,
+      "added": 9211,
+      "removed": 1248
     },
     "Frontend": {
-      "files": 16,
-      "added": 78,
-      "removed": 15
+      "files": 22,
+      "added": 212,
+      "removed": 56
     },
     "Migrations": {
       "files": 20,
@@ -7104,14 +7189,14 @@
     },
     "Documentation/other": {
       "files": 12,
-      "added": 28900,
+      "added": 29114,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 303,
-    "added": 44588,
-    "removed": 5010
+    "files": 331,
+    "added": 46225,
+    "removed": 5069
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -9520,5 +9605,3606 @@
     },
     "source_manifest_sha256": "b83651bfcb9fc1f8c1cbf6b2f4b20089c7de1eaf72107ae3587c3193216c4cd5",
     "limitations": "5720 unchanged base inputs plus one explicit diagnostic spec. A separate buyer click permits the exact FreeCAD origin; an actual nonfixture HTTP-200 origin receipt is asserted. Homepage parser yields zero usable claims. This is neither global publisher verification nor complete product fit or useful market analysis."
+  },
+  "enquiry_recovery": {
+    "commit": "73bbda5b21895800e82d25d67c0795c7d3b2c96a",
+    "tested_files": [
+      "src/app/services/fulfillment/operator_recovery.py",
+      "src/app/services/supplier_enquiry_recovery.py",
+      "tests/services/fulfillment/test_operator_recovery.py",
+      "tests/services/test_supplier_enquiry_recovery.py",
+      "tests/services/test_supplier_enquiry_recovery_access.py",
+      "tests/chaos/test_enquiry_recovery_postgres.py",
+      "tests/services/test_supplier_enquiry_journey.py"
+    ],
+    "other_candidate_python_files_matching_head": 2991,
+    "sqlite_counts": {
+      "tests": 437,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "postgresql_counts": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "limitations": "Internal operator observations, generated provider evidence references and fake effects only. Does not certify provider evidence, actual independent human identity or every crash/SMTP recovery window."
+  },
+  "request_database_ownership": {
+    "commit": "e05326125a4732ed3a42535035a5d3296494fd34",
+    "tested_files": [
+      "src/app/models/database_ownership.py",
+      "src/app/models/request_database_middleware.py",
+      "src/app/main.py",
+      "tests/api/test_request_database_ownership.py",
+      "tests/unit/test_request_database_middleware.py",
+      "tests/chaos/test_request_database_owner_postgres.py"
+    ],
+    "other_candidate_python_files_matching_head": 2996,
+    "focused_counts": {
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "postgresql_counts": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "common_api_comparison": {
+      "same_test_ids": 315,
+      "same_assertion_failure_ids": [
+        "tests.api.test_admin_chat_tools::test_admin_chat_tools_endpoints_smoke",
+        "tests.api.test_order_payment_dispatch_spine::test_checkout_initiate_idempotency_409_on_duplicate",
+        "tests.api.test_order_payment_dispatch_spine::test_full_spine_created_paid_dispatched_shipped",
+        "tests.api.test_order_payment_dispatch_spine::test_new_order_from_cart_requires_stable_checkout_attempt_identity",
+        "tests.api.test_order_payment_dispatch_spine::test_no_items_no_order_still_demo_confirms",
+        "tests.api.test_payments_intent::test_payment_intent_idempotency",
+        "tests.api.test_shopping_case_decision_runs::test_owner_can_read_revisioned_decision_trace_without_commerce_authority",
+        "tests.api.test_shopping_case_evidence_source_resolution::test_emulate3d_policy_pending_claims_are_returned_for_review_with_execution_truth"
+      ],
+      "new_assertion_failures": [],
+      "resolved_assertion_failures": [],
+      "changed_outcomes": [
+        {
+          "id": "tests.api.test_shopping_case_supplier_continuation::test_operational_fact_classes_are_append_only_and_non_authoritative[quote_validity-value2-supplier:offers]",
+          "before": "error",
+          "after": "passed"
+        },
+        {
+          "id": "tests.api.test_shopping_case_supplier_continuation::test_operational_fact_classes_are_append_only_and_non_authoritative[supplier_response-value3-supplier:offers]",
+          "before": "passed",
+          "after": "error"
+        }
+      ],
+      "limitations": "Both runs have one setup error in different parameters of the same migration fixture, with ~418s observed setup and negative remaining subprocess timeout despite child exit 0. Shared timing/suspend/scheduling cause is an inference, not a repaired application hang."
+    },
+    "limitations": "Existing 315-case API baseline/candidate each has 306 passes, 8 same assertion failures and 1 migration setup error; both affected parameters pass focused reruns. This does not close the setup stall, all global engine consumers, every worker or full release gates."
+  },
+  "request_and_audit_test_bypass": {
+    "commit": "8f39db21c790044630d21dded541afab24f1c178",
+    "files": [
+      "src/app/main.py",
+      "src/app/security/runtime_test_controls.py",
+      "src/app/security/observer.py",
+      "src/app/routers/pricing.py",
+      "src/app/services/decision_log.py",
+      "tests/api/test_request_database_ownership.py",
+      "tests/security/test_request_bypass_boundary.py"
+    ],
+    "tested_hashes": [
+      {
+        "path": "src/app/main.py",
+        "candidate_sha256": "11b1ab375af05214a1fc38e217ac20711a1cf4cd19f595c3536b2096594f9af3"
+      },
+      {
+        "path": "src/app/security/runtime_test_controls.py",
+        "candidate_sha256": "cce018b40e3d56a5961e3196e3debd3c6444a8856155e8a68250027133041a5f"
+      },
+      {
+        "path": "src/app/security/observer.py",
+        "candidate_sha256": "be714310f2e390a8642d089829b2020f6c73258077217c8922870fb62bc5a8c6"
+      },
+      {
+        "path": "src/app/routers/pricing.py",
+        "candidate_sha256": "b10f4396074aceb862f52b5bbacfad1faa8477f8d0400c49318b6065b98fc391"
+      },
+      {
+        "path": "src/app/services/decision_log.py",
+        "candidate_sha256": "00bca8fd1cd94f286d0e718f1bc43ad73673ee402d5c33387376162c541b3dcd"
+      },
+      {
+        "path": "tests/api/test_request_database_ownership.py",
+        "candidate_sha256": "5e2f9d4f8431a923416289cb66a5021a482a1bc88af12a35f8003de6bf80942d"
+      },
+      {
+        "path": "tests/security/test_request_bypass_boundary.py",
+        "candidate_sha256": "a2b80a733fcc8c1c68c4c0bbf2bda5e8445836820c5b0ac8b2949676ea4b75ad"
+      }
+    ],
+    "other_candidate_python_files_matching_head": 3002,
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_request_bypass_boundary.py",
+        "tests/api/test_request_database_ownership.py",
+        "tests/security/test_observer_session_ownership.py",
+        "tests/security/test_observer_worker_ownership.py",
+        "tests/services/test_trace_batch.py",
+        "tests/test_decision_logs_fields.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\request-bypass-boundary-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 153.438,
+      "peaks": {
+        "rss_bytes": 346869760,
+        "handles": 1641,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 56,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "pricing_admission": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security/test_pricing_rate_limits.py",
+        "tests/security/test_rate_limits.py",
+        "tests/chaos/test_backpressure_rate_limit.py",
+        "tests/chaos/test_chaos_errors.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\request-bypass-pricing-regression\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 78.234,
+      "peaks": {
+        "rss_bytes": 282628096,
+        "handles": 1158,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "valid_reds": "16 failures/21 initial middleware cases plus 6 failures/8 direct durable sink cases",
+    "original_decision_log_wip_preserved": true,
+    "limitations": "TestClient production-policy requests plus separately owned HTTP pricing profile; no full production deployment/security certification. Other configured sampling/default health/pricing/vision exclusions remain separately scoped."
+  },
+  "positive_api_fixture_integration": {
+    "commit": "5af7d8d73f948ab31e5861801dd154513b59f084",
+    "files": [
+      {
+        "path": "tests/api/test_admin_chat_tools.py",
+        "sha256": "22efdd6311f4136ec6756f7eba4520ea626f79a79576e020c099694a7b870f6f"
+      },
+      {
+        "path": "tests/api/test_order_payment_dispatch_spine.py",
+        "sha256": "ca27e98d4984aa6ff52ef9416786299179d6792eb34e0ef15cc6d0e2fef8d003"
+      },
+      {
+        "path": "tests/api/test_payments_intent.py",
+        "sha256": "af6eab27c704e708a972a23842a1adf1e0b501ec6ee04348b0f2a2863aa389c9"
+      },
+      {
+        "path": "tests/api/test_shopping_case_decision_runs.py",
+        "sha256": "e55bcc3b0fb3f6fa3509fc8e20463dd06fd9e58f87341ebf2fd349fda7469c6c"
+      },
+      {
+        "path": "tests/api/test_shopping_case_evidence_source_resolution.py",
+        "sha256": "f18cb4eefd999c906e85f4610809b47260917dda78d79c731a67de012d24e03f"
+      },
+      {
+        "path": "tests/api/test_shopping_case_supplier_continuation.py",
+        "sha256": "6f03324adb10372032cee72fbcefa6311b70315ad2d1dd098cb9105806d606fb"
+      },
+      {
+        "path": "tests/buyer_identity_helpers.py",
+        "sha256": "a082dda07ec9a2a078d7da1bd0d3127fa3086e724c8f16b524244056a7d93c91"
+      },
+      {
+        "path": "tests/buyer_client.py",
+        "sha256": "4e1f4066f16474b77b085ba5e8d10b73da82ea360de0b549f25cf0e7b23fc851"
+      }
+    ],
+    "api_profile": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\api-fixture-integration-full\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\supplier-enquiry-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 528.891,
+      "peaks": {
+        "rss_bytes": 761638912,
+        "handles": 4136,
+        "threads": 84
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 326,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "unchanged_existing_assertions": 210,
+    "other_candidate_python_files_matching_head": 3003,
+    "limitations": "326 cases on committed production and these fixtures; ROOT 371-case profile includes further WIP. Passing this run does not causally repair earlier 418-second migration setup stalls or prove native payment provider conformance."
+  },
+  "preserved_working_tree_api": {
+    "profile": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\root-api-current-run\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\root-api-current-snapshot",
+      "native_exit_code": 0,
+      "elapsed_seconds": 547.859,
+      "peaks": {
+        "rss_bytes": 717336576,
+        "handles": 3817,
+        "threads": 84
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 371,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source_receipt": {
+      "source": "e05326125a4732ed3a42535035a5d3296494fd34",
+      "selected_inputs": 5728,
+      "changed_inputs": [],
+      "counts": {
+        "tests": 371,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "source_manifest_sha256": "a934f529e8b77c3e910807588b5f994deac72795b2e064ae17f7204627bb2d4a",
+    "limitations": "371 cases include original working-tree edits, before the request-bypass and cart response changes. All eight previously failing test files were edited. The separately integrated positive-fixture cohort preserves 210 existing assertion ASTs and passes 326 cases on committed production. Passing runs do not causally repair earlier 418-second migration setup stalls."
+  },
+  "cart_clear_undo_projection": {
+    "commit": "3d82d28fefaa5b3dc00db4f5fb333cf3f14730cb",
+    "files": [
+      {
+        "path": "src/app/routers/cart.py",
+        "sha256": "366da7bc26d6251afc3b54582f52916e34856747b09990f5d512d5307184cfcc"
+      },
+      {
+        "path": "tests/test_cart_clear_undo_projection.py",
+        "sha256": "0e96b279d0a6acc5730c6488161e3601e8d8e3a3197e887207607d4d7ac33fc5"
+      }
+    ],
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_cart_clear_undo_projection.py",
+        "tests/test_cart_tenant_isolation.py",
+        "tests/services/test_cart_session_state.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-clear-snapshot-authority-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 37.204,
+      "peaks": {
+        "rss_bytes": 309612544,
+        "handles": 1322,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "other_candidate_python_files_matching_head": 3010,
+    "valid_reds": {
+      "missing_response_projection": 3,
+      "stale_snapshot_and_failed_invalidation": 2
+    },
+    "broader_cart_attempt": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_cart_clear_undo_projection.py",
+        "tests/test_cart_stock_gates.py",
+        "tests/test_cart_tenant_isolation.py",
+        "tests/services/test_cart_session_state.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-clear-undo-projection-fixed\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate",
+      "native_exit_code": 1,
+      "elapsed_seconds": 74.172,
+      "peaks": {
+        "rss_bytes": 318255104,
+        "handles": 1381,
+        "threads": 37
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 32,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "limitations": "Broader cart attempt has one old stock-test SQLite transaction failure; new inherited StaticPool regression fixture explicitly uses synchronous telemetry. No causal repair of asynchronous cart intermittence, Redis/SQL crash atomicity or all mutation races is claimed."
+  },
+  "cart_clear_visible_failure_and_restore": {
+    "commit": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+    "files": [
+      {
+        "path": "frontend/src/App.tsx",
+        "sha256": "c25ff152a0ad11f8362d7a57ae455bfc71f1d84f62638f01932dfe3a91640e7c"
+      },
+      {
+        "path": "frontend/e2e/cart-clear-outage.spec.ts",
+        "sha256": "002e293be10229885bebc9d312e4373e4354539b1bc8415d8b209bb023148df4"
+      },
+      {
+        "path": "frontend/e2e/cart-clear-restore.spec.ts",
+        "sha256": "805216a7a2ce3516297ae383794ae13cc484d64e903ba6941e8ef1c9073c4018"
+      }
+    ],
+    "candidate_browser": {
+      "complete": true,
+      "commercial_effects": "sandbox/disabled",
+      "results": [
+        {
+          "spec": "cart-clear-outage.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T02:34:35.979Z",
+            "duration": 2980.5060000000003,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 24,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned_redis_browser_candidate_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\.artifacts\\cart-clear-candidate-final-specs\\cart-clear-outage\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\.artifacts\\cart-clear-candidate-final-specs\\cart-clear-outage",
+              "--label",
+              "preview",
+              "--api-port",
+              "8100",
+              "--ui-port",
+              "5190",
+              "--frontend-mode",
+              "preview",
+              "cart-clear-outage.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate",
+            "native_exit_code": 0,
+            "elapsed_seconds": 23.859,
+            "peaks": {
+              "rss_bytes": 246300672,
+              "handles": 1171,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8100": true,
+            "5190": true
+          }
+        },
+        {
+          "spec": "cart-clear-restore.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T02:35:04.356Z",
+            "duration": 3388.795,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 33,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned_redis_browser_candidate_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\.artifacts\\cart-clear-candidate-final-specs\\cart-clear-restore\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\.artifacts\\cart-clear-candidate-final-specs\\cart-clear-restore",
+              "--label",
+              "preview",
+              "--api-port",
+              "8100",
+              "--ui-port",
+              "5190",
+              "--frontend-mode",
+              "preview",
+              "cart-clear-restore.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate",
+            "native_exit_code": 0,
+            "elapsed_seconds": 24.172,
+            "peaks": {
+              "rss_bytes": 247054336,
+              "handles": 1196,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8100": true,
+            "5190": true
+          }
+        }
+      ],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "changed_source_inputs": [],
+      "selected_source_inputs": 5496,
+      "elapsed_seconds": 93.984
+    },
+    "types": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 13.828,
+      "command": [
+        "node",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\frontend\\node_modules\\typescript\\bin\\tsc",
+        "--noEmit",
+        "-p",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-undo-candidate\\frontend\\tsconfig.json"
+      ]
+    },
+    "other_candidate_python_typescript_css_json_files_matching_head": 4441,
+    "original_root_app_wip_preserved": true,
+    "valid_red": "One actual browser case on unchanged ROOT input: simulated HTTP503 still displayed successful empty-cart text; later error/retry/actual clear and native one-time restore pass on the exact isolated committed candidate plus three-file patch.",
+    "limitations": "Native Redis is ephemeral and fixtures are fictional. Cache/SQL cross-system crash atomicity, prior asynchronous SQLite stock intermittence and complete application/browser gates remain open. External fixture/supervisor tooling is distinct from the exact candidate backend/frontend source."
+  },
+  "browser_outcome_ledger": {
+    "path": "docs/audits/2026-10-21-browser-outcome-ledger.csv",
+    "sha256": "86ddd1a11f6de8ae3c2f84f6578e6fb631cd3c0a134e07bdb39ed5e1ca7b0a16",
+    "scope": "All 162 frozen collected IDs with source lines/hashes and reported or unreported outcomes; reason categories are heuristic triage, not established root causes."
+  },
+  "current_broad_browser_diagnostic": {
+    "source": "73bbda5b21895800e82d25d67c0795c7d3b2c96a",
+    "source_manifest_sha256": "64031688579b2d0391bcf496da1fc9c53e81a54d208bb47f32dae123c49db8c5",
+    "source_receipt": {
+      "selected_inputs": 5724,
+      "changed_inputs": [],
+      "completed_specs": 77,
+      "selected_specs": 77,
+      "elapsed_seconds": 5007.406,
+      "scope": "Frozen preserved working tree, offline controlled fixtures, no commercial execution"
+    },
+    "profile": "Fresh per-spec offline shops; retries zero; CPU only; commercial effects disabled",
+    "collected": 162,
+    "reported": 157,
+    "unreported": [
+      {
+        "file": "live-unresolved-purchase-boundary.spec.ts",
+        "title": "KCD2 partial evidence agrees across chat, questions and persisted turn",
+        "project": "chromium"
+      },
+      {
+        "file": "live-unresolved-purchase-boundary.spec.ts",
+        "title": "live preflight cannot replace executed provider requirements",
+        "project": "chromium"
+      },
+      {
+        "file": "live-unresolved-purchase-boundary.spec.ts",
+        "title": "live complete-evidence qualified-product delivery gate",
+        "project": "chromium"
+      },
+      {
+        "file": "live-unresolved-purchase-boundary.spec.ts",
+        "title": "approximate budget keeps its literal anchor without automatic stretch",
+        "project": "chromium"
+      },
+      {
+        "file": "live-unresolved-purchase-boundary.spec.ts",
+        "title": "held workload cannot answer a new unresolved purchase",
+        "project": "chromium"
+      }
+    ],
+    "totals": {
+      "expected": 52,
+      "unexpected": 72,
+      "skipped": 33,
+      "flaky": 0
+    },
+    "specs": [
+      {
+        "spec": "accepted-stock.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.813,
+        "stats": {
+          "startTime": "2026-10-21T01:01:06.172Z",
+          "duration": 3189.157,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 267599872,
+          "handles": 1123,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "accepted-stock.spec.ts",
+            "title": "accepted quantity changes replace holds and invalidate qualification",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "adversarial-case-isolation.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.359,
+        "stats": {
+          "startTime": "2026-10-21T01:01:27.016Z",
+          "duration": 3916.2239999999997,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 283443200,
+          "handles": 1194,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "adversarial-case-isolation.spec.ts",
+            "title": "cross-tenant canary stays private under direct injection and UID spoofing",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "artifact-security-boundary.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 24.641,
+        "stats": {
+          "startTime": "2026-10-21T01:01:48.988Z",
+          "duration": 10762.954,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 302260224,
+          "handles": 1427,
+          "threads": 90
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "artifact-security-boundary.spec.ts",
+            "title": "rejected attachment remains visible and cannot become an attachment-free recommendation",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "artifact-security-boundary.spec.ts",
+            "title": "malicious or incompletely inspected image is blocked, traced, and records monitoring outcome",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "budget-subject-rfq-live.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 16.344,
+        "stats": {
+          "startTime": "2026-10-21T01:02:19.375Z",
+          "duration": 1332.4340000000002,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246566912,
+          "handles": 1148,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "budget-subject-rfq-live.spec.ts",
+            "title": "software budget truth is consistent and off-catalog sourcing is explicit and draft-only",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "bulk-order-economics-live.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 17.187,
+        "stats": {
+          "startTime": "2026-10-21T01:02:39.372Z",
+          "duration": 2365.913,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 248754176,
+          "handles": 1148,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "bulk-order-economics-live.spec.ts",
+            "title": "bulk order within budget keeps one canonical role, amount and order result",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "bulk-order-economics-live.spec.ts",
+            "title": "underfunded bulk order reports exact shortfall with no false fitting shelf",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "buyer-evidence-source-live.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 14.328,
+        "stats": {
+          "startTime": "2026-10-21T01:03:00.378Z",
+          "duration": 89.935,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239128576,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "buyer-evidence-source-live.spec.ts",
+            "title": "buyer checks an official URL locally then explicitly authorizes canonical research",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "buyer-flow.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 15.672,
+        "stats": {
+          "startTime": "2026-10-21T01:03:18.843Z",
+          "duration": 1469.732,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246882304,
+          "handles": 1147,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "buyer-flow.spec.ts",
+            "title": "T1 \u2014 search shows products with no internal ranker tags leaked to the buyer",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "buyer-flow.spec.ts",
+            "title": "T4 \u2014 multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "canonical-ambiguous-procurement.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 16.172,
+        "stats": {
+          "startTime": "2026-10-21T01:03:39.560Z",
+          "duration": 1006.9509999999999,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239587328,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "canonical-ambiguous-procurement.spec.ts",
+            "title": "ambiguous workload explores locally before optional research without cart authority",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "case-contract-selection.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.703,
+        "stats": {
+          "startTime": "2026-10-21T01:03:59.029Z",
+          "duration": 2060.2610000000004,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 243499008,
+          "handles": 1082,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "case-contract-selection.spec.ts",
+            "title": "case requirements persist across reload and reject a stale second tab",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "case-panel-trace-consistency.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 15.859,
+        "stats": {
+          "startTime": "2026-10-21T01:04:20.391Z",
+          "duration": 835.8689999999999,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 240066560,
+          "handles": 1026,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "case-panel-trace-consistency.spec.ts",
+            "title": "shopping-case panel and Decision Trace consume the same truth projection",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "commercial-interpretation.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 19.282,
+        "stats": {
+          "startTime": "2026-10-21T01:04:39.783Z",
+          "duration": 4935.347,
+          "expected": 3,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 283561984,
+          "handles": 1176,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "commercial-interpretation.spec.ts",
+            "title": "product description does not become bulk demand: Dell 15 laptop under AUD 1400",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "commercial-interpretation.spec.ts",
+            "title": "product description does not become bulk demand: 15 inch laptops for work under AUD 1400",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "commercial-interpretation.spec.ts",
+            "title": "budget maximum stays a commercial constraint through normal chat",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "consented-live-research.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 14.406,
+        "stats": {
+          "startTime": "2026-10-21T01:05:02.692Z",
+          "duration": 802.8810000000001,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239329280,
+          "handles": 1010,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "consented-live-research.spec.ts",
+            "title": "consented live discovery preserves scope and grants no commerce authority",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "context-retention.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 15.203,
+        "stats": {
+          "startTime": "2026-10-21T01:05:21.355Z",
+          "duration": 1604.287,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 240476160,
+          "handles": 1027,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "context-retention.spec.ts",
+            "title": "budget context survives raise + cut across turns (one session)",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "context-retention.spec.ts",
+            "title": "bulk quantity survives non-qty turns; a fresh amendment wins and then holds",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "conversational-integrity.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 142.516,
+        "stats": {
+          "startTime": "2026-10-21T01:05:41.771Z",
+          "duration": 127714.807,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 4,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 250687488,
+          "handles": 1156,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "conversational-integrity.spec.ts",
+            "title": "prospective arrival request reaches fulfilment instead of post-purchase refusal",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "conversational-integrity.spec.ts",
+            "title": "ordinary gaming catalog exploration renders products without requiring research",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "conversational-integrity.spec.ts",
+            "title": "commercial turns remain bound to an ambiguous case and preserve its purpose",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "conversational-integrity.spec.ts",
+            "title": "a product swap preserves the CAD purpose and quantity",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "conversational-qualification.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 41.047,
+        "stats": {
+          "startTime": "2026-10-21T01:08:08.335Z",
+          "duration": 26533.186,
+          "expected": 6,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 302858240,
+          "handles": 1369,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "ordinary chat qualifies fictional evidence with trace agreement and revocation",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "normal chat rejects expired evidence when consumed",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "normal chat rejects conflicting evidence when consumed",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "normal chat rejects revoked-source evidence when consumed",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "ordinary qualified case offers an evidenced accessory and changes the draft only after acceptance",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "conversational-qualification.spec.ts",
+            "title": "ordinary qualified case connects to accepted holds and an independently approved fake supplier conversation",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "conversational-spatiotemporal-certificate.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 77.641,
+        "stats": {
+          "startTime": "2026-10-21T01:08:53.222Z",
+          "duration": 63673.843,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239878144,
+          "handles": 1026,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "conversational-spatiotemporal-certificate.spec.ts",
+            "title": "two-turn procurement decision lab renders and seals the canonical certificate",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "decision-run-disturbance.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 15.703,
+        "stats": {
+          "startTime": "2026-10-21T01:10:14.949Z",
+          "duration": 1387.461,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 245161984,
+          "handles": 1090,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "decision-run-disturbance.spec.ts",
+            "title": "inventory disturbance projects selective invalidation and unresolved delivery conflict",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "decision-trace-live-audit.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 14.531,
+        "stats": {
+          "startTime": "2026-10-21T01:10:34.206Z",
+          "duration": 822.328,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239964160,
+          "handles": 1025,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "decision-trace-live-audit.spec.ts",
+            "title": "live Decision Trace is durable, factual, and honest across all leaves",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "decision-trace-navigation.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.937,
+        "stats": {
+          "startTime": "2026-10-21T01:10:53.463Z",
+          "duration": 3719.9979999999996,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 316071936,
+          "handles": 1096,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "decision-trace-navigation.spec.ts",
+            "title": "consolidated Decision Trace preserves requests, keyboard use, and every deep link",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "decision-trace-navigation.spec.ts",
+            "title": "qualified evidence chain remains visibly human gated",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "decision-trace-procurement-operations.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.469,
+        "stats": {
+          "startTime": "2026-10-21T01:11:16.290Z",
+          "duration": 1577.5139999999997,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 245903360,
+          "handles": 1088,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "decision-trace-procurement-operations.spec.ts",
+            "title": "Commercial Journey renders governed supplier pressure, wave and route evidence",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "decision-trace-temporal-contact.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.313,
+        "stats": {
+          "startTime": "2026-10-21T01:11:36.899Z",
+          "duration": 1745.522,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246591488,
+          "handles": 1094,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "decision-trace-temporal-contact.spec.ts",
+            "title": "weekend email transmits while supplier response SLA remains paused",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "decision-trace-temporal-contact.spec.ts",
+            "title": "phone-only supplier stays queued and opens a procurement human room",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "electronics-shop-scenario.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.063,
+        "stats": {
+          "startTime": "2026-10-21T01:11:57.907Z",
+          "duration": 1640.0060000000003,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 240889856,
+          "handles": 1025,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "electronics-shop-scenario.spec.ts",
+            "title": "quantity expansion displays real API arithmetic without granting commerce authority",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "empty-profile-auth.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 15.141,
+        "stats": {
+          "startTime": "2026-10-21T01:12:17.110Z",
+          "duration": 1984.968,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 280752128,
+          "handles": 1207,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "empty-profile-auth.spec.ts",
+            "title": "ordinary registration and login permit own shopping but never operator approval access",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "fit-deadline-trace.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 34.64,
+        "stats": {
+          "startTime": "2026-10-21T01:12:36.254Z",
+          "duration": 21541.844,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 245850112,
+          "handles": 1140,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "fit-deadline-trace.spec.ts",
+            "title": "typed fit, quantity and deadline semantics produce governed alternatives",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "five-year-fleet-consent-regression.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 264.922,
+        "stats": {
+          "startTime": "2026-10-21T01:13:14.746Z",
+          "duration": 251892.88999999998,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 8,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 252514304,
+          "handles": 1152,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: exact-1",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: exact-2",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: exact-3",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: personal-one",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: fleet-thirty-days",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: fleet-two-days",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: budgeted-fleet",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "five-year-fleet-consent-regression.spec.ts",
+            "title": "five-year fleet consent is consequential and bounded: named-model",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "governed-conversation-lifecycle.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.531,
+        "stats": {
+          "startTime": "2026-10-21T01:17:44.302Z",
+          "duration": 3160.94,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 283373568,
+          "handles": 1105,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "governed-conversation-lifecycle.spec.ts",
+            "title": "20-turn corrections and pronouns retain one browser session and explicit product anchor",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "governed-product-offers.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 56.297,
+        "stats": {
+          "startTime": "2026-10-21T01:18:04.981Z",
+          "duration": 43188.091,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239988736,
+          "handles": 1026,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "governed-product-offers.spec.ts",
+            "title": "buyer reviews and explicitly accepts a supported bundle with durable prices",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "governed-product-offers.spec.ts",
+            "title": "buyer reviews and explicitly accepts a supported upgrade with durable prices",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "inventory-scheduler.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 46.578,
+        "stats": {
+          "startTime": "2026-10-21T01:19:05.478Z",
+          "duration": 33115.276000000005,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 258146304,
+          "handles": 1068,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "inventory-scheduler.spec.ts",
+            "title": "scheduled expiry releases an accepted buyer hold and records one durable expiry",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "legacy-review-failure.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 14.343,
+        "stats": {
+          "startTime": "2026-10-21T01:19:55.253Z",
+          "duration": 1765.152,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 245727232,
+          "handles": 1125,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "legacy-review-failure.spec.ts",
+            "title": "failed requirement acceptance never becomes a completed review",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "live-acceptance-budget.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 317.953,
+        "stats": {
+          "startTime": "2026-10-21T01:20:14.573Z",
+          "duration": 304717.056,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 248860672,
+          "handles": 1142,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-acceptance-budget.spec.ts",
+            "title": "live manual acceptance preserves case budget and cannot verify partial evidence (stretch=false)",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-acceptance-budget.spec.ts",
+            "title": "live manual acceptance preserves case budget and cannot verify partial evidence (stretch=true)",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "live-buyer-regression-matrix.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 22.547,
+        "stats": {
+          "startTime": "2026-10-21T01:25:37.703Z",
+          "duration": 7970.485000000001,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 6,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 251432960,
+          "handles": 1159,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "covered gaming, university, and corporate searches stay on the normal buyer path",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled research with buyer authorization",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "BG3 affordability plus Emulate3D additive workload retains budget and researches the combined case",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "an unseen Steam title resolves live identity, release state, requirements, and catalog fit",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "natural workload replacements advance one revision and never project the prior subject",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "chat-pasted official URL and specifications enter their governed review paths",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-buyer-regression-matrix.spec.ts",
+            "title": "light and strenuous Emulate3D scopes remain separate and fail closed before evidence",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "live-external-ot-research-certification.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.954,
+        "stats": {
+          "startTime": "2026-10-21T01:26:06.864Z",
+          "duration": 1081.36,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239591424,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-external-ot-research-certification.spec.ts",
+            "title": "live OT research stays in one case and exposes real provider receipts",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "live-external-search-battery.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.844,
+        "stats": {
+          "startTime": "2026-10-21T01:26:28.130Z",
+          "duration": 717.2250000000001,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239718400,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-external-search-battery.spec.ts",
+            "title": "A-H live external intelligence battery is revision-bound and fail-closed",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "live-novel-title-intelligence.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 15.187,
+        "stats": {
+          "startTime": "2026-10-21T01:26:47.606Z",
+          "duration": 914.3980000000001,
+          "expected": 0,
+          "skipped": 10,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239218688,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "evidence delivery preserves official values without qualifying partial requirements",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "scope and stock: chair",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "scope and stock: unrelated",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "scope and stock: bulk",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "evidence delivery never binds FreeCAD to AutoCAD requirements",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "unseen title mio resolves without an application alias",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "unseen title pragmata resolves without an application alias",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "unseen title dawnwalker resolves without an application alias",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "non-instructive continuation resolves its clean subject span",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "live-novel-title-intelligence.spec.ts",
+            "title": "low-confidence cited identity asks for confirmation without fetching",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "live-procurement-disturbance-certificate.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 15.031,
+        "stats": {
+          "startTime": "2026-10-21T01:27:07.351Z",
+          "duration": 78.707,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239271936,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-procurement-disturbance-certificate.spec.ts",
+            "title": "real backend seals a topology-neutral side-effect-free disturbance matrix",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "live-research-memory-assessment.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 15.968,
+        "stats": {
+          "startTime": "2026-10-21T01:27:26.791Z",
+          "duration": 879.872,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239804416,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-research-memory-assessment.spec.ts",
+            "title": "live research quantity correction supplier-draft request market question and reload retain scoped facts",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "live-turn-trace-continuity.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 555.782,
+        "stats": {
+          "startTime": "2026-10-21T01:27:46.853Z",
+          "duration": 541825.876,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 3,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239398912,
+          "handles": 1011,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "live-turn-trace-continuity.spec.ts",
+            "title": "screenshot price correction never becomes a bulk order",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-turn-trace-continuity.spec.ts",
+            "title": "genuine bulk purchase retains quantity with readable currency narration",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "live-turn-trace-continuity.spec.ts",
+            "title": "live category and quantity turns retain their own trace and recorded history",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "live-unresolved-purchase-boundary.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 600.547,
+        "stats": null,
+        "resource_violation": "profile_deadline",
+        "peaks": {
+          "rss_bytes": 248946688,
+          "handles": 1152,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": []
+      },
+      {
+        "spec": "market-adaptation.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 31.875,
+        "stats": {
+          "startTime": "2026-10-21T01:47:27.258Z",
+          "duration": 1252.517,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 240300032,
+          "handles": 1025,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "market-adaptation.spec.ts",
+            "title": "adaptive storefront \u2014 strong signal adapts, weak signal is governed, clearing reverts",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "memory-restart.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 23.297,
+        "stats": {
+          "startTime": "2026-10-21T01:47:53.739Z",
+          "duration": 1968.87,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239407104,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "memory-restart.spec.ts",
+            "title": "accepted buyer facts survive a real server restart without Redis",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "merchant-replenishment.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 25.235,
+        "stats": {
+          "startTime": "2026-10-21T01:48:21.326Z",
+          "duration": 3700.054,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 248012800,
+          "handles": 1126,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "merchant-replenishment.spec.ts",
+            "title": "merchant reviews a persisted synthetic decision and wrong scope returns no data",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "model-offline-turn-outcome.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.329,
+        "stats": {
+          "startTime": "2026-10-21T01:48:46.508Z",
+          "duration": 191.1260000000001,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239652864,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "model-offline-turn-outcome.spec.ts",
+            "title": "Ollama offline preserves canonical order truth and fails closed",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "official-research-authorization.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 21.188,
+        "stats": {
+          "startTime": "2026-10-21T01:49:12.258Z",
+          "duration": 194.51700000000005,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239312896,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "official-research-authorization.spec.ts",
+            "title": "production-enrolled official evidence compiles into product authorization under one trace",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "open-world-unseen-live-matrix.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 363.078,
+        "stats": {
+          "startTime": "2026-10-21T01:49:38.237Z",
+          "duration": 341477.078,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 5,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 251379712,
+          "handles": 1144,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "open-world-unseen-live-matrix.spec.ts",
+            "title": "unseen 1: consent dispatches free discovery without granting authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-unseen-live-matrix.spec.ts",
+            "title": "unseen 2: consent dispatches free discovery without granting authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-unseen-live-matrix.spec.ts",
+            "title": "unseen 3: consent dispatches free discovery without granting authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-unseen-live-matrix.spec.ts",
+            "title": "unseen 4: consent dispatches free discovery without granting authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-unseen-live-matrix.spec.ts",
+            "title": "unseen 5: consent dispatches free discovery without granting authority",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "open-world-workload-regression.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 70.579,
+        "stats": {
+          "startTime": "2026-10-21T01:55:41.206Z",
+          "duration": 52908.818999999996,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 10,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 252866560,
+          "handles": 1163,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "novel suitability request stays provisional and exposes a durable research plan",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "held-out future-game alias resolves identity but cannot invent fit or budget sufficiency",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "first-turn Emulate3D URL creates its case and source-security receipt without a bridge race",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "digital twin to Heroes III Remake supersedes evidence and consent but retains budget",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "Heroes III Remake to BG3 resolves the new canonical Steam identity",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "unenrolled Larian URL is rejected with a visible zero-fetch security receipt",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "private-IP source is blocked before fetch with one visible SSRF receipt",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "demo URL policy strips ad tracking and rejects a purpose-mismatched community page",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "explicit furniture and pharmacy categories cannot inherit laptop shelves",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "open-world-workload-regression.spec.ts",
+            "title": "novel publisher is approved case-only, fetched, reviewed, and reranked in one case",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "operator-inventory.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 32.297,
+        "stats": {
+          "startTime": "2026-10-21T01:56:56.951Z",
+          "duration": 13626.244999999999,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 358109184,
+          "handles": 1243,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "operator-inventory.spec.ts",
+            "title": "independent people receive and transfer stock exactly once through real API and UI",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "operator-inventory.spec.ts",
+            "title": "accepted buyer holds connect to approved shipping returns and cancellation",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "ordinary-chat-shortfall.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 25.922,
+        "stats": {
+          "startTime": "2026-10-21T01:57:33.138Z",
+          "duration": 7928.666,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 290623488,
+          "handles": 1265,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "ordinary-chat-shortfall.spec.ts",
+            "title": "ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "platform-audit-memory.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 49.172,
+        "stats": {
+          "startTime": "2026-10-21T01:58:03.134Z",
+          "duration": 31090.59,
+          "expected": 7,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 351473664,
+          "handles": 1266,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "deadline corrections survive unrelated turns and reload without promising delivery",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "audit real browser retains and amends quantity over five messages and reload",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "recall preserves currency total budget and destination corrections",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "unresolved product fit preserves quantity and asks material budget scope",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "audit consented external research reports unavailable without qualification",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "audit direct authority injection cannot grant commerce authority",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "platform-audit-memory.spec.ts",
+            "title": "audit twenty real turns retain amended procurement facts",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "portfolio-narration-preview.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.672,
+        "stats": {
+          "startTime": "2026-10-21T01:58:56.385Z",
+          "duration": 144.495,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239607808,
+          "handles": 1010,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "portfolio-narration-preview.spec.ts",
+            "title": "local narration is buyer-triggered, critic-accepted and commercially powerless",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "portfolio-qualification.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 26.046,
+        "stats": {
+          "startTime": "2026-10-21T01:59:21.486Z",
+          "duration": 5055.242,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 261922816,
+          "handles": 1122,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "portfolio-qualification.spec.ts",
+            "title": "buyer selects fictional scope, qualifies, reloads and invalidates evidence",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "portfolio-recording-walkthrough.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 41.203,
+        "stats": {
+          "startTime": "2026-10-21T01:59:46.543Z",
+          "duration": 25449.839,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 248741888,
+          "handles": 1154,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "portfolio-recording-walkthrough.spec.ts",
+            "title": "deterministic portfolio recording walkthrough",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "portfolio-supplier-continuation.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.797,
+        "stats": {
+          "startTime": "2026-10-21T02:00:32.387Z",
+          "duration": 125.82799999999997,
+          "expected": 0,
+          "skipped": 3,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239353856,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "portfolio-supplier-continuation.spec.ts",
+            "title": "high-value bulk request shows governed fulfilment choices and explicit exact confirmation",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "portfolio-supplier-continuation.spec.ts",
+            "title": "unavailable flagship offers a proportionate conditional substitute without silent cart change",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "portfolio-supplier-continuation.spec.ts",
+            "title": "buyer can review wait and split paths then cancel without changing the cart",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "privacy-session-isolation.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 20.985,
+        "stats": {
+          "startTime": "2026-10-21T02:00:55.600Z",
+          "duration": 2604.9629999999997,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246349824,
+          "handles": 1113,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "privacy-session-isolation.spec.ts",
+            "title": "temporary chat rotates the browser epoch and marks requests no-memory",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "procurement-amendment-permutations.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 41.328,
+        "stats": {
+          "startTime": "2026-10-21T02:01:19.261Z",
+          "duration": 24160.439000000002,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246292480,
+          "handles": 1159,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "procurement-amendment-permutations.spec.ts",
+            "title": "relative bulk amendment preserves the cart line and exposes one confirmation authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "procurement-amendment-permutations.spec.ts",
+            "title": "read-only follow-up preserves exact identity without granting unverified fit authority",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "procurement-journey.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 19.703,
+        "stats": {
+          "startTime": "2026-10-21T02:02:05.580Z",
+          "duration": 2132.133,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246198272,
+          "handles": 1147,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "procurement-journey.spec.ts",
+            "title": "demo procurement journey: clear, exact cart line, amendment and delivery reconfirmation",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "procurement-trace.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 22.156,
+        "stats": {
+          "startTime": "2026-10-21T02:02:32.029Z",
+          "duration": 1544.6039999999998,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239427584,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "procurement-trace.spec.ts",
+            "title": "procurement decision trace \u2014 drafted supplier RFQ + audit, re-routes per product",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "qualified-commercial-journey.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 41.078,
+        "stats": {
+          "startTime": "2026-10-21T02:02:56.433Z",
+          "duration": 22548.381,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246337536,
+          "handles": 1149,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "qualified-commercial-journey.spec.ts",
+            "title": "ambiguous research continues into an explicit synthetic supplier decision",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "requirement-load-recovery.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 23.563,
+        "stats": {
+          "startTime": "2026-10-21T02:03:43.986Z",
+          "duration": 3012.123,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 257249280,
+          "handles": 1103,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "requirement-load-recovery.spec.ts",
+            "title": "failed requirement read offers recovery without mutating selection",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "research-degradation-live.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 16.672,
+        "stats": {
+          "startTime": "2026-10-21T02:04:07.681Z",
+          "duration": 133.91499999999996,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239931392,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "research-degradation-live.spec.ts",
+            "title": "unreachable discovery degrades to canonical origin without hanging or claiming discovery",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "research-disconnect-live.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 89.219,
+        "stats": {
+          "startTime": "2026-10-21T02:04:31.170Z",
+          "duration": 69733.255,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246927360,
+          "handles": 1148,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "research-disconnect-live.spec.ts",
+            "title": "buyer disconnect during live discovery does not strand backend responsiveness",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "research-disconnect-live.spec.ts",
+            "title": "forced disconnect cooperatively stops undispatched discovery queries",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "research-origin-degradation-kind.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 22.016,
+        "stats": {
+          "startTime": "2026-10-21T02:06:06.984Z",
+          "duration": 193.23399999999992,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239259648,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "research-origin-degradation-kind.spec.ts",
+            "title": " remains honest, bounded, and offers buyer evidence fallback",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "research-partial-engine-live.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 21.063,
+        "stats": {
+          "startTime": "2026-10-21T02:06:32.728Z",
+          "duration": 176.30200000000002,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239566848,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "research-partial-engine-live.spec.ts",
+            "title": "one failed search engine remains visible while free discovery succeeds",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "roadmap-browser-soak.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 387.328,
+        "stats": {
+          "startTime": "2026-10-21T02:06:54.050Z",
+          "duration": 369985.94299999997,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 4,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 251199488,
+          "handles": 1154,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "roadmap-browser-soak.spec.ts",
+            "title": "repeated live browser turns keep rendered answer and trace on the same revision",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "roadmap-browser-soak.spec.ts",
+            "title": "buyer request researches official Blender requirements in a fresh case",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "roadmap-browser-soak.spec.ts",
+            "title": "changed workload binds research to the new case without inherited consent",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "roadmap-browser-soak.spec.ts",
+            "title": "repeated browser image uploads reach bounded triage before further text turns",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "rotating-intelligence-certificate.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 22.422,
+        "stats": {
+          "startTime": "2026-10-21T02:13:29.076Z",
+          "duration": 1951.2939999999999,
+          "expected": 0,
+          "skipped": 1,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239759360,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "rotating-intelligence-certificate.spec.ts",
+            "title": "seeded official-feed titles exercise generic identity and fail-closed behavior",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "semantic-resolution-journey.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 54.094,
+        "stats": {
+          "startTime": "2026-10-21T02:13:56.376Z",
+          "duration": 32639.009000000002,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 247054336,
+          "handles": 1141,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "semantic-resolution-journey.spec.ts",
+            "title": "unfamiliar capability request plans research before buyer-specific clarification",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "shopping-case-fast-lane-timing.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 44.015,
+        "stats": {
+          "startTime": "2026-10-21T02:14:53.498Z",
+          "duration": 24032.88,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 281214976,
+          "handles": 1193,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "shopping-case-fast-lane-timing.spec.ts",
+            "title": "shopping-case fast lane returns provisional shelves before external research",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "shopping-case-sse-revision-supersession.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 18.391,
+        "stats": {
+          "startTime": "2026-10-21T02:15:37.837Z",
+          "duration": 1960.848,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246153216,
+          "handles": 1116,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "shopping-case-sse-revision-supersession.spec.ts",
+            "title": "SSE reconnect observes canonical shopping-case revision supersession",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "six-prompt-live-research-certification.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 18.453,
+        "stats": {
+          "startTime": "2026-10-21T02:15:59.955Z",
+          "duration": 2781.164,
+          "expected": 0,
+          "skipped": 6,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239734784,
+          "handles": 1008,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: manufacturing digital twin and predictive maintenance",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: CGI rendering",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: large CAD and point clouds",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: PLC factory and OT cyber range",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: large BIM and real-time walkthroughs",
+            "project": "chromium",
+            "status": "skipped"
+          },
+          {
+            "file": "six-prompt-live-research-certification.spec.ts",
+            "title": "live case-bound research: Unreal Engine Nanite and Lumen",
+            "project": "chromium",
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "spec": "split-fulfillment.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 20.75,
+        "stats": {
+          "startTime": "2026-10-21T02:16:25.432Z",
+          "duration": 1911.0980000000002,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 239026176,
+          "handles": 1008,
+          "threads": 78
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "split-fulfillment.spec.ts",
+            "title": "pre-payment split-fulfilment \u2014 ships now + supplier-ETA follow-up, buyer confirms before checkout",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "supplier-enquiry-journey.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 32.453,
+        "stats": {
+          "startTime": "2026-10-21T02:16:49.840Z",
+          "duration": 14322.75,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 329084928,
+          "handles": 1242,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "supplier-enquiry-journey.spec.ts",
+            "title": "accepted shortfall connects to independent approval fake send and reviewed supplier replies",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "supplier-recovery.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 32.375,
+        "stats": {
+          "startTime": "2026-10-21T02:17:29.605Z",
+          "duration": 11321.985999999999,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 262610944,
+          "handles": 1229,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "supplier-recovery.spec.ts",
+            "title": "operator reconciles uncertain delivery and obtains fresh independent approval for one replacement",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "terminal-response-race.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 25.484,
+        "stats": {
+          "startTime": "2026-10-21T02:18:06.291Z",
+          "duration": 3924.9429999999993,
+          "expected": 2,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 247148544,
+          "handles": 1129,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "terminal-response-race.spec.ts",
+            "title": "new terminal survives late success",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "terminal-response-race.spec.ts",
+            "title": "new terminal survives late failure",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "turn-transition-revision-matrix.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 25.468,
+        "stats": {
+          "startTime": "2026-10-21T02:18:34.531Z",
+          "duration": 5568.086,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 280432640,
+          "handles": 1099,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "turn-transition-revision-matrix.spec.ts",
+            "title": "every conversational transition publishes one matching case revision",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "unresolved-workload-authority.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 69.75,
+        "stats": {
+          "startTime": "2026-10-21T02:19:05.736Z",
+          "duration": 48389.780999999995,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 2,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 284229632,
+          "handles": 1204,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "unresolved-workload-authority.spec.ts",
+            "title": "product noun cannot bypass unresolved workload authority",
+            "project": "chromium",
+            "status": "unexpected"
+          },
+          {
+            "file": "unresolved-workload-authority.spec.ts",
+            "title": "noun-free paraphrase has the same unresolved workload authority",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      },
+      {
+        "spec": "uploaded-requirements-journey.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 41.485,
+        "stats": {
+          "startTime": "2026-10-21T02:20:18.969Z",
+          "duration": 20958.327,
+          "expected": 4,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 328048640,
+          "handles": 1540,
+          "threads": 89
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "uploaded-requirements-journey.spec.ts",
+            "title": "requirements screenshot becomes reviewable provisional claims",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "uploaded-requirements-journey.spec.ts",
+            "title": "PDF requirements use the same review and correction contract",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "uploaded-requirements-journey.spec.ts",
+            "title": "plain-text requirements use the same provisional review contract",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "uploaded-requirements-journey.spec.ts",
+            "title": "manual specifications use the same editable same-case corroboration contract",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "varied-image-continuity.spec.ts",
+        "native_exit_code": 0,
+        "elapsed_seconds": 75.812,
+        "stats": {
+          "startTime": "2026-10-21T02:21:05.305Z",
+          "duration": 54564.740000000005,
+          "expected": 3,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 888152064,
+          "handles": 1447,
+          "threads": 92
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "varied-image-continuity.spec.ts",
+            "title": "image 1 triage and corrections preserve authority and effect state",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "varied-image-continuity.spec.ts",
+            "title": "image 2 triage and corrections preserve authority and effect state",
+            "project": "chromium",
+            "status": "expected"
+          },
+          {
+            "file": "varied-image-continuity.spec.ts",
+            "title": "image 3 triage and corrections preserve authority and effect state",
+            "project": "chromium",
+            "status": "expected"
+          }
+        ]
+      },
+      {
+        "spec": "voice-v2-pilot.spec.ts",
+        "native_exit_code": 1,
+        "elapsed_seconds": 114.687,
+        "stats": {
+          "startTime": "2026-10-21T02:22:25.326Z",
+          "duration": 93535.36200000001,
+          "expected": 0,
+          "skipped": 0,
+          "unexpected": 1,
+          "flaky": 0
+        },
+        "resource_violation": null,
+        "peaks": {
+          "rss_bytes": 246444032,
+          "handles": 1140,
+          "threads": 81
+        },
+        "ports_closed": {
+          "8098": true,
+          "5188": true
+        },
+        "case_results": [
+          {
+            "file": "voice-v2-pilot.spec.ts",
+            "title": "spoken input shares the canonical V2 fail-closed recommendation path",
+            "project": "chromium",
+            "status": "unexpected"
+          }
+        ]
+      }
+    ],
+    "limitations": "All spec jobs attempted does not mean every collected case has an outcome. A deadline-truncated spec has no JSON result; unreported IDs remain unverified. Skips remain required profile gaps. Raw errors and generated fixture credentials are excluded. Later targeted repairs use different source/profiles and do not rewrite these outcomes."
+  },
+  "buyer_browser_fixture_integration": {
+    "commit": "9affa8ba2ac010d2cacf69d65570ddc6666ef0e2",
+    "tested_files": [
+      {
+        "path": "frontend/e2e/helpers/authenticatedTest.ts",
+        "sha256": "39ae36628c221a1e781b9447bd26920c30323df9d3920205dc08848ca3ddeb13"
+      },
+      {
+        "path": "frontend/e2e/budget-subject-rfq-live.spec.ts",
+        "sha256": "61b0896ffde88fc8a8c3a3d11853bda76e128c0bc6fa8be8385371fca3dbdf54"
+      },
+      {
+        "path": "frontend/e2e/buyer-flow.spec.ts",
+        "sha256": "86460540f5aadd771e8e492abbb5c18cd1c2ea090c3256f69110eb4d9187a8ca"
+      },
+      {
+        "path": "frontend/e2e/case-panel-trace-consistency.spec.ts",
+        "sha256": "7c8d7f87af22ce35f687edd8efb86dd4bf5f6f32a7c47f0ec83da21229b094e0"
+      }
+    ],
+    "profile": {
+      "complete": true,
+      "commercial_effects": "sandbox/disabled",
+      "results": [
+        {
+          "spec": "budget-subject-rfq-live.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T02:30:27.957Z",
+            "duration": 5396.236,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 39,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned_redis_browser_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\budget-subject-rfq-live\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\budget-subject-rfq-live",
+              "--label",
+              "preview",
+              "--api-port",
+              "8102",
+              "--ui-port",
+              "5192",
+              "--frontend-mode",
+              "preview",
+              "budget-subject-rfq-live.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire",
+            "native_exit_code": 0,
+            "elapsed_seconds": 25.438,
+            "peaks": {
+              "rss_bytes": 282611712,
+              "handles": 1267,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8102": true,
+            "5192": true
+          }
+        },
+        {
+          "spec": "buyer-flow.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T02:30:53.923Z",
+            "duration": 5792.933,
+            "expected": 2,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 53,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned_redis_browser_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\buyer-flow\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\buyer-flow",
+              "--label",
+              "preview",
+              "--api-port",
+              "8102",
+              "--ui-port",
+              "5192",
+              "--frontend-mode",
+              "preview",
+              "buyer-flow.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire",
+            "native_exit_code": 0,
+            "elapsed_seconds": 21.625,
+            "peaks": {
+              "rss_bytes": 285368320,
+              "handles": 1254,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8102": true,
+            "5192": true
+          }
+        },
+        {
+          "spec": "case-panel-trace-consistency.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T02:31:21.128Z",
+            "duration": 2514.349,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 7,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\owned_redis_browser_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\case-panel-trace-consistency\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\buyer-fixture-final-specs\\case-panel-trace-consistency",
+              "--label",
+              "preview",
+              "--api-port",
+              "8102",
+              "--ui-port",
+              "5192",
+              "--frontend-mode",
+              "preview",
+              "case-panel-trace-consistency.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire",
+            "native_exit_code": 0,
+            "elapsed_seconds": 20.031,
+            "peaks": {
+              "rss_bytes": 252489728,
+              "handles": 1050,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8102": true,
+            "5192": true
+          }
+        }
+      ],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "changed_source_inputs": [],
+      "selected_source_inputs": 5733,
+      "elapsed_seconds": 111.25
+    },
+    "source_manifest_sha256": "2998031f2c6de6c0db5115d956ef8c4f2d9b7c4e2d9e50d6b56307f7cfa148be",
+    "limitations": "Four passing cases use the preserved ROOT application source and an externally prepared owned Redis/planner profile. Runtime supervisor cache labels are inherited; the explicit override, native cache key counts and retained canaries prove actual Redis. No claim of full committed-source product qualification. Canonical ambiguity spec remains uncommitted and fails required positive delivery when interpreter is offline."
   }
 }
