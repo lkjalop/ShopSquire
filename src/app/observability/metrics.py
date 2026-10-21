@@ -3,6 +3,7 @@ import ipaddress
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY
+from src.app.observability.http_histogram import http_latency_histogram
 cb_state_gauge = Gauge(
     "shopsquire_circuit_breaker_state",
     "Circuit breaker state (0=closed,1=open)",
@@ -73,7 +74,7 @@ http_requests_total = Counter(
     labelnames=["method", "path", "status"],
 )
 
-http_request_duration_seconds = Histogram(
+http_request_duration_seconds = http_latency_histogram(
     "shopsquire_http_request_duration_seconds",
     "HTTP request latency in seconds by API resource family",
     labelnames=["method", "path"],
