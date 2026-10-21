@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -18,6 +19,14 @@ from src.app.services.model_execution_gateway import (
 )
 from src.app.services.model_transports import ollama_generate_transport
 from src.app.services.ollama_artifact_verification import verify_ollama_artifact
+
+
+class LocalModelFailure(RuntimeError):
+    """Stable, safe machine-readable failure across gateway and router boundaries."""
+
+    def __init__(self, failure_code: str):
+        self.failure_code = failure_code
+        super().__init__(failure_code)
 
 
 _ROLE_PRIORITIES = {
@@ -175,9 +184,12 @@ def execute_local_model_role(
     tenant_id: str = "portfolio-demo",
     context_hash: str | None = None,
     transport: Transport | None = None,
+    execution_id: str | None = None,
 ) -> str:
     """Return model text or raise a typed runtime failure; never fall back to cloud."""
 
+    execution_id = execution_id or f"model-run-{uuid.uuid4().hex}"
+    _SCHEDULE_STATE.metrics = {}
     schedule_started = time.perf_counter()
     deadline = schedule_started + max(float(timeout_s), 0.05)
     priority = _role_priority(role)
@@ -198,7 +210,14 @@ def execute_local_model_role(
         record_model_outcome(
             "blocked", f"model_artifact_{verification_status}", 0,
         )
-        raise RuntimeError(f"model_artifact_{verification_status}")
+        _record_schedule({
+            "execution_id": execution_id, "role": role, "status": "blocked",
+            "failure_code": f"model_artifact_{verification_status}",
+            "verification_ms": (time.perf_counter() - schedule_started) * 1000,
+            "queue_ms": 0.0, "execution_ms": 0.0,
+        })
+        raise LocalModelFailure(f"model_artifact_{verification_status}")
+    verification_ms = (time.perf_counter() - schedule_started) * 1000
     endpoint = base_url + "/api/generate"
     host = str(urlsplit(endpoint).hostname or "")
     deployment_id = f"local-{role.replace('_', '-')}-{sha256_text(model)[:10]}"
@@ -220,49 +239,56 @@ def execute_local_model_role(
     acquired, queue_ms = gate.acquire(priority=priority, timeout=queue_allowance)
     if not acquired:
         _record_schedule({
+            "execution_id": execution_id, "verification_ms": verification_ms,
             "role": role, "priority": priority, "status": "timed_out",
             "failure_code": "local_model_queue_timeout", "queue_ms": round(queue_ms, 2),
             "execution_ms": 0.0, "deadline_ms": round(max(float(timeout_s), 0.05) * 1_000),
             "cancelled": True,
         })
-        raise RuntimeError("local_model_queue_timeout")
+        raise LocalModelFailure("local_model_queue_timeout")
     remaining = deadline - time.perf_counter()
     if remaining < 0.05:
         gate.release()
         _record_schedule({
+            "execution_id": execution_id, "verification_ms": verification_ms,
             "role": role, "priority": priority, "status": "timed_out",
             "failure_code": "local_model_deadline_exhausted", "queue_ms": round(queue_ms, 2),
             "execution_ms": 0.0, "deadline_ms": round(max(float(timeout_s), 0.05) * 1_000),
             "cancelled": True,
         })
-        raise RuntimeError("local_model_deadline_exhausted")
-    request = ModelExecutionRequest(
-        tenant_id=tenant_id, purpose=purpose, role=role,
-        deployment_id=deployment.deployment_id,
-        model_artifact_id=deployment.model_artifact_id,
-        prompt_id=prompt_id, prompt_version="v1", prompt_hash=sha256_text(prompt),
-        context_hash=context_hash or sha256_text(f"{purpose}:{tenant_id}"),
-        data_classes={
-            "aggregate_market" if role == "market_narrator" else "buyer_workload"
-        },
-        timeout_ms=int(min(remaining, 120.0) * 1_000),
-        max_output_tokens=max_output_tokens,
-        scheduler_queue_ms=round(queue_ms, 2),
-        scheduler_deadline_ms=round(max(float(timeout_s), 0.05) * 1_000),
-    )
+        raise LocalModelFailure("local_model_deadline_exhausted")
+    try:
+        request = ModelExecutionRequest(
+            run_id=execution_id, tenant_id=tenant_id, purpose=purpose, role=role,
+            deployment_id=deployment.deployment_id,
+            model_artifact_id=deployment.model_artifact_id,
+            prompt_id=prompt_id, prompt_version="v1", prompt_hash=sha256_text(prompt),
+            context_hash=context_hash or sha256_text(f"{purpose}:{tenant_id}"),
+            data_classes={
+                "aggregate_market" if role == "market_narrator" else "buyer_workload"
+            },
+            timeout_ms=int(min(remaining, 120.0) * 1_000),
+            max_output_tokens=max_output_tokens,
+            scheduler_queue_ms=round(queue_ms, 2),
+            scheduler_deadline_ms=round(max(float(timeout_s), 0.05) * 1_000),
+        )
+        gateway = ModelExecutionGateway(
+            [deployment], **({"ledger": ledger} if ledger is not None else {}),
+        )
+    except BaseException:
+        gate.release()
+        raise
     execution_started = time.perf_counter()
     result = None
     execution_error: BaseException | None = None
     try:
-        result = ModelExecutionGateway(
-            [deployment], **({"ledger": ledger} if ledger is not None else {}),
-        ).execute(
+        result = gateway.execute(
             request, prompt=prompt, transport=transport or ollama_generate_transport,
+            on_transport_finished=gate.release,
         )
     except BaseException as exc:
         execution_error = exc
     finally:
-        gate.release()
         execution_ms = (time.perf_counter() - execution_started) * 1_000
     status = (
         "completed"
@@ -270,13 +296,15 @@ def execute_local_model_role(
         else "failed"
     )
     failure_code = None if status == "completed" else (
-        (type(execution_error).__name__ if execution_error is not None else None)
+        (getattr(execution_error, "failure_code", None) or type(execution_error).__name__
+         if execution_error is not None else None)
         or getattr(result, "failure_code", None)
         or getattr(result, "status", None)
         or "model_execution_failed"
     )
     _record_schedule({
-        "role": role, "priority": priority, "status": status,
+        "execution_id": execution_id, "verification_ms": verification_ms,
+            "role": role, "priority": priority, "status": status,
         "failure_code": failure_code, "queue_ms": round(queue_ms, 2),
         "execution_ms": round(execution_ms, 2),
         "deadline_ms": round(max(float(timeout_s), 0.05) * 1_000),
@@ -285,7 +313,7 @@ def execute_local_model_role(
     if execution_error is not None:
         raise execution_error
     if result.status != "completed" or result.text is None:
-        raise RuntimeError(result.failure_code or result.status)
+        raise LocalModelFailure(result.failure_code or result.status)
     return result.text
 
 

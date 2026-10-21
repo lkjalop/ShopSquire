@@ -218,14 +218,23 @@ class ModelExecutionGateway:
     def execute(
         self, request: ModelExecutionRequest, *, prompt: str, transport: Transport,
         cancellation_requested: Callable[[], bool] | None = None,
+        on_transport_finished: Callable[[], None] | None = None,
     ) -> ModelExecutionResult:
-        deployment = self._deployments.get(request.deployment_id)
-        if deployment is None:
-            raise ValueError("model_deployment_not_enrolled")
-        return execute_model(
-            request, deployment, prompt=prompt, transport=transport,
-            ledger=self.ledger, cancellation_requested=cancellation_requested,
-        )
+        dispatched = threading.Event()
+        try:
+            deployment = self._deployments.get(request.deployment_id)
+            if deployment is None:
+                raise ValueError("model_deployment_not_enrolled")
+            return execute_model(
+                request, deployment, prompt=prompt, transport=transport,
+                ledger=self.ledger, cancellation_requested=cancellation_requested,
+                on_transport_finished=on_transport_finished, transport_dispatched=dispatched,
+            )
+        finally:
+            # Once dispatched, only the worker owns the resource lease. A caller
+            # timeout quarantines output but does not terminate transport work.
+            if not dispatched.is_set() and on_transport_finished is not None:
+                on_transport_finished()
 
 
 def execute_model(
@@ -236,6 +245,8 @@ def execute_model(
     transport: Transport,
     ledger: AgentRunEventLedger,
     cancellation_requested: Callable[[], bool] | None = None,
+    on_transport_finished: Callable[[], None] | None = None,
+    transport_dispatched: threading.Event | None = None,
 ) -> ModelExecutionResult:
     """Execute one enrolled deployment with no implicit fallback or side effects."""
 
@@ -335,11 +346,17 @@ def execute_model(
                 pass
         finally:
             _EXECUTION_SLOTS.release()
+            if on_transport_finished is not None:
+                on_transport_finished()
 
     worker = threading.Thread(target=invoke, name="shopsquire-model-gateway", daemon=True)
     try:
+        if transport_dispatched is not None:
+            transport_dispatched.set()
         worker.start()
     except BaseException:
+        if transport_dispatched is not None:
+            transport_dispatched.clear()
         _EXECUTION_SLOTS.release()
         raise
     deadline = started + request.timeout_ms / 1_000.0
