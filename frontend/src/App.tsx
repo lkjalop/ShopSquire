@@ -675,7 +675,7 @@ export default function App() {
           body: fd,
           signal: controller.signal,
           headers: {
-            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+            ...apiRequestHeaders(),
             'x-skip-observer': '1',
           },
         });
@@ -761,7 +761,7 @@ export default function App() {
         signal: controller.signal,
         headers: {
           ...csrfHeaders(),
-          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          ...apiRequestHeaders(),
           'x-skip-observer': '1',
         },
       });
@@ -1542,7 +1542,7 @@ export default function App() {
       const params = new URLSearchParams({ uid, sku, trace_id: traceId });
       const r = await fetch(apiUrl(`/api/v1/recommend/why_product?${params.toString()}`), {
         credentials: 'include',
-        headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+        headers: { ...apiRequestHeaders() },
       });
       const data = await safeJson(r);
       if (!r.ok || !data) throw new Error(`why_product_failed (${r.status})`);
@@ -1740,7 +1740,7 @@ export default function App() {
       try {
         fetch(apiUrl('/api/v1/consumer/capability-gap'), {
           method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          headers: { 'Content-Type': 'application/json', ...apiRequestHeaders() },
           body: JSON.stringify({ utterance: q, category: 'unsupported_action', refusal_reason: 'chat_action_not_implemented', surface: 'chat', uid }),
         }).catch(() => {});
       } catch { /* ledger is best-effort */ }
@@ -2084,7 +2084,7 @@ export default function App() {
           headers: {
             'Content-Type': 'application/json',
             ...csrfHeaders(),
-            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+            ...apiRequestHeaders(),
           },
           body: JSON.stringify({
             uid: getOrCreateStoredUid(),
@@ -2253,7 +2253,7 @@ export default function App() {
         const apiHeaders = {
           'Content-Type': 'application/json',
           ...csrfHeaders(),
-          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          ...apiRequestHeaders(),
           // canonical header the backend single-flight reads (review-7 P0 — name now matches)
           'Idempotency-Key': idempotencyKey,
         };
