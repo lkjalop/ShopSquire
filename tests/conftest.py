@@ -38,10 +38,11 @@ _LAST_RUNNING_PATH = Path(
 _TEST_STARTED_AT: dict[str, float] = {}
 _SESSION_BASELINE_THREAD_IDS: set[int] = set()
 _RESOURCE_GC_TEARDOWNS = 0
+_RESOURCE_GC_FULL_INTERVAL = 25
 
 
-def collect_test_resource_garbage():
-    """Measure unreachable test objects without clearing live application state."""
+def collect_test_resource_garbage(*, generation=2):
+    """Collect unreachable objects without clearing live application state."""
     import gc
     try:
         import psutil
@@ -54,8 +55,8 @@ def collect_test_resource_garbage():
         def snapshot():
             return {}
     before = snapshot()
-    collected = gc.collect()
-    return {'before': before, 'collected': collected, 'after': snapshot()}
+    collected = gc.collect(generation)
+    return {'before': before, 'collected': collected, 'after': snapshot(), 'generation': generation}
 
 
 def pytest_runtest_logreport(report):
@@ -831,8 +832,9 @@ def _restore_db_engine():
     on each ``create_app()`` call to reset the engine, which no longer happens
     with the per-URL singleton.
 
-    This fixture is zero-overhead for the common case where no test changes
-    the engine (just a reference comparison at teardown).
+    Owner restoration uses reference comparisons. Released runtime owners
+    require immediate full collection; unchanged owners use young-generation
+    collection between bounded full-heap checkpoints.
     """
     original_database_url = os.environ.get("DATABASE_URL")
     original_database_url_ro = os.environ.get("DATABASE_URL_RO")
@@ -847,6 +849,7 @@ def _restore_db_engine():
         yield
         return
     yield
+    released_runtime_owner = False
     try:
         if original_database_url is None:
             os.environ.pop("DATABASE_URL", None)
@@ -871,6 +874,10 @@ def _restore_db_engine():
                 is not original_engine
                 for _app_inst in _session_applications()
             )
+        released_runtime_owner = (
+            bool(temporary_apps) or engine_changed
+            or session_factory_changed or app_state_changed
+        )
         if engine_changed:
             set_engine(original_engine)
         if session_factory_changed:
@@ -900,7 +907,7 @@ def _restore_db_engine():
             except Exception:
                 pass
     except Exception:
-        pass
+        released_runtime_owner = True
 
     # Removed apps contain route/handler reference cycles. Release teardown's
     # own references before collecting unreachable objects; a live fixture or
@@ -909,13 +916,17 @@ def _restore_db_engine():
     temporary_apps = []
     temporary_app = None
     temporary_engine = None
-    result = collect_test_resource_garbage()
+    global _RESOURCE_GC_TEARDOWNS
+    _RESOURCE_GC_TEARDOWNS += 1
+    generation = (
+        2 if released_runtime_owner
+        or _RESOURCE_GC_TEARDOWNS % _RESOURCE_GC_FULL_INTERVAL == 0 else 0
+    )
+    result = collect_test_resource_garbage(generation=generation)
 
     # The opt-in interval controls diagnostic receipts, not resource cleanup.
     interval = int(os.getenv('PYTEST_DIAGNOSTIC_GC_INTERVAL', '0') or 0)
     if interval > 0:
-        global _RESOURCE_GC_TEARDOWNS
-        _RESOURCE_GC_TEARDOWNS += 1
         if _RESOURCE_GC_TEARDOWNS % interval == 0:
             import json
             result['nodeid'] = (_LAST_RUNNING_PATH.read_text(encoding='utf-8').strip()
