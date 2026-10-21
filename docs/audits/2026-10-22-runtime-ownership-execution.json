@@ -1,0 +1,3724 @@
+{
+  "source_head": "17fdb4ec0ab2ecd0b45468ffb5b230d4507af414",
+  "captured_at": "2026-10-21T19:29:19.057119+00:00",
+  "dirty_paths_before_publication": 331,
+  "staged_paths": [],
+  "inventory": {
+    "captured_at": "2026-10-21T19:24:48.655835+00:00",
+    "source_head": "17fdb4ec0ab2ecd0b45468ffb5b230d4507af414",
+    "files": 5832,
+    "existing_files": 5832,
+    "text_files": 5795,
+    "text_lines": 1103752,
+    "bytes": 111326438,
+    "dirty_paths": 331,
+    "staged_paths": [],
+    "content_states": {
+      "committed_bytes": 3234,
+      "committed_content_line_ending_variant": 2264,
+      "modified_working_content": 160,
+      "untracked": 174
+    },
+    "index_flags": {
+      "H": 5658
+    },
+    "python_files": 3179,
+    "python_functions": 19831,
+    "python_syntax_errors": [],
+    "largest_functions": [
+      {
+        "path": "src/app/routers/chat.py",
+        "symbol": "_chat_query_impl",
+        "line": 288,
+        "lines": 4528,
+        "source_sha256": "db55c623ed33f95aad5ce2ecb92acf78a6322e0fe24b094b678df5c6c7d31d57"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab",
+        "line": 867,
+        "lines": 2328,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "create_app",
+        "line": 200,
+        "lines": 2200,
+        "source_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+      },
+      {
+        "path": "src/app/security/email_security.py",
+        "symbol": "evaluate_email_security",
+        "line": 836,
+        "lines": 2021,
+        "source_sha256": "5b06ff98490fcd36785e2c1667fff299d629e61b7362ce3bd033492ff2315801"
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "symbol": "_route_turn_raw",
+        "line": 1412,
+        "lines": 1351,
+        "source_sha256": "74f8c00c77c6a84b26e89e3952e027b3991b138242c4410d13d9e780f1ed4d22"
+      },
+      {
+        "path": "src/app/routers/vision.py",
+        "symbol": "triage",
+        "line": 533,
+        "lines": 1303,
+        "source_sha256": "598fb79f0a9481a603fb1812dba9ff6498cb1f0b3c275998aaab57e082cd175e"
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "symbol": "_recommend_turn",
+        "line": 183,
+        "lines": 1303,
+        "source_sha256": "fb5ac2e3ddcd22813c73ff3336529820aa067d21bdbef8ed338ec5394fca59e2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint",
+        "line": 1669,
+        "lines": 1245,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "_run_internal",
+        "line": 2684,
+        "lines": 1154,
+        "source_sha256": "6a9ad0ecb4dcfcab71d28d8bdf56e0bcac81ab0da9907a166c3eb06f67a184a0"
+      },
+      {
+        "path": "src/app/models/db.py",
+        "symbol": "_bootstrap_minimal_sqlite_tables",
+        "line": 191,
+        "lines": 1057,
+        "source_sha256": "8fa5bc3d57de4fb20efe058d3e3038769a1a1fcaf25d9273f53cfdf4be02bf25"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "run_nlp_cv",
+        "line": 821,
+        "lines": 987,
+        "source_sha256": "6a9ad0ecb4dcfcab71d28d8bdf56e0bcac81ab0da9907a166c3eb06f67a184a0"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "analyze",
+        "line": 197,
+        "lines": 853,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/flows/nqe.py",
+        "symbol": "propose",
+        "line": 245,
+        "lines": 846,
+        "source_sha256": "547805a3b6edd1ed1931a330e703f6d6da895b47ea93a8d6a7f0a76432c767c1"
+      },
+      {
+        "path": "src/app/services/official_workload_research.py",
+        "symbol": "research_official_sources",
+        "line": 850,
+        "lines": 659,
+        "source_sha256": "bb395a0b1bb5e91d20c0f998ee29caea99329cf2b2e9145f5659f8787f3e1452"
+      },
+      {
+        "path": "src/app/services/cv_tier2_pipeline.py",
+        "symbol": "_run_tier2_impl",
+        "line": 508,
+        "lines": 647,
+        "source_sha256": "63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint_guest",
+        "line": 2917,
+        "lines": 638,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/shopping_case_open_world_research.py",
+        "symbol": "execute_open_world_publisher_discovery_async",
+        "line": 212,
+        "lines": 631,
+        "source_sha256": "439b5f9220288ee83337d4b9ee756123f5456912715edbc8bb6d7bbbb6295c01"
+      },
+      {
+        "path": "src/app/services/recommendation_facade.py",
+        "symbol": "dispatch_recommendation_core_typed",
+        "line": 951,
+        "lines": 492,
+        "source_sha256": "b8503e34d4cced1864cd0d65336f105a799f51acec061c019d65069e445fcbe4"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "upload",
+        "line": 1073,
+        "lines": 458,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/routers/returns.py",
+        "symbol": "submit_return",
+        "line": 535,
+        "lines": 447,
+        "source_sha256": "dbfbd43f3978e25b06979bad5ffdda1651471e3df66a2949521b49c102511de5"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "lifespan",
+        "line": 202,
+        "lines": 420,
+        "source_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+      },
+      {
+        "path": "src/app/security/observer.py",
+        "symbol": "compute_risk",
+        "line": 389,
+        "lines": 411,
+        "source_sha256": "be714310f2e390a8642d089829b2020f6c73258077217c8922870fb62bc5a8c6"
+      },
+      {
+        "path": "src/app/workers/celery_app.py",
+        "symbol": "make_celery",
+        "line": 16,
+        "lines": 410,
+        "source_sha256": "011d08509bc975707e3763f218797fa8eaa0c4595510bbffd69221815e55d6d6"
+      },
+      {
+        "path": "src/app/services/recommendation_compatibility.py",
+        "symbol": "serve_v2_compatibility",
+        "line": 392,
+        "lines": 404,
+        "source_sha256": "dd3634184c50cefc5971215a272e98dbd85017a06bee420a02873c3a48341443"
+      },
+      {
+        "path": "src/app/security/email_security_rules.py",
+        "symbol": "extract_indicators",
+        "line": 483,
+        "lines": 399,
+        "source_sha256": "48d2e3f895877c4a4e2553c936fd2b79b99c89358c5160de5f9da4815fcdb4b0"
+      },
+      {
+        "path": "src/app/security/email_structured_findings.py",
+        "symbol": "_build_structured_findings",
+        "line": 23,
+        "lines": 398,
+        "source_sha256": "86f6e265913609a5e890054ae0e20b6d6f9b26156ac682e76621560611c50f8d"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "create_case_interpretation",
+        "line": 197,
+        "lines": 391,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/services/checkout_upsell.py",
+        "symbol": "recommend_checkout_upsell",
+        "line": 738,
+        "lines": 390,
+        "source_sha256": "aa4afca4f2e8a3f027a6532b95699dcf3ebc12f697c36d310e95721ae0746ad2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "add_images",
+        "line": 3628,
+        "lines": 387,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/recommendation_response_finalizer.py",
+        "symbol": "finalize_core_response",
+        "line": 120,
+        "lines": 380,
+        "source_sha256": "a664259909892fe896db9cd2143f031db937c790694b84cc5e6210d9393355c9"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "_accept_requirement_proposal_with_db",
+        "line": 693,
+        "lines": 364,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/security/email_security_verdict.py",
+        "symbol": "verdict",
+        "line": 48,
+        "lines": 358,
+        "source_sha256": "404ea4830a275e5597edc30978be15c4396bcc7a70634414965ff76fb6bae53b"
+      },
+      {
+        "path": "src/app/services/demand_allocation.py",
+        "symbol": "allocation_workbench",
+        "line": 1037,
+        "lines": 356,
+        "source_sha256": "bede7c9b8b2869963d7d582b0abea0c92b929641f04584e0ee76cd9b9db6f25d"
+      },
+      {
+        "path": "src/app/services/shopping_case_enrolled_research.py",
+        "symbol": "execute_enrolled_official_research",
+        "line": 85,
+        "lines": 354,
+        "source_sha256": "83bd17414514ee7d8c1c9f84272cafac0643901c1872172f4d30054f4019c068"
+      },
+      {
+        "path": "src/app/services/recommendations.py",
+        "symbol": "rerank_candidates_with_factors",
+        "line": 1842,
+        "lines": 353,
+        "source_sha256": "c207325af124efd98832c49c827ee6e9acb985c23a3499622c655ada823fee87"
+      },
+      {
+        "path": "src/app/security/linked_artifact_analysis.py",
+        "symbol": "analyze_linked_artifact",
+        "line": 938,
+        "lines": 345,
+        "source_sha256": "89c1b5692e72c9819323ec18e2cc472bb1be4273f3c3c0d50ad611da6b3165e7"
+      },
+      {
+        "path": "src/app/services/recommendation_core/trace_ontology.py",
+        "symbol": "build_execution_steps",
+        "line": 38,
+        "lines": 345,
+        "source_sha256": "12667512d071dfa19e9a9e05370de8bcaa4111862111efb36f39066e6f2f3ce9"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab_threat_hunt",
+        "line": 521,
+        "lines": 343,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/services/inventory_agent.py",
+        "symbol": "execute_reorder",
+        "line": 1021,
+        "lines": 342,
+        "source_sha256": "0aabe9364b40e11d4521c80c3d0c249867977f0bcd031598daec46c02e10fad0"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "triage",
+        "line": 1335,
+        "lines": 331,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      }
+    ],
+    "inventory_sha256": "7da051a23538aa3bfe84fd0c184da28f3642293cf5355487b7ca7cb1ca93abbe",
+    "scope": "Every tracked or nonignored untracked repository input visible before publication. Ignored environments, private runtime outputs and generated checkpoint outputs are outside this inventory.",
+    "limitation": "Physical line counts, byte hashes and AST structure do not establish semantic review or execution of every line. Different source snapshots and process windows remain separate."
+  },
+  "physical_lines_by_area": {
+    "other": 148254,
+    "docs/": 268827,
+    "frontend/": 46578,
+    "scripts/": 26846,
+    "src/app/": 312505,
+    "src/frontend/": 28296,
+    "tests/": 272446
+  },
+  "repairs": [
+    {
+      "label": "contract-fixture-owner",
+      "commit": "cb5f70fcf7f22dd48e73b53efa22d458946b3202",
+      "parent": "057d4b5c46eaed830d9e4bc8773781a1d042b53b",
+      "files": [
+        {
+          "path": "tests/integration/test_recommend_contract_stability.py",
+          "historical_tested_sha256": "c266d14da2a0a8c2381aa9c79e0754a5cac8b613f0daf8c1bac306571b6a51d7",
+          "current_sha256": "c266d14da2a0a8c2381aa9c79e0754a5cac8b613f0daf8c1bac306571b6a51d7"
+        },
+        {
+          "path": "tests/integration/test_contract_fixture_ownership.py",
+          "historical_tested_sha256": "6e588ab0f767514d3f2233c62caad95a6ac5462a5b74fb0b05fb036c1d0b31ce",
+          "current_sha256": "6e588ab0f767514d3f2233c62caad95a6ac5462a5b74fb0b05fb036c1d0b31ce"
+        }
+      ],
+      "effect": "The contract fixture owns a canonical migrated file database using the bounded runtime WAL factory, and uses a fresh real application that borrows this exact engine. It no longer replaces another cached application owner. The unchanged request helper and every original shape assertion remain intact. A real factory-owned cached-app control exposes one parent test identity with a call ownership failure and a teardown missing-table error after the borrowed in-memory catalog is disposed. Final control preserves the cached owner/canary, current SKU, right_panel across two requests, current Alembic heads, WAL and committed-only visibility during another transaction. Module control restores prior app owners, session factory and environment. Thirteen active combined contract/parity/cache-lifetime cases pass; two pre-existing shape placeholders remain skipped.",
+      "limits": "Test fixture ownership/isolation repair, not a production application change or universal locking certificate. Original model/observer/audit-store exclusions for the shape profile are unchanged; image-match and security-block placeholders remain open. The historical source151full-process right_panel KeyError is preserved and not causally closed merely by these isolated passing controls. A later frozen broader process is still required. This cohort does not close the unadmitted-market or invented-image positive-authority gaps, distributed recovery or release/endurance qualification. Initial eight-pass/two-skip gate preceded stricter module-owner restoration and is superseded by the final13-pass/two-skip profile."
+    },
+    {
+      "label": "market-projection-truth",
+      "commit": "c9b42da916b97409416765edf7e75a8c564ef73d",
+      "parent": "cb5f70fcf7f22dd48e73b53efa22d458946b3202",
+      "files": [
+        {
+          "path": "src/app/services/market_projection.py",
+          "historical_tested_sha256": "173703204e57675c0940313de07817c97fa122fd149d95eb445138701f72de6a",
+          "current_sha256": "173703204e57675c0940313de07817c97fa122fd149d95eb445138701f72de6a"
+        },
+        {
+          "path": "tests/services/test_market_projection_truth.py",
+          "historical_tested_sha256": "cb5b4571e1111e29ff32c559c4a44e1740e62a0f23c064fdcd85166d742b38b1",
+          "current_sha256": "cb5b4571e1111e29ff32c559c4a44e1740e62a0f23c064fdcd85166d742b38b1"
+        }
+      ],
+      "effect": "Already-declared simulated sales remain simulated in observation truth, demand labels and non-null derived metric statuses, including zero-valued supply metrics. Observed sales/zero/dead-stock and missingness behavior remain intact; unavailable and insufficient metrics are not promoted. Two real private-SQL legacy-demo cases prove the persisted rows are unchanged. Exact parent11cases have6failures and5controls; all50combined projection/finalizer/stage/inventory/graph/fact checks pass without skips. Fifty-four controlled non-simulated label condition combinations preserve the prior branch behavior.",
+      "limits": "This honors the existing declared source status; it is not an admitted-source producer or a claim that all synthetic records are classified correctly at ingestion. The unchanged loader still classifies canonical facts partly by tenant, drops some provenance/validity data, lacks some future-time upper bounds and uses batch-wide status. Those gaps, licensing, aggregate privacy and useful cited buyer market analysis remain open. Controlled SQL rows are synthetic test inputs, not real market measurements. No application/browser source, actor permission, stored quantity or commercial authority changes. Earlier33-pass and15-pass profiles predate two additional zero-value controls and are superseded by the final50-case run. No final-source all-profile or release/endurance qualification."
+    },
+    {
+      "label": "local-model-budget",
+      "commit": "98110abfff68ea4646690eb8f687bbed255d8df8",
+      "parent": "c9b42da916b97409416765edf7e75a8c564ef73d",
+      "files": [
+        {
+          "path": "src/app/services/local_model_roles.py",
+          "historical_tested_sha256": "b7516294f4bd06b96ab88b5f0933e4d1689f664dee24652d22b590a1c4798bed",
+          "current_sha256": "cfade70c2fbe890625243d8a7939b419590ba40c2bcd90df058e16e29afdcda6"
+        },
+        {
+          "path": "tests/services/test_local_model_deadline_budget.py",
+          "historical_tested_sha256": "3556c5a48fbdea5676f1147ff3869b9b168385a931ccdda5952aba8fa73555b9",
+          "current_sha256": "3556c5a48fbdea5676f1147ff3869b9b168385a931ccdda5952aba8fa73555b9"
+        },
+        {
+          "path": "tests/services/fulfillment/test_supplier_polish.py",
+          "historical_tested_sha256": "72c5cdfe55a9e27b6aa3374e18de1f0595ca7e5d93f5a311307744ca82a4c1f7",
+          "current_sha256": "72c5cdfe55a9e27b6aa3374e18de1f0595ca7e5d93f5a311307744ca82a4c1f7"
+        }
+      ],
+      "effect": "Three exact production expressions keep artifact verification within the existing normalized50ms minimum/2s maximum, reject dispatch below the transport50ms minimum after queue work, and floor remaining positive milliseconds rather than rounding upward. Exact14-case parent reproduction has5 failures and9 passes; all28 final deadline, supplier polish, real threaded priority/queue and gateway tests pass without skips. The original supplier exact5-second assertion is preserved under a scoped zero-elapsed clock; separate9 new cases enforce consumed/expired budgets. All other original supplier assertions are AST-identical.",
+      "limits": "This does not prove a strict end-to-end wall-clock bound through all setup/preflight/ledger work or qualify a live model. Parent runtime callback/lease ownership and typed failure/execution identity changes in the authored working tree remain unstaged. In particular transport termination after caller timeout and overlapped inference need their own coherent integration and tests. No cloud fallback, authority, model service, stored business facts or commercial effects changed. Full source151 run does not include this repair; no final-source all-profile/endurance qualification."
+    },
+    {
+      "label": "model-transport-owner",
+      "commit": "95dc0e1afa60de4ae5afe4124774af5d7404bcbf",
+      "parent": "98110abfff68ea4646690eb8f687bbed255d8df8",
+      "files": [
+        {
+          "path": "src/app/services/local_model_roles.py",
+          "historical_tested_sha256": "cfade70c2fbe890625243d8a7939b419590ba40c2bcd90df058e16e29afdcda6",
+          "current_sha256": "cfade70c2fbe890625243d8a7939b419590ba40c2bcd90df058e16e29afdcda6"
+        },
+        {
+          "path": "src/app/services/model_execution_gateway.py",
+          "historical_tested_sha256": "2f0fa0a64924ffb9ad7ff92fed92f6e836ef1b8719077bab85ea7bb3b6425f11",
+          "current_sha256": "2f0fa0a64924ffb9ad7ff92fed92f6e836ef1b8719077bab85ea7bb3b6425f11"
+        },
+        {
+          "path": "tests/services/test_local_model_transport_ownership.py",
+          "historical_tested_sha256": "b771b30fa7b4f0cb1aa4ba0c1a200e2e8a3634661d9915217f3e553a103f39d4",
+          "current_sha256": "b771b30fa7b4f0cb1aa4ba0c1a200e2e8a3634661d9915217f3e553a103f39d4"
+        }
+      ],
+      "effect": "Coherently integrates authored role and gateway ownership handoff: a dispatched worker returns its per-model lease when transport actually finishes; gateway preflight/no-dispatch returns it immediately, and role request/gateway construction failure returns it without dispatch. Exact3 parent behavior checks have2 failures (premature timeout release and validation leak) and1 construction-fault control. Final41 active tests pass without skips, including11 new ownership/callback/current-execution controls,9 earlier deadline cases,5 supplier checks,4 real threaded scheduler checks,10 gateway controls and2 architecture boundary checks. Typed failures/current execution identity and fresh blocked-artifact schedule evidence are integrated and tested. Earlier unrelated working files remain byte-identical.",
+      "limits": "A caller timeout or cancellation quarantines output rather than killing an arbitrary Python transport thread. A transport that never returns still owns its slot until process recovery; this patch prevents overlap and does not certify hard transport termination or distributed model scheduling. Concurrency is process-local, existing gate-key/maximum and gateway capacity remain unchanged, no live model/GPU/cloud or commercial provider was invoked. This final candidate excludes other authored runtime/router/CV/research changes. Full source151 observations remain historical and do not qualify this integration or a final release."
+    },
+    {
+      "label": "pytest-cleanup-scaling",
+      "commit": "17fdb4ec0ab2ecd0b45468ffb5b230d4507af414",
+      "parent": "95dc0e1afa60de4ae5afe4124774af5d7404bcbf",
+      "files": [
+        {
+          "path": "tests/conftest.py",
+          "historical_tested_sha256": "b08e5daff24bf98279cf971acfbee479caa3941d4bacefa1aa80c6f454b7b27b",
+          "current_sha256": "0caa7d1cfa6f3ec84461daca7d60dd3cbdba36a75ef4a996371a2f4e22c6a2a8"
+        },
+        {
+          "path": "tests/unit/test_pytest_cleanup_scaling.py",
+          "historical_tested_sha256": "e7d18b484909de88db447aa7c3c55054288c40f3e1b841f6e16dd27045c9a927",
+          "current_sha256": "e7d18b484909de88db447aa7c3c55054288c40f3e1b841f6e16dd27045c9a927"
+        }
+      ],
+      "effect": "Test harness young-generation collection still runs every teardown; a released app/engine/session-factory owner or restoration error forces immediate full collection. Unchanged owners get a full checkpoint every25 teardowns; diagnostic receipt interval never disables cleanup. Explicit collector calls default to full collection as before. Native64-case child workload falls from64 whole-heap scans to2, with at most25 promoted unreachable file cycles and63 extra native handles; final explicit collection releases all unreachable files and preserves the live borrowed owner. All original app/engine disposal, immediate removed-app-cycle and borrowed-file controls pass unchanged. Final62-report combined gate has60 active passes,2 pre-existing image/security-shape placeholder skips,0 failures/errors. Actual threaded scheduler/gateway/deadline, native child watchdog termination and recommend-contract ownership checks pass. No product source or production resource policy changes.",
+      "limits": "This intentionally replaces unconditional per-test full-heap scanning with bounded checkpoints for unchanged owners. It is not proof that every arbitrary promoted test cycle closes immediately after each test; owned runtime release remains immediate and the child measures bounded promoted-file retention. Normal automatic GC remains enabled. Process guards remain5000 handles/2GiB RSS/1GiB host headroom/180s call timeout, and full-suite deadline5400s remains unchanged. No live cache/borrowed state is cleared to force a pass. Initial parent-red child failed before assertions due wrong cwd and is excluded. Parent-red-v2 is the valid64-scan reproduction. A failed review-script string check blocked mutation; the unfortunately named pytest-cleanup-scaling-final profile therefore still ran the unchanged parent and reproduced the same failure among62 reports, not a repaired final pass. Only green-v2 is the repaired-source result. Full source15190-minute failure remains separate; a new final-source full run is still required."
+    }
+  ],
+  "local_commits_since_original_roadmap": 160,
+  "original_roadmap_commit": "0d551213a6a514e81cb610ddf2ebe3343a31bf50",
+  "committed_line_delta_since_original_roadmap": [
+    {
+      "path": ".gitattributes",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": ".github/workflows/clean-checkout-smoke.yml",
+      "added": "12",
+      "removed": "5"
+    },
+    {
+      "path": "Dockerfile.runtime",
+      "added": "14",
+      "removed": "4"
+    },
+    {
+      "path": "alembic/env.py",
+      "added": "25",
+      "removed": "1"
+    },
+    {
+      "path": "alembic/versions/20260875_evaluation_tenant_integrity.py",
+      "added": "42",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260876_dmarc_tenant_boundary.py",
+      "added": "36",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260877_outbound_effect_binding.py",
+      "added": "20",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260878_outbound_ack_reference.py",
+      "added": "18",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260879_refund_effect_permit.py",
+      "added": "21",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260880_case_contract_selection.py",
+      "added": "28",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260881_synthetic_shop_history.py",
+      "added": "26",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260882_inventory_transactions.py",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260883_person_effect_approval.py",
+      "added": "39",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260884_outbound_recovery.py",
+      "added": "24",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260885_fulfillment_request_binding.py",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260886_inventory_expiry.py",
+      "added": "19",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260887_merchant_decision_dataset.py",
+      "added": "24",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260888_inventory_stock_movements.py",
+      "added": "27",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260889_operator_inventory_requests.py",
+      "added": "29",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260890_supplier_enquiry_journey.py",
+      "added": "32",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260891_governed_product_offers.py",
+      "added": "15",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260892_buyer_supplier_selection.py",
+      "added": "19",
+      "removed": "0"
+    },
+    {
+      "path": "alembic/versions/20260893_security_tenant_policy.py",
+      "added": "27",
+      "removed": "0"
+    },
+    {
+      "path": "config/electronics_shop_scenario.json",
+      "added": "21",
+      "removed": "0"
+    },
+    {
+      "path": "config/merchant_market_pilot.json",
+      "added": "22",
+      "removed": "0"
+    },
+    {
+      "path": "config/product_offer_demo.json",
+      "added": "11",
+      "removed": "0"
+    },
+    {
+      "path": "config/requirement_contracts/blender-5.0-windows-opengl.json",
+      "added": "31",
+      "removed": "0"
+    },
+    {
+      "path": "config/requirement_contracts/fictional-memory-lab.json",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "config/runtime_dependency_profiles.json",
+      "added": "31",
+      "removed": "2"
+    },
+    {
+      "path": "config/store_profiles/electronics.json",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_BROWSER_AND_TENANT_CHECKPOINT_2026-10-22.md",
+      "added": "61",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_DELTA_AND_IMPLEMENTATION_PLAN_2026-10-20.md",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_EXECUTION_CONTINUATION_2026-10-22.md",
+      "added": "55",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_EXECUTION_DELTA_2026-10-20.md",
+      "added": "98",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_EXECUTION_FOLLOWUP_2026-10-21.md",
+      "added": "112",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_EXECUTION_STATUS_2026-10-21.md",
+      "added": "213",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_EXECUTION_STATUS_2026-10-22.md",
+      "added": "109",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_FULL_PYTHON_OBSERVATIONS_2026-10-22.md",
+      "added": "47",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_MARKET_AND_BROWSER_CHECKPOINT_2026-10-22.md",
+      "added": "40",
+      "removed": "0"
+    },
+    {
+      "path": "docs/ROADMAP_PRICING_AND_CACHE_CHECKPOINT_2026-10-22.md",
+      "added": "41",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-20-execution-delta.json",
+      "added": "1981",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-20-execution-file-inventory.csv",
+      "added": "5649",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-20-runtime-file-inventory.csv",
+      "added": "5657",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-20-runtime-source-map.csv",
+      "added": "10",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-browser-outcome-ledger.csv",
+      "added": "163",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-clean-committed-browser-outcome-ledger.csv",
+      "added": "130",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-continued-execution.json",
+      "added": "16002",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-continued-file-inventory.csv",
+      "added": "5734",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-continued-source-map.csv",
+      "added": "97",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-final-clean-browser-outcome-ledger.csv",
+      "added": "130",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-followup-execution.json",
+      "added": "3613",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-followup-file-inventory.csv",
+      "added": "5761",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-followup-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-followup-source-map.csv",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-python-frozen-outcome-ledger.csv",
+      "added": "8561",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-python-skip-prerequisites.csv",
+      "added": "269",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-python-v7-frozen-outcome-ledger.csv",
+      "added": "8610",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-required-profile-skip-ledger.csv",
+      "added": "248",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-21-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-browser-v3-cases.csv",
+      "added": "128",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-browser-v3-summary.json",
+      "added": "1446",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-clean-v2-failure-followup.csv",
+      "added": "23",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-continuation-execution.json",
+      "added": "769",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-continuation-failure-followup.csv",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-continuation-file-inventory.csv",
+      "added": "5788",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-continuation-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-continuation-source-map.csv",
+      "added": "48",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-execution.json",
+      "added": "772",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-file-inventory.csv",
+      "added": "5777",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-full-v3-cases.csv",
+      "added": "8425",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-full-v3-execution.json",
+      "added": "752",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-full-v3-failure-followup.csv",
+      "added": "13",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-full-v3-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-full-v3-source-map.csv",
+      "added": "38",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-market-browser-cases.csv",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-market-browser-execution.json",
+      "added": "990",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-market-browser-file-inventory.csv",
+      "added": "5816",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-market-browser-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-market-browser-source-map.csv",
+      "added": "42",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-pricing-cache-execution.json",
+      "added": "173",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-pricing-cache-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-pricing-cache-source-map.csv",
+      "added": "38",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-python-clean-v2-observation-ledger.csv",
+      "added": "8347",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-source-map.csv",
+      "added": "61",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-execution.json",
+      "added": "2045",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-file-inventory.csv",
+      "added": "5798",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-source-map.csv",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/browser-native-tenant-procurement.spec.ts",
+      "added": "39",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/budget-subject-rfq-live.spec.ts",
+      "added": "4",
+      "removed": "2"
+    },
+    {
+      "path": "frontend/e2e/buyer-flow.spec.ts",
+      "added": "9",
+      "removed": "24"
+    },
+    {
+      "path": "frontend/e2e/buyer-only-procurement.spec.ts",
+      "added": "34",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/cart-clear-outage.spec.ts",
+      "added": "34",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/cart-clear-restore.spec.ts",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/case-panel-trace-consistency.spec.ts",
+      "added": "2",
+      "removed": "9"
+    },
+    {
+      "path": "frontend/e2e/helpers/authenticatedTest.ts",
+      "added": "38",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/helpers/chatTurn.ts",
+      "added": "18",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/helpers/currentQualification.ts",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/helpers/terminalTurn.ts",
+      "added": "78",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/helpers/turnOracle.ts",
+      "added": "26",
+      "removed": "3"
+    },
+    {
+      "path": "frontend/e2e/live-unresolved-purchase-boundary.spec.ts",
+      "added": "7",
+      "removed": "26"
+    },
+    {
+      "path": "frontend/e2e/ordinary-case-requirements.spec.ts",
+      "added": "31",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/ordinary-chat-shortfall.spec.ts",
+      "added": "42",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/platform-audit-memory.spec.ts",
+      "added": "141",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/terminal-turn-helper.spec.ts",
+      "added": "102",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/package-lock.json",
+      "added": "97",
+      "removed": "171"
+    },
+    {
+      "path": "frontend/package.json",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "added": "54",
+      "removed": "21"
+    },
+    {
+      "path": "frontend/src/components/AmbiguityExplorationPanel.tsx",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/src/components/BuyerSupplierQuotes.tsx",
+      "added": "72",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/CaseContractSelection.tsx",
+      "added": "70",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/CaseProductOffers.tsx",
+      "added": "43",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/LoginModal.tsx",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "frontend/src/components/ProductShelvesPanel.tsx",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/StockAcceptancePanel.tsx",
+      "added": "68",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/__tests__/LoginModal.test.tsx",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/__tests__/WorkloadResearchTrace.test.tsx",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/components/decision-trace/MarketIntelligencePanel.tsx",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "frontend/src/components/decision-trace/PendingProcurementPlan.tsx",
+      "added": "3",
+      "removed": "3"
+    },
+    {
+      "path": "frontend/src/components/decision-trace/RawTracePanel.tsx",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/api.test.ts",
+      "added": "15",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/queryIntent.test.ts",
+      "added": "9",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/terminalInstallation.test.ts",
+      "added": "10",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "added": "4",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/lib/proportionateAlternatives.ts",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/lib/queryIntent.ts",
+      "added": "9",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/src/lib/terminalInstallation.ts",
+      "added": "7",
+      "removed": "2"
+    },
+    {
+      "path": "frontend/tsconfig.json",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/vite.config.ts",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "poetry.lock",
+      "added": "1846",
+      "removed": "2355"
+    },
+    {
+      "path": "pyproject.toml",
+      "added": "39",
+      "removed": "18"
+    },
+    {
+      "path": "requirements/api-runtime-windows.txt",
+      "added": "100",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/api-runtime.txt",
+      "added": "30",
+      "removed": "29"
+    },
+    {
+      "path": "requirements/bootstrap-runtime-windows.txt",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/bootstrap-runtime.txt",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/test-runtime-windows.txt",
+      "added": "40",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/test-runtime.txt",
+      "added": "39",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/vision-runtime-windows.txt",
+      "added": "75",
+      "removed": "0"
+    },
+    {
+      "path": "requirements/vision-runtime.txt",
+      "added": "54",
+      "removed": "28"
+    },
+    {
+      "path": "scripts/docker_entrypoint.sh",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/generate_runtime_requirements.py",
+      "added": "41",
+      "removed": "13"
+    },
+    {
+      "path": "scripts/prepare_roadmap_demo.py",
+      "added": "101",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/roadmap_runtime.py",
+      "added": "21",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/run_image_security_profile.py",
+      "added": "154",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/run_roadmap_browser.py",
+      "added": "168",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/seed_current_qualification_fixture.py",
+      "added": "157",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/seed_electronics_shop.py",
+      "added": "80",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/seed_inventory_from_txt.py",
+      "added": "55",
+      "removed": "7"
+    },
+    {
+      "path": "scripts/seed_merchant_market_pilot.py",
+      "added": "78",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/seed_operator_inventory_demo.py",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/seed_product_offer_demo.py",
+      "added": "47",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/soak_portfolio_browser.py",
+      "added": "161",
+      "removed": "0"
+    },
+    {
+      "path": "scripts/soak_resource_sample.py",
+      "added": "52",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/adapters/synthetic_market_operations.py",
+      "added": "57",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/bootstrap/application_lifespan.py",
+      "added": "24",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/bootstrap/business_background_lifecycle.py",
+      "added": "76",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/bootstrap/security_background_lifecycle.py",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/bootstrap/security_schema.py",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/contracts/suggest_contract.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/main.py",
+      "added": "86",
+      "removed": "138"
+    },
+    {
+      "path": "src/app/models/database_ownership.py",
+      "added": "47",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/models/db.py",
+      "added": "265",
+      "removed": "193"
+    },
+    {
+      "path": "src/app/models/orm.py",
+      "added": "16",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/models/request_database_middleware.py",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/observability/http_histogram.py",
+      "added": "87",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/observability/http_labels.py",
+      "added": "24",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/observability/metrics.py",
+      "added": "5",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/observability/tracing.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/platform/tenant_session.py",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/admin_email_security.py",
+      "added": "11",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/routers/admin_playbooks.py",
+      "added": "18",
+      "removed": "4"
+    },
+    {
+      "path": "src/app/routers/auth.py",
+      "added": "3",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/routers/cart.py",
+      "added": "18",
+      "removed": "16"
+    },
+    {
+      "path": "src/app/routers/chat.py",
+      "added": "191",
+      "removed": "311"
+    },
+    {
+      "path": "src/app/routers/chat_stream.py",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/routers/merchant_intelligence.py",
+      "added": "3",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/routers/payments.py",
+      "added": "60",
+      "removed": "53"
+    },
+    {
+      "path": "src/app/routers/payments_afterpay.py",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/payments_googlepay.py",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/payments_paypal.py",
+      "added": "5",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/payments_revolut.py",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/pricing.py",
+      "added": "2",
+      "removed": "13"
+    },
+    {
+      "path": "src/app/routers/privacy.py",
+      "added": "77",
+      "removed": "104"
+    },
+    {
+      "path": "src/app/routers/recommend_compat.py",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/shopping_case_contracts.py",
+      "added": "78",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/shopping_case_inventory.py",
+      "added": "96",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/shopping_case_product_offers.py",
+      "added": "91",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/routers/shopping_cases.py",
+      "added": "22",
+      "removed": "30"
+    },
+    {
+      "path": "src/app/routers/ui_storefront.py",
+      "added": "3",
+      "removed": "9"
+    },
+    {
+      "path": "src/app/security/admin_route_boundary.py",
+      "added": "29",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/security/auth.py",
+      "added": "45",
+      "removed": "52"
+    },
+    {
+      "path": "src/app/security/buyer_principal.py",
+      "added": "69",
+      "removed": "4"
+    },
+    {
+      "path": "src/app/security/observer.py",
+      "added": "66",
+      "removed": "132"
+    },
+    {
+      "path": "src/app/security/observer_workers.py",
+      "added": "91",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/security/passive_payload_analysis_new.py",
+      "added": "0",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/security/runtime_test_controls.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/security/security_event_ingest.py",
+      "added": "72",
+      "removed": "80"
+    },
+    {
+      "path": "src/app/security/webhook_security.py",
+      "added": "40",
+      "removed": "29"
+    },
+    {
+      "path": "src/app/services/accepted_catalog_projection.py",
+      "added": "27",
+      "removed": "7"
+    },
+    {
+      "path": "src/app/services/budget_grammar.py",
+      "added": "24",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/services/bulk_intent.py",
+      "added": "14",
+      "removed": "8"
+    },
+    {
+      "path": "src/app/services/buyer_supplier_constraints.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/buyer_supplier_quotes.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/buyer_supplier_selection.py",
+      "added": "60",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/candidate_retriever.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/case_catalog_projection.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/case_contract_binding.py",
+      "added": "160",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/case_inventory_acceptance.py",
+      "added": "108",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/case_inventory_view.py",
+      "added": "32",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/case_task_delivery.py",
+      "added": "171",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_case_continuity.py",
+      "added": "139",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_guard_projection.py",
+      "added": "22",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_recommendation_dispatch.py",
+      "added": "48",
+      "removed": "36"
+    },
+    {
+      "path": "src/app/services/chat_research_entry.py",
+      "added": "91",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_terminal_projection.py",
+      "added": "202",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_transport.py",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/chat_turn_projection.py",
+      "added": "15",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/checkout_readiness.py",
+      "added": "8",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/services/citation_memory.py",
+      "added": "23",
+      "removed": "14"
+    },
+    {
+      "path": "src/app/services/clarification_state.py",
+      "added": "6",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/commercial_decision_reducer.py",
+      "added": "39",
+      "removed": "12"
+    },
+    {
+      "path": "src/app/services/commercial_terms.py",
+      "added": "24",
+      "removed": "27"
+    },
+    {
+      "path": "src/app/services/communication_lifecycle.py",
+      "added": "3",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/conversation_case_state.py",
+      "added": "50",
+      "removed": "10"
+    },
+    {
+      "path": "src/app/services/cv_analysis_cache.py",
+      "added": "39",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/cv_ocr.py",
+      "added": "108",
+      "removed": "18"
+    },
+    {
+      "path": "src/app/services/cv_tier2_pipeline.py",
+      "added": "21",
+      "removed": "9"
+    },
+    {
+      "path": "src/app/services/db_read_routing.py",
+      "added": "21",
+      "removed": "18"
+    },
+    {
+      "path": "src/app/services/decision_log.py",
+      "added": "43",
+      "removed": "24"
+    },
+    {
+      "path": "src/app/services/dmarc_ingest.py",
+      "added": "63",
+      "removed": "101"
+    },
+    {
+      "path": "src/app/services/dmarc_schema.py",
+      "added": "13",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/electronics_shop_scenario.py",
+      "added": "106",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/email_providers.py",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/evidence_orchestrator.py",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/fulfillment/approval_policy.py",
+      "added": "27",
+      "removed": "11"
+    },
+    {
+      "path": "src/app/services/fulfillment/category_budget_lock.py",
+      "added": "21",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/fulfillment/domain.py",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/fulfillment/draft.py",
+      "added": "4",
+      "removed": "8"
+    },
+    {
+      "path": "src/app/services/fulfillment/effect_contract.py",
+      "added": "41",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/fulfillment/operator_recovery.py",
+      "added": "60",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/fulfillment/outbound_queue.py",
+      "added": "186",
+      "removed": "72"
+    },
+    {
+      "path": "src/app/services/fulfillment/person_approval.py",
+      "added": "134",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/fulfillment/purchase_order.py",
+      "added": "32",
+      "removed": "19"
+    },
+    {
+      "path": "src/app/services/fulfillment/repository.py",
+      "added": "7",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/services/fulfillment/transport.py",
+      "added": "32",
+      "removed": "9"
+    },
+    {
+      "path": "src/app/services/fulfillment/workflow.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/governed_product_offers.py",
+      "added": "149",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/incident_sla_scheduler.py",
+      "added": "107",
+      "removed": "86"
+    },
+    {
+      "path": "src/app/services/inventory_expiry_scheduler.py",
+      "added": "80",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/inventory_transactions.py",
+      "added": "218",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/local_model_roles.py",
+      "added": "54",
+      "removed": "26"
+    },
+    {
+      "path": "src/app/services/market_analysis.py",
+      "added": "4",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/market_evidence_admission.py",
+      "added": "27",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/market_intelligence_agent.py",
+      "added": "64",
+      "removed": "16"
+    },
+    {
+      "path": "src/app/services/market_projection.py",
+      "added": "18",
+      "removed": "10"
+    },
+    {
+      "path": "src/app/services/media_process_isolation.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/merchant_decision_dataset.py",
+      "added": "179",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/merchant_evidence_retrieval.py",
+      "added": "132",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/model_execution_gateway.py",
+      "added": "24",
+      "removed": "7"
+    },
+    {
+      "path": "src/app/services/ocr_runtime.py",
+      "added": "105",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/orchestrator.py",
+      "added": "4",
+      "removed": "3"
+    },
+    {
+      "path": "src/app/services/outbound_email_monitor.py",
+      "added": "15",
+      "removed": "59"
+    },
+    {
+      "path": "src/app/services/paddle_model_assets.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/parallel_agent_executor.py",
+      "added": "0",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/payment_execution_policy.py",
+      "added": "22",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/payment_provider_readiness.py",
+      "added": "31",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/payment_reconcile_scheduler.py",
+      "added": "40",
+      "removed": "23"
+    },
+    {
+      "path": "src/app/services/payments.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/portfolio_qualification.py",
+      "added": "112",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/privacy_state_store.py",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/public_market_source_fetch.py",
+      "added": "41",
+      "removed": "21"
+    },
+    {
+      "path": "src/app/services/recommendation_audit_outbox.py",
+      "added": "16",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_compatibility.py",
+      "added": "15",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/case_binding.py",
+      "added": "262",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/catalog_brand_constraints.py",
+      "added": "62",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/contract_compilation_gate.py",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/core.py",
+      "added": "16",
+      "removed": "12"
+    },
+    {
+      "path": "src/app/services/recommendation_core/evidence_stage.py",
+      "added": "11",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/recommendation_core/legacy_adapter.py",
+      "added": "1",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/product_shelves.py",
+      "added": "20",
+      "removed": "13"
+    },
+    {
+      "path": "src/app/services/recommendation_core/requirement_compiler.py",
+      "added": "35",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/recommendation_core/requirement_scope.py",
+      "added": "11",
+      "removed": "5"
+    },
+    {
+      "path": "src/app/services/recommendation_core/research_contracts.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_core/trace_ontology.py",
+      "added": "27",
+      "removed": "16"
+    },
+    {
+      "path": "src/app/services/recommendation_core/turn_router.py",
+      "added": "32",
+      "removed": "53"
+    },
+    {
+      "path": "src/app/services/recommendation_core/workload_decision.py",
+      "added": "19",
+      "removed": "11"
+    },
+    {
+      "path": "src/app/services/recommendation_core/workload_refinement.py",
+      "added": "65",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/recommendation_facade.py",
+      "added": "15",
+      "removed": "11"
+    },
+    {
+      "path": "src/app/services/refund_authorization.py",
+      "added": "22",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/refund_completion.py",
+      "added": "26",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/refund_execution.py",
+      "added": "89",
+      "removed": "31"
+    },
+    {
+      "path": "src/app/services/requirement_claim_reconciliation.py",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/requirement_contract.py",
+      "added": "114",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/research_outcome.py",
+      "added": "85",
+      "removed": "38"
+    },
+    {
+      "path": "src/app/services/research_policy.py",
+      "added": "3",
+      "removed": "4"
+    },
+    {
+      "path": "src/app/services/return_partner_integrations.py",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/semantic_research_fixture.py",
+      "added": "22",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/shop_operational_history.py",
+      "added": "182",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/shopping_case_enrolled_research.py",
+      "added": "33",
+      "removed": "9"
+    },
+    {
+      "path": "src/app/services/shopping_case_revision.py",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/shopping_case_supplier_continuation.py",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/shortfall_enquiry_preview.py",
+      "added": "77",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/structured_requirement_claims.py",
+      "added": "9",
+      "removed": "2"
+    },
+    {
+      "path": "src/app/services/supplier_enquiry_journey.py",
+      "added": "217",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/supplier_enquiry_recovery.py",
+      "added": "76",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/synthetic_canonical_replay.py",
+      "added": "188",
+      "removed": "144"
+    },
+    {
+      "path": "src/app/services/terminal_qualification.py",
+      "added": "62",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/terminal_research_narration.py",
+      "added": "53",
+      "removed": "1"
+    },
+    {
+      "path": "src/app/services/terminal_research_reconciliation.py",
+      "added": "6",
+      "removed": "4"
+    },
+    {
+      "path": "src/app/services/turn_transition.py",
+      "added": "51",
+      "removed": "6"
+    },
+    {
+      "path": "src/app/services/user_data_inventory.py",
+      "added": "28",
+      "removed": "27"
+    },
+    {
+      "path": "src/app/workers/celery_app.py",
+      "added": "44",
+      "removed": "136"
+    },
+    {
+      "path": "src/app/workers/task_signing.py",
+      "added": "70",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/package-lock.json",
+      "added": "112",
+      "removed": "168"
+    },
+    {
+      "path": "src/frontend/admin-react/package.json",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api.ts",
+      "added": "6",
+      "removed": "1"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api/adminContracts.test.ts",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api/client.body-deadline.test.ts",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api/client.public-build.test.ts",
+      "added": "34",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api/client.test.ts",
+      "added": "36",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/src/api/client.ts",
+      "added": "27",
+      "removed": "10"
+    },
+    {
+      "path": "src/frontend/admin-react/src/components/AgentIntelligence.test.tsx",
+      "added": "56",
+      "removed": "0"
+    },
+    {
+      "path": "src/frontend/admin-react/src/components/AgentIntelligence.tsx",
+      "added": "14",
+      "removed": "8"
+    },
+    {
+      "path": "src/frontend/admin-react/src/components/DeveloperPanel.tsx",
+      "added": "0",
+      "removed": "7"
+    },
+    {
+      "path": "tests/api/test_admin_chat_tools.py",
+      "added": "3",
+      "removed": "2"
+    },
+    {
+      "path": "tests/api/test_admin_repair_contracts.py",
+      "added": "48",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_bulk_availability_e2e.py",
+      "added": "46",
+      "removed": "16"
+    },
+    {
+      "path": "tests/api/test_case_contract_selection.py",
+      "added": "78",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_case_product_offers.py",
+      "added": "65",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_chat_case_read_revision.py",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_chat_case_tasks.py",
+      "added": "181",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_chat_graceful_degrade.py",
+      "added": "3",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_chat_owned_evidence_intake.py",
+      "added": "75",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_chat_shortfall_task_quantity.py",
+      "added": "52",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_complaints_pipeline_smoke.py",
+      "added": "7",
+      "removed": "4"
+    },
+    {
+      "path": "tests/api/test_conversational_stock_acceptance.py",
+      "added": "72",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_cv_security_decoupling.py",
+      "added": "31",
+      "removed": "20"
+    },
+    {
+      "path": "tests/api/test_health_cache_contract.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/api/test_native_buyer_surface_auth.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_native_buyer_tenant_enrollment.py",
+      "added": "28",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_order_payment_dispatch_spine.py",
+      "added": "12",
+      "removed": "1"
+    },
+    {
+      "path": "tests/api/test_outbound_monitor_tenant_boundary.py",
+      "added": "70",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_payment_adapter_execution_policy.py",
+      "added": "70",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_payment_ledger_refunds.py",
+      "added": "31",
+      "removed": "5"
+    },
+    {
+      "path": "tests/api/test_payment_webhook_event_loop.py",
+      "added": "77",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_payments_intent.py",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_pipeline_e2e_fraud_and_warehouse.py",
+      "added": "5",
+      "removed": "4"
+    },
+    {
+      "path": "tests/api/test_privacy_consent_requests.py",
+      "added": "6",
+      "removed": "1"
+    },
+    {
+      "path": "tests/api/test_privacy_error_disclosure.py",
+      "added": "116",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_redteam_storefront_security_wiring.py",
+      "added": "5",
+      "removed": "4"
+    },
+    {
+      "path": "tests/api/test_request_database_ownership.py",
+      "added": "136",
+      "removed": "0"
+    },
+    {
+      "path": "tests/api/test_shopping_case_decision_runs.py",
+      "added": "11",
+      "removed": "1"
+    },
+    {
+      "path": "tests/api/test_shopping_case_evidence_source_resolution.py",
+      "added": "11",
+      "removed": "1"
+    },
+    {
+      "path": "tests/api/test_shopping_case_requirement_acceptance.py",
+      "added": "25",
+      "removed": "4"
+    },
+    {
+      "path": "tests/api/test_shopping_case_supplier_continuation.py",
+      "added": "10",
+      "removed": "12"
+    },
+    {
+      "path": "tests/api/test_support_complaints_security.py",
+      "added": "5",
+      "removed": "4"
+    },
+    {
+      "path": "tests/architecture/test_core_router_registration.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/architecture/test_fulfillment_outbound_registration.py",
+      "added": "4",
+      "removed": "2"
+    },
+    {
+      "path": "tests/architecture/test_recommend_aux_router.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/architecture/test_storefront_router_registration.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/bootstrap/test_admin_access_router_group.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/bootstrap/test_application_lifespan_protocol.py",
+      "added": "92",
+      "removed": "0"
+    },
+    {
+      "path": "tests/bootstrap/test_business_background_lifecycle.py",
+      "added": "139",
+      "removed": "1"
+    },
+    {
+      "path": "tests/bootstrap/test_lifespan_database_ownership.py",
+      "added": "65",
+      "removed": "0"
+    },
+    {
+      "path": "tests/browser/conftest.py",
+      "added": "31",
+      "removed": "131"
+    },
+    {
+      "path": "tests/browser/test_admin.py",
+      "added": "2",
+      "removed": "3"
+    },
+    {
+      "path": "tests/browser/test_checkout_flow.py",
+      "added": "16",
+      "removed": "9"
+    },
+    {
+      "path": "tests/browser/test_storefront.py",
+      "added": "9",
+      "removed": "6"
+    },
+    {
+      "path": "tests/browser/test_storefront_smoke.py",
+      "added": "6",
+      "removed": "7"
+    },
+    {
+      "path": "tests/buyer_client.py",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "tests/buyer_identity_helpers.py",
+      "added": "27",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_durable_trace_correlation_postgres.py",
+      "added": "26",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_effect_sink_postgres.py",
+      "added": "176",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_enquiry_recovery_postgres.py",
+      "added": "130",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_inventory_transactions_postgres.py",
+      "added": "179",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_market_optional_scope_postgres.py",
+      "added": "43",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_native_case_terminal_state.py",
+      "added": "76",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_outbound_dispatch_postgres.py",
+      "added": "151",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_read_session_rls_postgres.py",
+      "added": "105",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_read_session_tenant_postgres.py",
+      "added": "32",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_refund_authority_postgres.py",
+      "added": "142",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_release_integrity_postgres.py",
+      "added": "186",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_request_database_owner_postgres.py",
+      "added": "134",
+      "removed": "0"
+    },
+    {
+      "path": "tests/chaos/test_security_schema_owner_readiness_postgres.py",
+      "added": "20",
+      "removed": "0"
+    },
+    {
+      "path": "tests/conftest.py",
+      "added": "130",
+      "removed": "16"
+    },
+    {
+      "path": "tests/e2e/test_returns_adversarial_playwright.py",
+      "added": "88",
+      "removed": "97"
+    },
+    {
+      "path": "tests/email/test_dmarc_admin.py",
+      "added": "35",
+      "removed": "12"
+    },
+    {
+      "path": "tests/image_security_fixtures.py",
+      "added": "48",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_attribution_capture.py",
+      "added": "47",
+      "removed": "36"
+    },
+    {
+      "path": "tests/integration/test_attribution_transaction_isolation.py",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_celery_task_signing_runtime.py",
+      "added": "87",
+      "removed": "34"
+    },
+    {
+      "path": "tests/integration/test_chat_additive_workload_continuation.py",
+      "added": "5",
+      "removed": "1"
+    },
+    {
+      "path": "tests/integration/test_contract_fixture_ownership.py",
+      "added": "74",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_frontend_backend_parity.py",
+      "added": "42",
+      "removed": "57"
+    },
+    {
+      "path": "tests/integration/test_parity_fixture_database_ownership.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_privacy_controller_redis.py",
+      "added": "69",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_recommend_contract_stability.py",
+      "added": "54",
+      "removed": "89"
+    },
+    {
+      "path": "tests/legacy_endpoint_runtime.py",
+      "added": "36",
+      "removed": "0"
+    },
+    {
+      "path": "tests/migration_helpers.py",
+      "added": "15",
+      "removed": "0"
+    },
+    {
+      "path": "tests/observability/test_http_histogram_resources.py",
+      "added": "101",
+      "removed": "0"
+    },
+    {
+      "path": "tests/observability/test_http_metric_cardinality.py",
+      "added": "37",
+      "removed": "0"
+    },
+    {
+      "path": "tests/observability/test_tracing_provider_ownership.py",
+      "added": "179",
+      "removed": "0"
+    },
+    {
+      "path": "tests/owned_playwright_runtime.py",
+      "added": "18",
+      "removed": "0"
+    },
+    {
+      "path": "tests/owned_security_runtime.py",
+      "added": "179",
+      "removed": "0"
+    },
+    {
+      "path": "tests/owned_timeout_lifecycle.py",
+      "added": "11",
+      "removed": "0"
+    },
+    {
+      "path": "tests/playbooks/test_playbooks_lifecycle_dlq.py",
+      "added": "14",
+      "removed": "21"
+    },
+    {
+      "path": "tests/privacy_store_fakes.py",
+      "added": "15",
+      "removed": "0"
+    },
+    {
+      "path": "tests/pw/conftest.py",
+      "added": "13",
+      "removed": "4"
+    },
+    {
+      "path": "tests/pw/test_steg_image_assessment.py",
+      "added": "37",
+      "removed": "49"
+    },
+    {
+      "path": "tests/pw/test_vision_upload_perf.py",
+      "added": "143",
+      "removed": "155"
+    },
+    {
+      "path": "tests/scripts/test_generate_runtime_requirements.py",
+      "added": "90",
+      "removed": "1"
+    },
+    {
+      "path": "tests/scripts/test_roadmap_runtime.py",
+      "added": "25",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/conftest.py",
+      "added": "1",
+      "removed": "122"
+    },
+    {
+      "path": "tests/security/test_admin_playbooks_governance.py",
+      "added": "39",
+      "removed": "4"
+    },
+    {
+      "path": "tests/security/test_admin_route_boundary.py",
+      "added": "28",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_credential_audit_attribution.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_dmarc_boundaries.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_durable_trace_correlation.py",
+      "added": "80",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_email_attachment_steg.py",
+      "added": "30",
+      "removed": "29"
+    },
+    {
+      "path": "tests/security/test_flag_dual_approval.py",
+      "added": "5",
+      "removed": "3"
+    },
+    {
+      "path": "tests/security/test_idempotency_middleware.py",
+      "added": "5",
+      "removed": "1"
+    },
+    {
+      "path": "tests/security/test_observer_session_ownership.py",
+      "added": "178",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_observer_worker_ownership.py",
+      "added": "108",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_owned_security_runtime.py",
+      "added": "86",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_playbook_approval_binding.py",
+      "added": "52",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_pricing_rate_limits.py",
+      "added": "12",
+      "removed": "30"
+    },
+    {
+      "path": "tests/security/test_public_storefront_credentials.py",
+      "added": "37",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_publication_security.py",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_rate_limits.py",
+      "added": "54",
+      "removed": "51"
+    },
+    {
+      "path": "tests/security/test_red_team_simulation.py",
+      "added": "31",
+      "removed": "25"
+    },
+    {
+      "path": "tests/security/test_request_bypass_boundary.py",
+      "added": "158",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_security_schema_owner_readiness.py",
+      "added": "107",
+      "removed": "0"
+    },
+    {
+      "path": "tests/security/test_threat_detection.py",
+      "added": "6",
+      "removed": "3"
+    },
+    {
+      "path": "tests/security/test_verified_operator_identity.py",
+      "added": "113",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_approval_policy.py",
+      "added": "27",
+      "removed": "2"
+    },
+    {
+      "path": "tests/services/fulfillment/test_draft.py",
+      "added": "23",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_external_comms.py",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/fulfillment/test_operator_identity.py",
+      "added": "21",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/fulfillment/test_operator_recovery.py",
+      "added": "105",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_outbound_dispatch_fencing.py",
+      "added": "87",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_outbound_queue.py",
+      "added": "55",
+      "removed": "6"
+    },
+    {
+      "path": "tests/services/fulfillment/test_person_approval.py",
+      "added": "95",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_supplier_polish.py",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/fulfillment/test_transport.py",
+      "added": "14",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/fulfillment/test_transport_health.py",
+      "added": "3",
+      "removed": "2"
+    },
+    {
+      "path": "tests/services/test_accepted_catalog_projection.py",
+      "added": "3",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_api_fixture_lifetime_ownership.py",
+      "added": "60",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_app_router_registry.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_audit_worker_tenant_ownership.py",
+      "added": "137",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_background_database_ownership.py",
+      "added": "93",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_browser_soak_runner.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_budget_amendment_scope.py",
+      "added": "19",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_budget_truth_parity.py",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_bulk_availability_fixture_ownership.py",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_buyer_supplier_quotes.py",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_buyer_supplier_selection.py",
+      "added": "83",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_buyer_tenant_lookup.py",
+      "added": "27",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_cart_test_database_ownership.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_case_contract_binding.py",
+      "added": "216",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_case_fact_recall.py",
+      "added": "31",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_case_inventory_acceptance.py",
+      "added": "82",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_case_task_shortfall_quantity.py",
+      "added": "26",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_certification_artifact_portability.py",
+      "added": "50",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_chat_case_continuity.py",
+      "added": "132",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_chat_dispatch_error_telemetry.py",
+      "added": "54",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_checkout_readiness.py",
+      "added": "2",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_commercial_quantity_contract.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_commercial_unknowns.py",
+      "added": "56",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_communication_lifecycle.py",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "tests/services/test_contract_compilation.py",
+      "added": "98",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_conversation_case_state.py",
+      "added": "88",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_current_qualification_fixture.py",
+      "added": "82",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_cv_tier2_cache_context.py",
+      "added": "157",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_decision_log_durable_identity.py",
+      "added": "166",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_fulfillment_intent_memory.py",
+      "added": "77",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_governed_product_offers.py",
+      "added": "102",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_incident_scheduler_ownership.py",
+      "added": "148",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_inventory_expiry.py",
+      "added": "113",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_inventory_expiry_scheduler.py",
+      "added": "101",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_inventory_stock_movements.py",
+      "added": "63",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_inventory_transactions.py",
+      "added": "93",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_legacy_endpoint_collection_ownership.py",
+      "added": "43",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_local_model_deadline_budget.py",
+      "added": "75",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_local_model_transport_ownership.py",
+      "added": "165",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_market_admission_budget.py",
+      "added": "120",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_market_context_delivery.py",
+      "added": "72",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_market_intelligence_agent.py",
+      "added": "20",
+      "removed": "4"
+    },
+    {
+      "path": "tests/services/test_market_projection_truth.py",
+      "added": "85",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_merchant_decision_dataset.py",
+      "added": "126",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_merchant_evidence_retrieval.py",
+      "added": "71",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_orchestrator_cache_owner.py",
+      "added": "72",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_outbound_email_monitor.py",
+      "added": "3",
+      "removed": "3"
+    },
+    {
+      "path": "tests/services/test_outbound_tenant_scope.py",
+      "added": "33",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_paddle_ocr_contract.py",
+      "added": "154",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_parallel_cv_circuit_open.py",
+      "added": "20",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_payment_native_readiness.py",
+      "added": "102",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_payment_provider_execution_policy.py",
+      "added": "93",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_payment_scheduler_ownership.py",
+      "added": "96",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_pending_workload_scale.py",
+      "added": "106",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_privacy_decision_subject.py",
+      "added": "143",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_privacy_redis_boundaries.py",
+      "added": "103",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_privacy_store_scope.py",
+      "added": "63",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_public_market_source_fetch.py",
+      "added": "29",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_public_market_stream_boundaries.py",
+      "added": "133",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_read_replica_pool_ownership.py",
+      "added": "118",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_read_session_tenant_ownership.py",
+      "added": "50",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_recommendation_core_brain.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_recommendation_facade.py",
+      "added": "17",
+      "removed": "5"
+    },
+    {
+      "path": "tests/services/test_refund_execution.py",
+      "added": "144",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_release_integrity.py",
+      "added": "36",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_requirement_contract.py",
+      "added": "71",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_requirement_scope.py",
+      "added": "56",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_research_outcome.py",
+      "added": "13",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_return_partner_integrations.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_selected_scope_router_continuity.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_semantic_coverage_subject_spans.py",
+      "added": "10",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_semantic_research_fixture.py",
+      "added": "20",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_shopping_case_supplier_continuation.py",
+      "added": "3",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_shortfall_enquiry_preview.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_sqlite_insert_integrity.py",
+      "added": "93",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_suggest_requirement_contract.py",
+      "added": "42",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_supplier_enquiry_current_authority.py",
+      "added": "35",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_supplier_enquiry_journey.py",
+      "added": "175",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_supplier_enquiry_recovery.py",
+      "added": "67",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_supplier_enquiry_recovery_access.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_tenant_session_binding.py",
+      "added": "58",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_terminal_qualification_security.py",
+      "added": "55",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_terminal_research_narration.py",
+      "added": "81",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_terminal_research_reconciliation.py",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "tests/services/test_timeout_lifecycle_ownership.py",
+      "added": "80",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_timeseries_persistence.py",
+      "added": "24",
+      "removed": "18"
+    },
+    {
+      "path": "tests/services/test_turn_router_clarification.py",
+      "added": "32",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_turn_transition.py",
+      "added": "37",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_turn_workload_narration.py",
+      "added": "39",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_user_data_inventory.py",
+      "added": "31",
+      "removed": "7"
+    },
+    {
+      "path": "tests/services/test_v2_contract_binding.py",
+      "added": "281",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_workload_decision.py",
+      "added": "31",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_admin_overview.py",
+      "added": "3",
+      "removed": "53"
+    },
+    {
+      "path": "tests/test_admin_scoring.py",
+      "added": "10",
+      "removed": "2"
+    },
+    {
+      "path": "tests/test_cart_clear_undo_projection.py",
+      "added": "106",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_cart_stock_gates.py",
+      "added": "29",
+      "removed": "31"
+    },
+    {
+      "path": "tests/test_chaos.py",
+      "added": "4",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_chat_recommend_delegation.py",
+      "added": "32",
+      "removed": "73"
+    },
+    {
+      "path": "tests/test_conversation_router_group.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_external_research_wiring.py",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_intelligence_router_group.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_inventory_import_boundaries.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_inventory_thresholds.py",
+      "added": "4",
+      "removed": "3"
+    },
+    {
+      "path": "tests/test_memory_pending_clarification.py",
+      "added": "1",
+      "removed": "13"
+    },
+    {
+      "path": "tests/test_no_flavour_in_core.py",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_openapi_contract.py",
+      "added": "6",
+      "removed": "4"
+    },
+    {
+      "path": "tests/test_operational_router_group.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_order_history_paging.py",
+      "added": "22",
+      "removed": "83"
+    },
+    {
+      "path": "tests/test_orders_status.py",
+      "added": "28",
+      "removed": "99"
+    },
+    {
+      "path": "tests/test_payments_providers.py",
+      "added": "22",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_recommendation_router_group.py",
+      "added": "2",
+      "removed": "1"
+    },
+    {
+      "path": "tests/test_roadmap_browser_spec_selection.py",
+      "added": "22",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_roadmap_schema_upgrade.py",
+      "added": "139",
+      "removed": "0"
+    },
+    {
+      "path": "tests/test_rollout_and_killswitch.py",
+      "added": "0",
+      "removed": "23"
+    },
+    {
+      "path": "tests/test_rules_admin_api.py",
+      "added": "4",
+      "removed": "4"
+    },
+    {
+      "path": "tests/test_scoring.py",
+      "added": "10",
+      "removed": "2"
+    },
+    {
+      "path": "tests/test_security_background_lifecycle.py",
+      "added": "6",
+      "removed": "4"
+    },
+    {
+      "path": "tests/test_security_event_tags.py",
+      "added": "14",
+      "removed": "71"
+    },
+    {
+      "path": "tests/test_security_indirect_prompt_injection.py",
+      "added": "22",
+      "removed": "41"
+    },
+    {
+      "path": "tests/test_security_observer_paths.py",
+      "added": "15",
+      "removed": "63"
+    },
+    {
+      "path": "tests/test_security_prompt_injection_endpoints.py",
+      "added": "36",
+      "removed": "91"
+    },
+    {
+      "path": "tests/test_support_thresholds_config.py",
+      "added": "4",
+      "removed": "3"
+    },
+    {
+      "path": "tests/test_trust_routing_thresholds.py",
+      "added": "4",
+      "removed": "3"
+    },
+    {
+      "path": "tests/unit/test_adversarial_browser_ownership.py",
+      "added": "62",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_app_factory_retention.py",
+      "added": "45",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_browser_runtime_ownership.py",
+      "added": "51",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_cv_ocr_runtime_snapshot.py",
+      "added": "7",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_database_result_streaming.py",
+      "added": "62",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_metrics_rbac.py",
+      "added": "2",
+      "removed": "2"
+    },
+    {
+      "path": "tests/unit/test_ocr_provider_readiness.py",
+      "added": "85",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pricing_execution_integrity.py",
+      "added": "76",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pytest_app_cache_lifecycle.py",
+      "added": "59",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pytest_cleanup_scaling.py",
+      "added": "80",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pytest_database_ownership.py",
+      "added": "28",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pytest_resource_collection.py",
+      "added": "26",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_request_database_middleware.py",
+      "added": "111",
+      "removed": "0"
+    },
+    {
+      "path": "tests/webhooks/test_webhook_atomic_replay.py",
+      "added": "178",
+      "removed": "0"
+    },
+    {
+      "path": "tests/webhooks/test_webhook_replay_and_timestamp.py",
+      "added": "15",
+      "removed": "14"
+    },
+    {
+      "path": "tests/webhooks/test_webhook_signature.py",
+      "added": "92",
+      "removed": "89"
+    },
+    {
+      "path": "tests/workers/test_celery_hmac_boundaries.py",
+      "added": "75",
+      "removed": "0"
+    }
+  ],
+  "committed_line_delta_since_checkpoint155": [
+    {
+      "path": "src/app/services/local_model_roles.py",
+      "added": "54",
+      "removed": "26"
+    },
+    {
+      "path": "src/app/services/market_projection.py",
+      "added": "18",
+      "removed": "10"
+    },
+    {
+      "path": "src/app/services/model_execution_gateway.py",
+      "added": "24",
+      "removed": "7"
+    },
+    {
+      "path": "tests/conftest.py",
+      "added": "21",
+      "removed": "10"
+    },
+    {
+      "path": "tests/integration/test_contract_fixture_ownership.py",
+      "added": "74",
+      "removed": "0"
+    },
+    {
+      "path": "tests/integration/test_recommend_contract_stability.py",
+      "added": "54",
+      "removed": "89"
+    },
+    {
+      "path": "tests/services/fulfillment/test_supplier_polish.py",
+      "added": "8",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_local_model_deadline_budget.py",
+      "added": "75",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_local_model_transport_ownership.py",
+      "added": "165",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_market_projection_truth.py",
+      "added": "85",
+      "removed": "0"
+    },
+    {
+      "path": "tests/unit/test_pytest_cleanup_scaling.py",
+      "added": "80",
+      "removed": "0"
+    }
+  ],
+  "root_static_ratchets": {
+    "check_function_sizes.py": {
+      "native_exit_code": 1,
+      "failures": [
+        "src/app/models/db.py:_bootstrap_minimal_sqlite_tables: 1057 > 200",
+        "src/app/routers/chat.py:_chat_query_impl: 4528 > 4482",
+        "src/app/services/decision_log.py:log_trace_event: 301 > 300",
+        "src/app/services/recommendation_compatibility.py:serve_v2_compatibility: 404 > 389",
+        "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision: 230 > 221",
+        "src/app/services/recommendation_core/turn_router.py:_route_turn_raw: 1351 > 1347"
+      ],
+      "warnings": 0
+    },
+    "check_source_file_sizes.py": {
+      "native_exit_code": 0,
+      "failures": [],
+      "warnings": 49
+    }
+  },
+  "gates": {
+    "contract-fixture-owner": {
+      "parent": {
+        "tests": 2,
+        "failures": 1,
+        "errors": 1,
+        "skipped": 0
+      },
+      "final": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      }
+    },
+    "market-projection-truth": {
+      "parent": {
+        "tests": 11,
+        "failures": 6,
+        "errors": 0,
+        "skipped": 0
+      },
+      "final": {
+        "tests": 50,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "local-model-budget": {
+      "parent": {
+        "tests": 14,
+        "failures": 5,
+        "errors": 0,
+        "skipped": 0
+      },
+      "final": {
+        "tests": 28,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "model-transport-owner": {
+      "parent": {
+        "tests": 3,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "final": {
+        "tests": 41,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "pytest-cleanup-scaling": {
+      "parent": {
+        "tests": 5,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "final": {
+        "tests": 62,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      }
+    }
+  },
+  "cleanup_child": {
+    "cases": 64,
+    "full_heap_scans": 2,
+    "peak_unreachable_files": 25,
+    "peak_extra_handles": 63,
+    "live_owner_preserved": true,
+    "unreachable_files_released": true
+  },
+  "full_v4": {
+    "source_head": "47ab0acc9791e7d23a4ba39ab92625db695c86b7",
+    "receipt": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\clean-committed-v4-entry.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\clean-committed-v4-snapshot",
+      "native_exit_code": 1,
+      "elapsed_seconds": 5400.141,
+      "peaks": {
+        "rss_bytes": 999170048,
+        "handles": 3252,
+        "threads": 93
+      },
+      "resource_violation": "profile_deadline",
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "phase_counts": {
+      "setup:passed": 6357,
+      "call:passed": 6333,
+      "teardown:passed": 6573,
+      "setup:skipped": 217,
+      "call:skipped": 20,
+      "call:failed": 4
+    },
+    "phase_seconds": {
+      "setup": 222.18046451127157,
+      "call": 1243.0520798028447,
+      "teardown": 3776.6148168926593
+    },
+    "source_after": {
+      "head": "47ab0acc9791e7d23a4ba39ab92625db695c86b7",
+      "protected": 5641,
+      "changed": []
+    },
+    "remaining_windows": {
+      "source_head": "47ab0acc9791e7d23a4ba39ab92625db695c86b7",
+      "results": [
+        {
+          "partition": 1,
+          "profile": "clean-v4-remaining-partition-01",
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 375271424,
+            "handles": 1103,
+            "threads": 33
+          },
+          "resource_violation": null,
+          "reported_selected": 200,
+          "completed_teardown_selected": 200,
+          "unreported_selected": [],
+          "missing_teardown_selected": [],
+          "source_before": {
+            "checked": 5641,
+            "changed": []
+          },
+          "source_after": {
+            "checked": 5641,
+            "changed": []
+          }
+        },
+        {
+          "partition": 2,
+          "profile": "clean-v4-remaining-partition-02",
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 418131968,
+            "handles": 1261,
+            "threads": 58
+          },
+          "resource_violation": null,
+          "reported_selected": 200,
+          "completed_teardown_selected": 200,
+          "unreported_selected": [],
+          "missing_teardown_selected": [],
+          "source_before": {
+            "checked": 5641,
+            "changed": []
+          },
+          "source_after": {
+            "checked": 5641,
+            "changed": []
+          }
+        },
+        {
+          "partition": 3,
+          "profile": "clean-v4-remaining-partition-03",
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 440614912,
+            "handles": 1449,
+            "threads": 36
+          },
+          "resource_violation": null,
+          "reported_selected": 200,
+          "completed_teardown_selected": 200,
+          "unreported_selected": [],
+          "missing_teardown_selected": [],
+          "source_before": {
+            "checked": 5641,
+            "changed": []
+          },
+          "source_after": {
+            "checked": 5641,
+            "changed": []
+          }
+        },
+        {
+          "partition": 4,
+          "profile": "clean-v4-remaining-partition-04",
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 34
+          },
+          "peaks": {
+            "rss_bytes": 414457856,
+            "handles": 1392,
+            "threads": 38
+          },
+          "resource_violation": null,
+          "reported_selected": 200,
+          "completed_teardown_selected": 200,
+          "unreported_selected": [],
+          "missing_teardown_selected": [],
+          "source_before": {
+            "checked": 5641,
+            "changed": []
+          },
+          "source_after": {
+            "checked": 5641,
+            "changed": []
+          }
+        }
+      ],
+      "complete": false
+    },
+    "observations": {
+      "passed": 7102,
+      "skipped": 267,
+      "failed": 4,
+      "unreported": 1093
+    },
+    "qualification": "Original90-minute deadline remains failed; separate windows and partial replay remain explicit."
+  },
+  "full_v5": {
+    "source_head": "17fdb4ec0ab2ecd0b45468ffb5b230d4507af414",
+    "status": "running",
+    "collected": 8508,
+    "reported": {
+      "setup:passed": 268,
+      "call:passed": 268,
+      "teardown:passed": 286,
+      "setup:skipped": 19
+    },
+    "guards": {
+      "deadline_seconds": 5400,
+      "rss_bytes": 2147483648,
+      "handles": 5000,
+      "host_available_bytes": 1073741824,
+      "per_call_seconds": 180
+    },
+    "qualification": "Running is not passing; required native/service/live profiles remain separate."
+  },
+  "outputs": [
+    "docs/ROADMAP_RUNTIME_OWNERSHIP_CHECKPOINT_2026-10-22.md",
+    "docs/audits/2026-10-22-runtime-ownership-file-inventory.csv",
+    "docs/audits/2026-10-22-runtime-ownership-roadmap-work-items.csv",
+    "docs/audits/2026-10-22-runtime-ownership-source-map.csv",
+    "docs/audits/2026-10-22-runtime-ownership-cases.csv",
+    "docs/audits/2026-10-22-runtime-ownership-execution.json"
+  ],
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "all_line_semantic_review_complete": false,
+  "pushed": false
+}
