@@ -1,5 +1,5 @@
 import {test,expect} from './helpers/authenticatedTest';
-import {turn} from './helpers/chatTurn';
+import {terminalTurn as turn} from './helpers/terminalTurn';
 import {qualify,reviewCurrentFixtureStock} from './helpers/currentQualification';
 
 test('ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload',async({page,context},info)=>{
