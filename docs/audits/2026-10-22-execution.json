@@ -1,0 +1,772 @@
+{
+  "captured_at": "2026-10-21T14:36:52.813801+00:00",
+  "source_head": "e3b7b06f55063691344d23c0f77d3511e333bda1",
+  "local_commits_since_0d551213": 130,
+  "inventory": {
+    "captured_at": "2026-10-21T14:36:24.597674+00:00",
+    "source_head": "e3b7b06f55063691344d23c0f77d3511e333bda1",
+    "files": 5776,
+    "existing_files": 5776,
+    "text_files": 5739,
+    "text_lines": 1062507,
+    "bytes": 102329404,
+    "dirty_paths": 345,
+    "staged_paths": [],
+    "content_states": {
+      "committed_bytes": 3209,
+      "committed_content_line_ending_variant": 2219,
+      "modified_working_content": 173,
+      "untracked": 175
+    },
+    "index_flags": {
+      "H": 5601
+    },
+    "python_files": 3160,
+    "python_functions": 19721,
+    "python_syntax_errors": [],
+    "largest_functions": [
+      {
+        "path": "src/app/routers/chat.py",
+        "symbol": "_chat_query_impl",
+        "line": 288,
+        "lines": 4528,
+        "source_sha256": "db55c623ed33f95aad5ce2ecb92acf78a6322e0fe24b094b678df5c6c7d31d57"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab",
+        "line": 867,
+        "lines": 2328,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "create_app",
+        "line": 200,
+        "lines": 2200,
+        "source_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+      },
+      {
+        "path": "src/app/security/email_security.py",
+        "symbol": "evaluate_email_security",
+        "line": 836,
+        "lines": 2021,
+        "source_sha256": "5b06ff98490fcd36785e2c1667fff299d629e61b7362ce3bd033492ff2315801"
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "symbol": "_route_turn_raw",
+        "line": 1412,
+        "lines": 1351,
+        "source_sha256": "74f8c00c77c6a84b26e89e3952e027b3991b138242c4410d13d9e780f1ed4d22"
+      },
+      {
+        "path": "src/app/routers/vision.py",
+        "symbol": "triage",
+        "line": 533,
+        "lines": 1303,
+        "source_sha256": "598fb79f0a9481a603fb1812dba9ff6498cb1f0b3c275998aaab57e082cd175e"
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "symbol": "_recommend_turn",
+        "line": 183,
+        "lines": 1303,
+        "source_sha256": "fb5ac2e3ddcd22813c73ff3336529820aa067d21bdbef8ed338ec5394fca59e2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint",
+        "line": 1669,
+        "lines": 1245,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "_run_internal",
+        "line": 2683,
+        "lines": 1154,
+        "source_sha256": "78b6eea97d24a6d09a62c96a64fb23462e5e97ec5b82677da4da4163cbc83ec9"
+      },
+      {
+        "path": "src/app/models/db.py",
+        "symbol": "_bootstrap_minimal_sqlite_tables",
+        "line": 191,
+        "lines": 1057,
+        "source_sha256": "8fa5bc3d57de4fb20efe058d3e3038769a1a1fcaf25d9273f53cfdf4be02bf25"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "run_nlp_cv",
+        "line": 820,
+        "lines": 987,
+        "source_sha256": "78b6eea97d24a6d09a62c96a64fb23462e5e97ec5b82677da4da4163cbc83ec9"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "analyze",
+        "line": 197,
+        "lines": 853,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/flows/nqe.py",
+        "symbol": "propose",
+        "line": 245,
+        "lines": 846,
+        "source_sha256": "547805a3b6edd1ed1931a330e703f6d6da895b47ea93a8d6a7f0a76432c767c1"
+      },
+      {
+        "path": "src/app/services/official_workload_research.py",
+        "symbol": "research_official_sources",
+        "line": 850,
+        "lines": 659,
+        "source_sha256": "bb395a0b1bb5e91d20c0f998ee29caea99329cf2b2e9145f5659f8787f3e1452"
+      },
+      {
+        "path": "src/app/services/cv_tier2_pipeline.py",
+        "symbol": "_run_tier2_impl",
+        "line": 508,
+        "lines": 647,
+        "source_sha256": "63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint_guest",
+        "line": 2917,
+        "lines": 638,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/shopping_case_open_world_research.py",
+        "symbol": "execute_open_world_publisher_discovery_async",
+        "line": 212,
+        "lines": 631,
+        "source_sha256": "439b5f9220288ee83337d4b9ee756123f5456912715edbc8bb6d7bbbb6295c01"
+      },
+      {
+        "path": "src/app/services/recommendation_facade.py",
+        "symbol": "dispatch_recommendation_core_typed",
+        "line": 951,
+        "lines": 492,
+        "source_sha256": "b8503e34d4cced1864cd0d65336f105a799f51acec061c019d65069e445fcbe4"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "upload",
+        "line": 1073,
+        "lines": 458,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/routers/returns.py",
+        "symbol": "submit_return",
+        "line": 535,
+        "lines": 447,
+        "source_sha256": "dbfbd43f3978e25b06979bad5ffdda1651471e3df66a2949521b49c102511de5"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "lifespan",
+        "line": 202,
+        "lines": 420,
+        "source_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+      },
+      {
+        "path": "src/app/security/observer.py",
+        "symbol": "compute_risk",
+        "line": 389,
+        "lines": 411,
+        "source_sha256": "be714310f2e390a8642d089829b2020f6c73258077217c8922870fb62bc5a8c6"
+      },
+      {
+        "path": "src/app/workers/celery_app.py",
+        "symbol": "make_celery",
+        "line": 16,
+        "lines": 410,
+        "source_sha256": "011d08509bc975707e3763f218797fa8eaa0c4595510bbffd69221815e55d6d6"
+      },
+      {
+        "path": "src/app/services/recommendation_compatibility.py",
+        "symbol": "serve_v2_compatibility",
+        "line": 392,
+        "lines": 404,
+        "source_sha256": "dd3634184c50cefc5971215a272e98dbd85017a06bee420a02873c3a48341443"
+      },
+      {
+        "path": "src/app/security/email_security_rules.py",
+        "symbol": "extract_indicators",
+        "line": 483,
+        "lines": 399,
+        "source_sha256": "48d2e3f895877c4a4e2553c936fd2b79b99c89358c5160de5f9da4815fcdb4b0"
+      },
+      {
+        "path": "src/app/security/email_structured_findings.py",
+        "symbol": "_build_structured_findings",
+        "line": 23,
+        "lines": 398,
+        "source_sha256": "86f6e265913609a5e890054ae0e20b6d6f9b26156ac682e76621560611c50f8d"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "create_case_interpretation",
+        "line": 197,
+        "lines": 391,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/services/checkout_upsell.py",
+        "symbol": "recommend_checkout_upsell",
+        "line": 738,
+        "lines": 390,
+        "source_sha256": "aa4afca4f2e8a3f027a6532b95699dcf3ebc12f697c36d310e95721ae0746ad2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "add_images",
+        "line": 3628,
+        "lines": 387,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/recommendation_response_finalizer.py",
+        "symbol": "finalize_core_response",
+        "line": 120,
+        "lines": 380,
+        "source_sha256": "a664259909892fe896db9cd2143f031db937c790694b84cc5e6210d9393355c9"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "_accept_requirement_proposal_with_db",
+        "line": 693,
+        "lines": 364,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/security/email_security_verdict.py",
+        "symbol": "verdict",
+        "line": 48,
+        "lines": 358,
+        "source_sha256": "404ea4830a275e5597edc30978be15c4396bcc7a70634414965ff76fb6bae53b"
+      },
+      {
+        "path": "src/app/services/demand_allocation.py",
+        "symbol": "allocation_workbench",
+        "line": 1037,
+        "lines": 356,
+        "source_sha256": "bede7c9b8b2869963d7d582b0abea0c92b929641f04584e0ee76cd9b9db6f25d"
+      },
+      {
+        "path": "src/app/services/shopping_case_enrolled_research.py",
+        "symbol": "execute_enrolled_official_research",
+        "line": 85,
+        "lines": 354,
+        "source_sha256": "83bd17414514ee7d8c1c9f84272cafac0643901c1872172f4d30054f4019c068"
+      },
+      {
+        "path": "src/app/services/recommendations.py",
+        "symbol": "rerank_candidates_with_factors",
+        "line": 1842,
+        "lines": 353,
+        "source_sha256": "c207325af124efd98832c49c827ee6e9acb985c23a3499622c655ada823fee87"
+      },
+      {
+        "path": "src/app/security/linked_artifact_analysis.py",
+        "symbol": "analyze_linked_artifact",
+        "line": 938,
+        "lines": 345,
+        "source_sha256": "89c1b5692e72c9819323ec18e2cc472bb1be4273f3c3c0d50ad611da6b3165e7"
+      },
+      {
+        "path": "src/app/services/recommendation_core/trace_ontology.py",
+        "symbol": "build_execution_steps",
+        "line": 38,
+        "lines": 345,
+        "source_sha256": "12667512d071dfa19e9a9e05370de8bcaa4111862111efb36f39066e6f2f3ce9"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab_threat_hunt",
+        "line": 521,
+        "lines": 343,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/services/inventory_agent.py",
+        "symbol": "execute_reorder",
+        "line": 1021,
+        "lines": 342,
+        "source_sha256": "0aabe9364b40e11d4521c80c3d0c249867977f0bcd031598daec46c02e10fad0"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "triage",
+        "line": 1335,
+        "lines": 331,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      }
+    ],
+    "inventory_sha256": "a2ddb9ad00d737199cb5ebd0433d26ea9312d930b18c36e08ec0abfdaf838ca8",
+    "scope": "Every tracked or nonignored untracked repository input visible before publication. Ignored environments, private runtime outputs and generated checkpoint outputs are outside this inventory.",
+    "limitation": "Physical line counts, byte hashes and AST structure do not establish semantic review or execution of every line. Different source snapshots and process windows remain separate."
+  },
+  "committed_line_delta": {
+    "Runtime/configuration": {
+      "files": 20,
+      "added": 2394,
+      "removed": 2441
+    },
+    "Migrations": {
+      "files": 20,
+      "added": 523,
+      "removed": 1
+    },
+    "Documentation/other": {
+      "files": 23,
+      "added": 63132,
+      "removed": 0
+    },
+    "Frontend": {
+      "files": 49,
+      "added": 1365,
+      "removed": 440
+    },
+    "Scripts": {
+      "files": 14,
+      "added": 1160,
+      "removed": 20
+    },
+    "Application": {
+      "files": 149,
+      "added": 7675,
+      "removed": 2220
+    },
+    "Tests": {
+      "files": 230,
+      "added": 12839,
+      "removed": 1716
+    }
+  },
+  "repairs": [
+    {
+      "scope": "commercial-number-grammar",
+      "commit": "ab1036b869c5865f3d205449f824d0ab677b391c",
+      "files": [
+        {
+          "path": "src/app/services/bulk_intent.py",
+          "committed_sha256": "c71f3c7e20f8fb471a8744478c3ad6308994e71980db0d720f3affcfff93db6c",
+          "current_sha256": "c71f3c7e20f8fb471a8744478c3ad6308994e71980db0d720f3affcfff93db6c"
+        },
+        {
+          "path": "src/app/services/commercial_terms.py",
+          "committed_sha256": "ec909bb99e04f4460dd1571f91f7fc2b2d468722e4c587a1c0c0a40f660925bb",
+          "current_sha256": "ec909bb99e04f4460dd1571f91f7fc2b2d468722e4c587a1c0c0a40f660925bb"
+        },
+        {
+          "path": "src/app/services/budget_grammar.py",
+          "committed_sha256": "30d6901f7860306e9d55ad27df9b78f3098e8110ed82e9fd7bfe6b0eb5b934d1",
+          "current_sha256": "20369e4547de249f262c05dff3228b9800befbcd95276c1ceabffbd3e9f4289f"
+        },
+        {
+          "path": "config/store_profiles/electronics.json",
+          "committed_sha256": "09ffede2d2b5c78229e1342e2475cd01162da23f9004e18c9ace0aac4108bd06",
+          "current_sha256": "2649b8cedd8fdc0117783b90284b0dd51e2a0bac52cbd570ee03137e1cd87024"
+        },
+        {
+          "path": "tests/services/test_commercial_quantity_contract.py",
+          "committed_sha256": "d736739947aa9509446e3778d33426a7b514b38cd80668b4e756e0f52e69b133",
+          "current_sha256": "d736739947aa9509446e3778d33426a7b514b38cd80668b4e756e0f52e69b133"
+        },
+        {
+          "path": "tests/services/test_budget_truth_parity.py",
+          "committed_sha256": "dbc4b1309e707bf44e99c94f55b59c90ece1003e79c11cca8c2fad0e363ce70b",
+          "current_sha256": "dbc4b1309e707bf44e99c94f55b59c90ece1003e79c11cca8c2fad0e363ce70b"
+        },
+        {
+          "path": "tests/services/test_semantic_coverage_subject_spans.py",
+          "committed_sha256": "ef031e4830f2be9e95e5f5e411126247ab945408525070442fbb27739467677c",
+          "current_sha256": "ef031e4830f2be9e95e5f5e411126247ab945408525070442fbb27739467677c"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/commercial-number-grammar-commit-verification.json"
+    },
+    {
+      "scope": "admin-trusted-claims",
+      "commit": "6b0aa6368bfc231dae49da547ebda5fb2e05d4bd",
+      "files": [
+        {
+          "path": "src/frontend/admin-react/src/api.ts",
+          "committed_sha256": "b2cc77e5ccf28e9dac93aacf3409da25d4e01ff412812f6ba66ef2886d1edfb6",
+          "current_sha256": "b2cc77e5ccf28e9dac93aacf3409da25d4e01ff412812f6ba66ef2886d1edfb6"
+        },
+        {
+          "path": "src/frontend/admin-react/src/components/AgentIntelligence.tsx",
+          "committed_sha256": "8bd9d8afd5914fa2de4f9070e0449c27d54e8c229437c04ce17c0a19b875f795",
+          "current_sha256": "8bd9d8afd5914fa2de4f9070e0449c27d54e8c229437c04ce17c0a19b875f795"
+        },
+        {
+          "path": "src/frontend/admin-react/src/api/adminContracts.test.ts",
+          "committed_sha256": "7b4603de766177fa60cb0f4eb94273d2a9b629609ede095279aff7b55ad24ebf",
+          "current_sha256": "7b4603de766177fa60cb0f4eb94273d2a9b629609ede095279aff7b55ad24ebf"
+        },
+        {
+          "path": "src/frontend/admin-react/src/components/AgentIntelligence.test.tsx",
+          "committed_sha256": "f776bd0a8059b23e1b86020161ad1cbec5d17315a4deaad72933489acf653f30",
+          "current_sha256": "f776bd0a8059b23e1b86020161ad1cbec5d17315a4deaad72933489acf653f30"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/admin-trusted-claims-commit-verification.json"
+    },
+    {
+      "scope": "dmarc-current-window",
+      "commit": "f71d4d5a5536de7a99725de676821308de1a99f8",
+      "files": [
+        {
+          "path": "tests/email/test_dmarc_admin.py",
+          "committed_sha256": "ec8a4856ab45b9cb708180adb73b781fc3daba2801ae9e5f2e060161aa5c619e",
+          "current_sha256": "ec8a4856ab45b9cb708180adb73b781fc3daba2801ae9e5f2e060161aa5c619e"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/dmarc-current-window-commit-verification.json"
+    },
+    {
+      "scope": "lifespan-database-owner",
+      "commit": "3da0636f16b1cb25c11a7d292baad179bf4cae12",
+      "files": [
+        {
+          "path": "src/app/main.py",
+          "committed_sha256": "0af36f28e5b67f6fbaa3e21ac6bcd8120ecfd065aae39929e2891e7303b2edaa",
+          "current_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+        },
+        {
+          "path": "src/app/bootstrap/application_lifespan.py",
+          "committed_sha256": "d6cda85078da0e435812dffb3f2671f2276a2a3bd7064bef5415c6cd2b641810",
+          "current_sha256": "d6cda85078da0e435812dffb3f2671f2276a2a3bd7064bef5415c6cd2b641810"
+        },
+        {
+          "path": "tests/bootstrap/test_lifespan_database_ownership.py",
+          "committed_sha256": "d4491dd6bf0c68c52012abd22d3e4a76827e6ce620bc8c1ae580fa6bbcad714d",
+          "current_sha256": "d4491dd6bf0c68c52012abd22d3e4a76827e6ce620bc8c1ae580fa6bbcad714d"
+        },
+        {
+          "path": "tests/bootstrap/test_application_lifespan_protocol.py",
+          "committed_sha256": "e14dfa68aad85dac109f18469fc246c3e75245387a4125b653f62e038ab12af1",
+          "current_sha256": "e14dfa68aad85dac109f18469fc246c3e75245387a4125b653f62e038ab12af1"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/lifespan-database-owner-commit-verification.json"
+    },
+    {
+      "scope": "durable-trace-correlation",
+      "commit": "6dc19217c55db3312fad4760ea2f3e7a2bb7dc5d",
+      "files": [
+        {
+          "path": "src/app/security/security_event_ingest.py",
+          "committed_sha256": "1d6c89af8967846b9c689b1a47107fc45620d7b730fe8612acb9bfba0da08fb1",
+          "current_sha256": "39abfb6ab13a8fa252c8fb0d74a9e6a84c81be22311b3731ea5835db54f668ce"
+        },
+        {
+          "path": "tests/security/test_durable_trace_correlation.py",
+          "committed_sha256": "212a41161973d09739fa67987570e82fd566c8d6dd5a258e9b8d76d883903526",
+          "current_sha256": "212a41161973d09739fa67987570e82fd566c8d6dd5a258e9b8d76d883903526"
+        },
+        {
+          "path": "tests/chaos/test_durable_trace_correlation_postgres.py",
+          "committed_sha256": "1d1b57625f602edbae3b068423a75f2c0fd458d36ac7ae3e45d0bc1dce9e639a",
+          "current_sha256": "1d1b57625f602edbae3b068423a75f2c0fd458d36ac7ae3e45d0bc1dce9e639a"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/durable-trace-correlation-commit-verification.json"
+    },
+    {
+      "scope": "certification-artifact-portability",
+      "commit": "5766605cae571c6898967fac0c120c5444dbd832",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "committed_sha256": "11a8651138f4690589338a029c136716b1c2e8dae5676bd5a8ba4e528a283819",
+          "current_sha256": "11a8651138f4690589338a029c136716b1c2e8dae5676bd5a8ba4e528a283819"
+        },
+        {
+          "path": "tests/services/test_certification_artifact_portability.py",
+          "committed_sha256": "c4d1315918a68bfdd93fae22ab48d836e18a04071cd4cf2d0467ab68f939502a",
+          "current_sha256": "c4d1315918a68bfdd93fae22ab48d836e18a04071cd4cf2d0467ab68f939502a"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/certification-artifact-portability-commit-verification.json"
+    },
+    {
+      "scope": "security-schema-owner",
+      "commit": "774463c8b38c4d12db6bbf2b1795891af5e9e581",
+      "files": [
+        {
+          "path": "src/app/security/security_event_ingest.py",
+          "committed_sha256": "39abfb6ab13a8fa252c8fb0d74a9e6a84c81be22311b3731ea5835db54f668ce",
+          "current_sha256": "39abfb6ab13a8fa252c8fb0d74a9e6a84c81be22311b3731ea5835db54f668ce"
+        },
+        {
+          "path": "src/app/main.py",
+          "committed_sha256": "a5387f6138bd0a4b277869212694a69e36f6ae5918add53c269f998d43fc6048",
+          "current_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+        },
+        {
+          "path": "tests/security/test_security_schema_owner_readiness.py",
+          "committed_sha256": "6e29beb0d72ca52fbb9c9052d9fe01f0e622d55b2a3f4e348ac73c52b94a0824",
+          "current_sha256": "6e29beb0d72ca52fbb9c9052d9fe01f0e622d55b2a3f4e348ac73c52b94a0824"
+        },
+        {
+          "path": "tests/chaos/test_security_schema_owner_readiness_postgres.py",
+          "committed_sha256": "32638694ab6b91fe04a02c7b4295180b3b6fc3796e168a1fff251bcbc8155f70",
+          "current_sha256": "32638694ab6b91fe04a02c7b4295180b3b6fc3796e168a1fff251bcbc8155f70"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/security-schema-owner-commit-verification.json"
+    },
+    {
+      "scope": "threshold-fixture-owner",
+      "commit": "7df4f29d7bcf3d6e64a212886b065f96aedb5f9f",
+      "files": [
+        {
+          "path": "tests/test_inventory_thresholds.py",
+          "committed_sha256": "7dbd6c6a8db819d416464a9aefd1c12b1c2f25c359267f7eeeaab3343148f5bb",
+          "current_sha256": "7dbd6c6a8db819d416464a9aefd1c12b1c2f25c359267f7eeeaab3343148f5bb"
+        },
+        {
+          "path": "tests/test_support_thresholds_config.py",
+          "committed_sha256": "f23c60afee5bb36177f609f4b1efa8204f822f525c751b89ac4cc26aa5e9baf2",
+          "current_sha256": "f23c60afee5bb36177f609f4b1efa8204f822f525c751b89ac4cc26aa5e9baf2"
+        },
+        {
+          "path": "tests/test_trust_routing_thresholds.py",
+          "committed_sha256": "5e59ddf03a5d0020d50089a824703f271d93a96c2503e98e86b5f0d3620b3579",
+          "current_sha256": "5e59ddf03a5d0020d50089a824703f271d93a96c2503e98e86b5f0d3620b3579"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/threshold-fixture-owner-commit-verification.json"
+    },
+    {
+      "scope": "security-startup-extraction",
+      "commit": "51615a3314a6ec5bad7e70d01b5836721e2c01d2",
+      "files": [
+        {
+          "path": "src/app/main.py",
+          "committed_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6",
+          "current_sha256": "be86a9af7bb6a580ae3b18093f74c4b9ffeb2778a52dfd8a0a9a993722bfc4c6"
+        },
+        {
+          "path": "src/app/bootstrap/security_schema.py",
+          "committed_sha256": "e5112e34ebc4c5d791c3073f4c6d3d3eff8d45fa37961b2fc1ebb6fc001dce56",
+          "current_sha256": "e5112e34ebc4c5d791c3073f4c6d3d3eff8d45fa37961b2fc1ebb6fc001dce56"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/security-startup-extraction-commit-verification.json"
+    },
+    {
+      "scope": "memory-pending-fixture",
+      "commit": "e3b7b06f55063691344d23c0f77d3511e333bda1",
+      "files": [
+        {
+          "path": "tests/test_memory_pending_clarification.py",
+          "committed_sha256": "55b911d0b2455057e4cbe52a6c93a0429cbfc3cef64c830887700e9489f691ec",
+          "current_sha256": "55b911d0b2455057e4cbe52a6c93a0429cbfc3cef64c830887700e9489f691ec"
+        }
+      ],
+      "proof_path": ".artifacts/roadmap-execution-2026-10-20/memory-pending-fixture-commit-verification.json"
+    }
+  ],
+  "roadmap": {
+    "path": "docs/audits/2026-10-22-roadmap-work-items.csv",
+    "packages": 16,
+    "sha256": "ab1c2115a062e18af55234a3c6b6d07d1fbe317cb48c6e02935cce05f07fdfa8"
+  },
+  "source_map": {
+    "path": "docs/audits/2026-10-22-source-map.csv",
+    "anchors": 60,
+    "sha256": "c53efb2b221b4af7b6b041055ce38f6edd6dad788909b1fd9e909693ca3876f2"
+  },
+  "clean_v2": {
+    "source_head": "4b9071af020d3dbe74197961f1c992276c67bc79",
+    "cases": 8346,
+    "outcomes": {
+      "call_pass_record": 8059,
+      "skipped": 265,
+      "assertion_failure": 22
+    },
+    "originally_reported": 1268,
+    "partitioned": 7078,
+    "repeated_collection_skip_reports": 144,
+    "source_freeze_gate": "failed",
+    "configuration_drift": {
+      "path": "config/feature_flags.json",
+      "expected_frozen_sha256": "ec0ab620eecd759d4de3bc08d86db3db40f5427f2776f42852875b42a5c4057f",
+      "current_sha256": "b5ee3d8c5df852db6b4009a84c053e1deca62f8dab0d6367e318ffbfa1d63f49",
+      "git_blob_sha256": "99ba4f998dce7800344359d323f18202663d3dbd689eb2c93a602e5c97eb384d",
+      "equal_after_line_ending_normalization": false,
+      "equal_json_values": false,
+      "added_keys": [
+        "INVENTORY_THRESHOLDS",
+        "SUPPORT_THRESHOLDS",
+        "TRUST_THRESHOLDS"
+      ],
+      "removed_keys": [],
+      "changed_top_level_keys": [],
+      "original_crlf": 0,
+      "current_crlf": 73
+    },
+    "full_process_source_after": {
+      "changed": [],
+      "protected_files": 5581
+    },
+    "ledger": "docs/audits/2026-10-22-python-clean-v2-observation-ledger.csv",
+    "ledger_sha256": "2f10184e4330f724d668c06bf740e659443dfd99bb7439069c9aadfcbf85b95d"
+  },
+  "followup_assertion_failures": {
+    "path": "docs/audits/2026-10-22-clean-v2-failure-followup.csv",
+    "cases": 22,
+    "later_repaired": 12,
+    "still_open": 10
+  },
+  "size_assessment": {
+    "results": {
+      "parent": {
+        "failures": {
+          "src/app/main.py:create_app.lifespan": {
+            "lines": 424,
+            "ceiling": 423
+          },
+          "src/app/models/db.py:_bootstrap_minimal_sqlite_tables": {
+            "lines": 1057,
+            "ceiling": 200
+          },
+          "src/app/routers/chat.py:_chat_query_impl": {
+            "lines": 4528,
+            "ceiling": 4482
+          },
+          "src/app/routers/merchant_dashboard.py:merchant_email_lab": {
+            "lines": 2331,
+            "ceiling": 2328
+          },
+          "src/app/routers/pricing.py:suggest": {
+            "lines": 239,
+            "ceiling": 238
+          },
+          "src/app/services/decision_log.py:log_trace_event": {
+            "lines": 301,
+            "ceiling": 300
+          },
+          "src/app/services/recommendation_compatibility.py:serve_v2_compatibility": {
+            "lines": 404,
+            "ceiling": 389
+          },
+          "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision": {
+            "lines": 238,
+            "ceiling": 221
+          },
+          "src/app/services/recommendation_core/turn_router.py:_route_turn_raw": {
+            "lines": 1348,
+            "ceiling": 1347
+          }
+        },
+        "main_factory": 2204,
+        "main_lifespan": 424
+      },
+      "candidate": {
+        "failures": {
+          "src/app/models/db.py:_bootstrap_minimal_sqlite_tables": {
+            "lines": 1057,
+            "ceiling": 200
+          },
+          "src/app/routers/chat.py:_chat_query_impl": {
+            "lines": 4528,
+            "ceiling": 4482
+          },
+          "src/app/routers/merchant_dashboard.py:merchant_email_lab": {
+            "lines": 2331,
+            "ceiling": 2328
+          },
+          "src/app/routers/pricing.py:suggest": {
+            "lines": 239,
+            "ceiling": 238
+          },
+          "src/app/services/decision_log.py:log_trace_event": {
+            "lines": 301,
+            "ceiling": 300
+          },
+          "src/app/services/recommendation_compatibility.py:serve_v2_compatibility": {
+            "lines": 404,
+            "ceiling": 389
+          },
+          "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision": {
+            "lines": 238,
+            "ceiling": 221
+          },
+          "src/app/services/recommendation_core/turn_router.py:_route_turn_raw": {
+            "lines": 1348,
+            "ceiling": 1347
+          }
+        },
+        "main_factory": 2200,
+        "main_lifespan": 420
+      },
+      "root": {
+        "failures": {
+          "src/app/models/db.py:_bootstrap_minimal_sqlite_tables": {
+            "lines": 1057,
+            "ceiling": 200
+          },
+          "src/app/routers/chat.py:_chat_query_impl": {
+            "lines": 4528,
+            "ceiling": 4482
+          },
+          "src/app/routers/pricing.py:suggest": {
+            "lines": 239,
+            "ceiling": 238
+          },
+          "src/app/services/decision_log.py:log_trace_event": {
+            "lines": 301,
+            "ceiling": 300
+          },
+          "src/app/services/recommendation_compatibility.py:serve_v2_compatibility": {
+            "lines": 404,
+            "ceiling": 389
+          },
+          "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision": {
+            "lines": 230,
+            "ceiling": 221
+          },
+          "src/app/services/recommendation_core/turn_router.py:_route_turn_raw": {
+            "lines": 1351,
+            "ceiling": 1347
+          }
+        },
+        "main_factory": 2200,
+        "main_lifespan": 420
+      }
+    },
+    "script_sha256": "bf83b8d888ae67621cc9c006a2d992ed41eaf00a96f5ef3ada7035a3672b8f07",
+    "baseline_sha256": "3582575abe92ee44f5fd2ed74c0445c67e00d268a64e99d7c37824c017a66713",
+    "limitation": "The uncommitted ROOT assessment script and baseline are a shared observer, not committed candidate prerequisites. Earlier direct execution assumed these untracked files existed in the candidate and returned file-not-found; that attempt is invalid and excluded."
+  },
+  "earlier_browser": {
+    "source_head": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+    "cases": 129,
+    "statuses": {
+      "case_pass_record": 28,
+      "assertion_failure": 69,
+      "skipped": 32
+    }
+  },
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "all_line_semantic_review_complete": false,
+  "pushed": false,
+  "published_files": [
+    "docs/ROADMAP_EXECUTION_STATUS_2026-10-22.md",
+    "docs/audits/2026-10-22-file-inventory.csv",
+    "docs/audits/2026-10-22-roadmap-work-items.csv",
+    "docs/audits/2026-10-22-source-map.csv",
+    "docs/audits/2026-10-22-clean-v2-failure-followup.csv",
+    "docs/audits/2026-10-22-python-clean-v2-observation-ledger.csv",
+    "docs/audits/2026-10-22-execution.json"
+  ]
+}
