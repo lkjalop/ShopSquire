@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
+from starlette.concurrency import run_in_threadpool
 import asyncio as _asyncio
 import concurrent.futures as _futures
 import functools as _functools
@@ -1496,7 +1497,6 @@ async def triage(
         if should_auto_queue(hypothesis):
             _steg_decoded = str((security_signals.get("steg_details") or {}).get("decoded_content") or "")
             _qr_urls = [str(u) for u in (security_signals.get("qr_payloads") or []) if str(u).strip()]
-            from starlette.concurrency import run_in_threadpool
             _sandbox_queue_result = await run_in_threadpool(queue_sandbox_detonation,
                 hypothesis=hypothesis,
                 trace_id=str(resp.get("trace_id") or ""),
