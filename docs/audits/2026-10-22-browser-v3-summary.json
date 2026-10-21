@@ -1,0 +1,1446 @@
+{
+  "source_head": "c3309ad8201faef27b04c5a97915d002fda185dc",
+  "captured_at": "2026-10-21T16:20:07.779332+00:00",
+  "selected_specs": 62,
+  "completed_specs": 62,
+  "original_controller_statistics": {
+    "expected": 28,
+    "unexpected": 65,
+    "skipped": 32,
+    "flaky": 0
+  },
+  "reconciled_outcomes": {
+    "passed": 28,
+    "failed": 66,
+    "skipped": 32,
+    "unreported": 1
+  },
+  "reported_case_ids": 126,
+  "unreported_specs": [
+    "live-unresolved-purchase-boundary.spec.ts"
+  ],
+  "assessments": {
+    "assertions_passed_in_recorded_profile": 28,
+    "browser_locator_or_response_timeout": 35,
+    "assertion_or_runtime_failure_requires_assessment": 23,
+    "prerequisite_not_executed": 32,
+    "missing_browser_credential_fixture": 1,
+    "ambiguous_browser_locator": 1,
+    "authentication_or_authorization_rejection": 6,
+    "No readable case report; no case identity/outcome inferred.": 1
+  },
+  "reports": [
+    {
+      "spec": "artifact-security-boundary.spec.ts",
+      "readable": true,
+      "report_sha256": "7f4a0d1576e4cf6ee8880cf06f76970d3dad37694c191f2160a2d0f7cb87c631",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:14:14.609Z",
+        "duration": 93088.506,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:14:14.609Z",
+        "duration": 93088.506,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "browser-native-tenant-procurement.spec.ts",
+      "readable": true,
+      "report_sha256": "7933e7df8d423b17660a5d0a8cc737a515acf7cf66a13c7719aa9d8effb247e4",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:16:05.236Z",
+        "duration": 4061.269,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:16:05.236Z",
+        "duration": 4061.269,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "budget-subject-rfq-live.spec.ts",
+      "readable": true,
+      "report_sha256": "25f44d96f6f3c167ef67e96eace0d5b572bd1a2101d08e8a792d610d010cedae",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:16:26.741Z",
+        "duration": 3182.67,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:16:26.741Z",
+        "duration": 3182.67,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "bulk-order-economics-live.spec.ts",
+      "readable": true,
+      "report_sha256": "37c34fb73775767585e8f2766c538f41a57d650abdd2556a75fb9484e377f948",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:16:47.509Z",
+        "duration": 2759.283,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:16:47.509Z",
+        "duration": 2759.283,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "buyer-evidence-source-live.spec.ts",
+      "readable": true,
+      "report_sha256": "2781fae061b203033114ba3ffc2506957e1613c9ae978f07f8b5f7e43470db7f",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:17:09.362Z",
+        "duration": 126.00599999999997,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:17:09.362Z",
+        "duration": 126.00599999999997,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "buyer-flow.spec.ts",
+      "readable": true,
+      "report_sha256": "447f951ddf931d3434e6af713494af68924772d19fc96ff283211d1db4b13f05",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:17:28.211Z",
+        "duration": 3256.154,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:17:28.211Z",
+        "duration": 3256.154,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "buyer-only-procurement.spec.ts",
+      "readable": true,
+      "report_sha256": "6f99f94855345d866cd75349bce8b8eb42dd8343c1fb4a0435afd71cdc20c721",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:17:50.012Z",
+        "duration": 3549.556,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:17:50.012Z",
+        "duration": 3549.556,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "canonical-ambiguous-procurement.spec.ts",
+      "readable": true,
+      "report_sha256": "9a8928f5dd875920ba24e1dc0d12c5671fb314f9d03a423ab3a4b2c0721b566e",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:18:10.356Z",
+        "duration": 835.358,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:18:10.356Z",
+        "duration": 835.358,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "cart-clear-outage.spec.ts",
+      "readable": true,
+      "report_sha256": "e0eccfe5f9750f63c126cc17015f99054309e765257cb41b3f1b33854620200b",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:18:28.157Z",
+        "duration": 2321.519,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:18:28.157Z",
+        "duration": 2321.519,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "cart-clear-restore.spec.ts",
+      "readable": true,
+      "report_sha256": "c0e3766cf39ea9808cf42c87f4f60ad66f46538835f1f400a91830c311332c09",
+      "original_error": "UnicodeDecodeError",
+      "recorded_stats": null,
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:18:47.767Z",
+        "duration": 1655.867,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "case-panel-trace-consistency.spec.ts",
+      "readable": true,
+      "report_sha256": "2e7975de4082f87991b2281cb403c205db196a70aaaf8885550af28fb9f19069",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:19:05.754Z",
+        "duration": 1288.413,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:19:05.754Z",
+        "duration": 1288.413,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "context-retention.spec.ts",
+      "readable": true,
+      "report_sha256": "dd7998893587c6454453a909f0f7a92ded2f9b276c49c4191b10f5f44900d57a",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:19:26.369Z",
+        "duration": 2091.387,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:19:26.369Z",
+        "duration": 2091.387,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "conversational-integrity.spec.ts",
+      "readable": true,
+      "report_sha256": "e7b03537eeddca1002e6735d3ed5d0ec4de891928aa2c0a2404599e705fad74a",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:19:45.395Z",
+        "duration": 126121.06,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:19:45.395Z",
+        "duration": 126121.06,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": 4
+    },
+    {
+      "spec": "conversational-spatiotemporal-certificate.spec.ts",
+      "readable": true,
+      "report_sha256": "134e8ba9f388760303f303604dbec40212734af83e3d21f43a84a489d316a0db",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:22:10.891Z",
+        "duration": 62607.956,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:22:10.891Z",
+        "duration": 62607.956,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "decision-run-disturbance.spec.ts",
+      "readable": true,
+      "report_sha256": "a1f03583b57344b7ec810fae1810b6371dc60bbcf8f6778c0f51a5093e4197c7",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:23:30.194Z",
+        "duration": 1216.592,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:23:30.194Z",
+        "duration": 1216.592,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "decision-trace-live-audit.spec.ts",
+      "readable": true,
+      "report_sha256": "9e378067633a2ceff4439edffac4ccc0eff32788f053d45799dd98aa6cd86b90",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:23:50.763Z",
+        "duration": 1109.734,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:23:50.763Z",
+        "duration": 1109.734,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "decision-trace-navigation.spec.ts",
+      "readable": true,
+      "report_sha256": "5dc45aceefa7d85d06a2663eb301238eee3182980f92f32527d67e9efd269ab7",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:24:11.151Z",
+        "duration": 3685.7570000000005,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:24:11.151Z",
+        "duration": 3685.7570000000005,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "decision-trace-procurement-operations.spec.ts",
+      "readable": true,
+      "report_sha256": "bf32c12a751294554fe6a31046c1b1aa4cb25a09e009b8ad04beaf817943f2e1",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:24:34.493Z",
+        "duration": 1514.887,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:24:34.493Z",
+        "duration": 1514.887,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "decision-trace-temporal-contact.spec.ts",
+      "readable": true,
+      "report_sha256": "8434506285717d49ac4af3ce7f47c43a1aa36ea4453dffc98808f7ce7ddf23da",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:24:53.986Z",
+        "duration": 1605.6079999999997,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:24:53.986Z",
+        "duration": 1605.6079999999997,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "fit-deadline-trace.spec.ts",
+      "readable": true,
+      "report_sha256": "543476a900921a6446d37f5ffe6d4e86ae16ea5c8ed1e6824e52bd11fc518a98",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:25:13.078Z",
+        "duration": 21551.068,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:25:13.078Z",
+        "duration": 21551.068,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "five-year-fleet-consent-regression.spec.ts",
+      "readable": true,
+      "report_sha256": "4018db8795d5ec0aeb2166b867d186ec93513f565eca52d823bf5186f4c8268e",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:25:52.533Z",
+        "duration": 252874.359,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 8,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:25:52.533Z",
+        "duration": 252874.359,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 8,
+        "flaky": 0
+      },
+      "cases": 8
+    },
+    {
+      "spec": "governed-conversation-lifecycle.spec.ts",
+      "readable": true,
+      "report_sha256": "e9ee57af6f49901d9a561a5bd1946a81418920b33ad9662d1efcc3a953989503",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:30:23.014Z",
+        "duration": 3445.334,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:30:23.014Z",
+        "duration": 3445.334,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "legacy-review-failure.spec.ts",
+      "readable": true,
+      "report_sha256": "2964b31ce55e24f3efd606d65f99f40b9507bab0ca889c95a5aad9ba084e9e2c",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:30:44.325Z",
+        "duration": 1531.69,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:30:44.325Z",
+        "duration": 1531.69,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "live-acceptance-budget.spec.ts",
+      "readable": true,
+      "report_sha256": "279ad5a63ae03cb52660ee663b218ca8c3d01fc64b3f07c4bd311c4f75bab47d",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:31:02.113Z",
+        "duration": 305686.503,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:31:02.113Z",
+        "duration": 305686.503,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "live-buyer-regression-matrix.spec.ts",
+      "readable": true,
+      "report_sha256": "7a3c3e8c0ed035845759d8d35d01cd8110b2e926a336fd95ab2a50c5e906e2eb",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:36:26.879Z",
+        "duration": 8558.945000000002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 6,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:36:26.879Z",
+        "duration": 8558.945000000002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 6,
+        "flaky": 0
+      },
+      "cases": 7
+    },
+    {
+      "spec": "live-external-ot-research-certification.spec.ts",
+      "readable": true,
+      "report_sha256": "9ec99cbeafd9c4aa9a5ecd936b0afb4a9c8a5ec5d006729eef788cf307b2e1f9",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:36:52.503Z",
+        "duration": 833.2120000000001,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:36:52.503Z",
+        "duration": 833.2120000000001,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "live-external-search-battery.spec.ts",
+      "readable": true,
+      "report_sha256": "460c6ea75de21bfc9ae7dd058e5ed1f095e8114bdb0a020f11c6b07010f5a40a",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:37:11.323Z",
+        "duration": 920.6750000000001,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:37:11.323Z",
+        "duration": 920.6750000000001,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "live-novel-title-intelligence.spec.ts",
+      "readable": true,
+      "report_sha256": "48df536f18e906255e1c38f7bd34ff15f146e95730d38c262859aca214385ef0",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:37:29.068Z",
+        "duration": 898.876,
+        "expected": 0,
+        "skipped": 10,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:37:29.068Z",
+        "duration": 898.876,
+        "expected": 0,
+        "skipped": 10,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 10
+    },
+    {
+      "spec": "live-procurement-disturbance-certificate.spec.ts",
+      "readable": true,
+      "report_sha256": "8f37b9f37b591b31b80ed11c60f2949d291c76c1998d93fd7ce4df06fdadfc6d",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:37:46.272Z",
+        "duration": 97.334,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:37:46.272Z",
+        "duration": 97.334,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "live-turn-trace-continuity.spec.ts",
+      "readable": true,
+      "report_sha256": "6a5c61be8ac7614cec95f3ec70fc9b0f08a4a5c52a7680a0c5fdc81ead853617",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:38:03.763Z",
+        "duration": 182539.84999999998,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:38:03.763Z",
+        "duration": 182539.84999999998,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "live-unresolved-purchase-boundary.spec.ts",
+      "readable": false,
+      "original_error": null
+    },
+    {
+      "spec": "market-adaptation.spec.ts",
+      "readable": true,
+      "report_sha256": "31a492aabe09aabeda500060b0c8db923789f71b62fd45166585ba2b52e0130e",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:51:31.325Z",
+        "duration": 1026.646,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:51:31.325Z",
+        "duration": 1026.646,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "model-offline-turn-outcome.spec.ts",
+      "readable": true,
+      "report_sha256": "61982fa1544932ad93d8acd7e7f8d18e575247ac99fa37c484eb10c0e6548d23",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:51:51.787Z",
+        "duration": 137.32100000000003,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:51:51.787Z",
+        "duration": 137.32100000000003,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "official-research-authorization.spec.ts",
+      "readable": true,
+      "report_sha256": "460ef611bfa88f6f4c545a666774a938fa1c724c94dceeca853161830c46782a",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:52:10.456Z",
+        "duration": 83.66900000000004,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:52:10.456Z",
+        "duration": 83.66900000000004,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "open-world-unseen-live-matrix.spec.ts",
+      "readable": true,
+      "report_sha256": "bbf075130ac1058a3119a0146814da7a93f371560068a8455b524102e24a9da5",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:52:29.832Z",
+        "duration": 334571.829,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 5,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:52:29.832Z",
+        "duration": 334571.829,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 5,
+        "flaky": 0
+      },
+      "cases": 5
+    },
+    {
+      "spec": "open-world-workload-regression.spec.ts",
+      "readable": true,
+      "report_sha256": "5c1c36ee9290b291e16f838047876a50eb25e89854716652cd3d70db0e5939b3",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:58:24.724Z",
+        "duration": 44664.705,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 10,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:58:24.724Z",
+        "duration": 44664.705,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 10,
+        "flaky": 0
+      },
+      "cases": 10
+    },
+    {
+      "spec": "ordinary-case-requirements.spec.ts",
+      "readable": true,
+      "report_sha256": "fe5490394bebeeb522e66edb9b0cec0758536b5430089981228d02a0c17a36c3",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:59:28.424Z",
+        "duration": 2926.225,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:59:28.424Z",
+        "duration": 2926.225,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "ordinary-chat-shortfall.spec.ts",
+      "readable": true,
+      "report_sha256": "4b8c4d165240f1de8f6f6dee5581b5b0034e5fe4736d45d7c0aababbb551c7cf",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T15:59:49.597Z",
+        "duration": 5609.378,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T15:59:49.597Z",
+        "duration": 5609.378,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "platform-audit-memory.spec.ts",
+      "readable": true,
+      "report_sha256": "a498e4bd171e0c2305ee0c145152a11f5fc5097819841aadb71a11f1c47d8310",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:00:14.783Z",
+        "duration": 18138.558999999997,
+        "expected": 7,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:00:14.783Z",
+        "duration": 18138.558999999997,
+        "expected": 7,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 7
+    },
+    {
+      "spec": "portfolio-narration-preview.spec.ts",
+      "readable": true,
+      "report_sha256": "75873165abdae46c2f4fb301497b5bff27f8eecc7936531324d377eec2b430d3",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:00:52.653Z",
+        "duration": 123.399,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:00:52.653Z",
+        "duration": 123.399,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "portfolio-recording-walkthrough.spec.ts",
+      "readable": true,
+      "report_sha256": "e69a3ec6cef8cc2811e59982310899168868ab8d1a2db961bccbe8b0184fa5bd",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:01:12.162Z",
+        "duration": 25084.929999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:01:12.162Z",
+        "duration": 25084.929999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "portfolio-supplier-continuation.spec.ts",
+      "readable": true,
+      "report_sha256": "3bf4b93bb2096114737a52024919e49e034b32cf3603fb0431727dbf1ccf4aac",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:01:56.385Z",
+        "duration": 184.483,
+        "expected": 0,
+        "skipped": 3,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:01:56.385Z",
+        "duration": 184.483,
+        "expected": 0,
+        "skipped": 3,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 3
+    },
+    {
+      "spec": "privacy-session-isolation.spec.ts",
+      "readable": true,
+      "report_sha256": "96d6356a608122b4a9487e99fa8d6fa8efeed440b97d6c78369cc73c21491bd5",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:02:15.676Z",
+        "duration": 1479.105,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:02:15.676Z",
+        "duration": 1479.105,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "procurement-amendment-permutations.spec.ts",
+      "readable": true,
+      "report_sha256": "5bb56b4297badc10fd6f5f4519265cf40d990b408cbd66f17dde7799da83ff16",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:02:36.632Z",
+        "duration": 22485.783,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:02:36.632Z",
+        "duration": 22485.783,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "procurement-journey.spec.ts",
+      "readable": true,
+      "report_sha256": "53daf7b44154794c1f395f14054680f4f25a0a4815c96ac30d6522e9e8d703bd",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:03:17.376Z",
+        "duration": 1385.037,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:03:17.376Z",
+        "duration": 1385.037,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "procurement-trace.spec.ts",
+      "readable": true,
+      "report_sha256": "c39ddada0fc2024f48671641a8d22f38467016ca89fadfdc0b863fdb3313d322",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:03:38.825Z",
+        "duration": 1369.9560000000001,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:03:38.825Z",
+        "duration": 1369.9560000000001,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "qualified-commercial-journey.spec.ts",
+      "readable": true,
+      "report_sha256": "06ae31e47f3bf339ab367c5b0027fa58711d0acc1c049c6bcd850bdafe761d62",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:03:59.242Z",
+        "duration": 21626.699999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:03:59.242Z",
+        "duration": 21626.699999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "research-degradation-live.spec.ts",
+      "readable": true,
+      "report_sha256": "6286083e656458c4773cdb342c39825a575f707b01427399054e2a7380aa8e05",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:04:38.939Z",
+        "duration": 99.25299999999999,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:04:38.939Z",
+        "duration": 99.25299999999999,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "research-disconnect-live.spec.ts",
+      "readable": true,
+      "report_sha256": "78208a2b0464c95e300ad57f88a6356503ecaf6a8e9158399f192f28ccbbe554",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:04:57.666Z",
+        "duration": 68012.417,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:04:57.666Z",
+        "duration": 68012.417,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "research-origin-degradation-kind.spec.ts",
+      "readable": true,
+      "report_sha256": "7376f8ebb23d07af643e40473dd1cb1f38d67989b1373a9e33a7aa7ff0230477",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:06:25.282Z",
+        "duration": 126.92799999999994,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:06:25.282Z",
+        "duration": 126.92799999999994,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "research-partial-engine-live.spec.ts",
+      "readable": true,
+      "report_sha256": "989ebb5fd375b177066c46f19447a4cf1e72b0cda40e5f99806b31dbb972d9cd",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:06:43.869Z",
+        "duration": 134.53300000000002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:06:43.869Z",
+        "duration": 134.53300000000002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "rotating-intelligence-certificate.spec.ts",
+      "readable": true,
+      "report_sha256": "a2850cd873009372a7097a0c0cda47f513aa0603b166536f9c971b8f8c0a59b8",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:07:03.969Z",
+        "duration": 1386.002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:07:03.969Z",
+        "duration": 1386.002,
+        "expected": 0,
+        "skipped": 1,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "semantic-resolution-journey.spec.ts",
+      "readable": true,
+      "report_sha256": "f6a34545320c066798f36d39843295ef0d43100fb51d3911b6b8a6ed52df07f7",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:07:25.476Z",
+        "duration": 31931.121000000003,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:07:25.476Z",
+        "duration": 31931.121000000003,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "shopping-case-fast-lane-timing.spec.ts",
+      "readable": true,
+      "report_sha256": "0ed674a46cf00a120fcfcc8fd17849c145fdcf12e7ed49ee107432427e7db1c7",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:08:17.112Z",
+        "duration": 21494.485999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:08:17.112Z",
+        "duration": 21494.485999999997,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "shopping-case-sse-revision-supersession.spec.ts",
+      "readable": true,
+      "report_sha256": "7a5801ec8bb7ee6dcfbc9d00e4443cff83a93092adfd8ccc17bf0f74b7e510ec",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:08:56.909Z",
+        "duration": 1315.654,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:08:56.909Z",
+        "duration": 1315.654,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "six-prompt-live-research-certification.spec.ts",
+      "readable": true,
+      "report_sha256": "0dc2dcd2947f78ad3f1d211442893d59964b6fff7bde2c27e1904c9f44531350",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:09:17.340Z",
+        "duration": 1977.908,
+        "expected": 0,
+        "skipped": 6,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:09:17.340Z",
+        "duration": 1977.908,
+        "expected": 0,
+        "skipped": 6,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 6
+    },
+    {
+      "spec": "split-fulfillment.spec.ts",
+      "readable": true,
+      "report_sha256": "a52b9b4143246e21b065f521679a314d9e06f179de5471c41f6a88a415518026",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:09:38.203Z",
+        "duration": 841.633,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:09:38.203Z",
+        "duration": 841.633,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "terminal-response-race.spec.ts",
+      "readable": true,
+      "report_sha256": "d403705217a94bfa9bbbc7c48a40c49c8b84b2f0c440946e33abdc1766a378d8",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:09:58.452Z",
+        "duration": 2629.661,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:09:58.452Z",
+        "duration": 2629.661,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "turn-transition-revision-matrix.spec.ts",
+      "readable": true,
+      "report_sha256": "586325cb14f14aee136f40e2f9ab2ac4e6e5d5d63e3b74842c4dd44d6b91ae16",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:10:19.187Z",
+        "duration": 491.75399999999996,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:10:19.187Z",
+        "duration": 491.75399999999996,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    },
+    {
+      "spec": "unresolved-workload-authority.spec.ts",
+      "readable": true,
+      "report_sha256": "4e5b712e5b4253f118509f3053b8b3426d0f52a739a55719b45e2b9123f94a6a",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:10:37.539Z",
+        "duration": 3056.004,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:10:37.539Z",
+        "duration": 3056.004,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": 2
+    },
+    {
+      "spec": "uploaded-requirements-journey.spec.ts",
+      "readable": true,
+      "report_sha256": "a40f08a341cb19b0172c7dd75c84cebbe80a441089729f04eddf1bad6fd5b8d9",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:10:59.257Z",
+        "duration": 187864.995,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:10:59.257Z",
+        "duration": 187864.995,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": 4
+    },
+    {
+      "spec": "voice-v2-pilot.spec.ts",
+      "readable": true,
+      "report_sha256": "9aae8bb3be52491b7181ac903d3197d93ee9aeba1cda68b93808d40665dea430",
+      "original_error": null,
+      "recorded_stats": {
+        "startTime": "2026-10-21T16:14:27.148Z",
+        "duration": 92379.076,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "utf8_stats": {
+        "startTime": "2026-10-21T16:14:27.148Z",
+        "duration": 92379.076,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": 1
+    }
+  ],
+  "final_raw_source_check": {
+    "checked": 5612,
+    "changed": []
+  },
+  "owned_container_removed": true,
+  "owned_network_removed": true,
+  "original_receipt_sha256": "b0da0d8716c84f888b3c0b8f3b81b1c63cc4f2065d0cb5b3a4e7ed005b23bed6",
+  "original_receipt_unchanged": true,
+  "case_ledger_sha256": "cd90df48ce62f082014e5b3dea1980acef0abe54e4a1eb45e2e253afa5fc21fa",
+  "qualification": "All 62 spec jobs completed on frozen source136. Reconciliation reads immutable reports as UTF-8; original Windows decode failures remain in the raw controller ledger. Missing case reports remain unreported. Optional live/model/service profiles were disabled; no final-source release or all-profile pass claim.",
+  "release_green": false
+}
