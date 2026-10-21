@@ -73,6 +73,8 @@ def read_session(read_class: str = "timeline"):
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng, future=True)
     s = SessionLocal()
     try:
+        from src.app.platform.tenant_session import bind_session_tenant
+        bind_session_tenant(s)
         yield s
     finally:
         try:
