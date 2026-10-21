@@ -107,3 +107,28 @@ def reconcile_requirement_claims(
 
 
 __all__ = ["ReconciledRequirementClaim", "reconcile_requirement_claims"]
+
+
+def buyer_claim_reconciliation(
+    buyer_claims: list[dict[str, Any]], official_claims: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    rows = [
+        row.model_dump(mode="json")
+        for row in reconcile_requirement_claims(buyer_claims, official_claims)
+    ]
+    counts = {
+        status: sum(row["status"] == status for row in rows)
+        for status in ("corroborated", "contradicted", "unresolved", "preference_only")
+    }
+    return rows, counts
+
+
+
+def ensure_blocked_reconciliation(result: dict, accepted: list[dict]) -> None:
+    """A blocked fetch reports unresolved claims without granting evidence authority."""
+    if result.get("research_choice") != "research_and_corroborate" or "buyer_claim_reconciliation" in result:
+        return
+    rows, counts = buyer_claim_reconciliation(accepted, [])
+    projection = dict(buyer_claim_reconciliation=rows, buyer_claim_reconciliation_status_counts=counts)
+    result.update(projection)
+    result["product_shelves"].update(projection)

@@ -1,4 +1,63 @@
 from src.app.services.terminal_research_narration import terminal_research_narration
+import pytest
+
+
+@pytest.mark.parametrize('state', [
+    {'requirement_completeness': 'partial'},
+    {'catalog_authority': 'blocked'},
+    {'requirement_completeness': 'complete', 'catalog_authority': 'permitted'},
+])
+def test_other_case_research_cannot_rewrite_current_product_answer(state):
+    original = 'We do not stock the requested enclosure.'
+    assert terminal_research_narration(
+        research_outcome={'case_id': 'old', 'identity': {'title': 'Old workload'}, **state},
+        current_exploration={'case_id': 'current'}, subject_role='ADJACENT_PRODUCT',
+        execution_evidence={}, existing_message=original, product_shelves={'shelves': []},
+    ) == original
+
+
+def test_current_partial_host_obligation_still_prevents_purchase_fit_claim():
+    message = terminal_research_narration(
+        research_outcome={'case_id': 'current', 'identity': {'title': 'Current workload'},
+                          'requirement_completeness': 'partial'},
+        current_exploration={'case_id': 'current'}, subject_role='PROCURE_SUBJECT',
+        execution_evidence={}, existing_message='This fully qualifies.',
+    )
+    assert 'coverage remains partial' in message
+    assert 'fully qualifies' not in message
+
+
+def test_current_context_only_workload_blocks_generic_purchase_fit():
+    message = terminal_research_narration(
+        research_outcome={"case_id": "current", "accepted_claim_count": 0},
+        current_exploration={"case_id": "current", "status": "context_only",
+                             "evidence": "authoritative_context_only"},
+        subject_role="PROCURE_SUBJECT", execution_evidence={},
+        existing_message="Yes - $2,000 is ample for general. Strong fits start at $629.",
+    )
+    assert "cannot confirm" in message
+    assert "context" in message
+    assert "ample" not in message
+    assert "Strong fits" not in message
+
+
+def test_historical_context_cannot_replace_unrelated_purchase_answer():
+    original = "We do not stock the requested storage enclosure."
+    message = terminal_research_narration(
+        research_outcome={"case_id": "current"},
+        current_exploration={"case_id": "old", "status": "context_only"},
+        subject_role="PROCURE_SUBJECT", execution_evidence={}, existing_message=original,
+    )
+    assert message == original
+
+
+def test_resolved_research_preserves_qualified_purchase_answer():
+    original = "One configuration meets the accepted requirements."
+    assert terminal_research_narration(
+        research_outcome={"case_id": "current", "accepted_claim_count": 6},
+        current_exploration={"case_id": "current", "status": "requirements_resolved"},
+        subject_role="PROCURE_SUBJECT", execution_evidence={}, existing_message=original,
+    ) == original
 
 
 def test_partial_evidence_keeps_the_canonical_subject():
@@ -122,4 +181,25 @@ def test_router_failure_remains_visible_as_degraded_when_research_succeeds() -> 
     )
 
     assert "interpretation was degraded" in message.lower()
-    assert "Official requirements were established" in message
+    assert "Research has not established authority" in message
+
+
+def test_unresearched_provisional_turn_cannot_claim_fit():
+    result = terminal_research_narration(
+        research_outcome={"catalog_authority":"unknown", "discovery_status":"not_attempted"},
+        current_exploration={"status":"provisional"}, execution_evidence={},
+        existing_message="These all handle creative workloads.")
+    assert "remain unresolved" in result
+    assert "These all handle" not in result
+
+
+def test_compiled_selected_scope_outranks_model_outage_without_inventing_a_discovered_identity():
+    message = terminal_research_narration(
+        research_outcome={'accepted_claim_count':1, 'requirement_completeness':'complete',
+            'catalog_authority':'permitted', 'simulation_only':True, 'identity':None},
+        execution_evidence={'failure_code':'model_execution_unavailable'},
+        existing_message='No product fit was concluded.',
+        product_shelves={'shelves':[{'initial':[{'identity_key':'fixture-config','fit_status':'qualified'}]}]})
+    assert 'fictional scope' in message
+    assert '1 exact catalog configuration' in message
+    assert 'No product fit was concluded' not in message

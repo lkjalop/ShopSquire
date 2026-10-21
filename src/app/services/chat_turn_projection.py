@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = None) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
+    from src.app.services.conversation_case_state import classify_case_turn
+    literal_case_turn=classify_case_turn(query,current_state={})
+    if literal_case_turn.dialogue_act=='amend_destination':
+        out['destination']=literal_case_turn.proposed_value
+    if literal_case_turn.dialogue_act=='amend_deadline':
+        out['deadline']=literal_case_turn.proposed_value
     budget = _extract_budget_bounds(query)
     if budget.get("budget_min") is not None:
         out["budget_min"] = budget.get("budget_min")
@@ -49,6 +55,11 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
     # turn 1 "need 25 laptops", turn 3 "which has the best battery?" must still know it's a 25-unit
     # conversation (Add buttons + procurement previews read requested_quantity every turn).
     _rq = data.get("requested_quantity")
+    if _rq is None:
+        from src.app.services.bulk_intent import extract_quantity_span
+        literal_quantity = extract_quantity_span(query)
+        if literal_quantity is not None:
+            _rq = literal_quantity[0]
     if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
         out["order_quantity"] = int(_rq)
     decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
@@ -85,6 +96,10 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
         # Response-side retrieval constraints must not rewrite buyer facts.
         out.update(budget_min=parsed_budget.budget_min, budget_max=parsed_budget.budget_max,
                    budget_mode=parsed_budget.mode)
+        from src.app.services.commercial_terms import stated_currency
+        currency=stated_currency(query,money_only=True)
+        if currency:
+            out['currency']=currency
     return out
 
 

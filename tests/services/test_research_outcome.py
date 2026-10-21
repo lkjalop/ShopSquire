@@ -1,6 +1,19 @@
 from src.app.services.research_outcome import build_research_outcome
 
 
+def test_enrolled_accepted_claims_expose_missing_compilation_scope():
+    outcome = build_research_outcome(
+        case_id="blender", case_revision=1, operation_id="research",
+        requirements={"accepted": [{"claim_id": "ram", "attribute": "ram_gb", "value": 32}]},
+        research={"source_execution": [{"source_id": "blender_official_requirements"}]},
+        catalog_authority="blocked", commerce_authority="none",
+    )
+    assert outcome.missing_requirement_attributes == ["manifest_scope_missing"]
+    assert outcome.requirement_completeness == "partial"
+    assert outcome.catalog_authority == "blocked"
+    assert outcome.commerce_authority == "none"
+
+
 def test_resolved_identity_does_not_accept_unverified_compiled_predicates():
     outcome = build_research_outcome(
         case_id="c", case_revision=1, operation_id="o", requirements={},

@@ -33,15 +33,33 @@ def _load_fixture(fixture_id: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def resolve_fixture(concept: str, *, authorized: bool = False) -> dict[str, Any] | None:
+def resolve_fixture(concept: str, *, authorized: bool = False, tenant_id: str | None = None) -> dict[str, Any] | None:
     enabled = str(os.getenv("SEMANTIC_RESEARCH_FIXTURES_ENABLED", "")).lower() in {
         "1", "true", "yes", "on",
     }
     fixture_id = str(os.getenv("SEMANTIC_RESEARCH_FIXTURE_ID", "")).strip()
     if not enabled or not fixture_id:
         return None
-    fixture = _load_fixture(fixture_id)
+    if str(os.getenv('APP_ENV','local')).lower() not in {'local','dev','development','test','testing'}:
+        return None
+    runtime_path = os.getenv('SEMANTIC_RESEARCH_FIXTURE_PATH')
+    if runtime_path:
+        # Deployment-selected fixture file, never a path from chat or a source.
+        try:
+            path=Path(runtime_path)
+            if path.stat().st_size>128_000:return None
+            fixture=json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(fixture,dict) or fixture.get('simulation_only') is not True:
+            return None
+        if not fixture.get('tenant_ids') or fixture.get('requires_explicit_consent') is not True:
+            return None
+    else:
+        fixture = _load_fixture(fixture_id)
     if not fixture:
+        return None
+    if fixture.get('tenant_ids') and tenant_id not in fixture['tenant_ids']:
         return None
     if fixture.get("requires_explicit_consent") is True and not authorized:
         return None
@@ -67,6 +85,8 @@ def resolve_fixture(concept: str, *, authorized: bool = False) -> dict[str, Any]
             "latency_ms": 0,
         },
         "items": items,
+        "claims": [dict(item,simulation_only=True) for item in fixture.get('claims') or []
+                   if isinstance(item,dict)][:64],
         "normalized_evidence": [
             dict(item) for item in fixture.get("normalized_evidence") or []
             if isinstance(item, dict)

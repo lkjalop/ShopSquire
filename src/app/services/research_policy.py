@@ -53,10 +53,9 @@ def tenant_policy_auto_research_authorized() -> bool:
     policy = active_research_policy()
     if policy["external_research_enabled"] and policy["auto_authorize_read_only"]:
         return True
-    # Backwards-compatible operator override used by existing proof scripts.
-    return str(os.getenv("EXTERNAL_RESEARCH_AUTO_AUTHORIZED") or "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    # Authorization is determined by the same resolved profile exposed to the
+    # buyer. Legacy environment overrides must not widen it (even on errors).
+    return False
 
 
 def resolved_origin_auto_fetch_policy(*, case_id: str) -> dict[str, Any]:

@@ -2,6 +2,26 @@ from src.app.services.semantic_research_fixture import resolve_fixture
 from types import SimpleNamespace
 
 from src.app.services.evidence_orchestrator import gather_evidence
+import json
+import pytest
+
+
+def test_runtime_fixture_claims_require_local_environment_consent_and_tenant(monkeypatch,tmp_path):
+    path=tmp_path/'fixture.json'
+    path.write_text(json.dumps(dict(fixture_version='fictional-1',simulation_only=True,
+        tenant_ids=['fictional-shop'],requires_explicit_consent=True,
+        concept_triggers=['unseen workload'],claims=[dict(attribute_key='ram_gb',value=32)])))
+    monkeypatch.setenv('APP_ENV','test')
+    monkeypatch.setenv('SEMANTIC_RESEARCH_FIXTURES_ENABLED','1')
+    monkeypatch.setenv('SEMANTIC_RESEARCH_FIXTURE_ID','fictional-1')
+    monkeypatch.setenv('SEMANTIC_RESEARCH_FIXTURE_PATH',str(path))
+    assert resolve_fixture('unseen workload',authorized=True,tenant_id='other') is None
+    assert resolve_fixture('unseen workload',authorized=False,tenant_id='fictional-shop') is None
+    result=resolve_fixture('unseen workload',authorized=True,tenant_id='fictional-shop')
+    assert result['claims'][0]['value']==32
+    assert result['simulation_only'] is True
+    monkeypatch.setenv('APP_ENV','production')
+    assert resolve_fixture('unseen workload',authorized=True,tenant_id='fictional-shop') is None
 
 
 def test_deterministic_fixture_is_explicitly_simulated_and_not_source_approved(monkeypatch) -> None:

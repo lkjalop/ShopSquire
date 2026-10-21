@@ -29,6 +29,66 @@ class _FakeResult:
         return self._row
 
 
+def test_evidence_only_turn_preserves_selected_scope_but_quantity_change_invalidates_it():
+    from src.app.models.orm import ShoppingCaseContractSelection
+    from src.app.services import case_contract_binding as binding
+    db=_db()
+    ShoppingCase.__table__.create(db.bind)
+    ShoppingCaseContractSelection.__table__.create(db.bind)
+    db.add(ShoppingCase(case_id='case-1',tenant_id='tenant-a',uid='buyer-1',revision=1))
+    db.commit();_seed(db)
+    contract=binding.available_contracts()[0]
+    binding.select_case_contract(db,tenant_id='tenant-a',case_id='case-1',uid='buyer-1',
+        expected_revision=1,contract_id=contract.id,context=contract.context)
+    db.commit()
+    def commit(revision,key,shared):
+        return commit_turn_transition(db,tenant_id='tenant-a',session_epoch='epoch-1',subject_ref='buyer-hash',
+            commit=TurnCommit(case_id='case-1',expected_revision=revision,source_message_id=key,idempotency_key=key,
+                transition=TurnTransition.UNRESOLVED,research={'status':'observed'},shared_constraints=shared))
+    first=commit(2,'research',{})
+    current=binding.read_case_contract_binding(db,tenant_id='tenant-a',case_id='case-1',uid='buyer-1')
+    assert current['state']=='current'
+    assert current['case_revision']==first['version']==3
+    assert first['contract_continuation']['reason']=='unchanged_material_inputs'
+    commit(3,'quantity',{'requested_quantity':41})
+    assert binding.read_case_contract_binding(db,tenant_id='tenant-a',case_id='case-1',uid='buyer-1')['state']=='stale_case_revision'
+
+
+def test_evidence_turn_preserves_explicit_revocation_reason():
+    from src.app.models.orm import ShoppingCaseContractSelection
+    from src.app.services import case_contract_binding as binding
+    db = _db()
+    ShoppingCase.__table__.create(db.bind)
+    ShoppingCaseContractSelection.__table__.create(db.bind)
+    db.add(ShoppingCase(case_id='case-1', tenant_id='tenant-a', uid='buyer-1', revision=1))
+    db.commit()
+    _seed(db)
+    contract = binding.available_contracts()[0]
+    selected = binding.select_case_contract(db, tenant_id='tenant-a', case_id='case-1', uid='buyer-1',
+        expected_revision=1, contract_id=contract.id, context=contract.context)
+    revoked = binding.revoke_case_contract(db, tenant_id='tenant-a', case_id='case-1', uid='buyer-1',
+        expected_revision=2, binding_id=selected['binding_id'])
+    result = commit_turn_transition(db, tenant_id='tenant-a', session_epoch='epoch-1', subject_ref='buyer-hash',
+        commit=TurnCommit(case_id='case-1', expected_revision=3, source_message_id='after-revoke',
+            idempotency_key='after-revoke', transition=TurnTransition.UNRESOLVED,
+            research={'status':'observed', 'requirement_contract':revoked}))
+    assert result['contract_continuation'] is None
+    assert result['read_model']['research']['requirement_contract']['state'] == 'revoked'
+
+
+def test_corrected_deadline_commits_and_survives_later_evidence_turn():
+    db = _db()
+    _seed(db)
+    for revision, deadline in [(1, '2030-10-10T17:00:00+11:00'), (2, '2030-10-12T17:00:00+11:00'), (3, None)]:
+        result = commit_turn_transition(db, tenant_id='tenant-a', session_epoch='epoch-1', subject_ref='buyer-hash',
+            commit=TurnCommit(case_id='case-1', expected_revision=revision, source_message_id=f'deadline-{revision}',
+                idempotency_key=f'deadline-{revision}', transition=TurnTransition.UNRESOLVED,
+                shared_constraints={'deadline':deadline} if deadline else {}))
+    temporal = result['state']['procurement_case_state']['temporal']
+    assert temporal['original_expression'] == '2030-10-12T17:00:00+11:00'
+    assert temporal['required_by'] == '2030-10-12T06:00:00+00:00'
+
+
 class _CaptureCaseDb:
     def __init__(self) -> None:
         self.insert_params = None
@@ -188,6 +248,7 @@ def test_atomic_turn_commit_advances_one_revision_and_publishes_one_read_model()
     )
     assert state["turn_transition"] == "ADD_WORKLOAD"
     assert state["turn_read_model"]["case_revision"] == 2
+
     assert state["turn_read_model"]["pending_clarification"]["action"] == "consume"
     assert state["procurement_case_state"]["workloads"] == ["Rockwell Emulate3D"]
     assert state["procurement_case_state"]["authority"]["catalog"] == "blocked"
@@ -237,6 +298,33 @@ def test_atomic_turn_commit_advances_one_revision_and_publishes_one_read_model()
     assert durable["procurement_case_state"]["budget"] == {
         "amount_minor": 300_000, "currency": "AUD", "scope": "total",
     }
+
+
+def test_explicit_case_patch_wins_over_retained_shared_quantity():
+    db=_db();ShoppingCase.__table__.create(db.bind)
+    db.add(ShoppingCase(case_id='case-1',tenant_id='tenant-a',uid='buyer-1',revision=1));db.commit();_seed(db)
+    receipt=commit_turn_transition(db,tenant_id='tenant-a',session_epoch='epoch-1',subject_ref='buyer-hash',
+        commit=TurnCommit(case_id='case-1',expected_revision=1,source_message_id='correct',idempotency_key='correct',
+            transition=TurnTransition.COMMERCIAL_AMENDMENT,
+            case_patches=[{'operation':'set','path':'requested_quantity','value':12}],
+            shared_constraints={'requested_quantity':20}))
+    state=get_case_state(db,tenant_id='tenant-a',case_id='case-1',session_epoch='epoch-1')['procurement_case_state']
+    assert state['requested_quantity']==12
+    assert receipt['read_model']['shared_constraints']['requested_quantity']==12
+    assert state['revision']==receipt['version']==2
+    assert state['authority']['commerce']=='none'
+
+
+def test_turn_commit_retains_delivery_correction_and_quantity_allocation():
+    db=_db();ShoppingCase.__table__.create(db.bind)
+    db.add(ShoppingCase(case_id='case-1',tenant_id='tenant-a',uid='buyer-1',revision=1));db.commit();_seed(db)
+    commit_turn_transition(db,tenant_id='tenant-a',session_epoch='epoch-1',subject_ref='buyer-hash',
+        commit=TurnCommit(case_id='case-1',expected_revision=1,source_message_id='delivery',idempotency_key='delivery',
+            transition=TurnTransition.COMMERCIAL_AMENDMENT,buyer_query='Actually deliver to Osaka.',
+            shared_constraints={'requested_quantity':8,'destination':'Osaka'}))
+    state=get_case_state(db,tenant_id='tenant-a',case_id='case-1',session_epoch='epoch-1')['procurement_case_state']
+    assert state['destinations']==[{'location_ref':'Osaka','quantity':8,'location_kind':'unknown'}]
+    assert state['authority']['commerce']=='none'
 
 
 def test_status_and_summary_read_case_without_proposing_a_mutation() -> None:

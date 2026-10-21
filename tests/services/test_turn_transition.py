@@ -35,6 +35,7 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
         idempotency_key="idem-1",
         transition=TurnTransition.ADD_WORKLOAD,
         objective="Gaming plus Emulate3D",
+        buyer_query="Actually I need a chair instead",
         workloads=["Baldur's Gate 3", "Rockwell Emulate3D"],
         preserved_fields=["budget"],
         canonical_budget={"budget_min": None, "budget_max": 3000, "mode": "ceiling", "source_span": [0, 8]},
@@ -73,6 +74,8 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     )
     projection = build_turn_read_model(commit, revision=5)
     assert projection.case_revision == 5
+    assert projection.buyer_query == "Actually I need a chair instead"
+    assert projection.objective == "Gaming plus Emulate3D"
     assert projection.transition == TurnTransition.ADD_WORKLOAD
     assert projection.pending_clarification.action == "consume"
     assert projection.catalog_authority == "blocked"
@@ -95,6 +98,25 @@ def test_revision_bound_read_model_is_a_projection_of_one_commit():
     assert "case_revision" not in commit.catalog_scope
 
 
+def test_effective_quantity_keeps_literal_provenance_and_uses_committed_state():
+    from src.app.services.turn_transition import effective_turn_facts
+    result=effective_turn_facts({'quantity':20,'commercial_terms':{'quantity':20}},
+        canonical_budget=None,canonical_quantity=12)
+    assert result['quantity']==result['commercial_terms']['quantity']==12
+    assert result['literal_quantity']==20
+    assert result['quantity_source']=='accepted_case_constraints'
+
+
+def test_effective_budget_scope_and_currency_follow_committed_case():
+    from src.app.services.turn_transition import effective_turn_facts
+    result=effective_turn_facts({'budget_scope':'unknown','commercial_terms':{'currency':'USD','budget_scope':'unknown'}},
+        canonical_budget={'budget_max':2000},canonical_quantity=3,
+        accepted_budget={'amount_minor':200000,'currency':'AUD','scope':'per_unit'})
+    assert result['budget_scope']==result['commercial_terms']['budget_scope']=='per_unit'
+    assert result['commercial_terms']['currency']=='AUD'
+    assert result['literal_commercial_terms']=={'currency':'USD','budget_scope':'unknown'}
+
+
 def test_partial_requirements_replace_stale_read_model_fit_narration():
     commit = TurnCommit(
         case_id="partial", expected_revision=1, source_message_id="m", idempotency_key="i",
@@ -110,3 +132,18 @@ def test_partial_requirements_replace_stale_read_model_fit_narration():
     assert result.products == []
     assert "fully qualifies" not in result.assistant_message
     assert "partial" in result.assistant_message
+
+
+def test_committed_read_model_includes_execution_failure_and_retained_facts():
+    commit = TurnCommit(
+        case_id="sc-owned", expected_revision=1, source_message_id="m", idempotency_key="i",
+        transition=TurnTransition.REFINE_WORKLOAD, catalog_authority="blocked",
+        execution_evidence={"failure_code": "model_execution_unavailable"},
+        assistant_message="May I research official requirements?",
+    )
+    result = build_turn_read_model(commit, revision=2, canonical_state={
+        "case_id": "sc-owned", "revision": 2, "requested_quantity": 40,
+    })
+    assert result.assistant_message.startswith("Your retained request: 40 units.")
+    assert "unavailable" in result.assistant_message.lower()
+    assert result.right_panel["retained_buyer_facts"] == {"requested_quantity": 40}

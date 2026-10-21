@@ -203,7 +203,7 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
 def test_auto_authorized_interpretation_returns_server_owned_research(monkeypatch):
     from src.app.routers import shopping_cases
 
-    monkeypatch.setenv("EXTERNAL_RESEARCH_AUTO_AUTHORIZED", "1")
+    monkeypatch.setenv("RESEARCH_POLICY_PROFILE", "demo-safe-auto-v1")
 
     async def completed(case_id, body, x_tenant_id=None, db=None, cancellation_requested=None):
         return {
@@ -230,6 +230,7 @@ def test_auto_authorized_interpretation_returns_server_owned_research(monkeypatc
     payload = response.json()
     assert payload["research_orchestration_owner"] == "backend"
     assert payload["server_research_failure"] is None
+    assert payload["server_research_result"] is not None, payload
     assert payload["server_research_result"]["status"] == "research_completed"
     assert payload["ambiguity_exploration"]["status"] == "researched"
     assert payload["cart_mutation"] == "not_authorized"
@@ -838,6 +839,9 @@ def test_acceptance_is_case_scoped_versioned_idempotent_and_never_mutates_cart()
     assert payload["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
     assert payload["evidence_acquisition"]["selected_stage"] == "buyer_upload"
     assert payload["evidence_acquisition"]["paid_calls"] == 0
+    assert payload["corroboration"]["status"] == "blocked"
+    assert len(payload["buyer_claim_reconciliation"]) == len(selected)
+    assert not payload["buyer_claim_reconciliation_status_counts"]["corroborated"]
 
     replay = client.post(
         f"/api/v1/shopping-cases/case-ot/requirement-proposals/{proposal['proposal_id']}/accept",

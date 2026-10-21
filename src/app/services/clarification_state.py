@@ -104,11 +104,16 @@ def external_research_consent_granted(query: str) -> bool:
 def commercial_obligations(query: str) -> tuple[str, ...]:
     """Return independently addressable commercial acts in one buyer turn."""
     text = _short(query, 1_000)
-    return tuple(
+    obligations = tuple(
         obligation
         for obligation, pattern in _COMMERCIAL_OBLIGATION_PATTERNS
         if pattern.search(text)
     )
+    # Reuse the canonical case grammar instead of another destination regex.
+    from src.app.services.conversation_case_state import decompose_case_obligations
+    if any(row['kind']=='destination' for row in decompose_case_obligations(text,current_state={})):
+        obligations += ('destination',)
+    return obligations
 
 
 def request_text_without_research_meta(query: str) -> str:

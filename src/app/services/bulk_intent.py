@@ -140,6 +140,9 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
         end = m.end(1)
         if _looks_like_date(start, end):
             return None
+        # Specification dimensions cannot become an item count via "need N".
+        if _QTY_SPEC_FILLERS.match(q[end:].lstrip()):
+            return None
         if start > 0 and (q[start - 1].isalnum() or q[start - 1] in "-_/."):
             return None
         if end < len(q) and (q[end].isalnum() or q[end] in "_/."):

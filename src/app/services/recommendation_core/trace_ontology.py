@@ -18,6 +18,23 @@ def _stage_kind(name: str) -> str:
     return "stage"
 
 
+def _execution_stage_steps(stages):
+    steps = []
+    for index, stage in enumerate(stages):
+        name = str(stage.get("stage") or f"stage-{index}")
+        if name == "route+intent":
+            continue
+        steps.append({
+            "id": f"stage-{index}", "kind": _stage_kind(name),
+            "authority": "executes" if str(stage.get("status") or "ok") == "ok" else "observes",
+            "label": name.replace("_", " ").replace(":", ": "),
+            "status": stage.get("status") or "ok", "source": "recommendation_core",
+            "latency_ms": stage.get("latency_ms"), "retrieval_count": stage.get("retrieval_count") or 0,
+            "won_message": bool(stage.get("won_message")),
+        })
+    return steps
+
+
 def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
     """Project a finalized core response into auditable authority boundaries."""
     decision = dict((getattr(core, "extras", {}) or {}).get("decision") or {})
@@ -27,6 +44,7 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
     clamped = [item for item in changes if str(item).endswith(":clamped")]
     stages = list((getattr(core, "extras", {}) or {}).get("stage_results") or [])
     route_stage = next((s for s in stages if s.get("stage") == "route+intent"), {})
+    degraded_input = not proposal and str(decision.get("source") or "").startswith("fallback:")
 
     steps: List[Dict[str, Any]] = [{
         "id": "model-proposal",
@@ -43,7 +61,12 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
         "authority": "authorizes",
         "authority_scope": "catalog_routing",
         "label": "Clamp proposal to catalog and policy",
-        "status": "corrected" if clamped else ("defaulted" if changes else "accepted"),
+        "status": "degraded" if degraded_input else ("corrected" if clamped else ("defaulted" if changes else "accepted")),
+        "input_provenance": {
+            "source": decision.get("source") or "unknown",
+            "degraded": degraded_input,
+            "requirements_verified": not degraded_input,
+        },
         "source": "recommendation_core",
         "changes": changes,
         "output": {
@@ -323,21 +346,7 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             },
         })
 
-    for index, stage in enumerate(stages):
-        name = str(stage.get("stage") or f"stage-{index}")
-        if name == "route+intent":
-            continue
-        steps.append({
-            "id": f"stage-{index}",
-            "kind": _stage_kind(name),
-            "authority": "executes" if str(stage.get("status") or "ok") == "ok" else "observes",
-            "label": name.replace("_", " ").replace(":", ": "),
-            "status": stage.get("status") or "ok",
-            "source": "recommendation_core",
-            "latency_ms": stage.get("latency_ms"),
-            "retrieval_count": stage.get("retrieval_count") or 0,
-            "won_message": bool(stage.get("won_message")),
-        })
+    steps.extend(_execution_stage_steps(stages))
 
     gates = dict((getattr(core, "extras", {}) or {}).get("gates") or {})
     if gates:

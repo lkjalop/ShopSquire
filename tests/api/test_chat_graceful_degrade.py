@@ -15,6 +15,9 @@ def test_recommend_hop_failure_degrades_to_200_not_502(monkeypatch, tmp_path):
         "DATABASE_URL",
         f"sqlite+pysqlite:///{tmp_path / 'degrade.sqlite'}",
     )
+    from alembic import command
+    from alembic.config import Config
+    command.upgrade(Config('alembic.ini'),'head')
 
     calls = []
 

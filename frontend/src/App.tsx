@@ -2473,7 +2473,7 @@ export default function App() {
             ambiguityExploration: terminalOutcome.ambiguity_exploration ?? null,
             supplierContinuation: null,
           });
-          if (terminalOutcome.ambiguity_exploration) switchRightPanelMode('grid');
+          if (terminalOutcome.ambiguity_exploration || terminalShelves(terminalOutcome)) switchRightPanelMode('grid');
           data = {
             ...data,
             assistant_message: terminalOutcome.assistant_message ?? data.assistant_message,
@@ -2760,7 +2760,7 @@ export default function App() {
         setRecommendationActionsAuthorized(
           responseQualificationAuthority === 'positive_evidence' || sectionQualificationAuthorized,
         );
-        if (buyerRequirementClaims.length > 0) {
+        if (!terminalOutcome && buyerRequirementClaims.length > 0) {
           // An upload is a pending evidence proposal, not permission to keep presenting
           // an earlier case's shelves as if they reflect the newly extracted claims.
           setProductShelves(null);

@@ -718,6 +718,31 @@ def get_case_state(db, *, tenant_id: str, case_id: str, session_epoch: str) -> d
     return json.loads(row[0]) if row else {}
 
 
+def _shared_constraint_updates(typed,shared,now_iso):
+    from src.app.services.procurement_case_state import MoneyConstraint
+    updates={}
+    if shared.get('deadline'):
+        from src.app.services.procurement_case_state import TemporalConstraint, resolve_temporal_constraint
+        updates['temporal'] = resolve_temporal_constraint(
+            TemporalConstraint(original_expression=str(shared['deadline']),
+                timezone=typed.temporal.timezone if typed.temporal else 'Australia/Sydney'),
+            interpretation_instant=_now(now_iso))
+    if isinstance(shared.get("budget"), dict):
+        updates["budget"] = MoneyConstraint.model_validate(shared["budget"])
+    if shared.get("requested_quantity") is not None:
+        updates["requested_quantity"] = int(shared["requested_quantity"])
+        # Keep a single delivery allocation aligned with the accepted quantity.
+        # Multiple destinations require an explicit allocation, never an invented split.
+        if len(typed.destinations)==1:
+            updates['destinations']=[typed.destinations[0].model_copy(update={'quantity':updates['requested_quantity']})]
+    if shared.get('destination'):
+        quantity=updates.get('requested_quantity',typed.requested_quantity)
+        if type(quantity) is int and quantity>0:
+            from src.app.services.procurement_case_state import DestinationAllocation
+            updates['destinations']=[DestinationAllocation(location_ref=shared['destination'],quantity=quantity)]
+    return updates
+
+
 def commit_turn_transition(
     db,
     *,
@@ -788,10 +813,7 @@ def commit_turn_transition(
         else project_legacy_case_anchor({**current, "case_id": accepted.case_id, "revision": version})
     )
     normalized_patches = [CasePatch.model_validate(item) for item in accepted.case_patches]
-    if normalized_patches:
-        typed = apply_case_patch_set(
-            typed, expected_revision=version, patches=normalized_patches,
-        ).state
+    material_state_before = typed.model_copy(deep=True)
     next_workloads = list(typed.workloads)
     if accepted.transition in {TurnTransition.REPLACE_WORKLOAD, TurnTransition.NEW_CATEGORY}:
         next_workloads = list(dict.fromkeys(accepted.workloads))
@@ -815,15 +837,31 @@ def commit_turn_transition(
             "external_research_authorized": accepted.external_research_authorized,
         },
     }
-    shared = dict(accepted.shared_constraints)
-    if isinstance(shared.get("budget"), dict):
-        updates["budget"] = MoneyConstraint.model_validate(shared["budget"])
-    if shared.get("requested_quantity") is not None:
-        updates["requested_quantity"] = int(shared["requested_quantity"])
+    updates.update(_shared_constraint_updates(typed,dict(accepted.shared_constraints),now_iso))
     typed = typed.model_copy(update=updates)
+    typed = ProcurementCaseState.model_validate(typed.model_dump())
+    # Accepted explicit patches outrank the retained summary carried by the turn.
+    if normalized_patches:
+        typed = apply_case_patch_set(typed,expected_revision=version,patches=normalized_patches).state
+    accepted=accepted.model_copy(update={'commercial_terms':{**accepted.commercial_terms,'quantity':typed.requested_quantity},'shared_constraints':{**accepted.shared_constraints,
+        'requested_quantity':typed.requested_quantity,**({'budget':typed.budget.model_dump(mode='json')} if typed.budget else {})}})
 
     new_revision = version + 1
-    read_model = build_turn_read_model(accepted, revision=new_revision)
+    from src.app.services.case_contract_binding import continue_unchanged_contract
+    contract_continuation = continue_unchanged_contract(db,tenant_id=tenant_id,case_id=accepted.case_id,
+        previous_revision=version,before=material_state_before,after=typed)
+    if accepted.research.get('requirement_contract'):
+        research=dict(accepted.research)
+        prior_receipt=dict(research['requirement_contract'])
+        research['requirement_contract']=(dict(prior_receipt,**contract_continuation) if contract_continuation
+            else dict(prior_receipt,
+                state=('stale_case_revision' if prior_receipt.get('state') == 'current'
+                    else prior_receipt.get('state', 'stale_case_revision')),
+                case_revision=new_revision))
+        accepted=accepted.model_copy(update={'research':research})
+        typed=typed.model_copy(update={'research':research})
+    read_model = build_turn_read_model(accepted, revision=new_revision,
+        canonical_state=typed.model_copy(update={"revision":new_revision}).model_dump(mode="json"))
     current["procurement_case_state"] = typed.model_copy(
         update={"revision": new_revision},
     ).model_dump(mode="json")
@@ -852,6 +890,7 @@ def commit_turn_transition(
         "confirmation": False, "reason": accepted.transition.value,
         "provenance": _json({
             "kind": "atomic_turn_commit",
+            "contract_continuation": contract_continuation,
             "schema_version": accepted.schema_version,
             "source_message_id": accepted.source_message_id,
             "commerce_authority": False,
@@ -884,6 +923,7 @@ def commit_turn_transition(
         "turn_commit_id": identity,
         "status": "accepted",
         "idempotent": False,
+        "contract_continuation": contract_continuation,
         "version": advanced,
         "transition": accepted.transition.value,
         "state": current,

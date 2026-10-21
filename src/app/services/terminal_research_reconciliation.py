@@ -75,10 +75,10 @@ class TerminalCatalogGate:
             return "blocked"
         if self.catalog_authority != "permitted":
             return "held"
-        has_matches = bool(self.products) or any(
-            bool(shelf.get("initial"))
-            for shelf in (self.product_shelves or {}).get("shelves", [])
-            if isinstance(shelf, Mapping)
+        from src.app.services.terminal_qualification import shelf_products
+        has_matches = any(
+            item.get('fit_status') == 'qualified'
+            for item in shelf_products(self.product_shelves)
         )
         return "qualified" if has_matches else "no_qualified_products"
 
@@ -93,6 +93,8 @@ def gate_terminal_catalog_projection(
 ) -> TerminalCatalogGate:
     status = str(research_status or "").strip().lower()
     authority = str(catalog_authority or "unknown").strip().lower() or "unknown"
+    if authority == 'unknown' and status != 'identity_confirmation_required':
+        return TerminalCatalogGate(products=(), product_shelves=None, catalog_authority='unknown')
     if (status == "identity_confirmation_required" or authority == "blocked"
             or (authority == "permitted"
                 and str(requirement_completeness or "").lower() == "partial")):

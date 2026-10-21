@@ -375,7 +375,7 @@ def _leg_concept_resolution(
     from src.app.services.semantic_research_fixture import resolve_fixture
 
     fixture = resolve_fixture(
-        concept,
+        concept, tenant_id=tenant_id,
         authorized=bool(getattr(plan, "external_research_authorized", False)),
     )
     if fixture is not None:

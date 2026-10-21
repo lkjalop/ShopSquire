@@ -58,6 +58,7 @@ class ResearchOutcome(BaseModel):
     commerce_authority: Literal["none", "proposal_only", "approved"] = "none"
     next_action: str | None = Field(default=None, max_length=240)
     failure_code: str | None = Field(default=None, max_length=160)
+    simulation_only: bool = False
 
 
 def _dicts(value: Any) -> Iterable[Mapping[str, Any]]:
@@ -167,12 +168,64 @@ def _identity(rows: list[Mapping[str, Any]]) -> ResearchIdentity | None:
 
 
 def _failure_code(rows: list[Mapping[str, Any]]) -> str | None:
+    dispatched = [row for row in rows if row.get("provider_capability") == "WEB_DISCOVERY"
+                  and row.get("external_call_dispatched") is True]
+    for receipt in dispatched:
+        if receipt.get("execution_status") == "failed" and receipt.get("error"):
+            return str(receipt["error"])[:160]
     for row in rows:
         for key in ("failure_code", "error_code", "code", "rejection_reason"):
             value = str(row.get(key) or "").strip()
+            if dispatched and value == "discovery_reachability_not_observed":
+                continue  # pre-dispatch uncertainty cannot override an executed receipt
             if value and value not in {"none", "not_recorded"}:
                 return value[:160]
     return None
+
+
+def _manifest_coverage(rows, contract=None):
+    # Scoped provider groups are assessed independently: attributes from two
+    # different workloads cannot fill each other's missing obligations.
+    from src.app.services.recommendation_core.requirement_scope import RequirementScope, scope_is_current
+    scopes: dict[str, dict[str, Any]] = {}
+    missing_attributes: set[str] = set()
+    for row in rows:
+        predicates = row.get("compiled_requirements")
+        if not isinstance(predicates, list):
+            continue
+        groups: dict[tuple[str, ...], tuple[Any, set[str]]] = {}
+        for predicate in predicates:
+            if not isinstance(predicate, Mapping) or not predicate.get("compilation_scope"):
+                continue
+            try:
+                scope = RequirementScope.model_validate(predicate["compilation_scope"])
+            except ValueError:
+                missing_attributes.add("valid_manifest_scope")
+                continue
+            scope_key = scope.model_dump_json()
+            scopes[scope_key] = scope.model_dump(mode="json")
+            # Container shape is not identity: one provider row can contain
+            # obligations for several artifacts or versions.
+            key = (scope_key, str(predicate.get("artefact_name") or "").casefold(),
+                   str(predicate.get("artefact_version") or ""),
+                   str(predicate.get("requirement_class") or "minimum"),
+                   str(predicate.get("scope_caveat") or ""))
+            if key not in groups:
+                groups[key] = (scope, set())
+            if predicate.get("verification_status") == "verified":
+                groups[key][1].add(str(predicate.get("attribute_key") or ""))
+        for key,(scope, present) in groups.items():
+            if not scope_is_current(scope):
+                missing_attributes.add("current_manifest_revision")
+            if not scope.required_attributes:
+                missing_attributes.add("manifest_obligations")
+            required=set(scope.required_attributes)
+            if (contract is not None and key[1]==contract.context.subject.casefold()
+                    and key[2]==contract.context.version):
+                required={o.attribute for o in contract.obligations if o.tier==key[3]}
+            missing_attributes.update(required - present)
+
+    return scopes, missing_attributes
 
 
 def build_research_outcome(
@@ -184,6 +237,7 @@ def build_research_outcome(
     requirements: Mapping[str, Any] | None,
     catalog_authority: str,
     commerce_authority: str,
+    contract_receipt: Mapping[str, Any] | None = None,
 ) -> ResearchOutcome:
     """Reduce existing receipts without inventing execution or evidence."""
 
@@ -274,49 +328,41 @@ def build_research_outcome(
         int(compilation.get("parsed") or 0),
     )
 
-    # Scoped provider groups are assessed independently: attributes from two
-    # different workloads cannot fill each other's missing obligations.
-    from src.app.services.recommendation_core.requirement_scope import RequirementScope, scope_is_current
-    scopes: dict[str, dict[str, Any]] = {}
-    missing_attributes: set[str] = set()
-    for row in rows:
-        predicates = row.get("compiled_requirements")
-        if not isinstance(predicates, list):
-            continue
-        groups: dict[tuple[str, str, str], tuple[Any, set[str]]] = {}
-        for predicate in predicates:
-            if not isinstance(predicate, Mapping) or not predicate.get("compilation_scope"):
-                continue
-            try:
-                scope = RequirementScope.model_validate(predicate["compilation_scope"])
-            except ValueError:
-                missing_attributes.add("valid_manifest_scope")
-                continue
-            scope_key = scope.model_dump_json()
-            scopes[scope_key] = scope.model_dump(mode="json")
-            # Container shape is not identity: one provider row can contain
-            # obligations for several artifacts or versions.
-            key = (scope_key, str(predicate.get("artefact_name") or "").casefold(),
-                   str(predicate.get("artefact_version") or ""))
-            if key not in groups:
-                groups[key] = (scope, set())
-            if predicate.get("verification_status") == "verified":
-                groups[key][1].add(str(predicate.get("attribute_key") or ""))
-        for scope, present in groups.values():
-            if not scope_is_current(scope):
-                missing_attributes.add("current_manifest_revision")
-            if not scope.required_attributes:
-                missing_attributes.add("manifest_obligations")
-            missing_attributes.update(set(scope.required_attributes) - present)
-
+    selected_contract=None
+    invalid_contract=False
+    if contract_receipt and contract_receipt.get('state')!='unselected':
+        from src.app.services.case_contract_binding import load_contract_by_id
+        from src.app.services.structured_requirement_claims import project_structured_requirement_claims
+        from src.app.services.requirement_contract import assess_contract_coverage
+        try:
+            candidate=load_contract_by_id(contract_receipt.get('contract_id'))
+            claims=project_structured_requirement_claims({'evidence':rows})
+            valid=(contract_receipt.get('state')=='current' and contract_receipt.get('case_id')==case_id
+                and contract_receipt.get('case_revision')==case_revision
+                and contract_receipt.get('contract_revision')==candidate.revision
+                and contract_receipt.get('context')==candidate.context.model_dump()
+                and assess_contract_coverage(candidate,context=candidate.context,claims=claims)['coverage_complete'])
+            if valid:selected_contract=candidate
+            else:invalid_contract=True
+        except (ValueError,OSError):invalid_contract=True
+    scopes, missing_attributes = _manifest_coverage(rows,selected_contract)
+    if invalid_contract:missing_attributes.add('selected_contract_current_evidence')
+    if accepted and not scopes and any(row.get("source_execution") for row in rows):
+        # Enrolled-source acceptance proves provenance, not compiler coverage.
+        # Make the actual blocker visible instead of returning partial + [] in
+        # the shared API/UI/trace outcome.
+        missing_attributes.add("manifest_scope_missing")
     completeness_value = str(_first(rows, "requirements_completeness") or "").lower()
     evidence_outcome = str(_first(rows, "evidence_outcome") or "").lower()
     if missing_attributes:
         completeness = "partial"
+    elif scopes and not held:
+        # Completeness belongs to the current manifest's obligations. An
+        # unsupported extra predicate stays rejected, but cannot invalidate
+        # independently verified predicates satisfying every obligation.
+        completeness = "complete"
     elif any(row.get("claim_rejections") for row in rows):
         completeness = "partial"
-    elif scopes and not held:
-        completeness = "complete"
     elif completeness_value in {"minimum_and_recommended", "complete", "accepted_complete"}:
         completeness = "complete"
     elif held or accepted or compiled or "partial" in completeness_value:
@@ -423,7 +469,7 @@ def build_research_outcome(
         bounded_catalog = "unknown"
     if identity_confirmation is not None:
         bounded_catalog = "blocked"
-    if bounded_catalog == "permitted" and completeness == "partial":
+    if bounded_catalog in {"permitted", "unknown"} and completeness == "partial":
         bounded_catalog = "blocked"
         failure = "requirements_incomplete"
         next_action = "complete_requirement_evidence"
@@ -452,6 +498,7 @@ def build_research_outcome(
         commerce_authority=bounded_commerce,
         next_action=next_action,
         failure_code=failure,
+        simulation_only=any(row.get('simulation_only') is True for row in rows),
     )
 
 

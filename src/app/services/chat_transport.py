@@ -18,6 +18,14 @@ _CHAT_REPLAY_LOCK = RLock()
 logger = logging.getLogger(__name__)
 
 
+def chat_replay_digest(*,tenant_id,uid,session_id,source_ip,query,nonce,shape,memory_mode,case_id):
+    """Duplicate requests are scoped to one tenant, buyer, mode and case."""
+    material=dict(tenant_id=tenant_id,uid=uid,session_id=session_id or '',source_ip=source_ip or '',
+        query=str(query or '').strip().lower()[:500],nonce=nonce or '',shape=shape if not nonce else {},
+        memory_mode=memory_mode,case_id=case_id or '')
+    return hashlib.sha256(json.dumps(material,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
 def _chat_in_progress(
     *, idempotency_key: str = "", execution_progress: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:

@@ -144,7 +144,7 @@ def test_resolved_research_preserves_catalog_projection() -> None:
     result = gate_terminal_catalog_projection(
         research_status="requirements_resolved",
         products=[{"sku": "FIT-1"}],
-        product_shelves={"shelves": [{"initial": [{"sku": "FIT-1"}]}]},
+        product_shelves={"shelves": [{"initial": [{"sku": "FIT-1", "fit_status": "qualified"}]}]},
         catalog_authority="permitted",
     )
 

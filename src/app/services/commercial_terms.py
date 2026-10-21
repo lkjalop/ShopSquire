@@ -67,6 +67,14 @@ _QUANTITY_UNITS = (
 )
 
 
+def stated_currency(text: str, *, money_only: bool = False) -> str | None:
+    """An explicit unambiguous currency; a bare dollar sign has no ISO identity."""
+    pattern=r"\b(aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b"+(r"(?=\s*[$€£¥]?\s*\d)" if money_only else '')
+    currencies={_CURRENCY[m] for m in re.findall(pattern,str(text).lower())}
+    if '€' in text:currencies.add('EUR')
+    if '£' in text:currencies.add('GBP')
+    return next(iter(currencies)) if len(currencies)==1 else None
+
 def parse_commercial_terms(text: str, *, default_currency: str = "USD") -> CommercialTerms:
     q = str(text or "")
     ql = q.lower()

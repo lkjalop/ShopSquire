@@ -185,19 +185,7 @@ def _trace_id(proposal_id: str, version: int) -> str:
     return "req-" + hashlib.sha256(f"{proposal_id}:{version}".encode()).hexdigest()[:20]
 
 
-def _buyer_claim_reconciliation(
-    buyer_claims: list[dict[str, Any]], official_claims: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    rows = [
-        row.model_dump(mode="json")
-        for row in reconcile_requirement_claims(buyer_claims, official_claims)
-    ]
-    counts = {
-        status: sum(row["status"] == status for row in rows)
-        for status in ("corroborated", "contradicted", "unresolved", "preference_only")
-    }
-    return rows, counts
-
+from src.app.services.requirement_claim_reconciliation import buyer_claim_reconciliation as _buyer_claim_reconciliation
 
 from src.app.services.shopping_case_trace_reader import (
     _payload_object, _case_research_plan_from_trace,
@@ -841,7 +829,7 @@ async def _accept_requirement_proposal_with_db(
         elif not str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip():
             result["corroboration"] = {
                 "status": "blocked", "reason": "local_discovery_not_enrolled",
-                "message": "The accepted claims remain provisional because local discovery is not enrolled.",
+                "message": "Approved-source research is currently unavailable. The accepted claims remain provisional.",
             }
         else:
             try:
@@ -915,6 +903,8 @@ async def _accept_requirement_proposal_with_db(
                     "status": "blocked", "reason": detail.get("code", "research_failed"),
                     "message": detail.get("message", "The accepted claims remain provisional."),
                 }
+    from src.app.services.requirement_claim_reconciliation import ensure_blocked_reconciliation
+    ensure_blocked_reconciliation(result, accepted)
     # Ensure the JSON remains serializable before making the state transition durable.
     json.dumps(result, sort_keys=True)
     from src.app.services.conversation_case_state import propagate_case_supersession

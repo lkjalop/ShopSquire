@@ -36,14 +36,59 @@ def terminal_research_narration(
     execution_evidence: Mapping[str, Any] | None,
     existing_message: str,
     subject_role: str | None = None,
+    current_exploration: Mapping[str, Any] | None = None,
+    product_shelves: Mapping[str, Any] | None = None,
 ) -> str:
     """Return canonical failure/held narration, otherwise preserve the answer."""
 
+    outcome = dict(research_outcome or {})
+    exploration = dict(current_exploration or {})
+    # An explicitly different current case cannot inherit narration authority
+    # from retained research, regardless of completeness or subject vocabulary.
+    if (exploration.get('case_id') and outcome.get('case_id')
+            and exploration['case_id'] != outcome['case_id']):
+        return str(existing_message or '')
+    if outcome.get('identity') and outcome.get('requirement_completeness') == 'partial':
+        missing = ', '.join(str(key).replace('_', ' ') for key in outcome.get('missing_requirement_attributes', []))
+        return (f"Research accepted {int(outcome.get('accepted_claim_count') or 0)} requirement claims, "
+                "but requirements coverage remains partial. I cannot confirm full compatibility or qualify a product. "
+                + (f"Missing evidence: {missing}. " if missing else '')
+                + "No cart or supplier action was authorized.")
+    if outcome.get('identity') and outcome.get('catalog_authority') in {'unknown', 'blocked'}:
+        degraded = 'Initial workload interpretation was degraded. ' if (execution_evidence or {}).get('failure_code') in _MODEL_FAILURE_MESSAGES else ''
+        return degraded + ('Research has not established authority to qualify products. '
+                'The remaining source and compatibility obligations need review. '
+                'No cart or supplier action was authorized.')
+    if (outcome.get('requirement_completeness') == 'complete'
+            and outcome.get('catalog_authority') == 'permitted'
+            and (outcome.get('identity') or int(outcome.get('accepted_claim_count') or 0) > 0)
+            and product_shelves is not None):
+        from src.app.services.terminal_qualification import qualified_configuration_ids
+        count = len(qualified_configuration_ids(outcome, product_shelves))
+        if outcome.get('simulation_only'):
+            return (f"Within the selected fictional scope, simulated evidence qualifies {count} exact catalog configuration{'s' if count != 1 else ''}. "
+                    "This does not certify a real application or product. No cart or supplier action was authorized.")
+        return (f"Complete requirements evidence qualifies {count} exact catalog configuration{'s' if count != 1 else ''}. "
+                if count else 'Requirements evidence is complete, but no exact catalog configuration is qualified. ') + (
+                'Product evidence, price and availability are shown in the shelves. No cart or supplier action was authorized.')
+    # The chat transition boundary clears this projection on an unrelated
+    # purchase. Consume that current projection, never retained case claims.
+    # A purchased computer can still have unresolved host-workload obligations;
+    # PROCURE_SUBJECT alone does not establish technical or budget suitability.
+    if (exploration.get("case_id")
+            and exploration.get("case_id") == outcome.get("case_id")
+            and exploration.get("status") == "context_only"):
+        return (
+            "Research found workload context, but not enough requirements to establish "
+            "product fit. I cannot confirm compatibility or whether the budget is "
+            "sufficient until the software and local workload requirements are resolved. "
+            "Any catalog options are provisional, not qualified recommendations. "
+            "No cart or supplier action was authorized."
+        )
     # Host-workload evidence cannot answer a different purchased object. The
     # caller supplies the validated role; no title/keyword matching occurs here.
     if subject_role in {"PROCURE_SUBJECT", "ADJACENT_PRODUCT"}:
         return str(existing_message or "")
-    outcome = dict(research_outcome or {})
     if outcome.get("failure_code") == "requirements_incomplete":
         identity = outcome.get("identity")
         title = str(identity.get("title") or "").strip() if isinstance(identity, Mapping) else ""
@@ -83,6 +128,13 @@ def terminal_research_narration(
             "compatibility or budget fit yet. No cart or supplier action was authorized."
         )
     if held <= 0:
+        if (outcome.get("catalog_authority") in {"unknown", "blocked"}
+                and exploration.get("status") == "provisional"):
+            return (
+                "Product fit and budget suitability remain unresolved. "
+                "The workload requirements and exact product configuration still need evidence. "
+                "No product has been qualified and no cart or supplier action was authorized."
+            )
         return str(existing_message or "")
 
     parsed = max(held, int(outcome.get("parsed_claim_count") or 0))
