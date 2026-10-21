@@ -1130,8 +1130,14 @@ export default function App() {
       // Trace no longer resolves the (now-abandoned) bulk order's Procurement tab.
       setSourcingTraceId(null);
       setConfirmedSourcingOrderId(null);
+      return true;
     } catch {
-      // ignore
+      setMessages(prev => [...prev, {
+        role: 'assistant' as const,
+        content: "I couldn't confirm that your cart was cleared. Refresh the cart before retrying.",
+        timestamp: new Date(),
+      }]);
+      return false;
     }
   };
 
@@ -1702,12 +1708,14 @@ export default function App() {
     if (/\b(?:clear|empty|wipe|reset)\b.{0,20}\bcart\b|\bcart\b.{0,12}\b(?:clear|empty)\b/i.test(q)) {
       // Capture the whole cart BEFORE the wipe so the Undo chip can restore it.
       const removedItems = ((cart?.items as any[]) || []).map((i) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name }));
-      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
-        { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.',
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() }]);
+      setInputValue('');
+      const cleared = await clearCartAll();
+      if (cleared) {
+        setMessages(prev => [...prev, { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.',
           ...(removedItems.length ? { undoClear: { items: removedItems } } : {}),
           timestamp: new Date() }]);
-      setInputValue('');
-      await clearCartAll();
+      }
       switchRightPanelMode('cart');
       return;
     }
@@ -4247,7 +4255,7 @@ export default function App() {
                         cart={cart}
                         onRefresh={refreshCart}
                         onRemove={removeFromCart}
-                        onClear={clearCartAll}
+                        onClear={async () => { await clearCartAll(); }}
                         onAdd={addToCart}
                         onSetQty={setCartQty}
                         traceId={traceId || sourcingTraceId}
