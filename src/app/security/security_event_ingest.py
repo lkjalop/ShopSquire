@@ -6,10 +6,12 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+from threading import RLock
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import inspect, text
 
-from src.app.models.db import db_session
+from src.app.models.db import db_session, get_engine
 from src.app.rules.tenant_config_store import TenantConfigStore
 from src.app.services.geoip import enrich_ip
 
@@ -21,6 +23,34 @@ _TENANT_STORAGE_POLICY_KEY = "security_event_storage_policy"
 _tenant_cfg_store = TenantConfigStore(cache_ttl=5)
 _SECURITY_EVENT_TABLE_READY = False
 _ACTOR_STATE_TABLE_READY = False
+_SCHEMA_OWNER_GUARD = RLock()
+_SCHEMA_OWNERS = WeakKeyDictionary()
+
+
+class _SchemaReadiness:
+    def __init__(self):
+        self.lock = RLock()
+        self.ready = False
+
+
+def _ensure_schema_for_owner(table, legacy_ready, initializer):
+    # Pool replacement invalidates readiness; weak ownership releases discarded
+    # databases. Keep legacy false hints useful for existing fixture invalidation.
+    pool = get_engine().pool
+    with _SCHEMA_OWNER_GUARD:
+        schemas = _SCHEMA_OWNERS.get(pool)
+        if schemas is None:
+            schemas = {}
+            _SCHEMA_OWNERS[pool] = schemas
+        state = schemas.get(table)
+        if state is None:
+            state = _SchemaReadiness()
+            schemas[table] = state
+    with state.lock:
+        if legacy_ready and state.ready:
+            return True
+        state.ready = bool(initializer())
+        return state.ready
 
 
 def _now_iso() -> str:
@@ -170,10 +200,17 @@ def _get_actor_key(event: Dict[str, Any]) -> str | None:
     return None
 
 
-def _ensure_actor_state_table() -> None:
+def _ensure_actor_state_table() -> bool:
     global _ACTOR_STATE_TABLE_READY
-    if _ACTOR_STATE_TABLE_READY:
-        return
+    ready = _ensure_schema_for_owner(
+        'security_event_actor_state', _ACTOR_STATE_TABLE_READY, _initialize_actor_state_table,
+    )
+    if ready:
+        _ACTOR_STATE_TABLE_READY = True
+    return ready
+
+
+def _initialize_actor_state_table() -> bool:
     with db_session() as db:
         try:
             db.execute(
@@ -194,12 +231,13 @@ def _ensure_actor_state_table() -> None:
                 )
             )
             db.commit()
-            _ACTOR_STATE_TABLE_READY = True
+            return True
         except Exception:
             try:
                 db.rollback()
             except Exception:
                 pass
+            return False
 
 
 def _compute_impossible_travel(event: Dict[str, Any], geo: Dict[str, Any]) -> Dict[str, Any]:
@@ -471,10 +509,17 @@ def decide_policy_action(canonical_event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def ensure_security_event_ingest_table() -> None:
+def ensure_security_event_ingest_table() -> bool:
     global _SECURITY_EVENT_TABLE_READY
-    if _SECURITY_EVENT_TABLE_READY:
-        return
+    ready = _ensure_schema_for_owner(
+        'security_event_ingest', _SECURITY_EVENT_TABLE_READY, _initialize_security_event_ingest_table,
+    )
+    if ready:
+        _SECURITY_EVENT_TABLE_READY = True
+    return ready
+
+
+def _initialize_security_event_ingest_table() -> bool:
     with db_session() as db:
         try:
             db.execute(
@@ -534,12 +579,13 @@ def ensure_security_event_ingest_table() -> None:
                         f"ALTER TABLE security_event_ingest ADD COLUMN {name} {sql_type}"
                     ))
             db.commit()
-            _SECURITY_EVENT_TABLE_READY = True
+            return True
         except Exception:
             try:
                 db.rollback()
             except Exception:
                 pass
+            return False
 
 
 def ingest_security_event(

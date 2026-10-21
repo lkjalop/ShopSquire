@@ -231,7 +231,8 @@ def create_app() -> FastAPI:
 
         def _ensure_security_ingest() -> None:
             from src.app.security.security_event_ingest import ensure_security_event_ingest_table
-            ensure_security_event_ingest_table()
+            if not ensure_security_event_ingest_table():
+                raise RuntimeError('security_event_ingest_schema_unavailable')
         run_startup_step(
             app, name="security_event_ingest_compatibility", criticality="optional",
             operation=_ensure_security_ingest,
