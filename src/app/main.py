@@ -55,6 +55,7 @@ from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
 from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
+from src.app.bootstrap.application_lifespan import application_lifespan
 from src.app.bootstrap.business_background_lifecycle import (
     register_business_background_lifecycle,
 )
@@ -623,21 +624,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan_with_resource_cleanup(app: FastAPI):
-        try:
-            async with lifespan(app):
-                yield
-        finally:
-            # A custom ASGI lifespan does not invoke legacy shutdown handlers.
-            # Run owned-resource cleanup even when required startup fails.
-            import sys
-            primary_error = sys.exc_info()[1]
-            try:
-                await _on_shutdown()
-            except BaseException:
-                if primary_error is None:
-                    raise
-                import logging as cleanup_logging
-                cleanup_logging.getLogger(__name__).exception('Resource cleanup failed; preserving the application error')
+        async with application_lifespan(app, lifespan, _on_shutdown):
+            yield
 
     app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse,
                   lifespan=lifespan_with_resource_cleanup)
