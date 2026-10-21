@@ -451,9 +451,9 @@ def pytest_sessionstart(session):
     # Calling set_engine() here ensures the module-level engine points at the
     # session DB before any test fixture snapshot is taken.
     try:
-        from sqlalchemy import create_engine as _create_engine
+        from src.app.models.db import create_runtime_engine as _create_runtime_engine
         from src.app.models.db import set_engine as _set_engine
-        _session_eng = _create_engine(session_db_url, pool_pre_ping=True, future=True)
+        _session_eng = _create_runtime_engine(session_db_url)
         _set_engine(_session_eng)
         # The public module app is also used directly by integration tests.
         # Rebind it before collection, and reuse it as the session singleton.
