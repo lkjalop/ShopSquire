@@ -11,9 +11,9 @@ from src.app.services.warehouse_verification import WarehouseVerification
 from src.app.models.db import db_session
 
 
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path_factory.getbasetemp()}/e2e.sqlite"
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path / 'e2e.sqlite'}")
     app = create_app()
     # Seed order and expected serial mapping
     with db_session() as db:
@@ -25,7 +25,8 @@ def client(tmp_path_factory):
             pass
         db.execute(text("INSERT OR REPLACE INTO order_serials (order_id, serial) VALUES ('ORDERX', 'SN-EXPECT1')"))
         db.commit()
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_e2e_pipeline_with_fraud_and_warehouse(client, monkeypatch):

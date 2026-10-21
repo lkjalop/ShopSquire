@@ -8,11 +8,14 @@ from src.app.main import create_app
 from src.app.services.cv_provider import ManagedCVProvider
 
 
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path_factory.getbasetemp()}/pipeline.sqlite"
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    # A module-scoped engine change precedes the per-test restoration fixture
+    # and becomes its baseline, contaminating unrelated approval/ERP tests.
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path / 'pipeline.sqlite'}")
     app = create_app()
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_complaints_pipeline_smoke(client, monkeypatch):

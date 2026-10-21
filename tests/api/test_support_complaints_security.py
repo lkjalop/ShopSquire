@@ -8,11 +8,12 @@ from src.app.main import create_app
 from src.app.services.cv_provider import ManagedCVProvider
 
 
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path_factory.getbasetemp()}/api_test.sqlite"
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path / 'api_test.sqlite'}")
     app = create_app()
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_submit_complaint_sanitizes_description_and_handles_unicode(client, monkeypatch):
