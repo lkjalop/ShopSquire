@@ -107,12 +107,13 @@ class Orchestrator:
         self.catalog = CatalogRepository()
         # Tier routing
         try:
-            # Instantiate semantic cache (uses REDIS_URL if set)
+            # Reuse request memory's backend unless an operator chose a separate cache.
             try:
-                redis_url = flags.get("REDIS_URL") or __import__('os').environ.get('REDIS_URL')
+                redis_url = flags.get("REDIS_URL")
             except Exception:
                 redis_url = None
-            cache = SemanticCache(redis_url=redis_url)
+            cache_client = None if redis_url else getattr(memory, "redis", None)
+            cache = SemanticCache(redis_url=redis_url, redis_client=cache_client)
             self.tier_router = TierRouter(cache_backend=cache, flags=flags)
             try:
                 # Optional learned router layered on top of TierRouter
