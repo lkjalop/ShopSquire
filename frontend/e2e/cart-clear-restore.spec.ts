@@ -14,16 +14,18 @@ test('clearing a real two-line cart immediately offers an exact one-time restore
     expect(response.ok(),`cart seed HTTP ${response.status()}`).toBeTruthy();
   }
   await page.goto('/');
-  await page.getByRole('button',{name:/Ask Me/i}).click();
+  await page.getByRole('button',{name:/^Cart \(\d+\)$/}).click();
+  for(const line of lines)await expect(page.getByTestId(`qty-${line.sku}`)).toHaveText(String(line.quantity));
   const clear=page.waitForResponse(r=>/\/api\/v1\/cart\/clear(?:\?|$)/.test(r.url()));
   await page.getByPlaceholder('Type your message...').fill('Clear cart.');
   await page.getByPlaceholder('Type your message...').press('Enter');
   const cleared=await clear;
   expect(cleared.ok()).toBeTruthy();
   expect((await cleared.json()).undo).toEqual({available:true,count:2});
+  await expect(page.getByText(/cart is now empty/i)).toBeVisible();
   await expect(page.getByText(/Undo available.*2 prior line item/i)).toBeVisible();
   const undo=page.waitForResponse(r=>/\/api\/v1\/cart\/undo(?:\?|$)/.test(r.url()));
-  await page.getByRole('button',{name:/Restore/i}).click();
+  await page.getByRole('button',{name:'↩️ Restore',exact:true}).click();
   const restored=await undo;
   expect(restored.ok()).toBeTruthy();
   expect((await restored.json()).items.map((p:{sku:string,quantity:number})=>({sku:p.sku,quantity:p.quantity}))).toEqual(lines);
