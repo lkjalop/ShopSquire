@@ -1,0 +1,752 @@
+{
+  "source_head": "956e101eab2ddedf416a2ba0bd78e5073e7256bc",
+  "captured_at": "2026-10-21T17:20:49.956480+00:00",
+  "dirty_paths_before_publication": 336,
+  "staged_paths": [],
+  "full_python": {
+    "source_head": "c3309ad8201faef27b04c5a97915d002fda185dc",
+    "captured_at": "2026-10-21T17:08:30.803638+00:00",
+    "collected_item_ids": 8424,
+    "observed_item_ids": 8424,
+    "outcomes": {
+      "call_pass_record": 8144,
+      "skipped": 268,
+      "call_failure": 12
+    },
+    "original_reported_item_ids": 6736,
+    "remaining_observed_item_ids": 1688,
+    "remaining_windows": [
+      {
+        "partition": 1,
+        "profile": "clean-v3-remaining-partition-01",
+        "selected": 200,
+        "exit": 0,
+        "counts": {
+          "tests": 204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 4
+        },
+        "peaks": {
+          "rss_bytes": 417017856,
+          "handles": 1253,
+          "threads": 60
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 2,
+        "profile": "clean-v3-remaining-partition-02",
+        "selected": 200,
+        "exit": 0,
+        "counts": {
+          "tests": 204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 4
+        },
+        "peaks": {
+          "rss_bytes": 439906304,
+          "handles": 1447,
+          "threads": 35
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 3,
+        "profile": "clean-v3-remaining-partition-03",
+        "selected": 200,
+        "exit": 1,
+        "counts": {
+          "tests": 204,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 34
+        },
+        "peaks": {
+          "rss_bytes": 412217344,
+          "handles": 1391,
+          "threads": 38
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 4,
+        "profile": "clean-v3-remaining-partition-04",
+        "selected": 200,
+        "exit": 0,
+        "counts": {
+          "tests": 204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7
+        },
+        "peaks": {
+          "rss_bytes": 366964736,
+          "handles": 1088,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 5,
+        "profile": "clean-v3-remaining-partition-05",
+        "selected": 200,
+        "exit": 1,
+        "counts": {
+          "tests": 204,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 5
+        },
+        "peaks": {
+          "rss_bytes": 363405312,
+          "handles": 981,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 6,
+        "profile": "clean-v3-remaining-partition-06",
+        "selected": 200,
+        "exit": 1,
+        "counts": {
+          "tests": 204,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 4
+        },
+        "peaks": {
+          "rss_bytes": 419487744,
+          "handles": 1392,
+          "threads": 36
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 7,
+        "profile": "clean-v3-remaining-partition-07",
+        "selected": 200,
+        "exit": 0,
+        "counts": {
+          "tests": 204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 4
+        },
+        "peaks": {
+          "rss_bytes": 422768640,
+          "handles": 1469,
+          "threads": 37
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 8,
+        "profile": "clean-v3-remaining-partition-08",
+        "selected": 200,
+        "exit": 0,
+        "counts": {
+          "tests": 204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 4
+        },
+        "peaks": {
+          "rss_bytes": 426614784,
+          "handles": 1418,
+          "threads": 42
+        },
+        "resource_violation": null,
+        "reported_selected": 200,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      },
+      {
+        "partition": 9,
+        "profile": "clean-v3-remaining-partition-09",
+        "selected": 88,
+        "exit": 0,
+        "counts": {
+          "tests": 92,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 10
+        },
+        "peaks": {
+          "rss_bytes": 361680896,
+          "handles": 1059,
+          "threads": 34
+        },
+        "resource_violation": null,
+        "reported_selected": 88,
+        "unreported_selected": [],
+        "source_before": {
+          "checked": 5612,
+          "changed": []
+        },
+        "source_after": {
+          "checked": 5612,
+          "changed": []
+        }
+      }
+    ],
+    "repeated_collection_skip_reports": 36,
+    "non_item_stream_report_ids": [],
+    "failures": [
+      {
+        "nodeid": "tests/integration/test_adaptive_growth_pipeline.py::test_gate2_signal_to_finding_to_recall_to_narration",
+        "path": "tests/integration/test_adaptive_growth_pipeline.py",
+        "line": 53,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/integration/test_chat_multimodal_trace_events.py::test_chat_with_image_emits_multimodal_and_intent_routing_events",
+        "path": "tests/integration/test_chat_multimodal_trace_events.py",
+        "line": 31,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/security/test_verified_operator_identity.py::test_invalid_bearer_cannot_supply_person_or_email[changes3]",
+        "path": "tests/security/test_verified_operator_identity.py",
+        "line": 40,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/services/test_return_partner_integrations.py::test_confirmed_label_is_bounded_typed_observation_not_commercial_authority",
+        "path": "tests/services/test_return_partner_integrations.py",
+        "line": 42,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/services/test_return_partner_integrations.py::test_untrusted_partner_responses_fail_typed_without_authorizing_an_outcome[response0-redirect]",
+        "path": "tests/services/test_return_partner_integrations.py",
+        "line": 68,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/services/test_return_partner_integrations.py::test_untrusted_partner_responses_fail_typed_without_authorizing_an_outcome[response1-Expecting value]",
+        "path": "tests/services/test_return_partner_integrations.py",
+        "line": 68,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/services/test_return_partner_integrations.py::test_untrusted_partner_responses_fail_typed_without_authorizing_an_outcome[response2-status_invalid]",
+        "path": "tests/services/test_return_partner_integrations.py",
+        "line": 68,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/services/test_return_partner_integrations.py::test_untrusted_partner_responses_fail_typed_without_authorizing_an_outcome[response3-incomplete]",
+        "path": "tests/services/test_return_partner_integrations.py",
+        "line": 68,
+        "profile": "clean-committed-v3-run",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/test_chat_recommend_delegation.py::test_in_process_recommend_preserves_v2_compatibility_dependencies",
+        "path": "tests/test_chat_recommend_delegation.py",
+        "line": 26,
+        "profile": "clean-v3-remaining-partition-03",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/test_chat_recommend_delegation.py::test_v2_compatibility_failure_is_observable",
+        "path": "tests/test_chat_recommend_delegation.py",
+        "line": 166,
+        "profile": "clean-v3-remaining-partition-03",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/test_no_flavour_in_core.py::test_core_module_has_no_laptop_flavour[src/app/services/fulfillment/draft.py]",
+        "path": "tests/test_no_flavour_in_core.py",
+        "line": 368,
+        "profile": "clean-v3-remaining-partition-05",
+        "outcome": "call_failure"
+      },
+      {
+        "nodeid": "tests/test_no_flavour_in_core.py::test_pending_excision_flavour_does_not_grow[src/app/routers/chat.py-17]",
+        "path": "tests/test_no_flavour_in_core.py",
+        "line": 425,
+        "profile": "clean-v3-remaining-partition-06",
+        "outcome": "call_failure"
+      }
+    ],
+    "final_raw_source_check": {
+      "checked": 5612,
+      "changed": []
+    },
+    "ledger_sha256": "05b244eefc0713a0df8cb3d9f877f18a06d73a86b0876e1890779fe2f6454039",
+    "qualification": "All8424 frozen source136 collected identities have one recorded outcome across the original deadline-failed process and nine independent windows. Window source hashes were checked before/after each window. Call-pass records, skipped requirements, repeated collection-level reports and process/resource failures remain distinct. This is not a completed monolithic, final-source, all-profile or endurance pass.",
+    "release_green": false,
+    "original_full": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 5400.437,
+      "peaks": {
+        "rss_bytes": 964284416,
+        "handles": 3232,
+        "threads": 92
+      },
+      "resource_violation": "profile_deadline"
+    },
+    "processes": [
+      {
+        "profile": "clean-committed-v3-run",
+        "reported_item_ids": 6736,
+        "phase_counts": {
+          "call:passed": 6500,
+          "setup:skipped": 208,
+          "call:skipped": 20,
+          "call:failed": 8
+        },
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 5400.437,
+          "peaks": {
+            "rss_bytes": 964284416,
+            "handles": 3232,
+            "threads": 92
+          },
+          "resource_violation": "profile_deadline"
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-01",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 200
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 105.75,
+          "peaks": {
+            "rss_bytes": 417017856,
+            "handles": 1253,
+            "threads": 60
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-02",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 200
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 110.75,
+          "peaks": {
+            "rss_bytes": 439906304,
+            "handles": 1447,
+            "threads": 35
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-03",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 168,
+          "call:failed": 2,
+          "setup:skipped": 21,
+          "call:skipped": 9
+        },
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 147.282,
+          "peaks": {
+            "rss_bytes": 412217344,
+            "handles": 1391,
+            "threads": 38
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 2,
+            "errors": 0,
+            "skipped": 34
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-04",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 197,
+          "call:skipped": 3
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 88.188,
+          "peaks": {
+            "rss_bytes": 366964736,
+            "handles": 1088,
+            "threads": 33
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 7
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-05",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 198,
+          "setup:skipped": 1,
+          "call:failed": 1
+        },
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 95.14,
+          "peaks": {
+            "rss_bytes": 363405312,
+            "handles": 981,
+            "threads": 33
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 1,
+            "errors": 0,
+            "skipped": 5
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-06",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 199,
+          "call:failed": 1
+        },
+        "receipt": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 184.016,
+          "peaks": {
+            "rss_bytes": 419487744,
+            "handles": 1392,
+            "threads": 36
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 1,
+            "errors": 0,
+            "skipped": 4
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-07",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 200
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 138.281,
+          "peaks": {
+            "rss_bytes": 422768640,
+            "handles": 1469,
+            "threads": 37
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-08",
+        "reported_item_ids": 200,
+        "phase_counts": {
+          "call:passed": 200
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 122.937,
+          "peaks": {
+            "rss_bytes": 426614784,
+            "handles": 1418,
+            "threads": 42
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          }
+        }
+      },
+      {
+        "profile": "clean-v3-remaining-partition-09",
+        "reported_item_ids": 88,
+        "phase_counts": {
+          "call:passed": 82,
+          "call:skipped": 2,
+          "setup:skipped": 4
+        },
+        "receipt": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 59.984,
+          "peaks": {
+            "rss_bytes": 361680896,
+            "handles": 1059,
+            "threads": 34
+          },
+          "resource_violation": null,
+          "counts": {
+            "tests": 92,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 10
+          }
+        }
+      }
+    ]
+  },
+  "repairs": [
+    {
+      "scope": "terminal-helper",
+      "commit": "472bfd5adcc42596b0903e7d35509bf77b55c0cf",
+      "parent": "1b7a41598000c17d95704f6a01a91b851a2f4e68",
+      "files": [
+        {
+          "path": "frontend/e2e/helpers/terminalTurn.ts",
+          "committed_sha256": "f45bd91d8320932f5ab6a874abb963aa5c3c01862a8d2f362e21807545bd6f1a",
+          "current_sha256": "f45bd91d8320932f5ab6a874abb963aa5c3c01862a8d2f362e21807545bd6f1a"
+        },
+        {
+          "path": "frontend/e2e/terminal-turn-helper.spec.ts",
+          "committed_sha256": "dc980e753ec2b5954754a4253753cb655d9862d6bc29ac71367d9734ad3a0692",
+          "current_sha256": "dc980e753ec2b5954754a4253753cb655d9862d6bc29ac71367d9734ad3a0692"
+        },
+        {
+          "path": "frontend/e2e/ordinary-chat-shortfall.spec.ts",
+          "committed_sha256": "e711a226b9f56a4f89530c2cef2cbac306a92d7131b5d35353afb3850c97d995",
+          "current_sha256": "e711a226b9f56a4f89530c2cef2cbac306a92d7131b5d35353afb3850c97d995"
+        }
+      ],
+      "limits": "Controlled invalid-domain HTTP routes qualify the test observer, not real providers or product evidence. The live unresolved-purchase spec still uses its legacy sender and needs a separate actor/profile integration; its source136600-second failure is not retroactively repaired. Initial mock textarea omitted preventDefault/captured query and a provisional seven-pass/four-timeout run was excluded; corrected exact harness reran legacy and final. Runtime listener inspection requires a verified method omitted from the public Page type; two intermediate type failures were corrected and final strict check passes. No production application protocol or external effect changed.",
+      "private_receipt": ".artifacts/roadmap-execution-2026-10-20/terminal-helper-commit-verification.json"
+    },
+    {
+      "scope": "return-partner",
+      "commit": "956e101eab2ddedf416a2ba0bd78e5073e7256bc",
+      "parent": "472bfd5adcc42596b0903e7d35509bf77b55c0cf",
+      "files": [
+        {
+          "path": "src/app/services/return_partner_integrations.py",
+          "committed_sha256": "0ec9cc1c559c1d9a6592f426bac4bbbdcab858e35741b70c8450dd37915a96e1",
+          "current_sha256": "0ec9cc1c559c1d9a6592f426bac4bbbdcab858e35741b70c8450dd37915a96e1"
+        },
+        {
+          "path": "tests/services/test_return_partner_integrations.py",
+          "committed_sha256": "cdfc844a38408d7331ea3022e355ba29f92ee597bb98a56b236740b7ff7cfbcd",
+          "current_sha256": "cdfc844a38408d7331ea3022e355ba29f92ee597bb98a56b236740b7ff7cfbcd"
+        }
+      ],
+      "limits": "All partner calls use MockTransport, not actual providers. No application caller of this adapter was found in src/app; this is not routed partner integration or a commercial-effect certification. Existing nonstream download occurs before the body-size check, DNS has no independently bounded resolver deadline, and label URLs need broader policy review. A ROOT-only egress restoration neighbor was rejected by preflight and not counted. Original source136 five fixture failures remain historical.",
+      "private_receipt": ".artifacts/roadmap-execution-2026-10-20/return-partner-commit-verification.json"
+    }
+  ],
+  "delta_since_source144": [
+    {
+      "path": "docs/ROADMAP_BROWSER_AND_TENANT_CHECKPOINT_2026-10-22.md",
+      "added": "61",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-browser-v3-cases.csv",
+      "added": "128",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-browser-v3-summary.json",
+      "added": "1446",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-execution.json",
+      "added": "2045",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-file-inventory.csv",
+      "added": "5798",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-roadmap-work-items.csv",
+      "added": "17",
+      "removed": "0"
+    },
+    {
+      "path": "docs/audits/2026-10-22-tenant-browser-source-map.csv",
+      "added": "44",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/helpers/terminalTurn.ts",
+      "added": "78",
+      "removed": "0"
+    },
+    {
+      "path": "frontend/e2e/ordinary-chat-shortfall.spec.ts",
+      "added": "1",
+      "removed": "1"
+    },
+    {
+      "path": "frontend/e2e/terminal-turn-helper.spec.ts",
+      "added": "102",
+      "removed": "0"
+    },
+    {
+      "path": "src/app/services/return_partner_integrations.py",
+      "added": "6",
+      "removed": "0"
+    },
+    {
+      "path": "tests/services/test_return_partner_integrations.py",
+      "added": "45",
+      "removed": "0"
+    }
+  ],
+  "roadmap": {
+    "path": "docs/audits/2026-10-22-full-v3-roadmap-work-items.csv",
+    "sha256": "738828d638938f9e0c6a5a2d9e73f31b8a22d79f4100646d882fc231d5a3121d"
+  },
+  "source_map": {
+    "path": "docs/audits/2026-10-22-full-v3-source-map.csv",
+    "sha256": "e8453484691a4a1eee35d03fbda19c92b91e5142b04f57409b7ce5aa622883c1",
+    "anchors": 37
+  },
+  "cases": {
+    "path": "docs/audits/2026-10-22-full-v3-cases.csv",
+    "sha256": "05b244eefc0713a0df8cb3d9f877f18a06d73a86b0876e1890779fe2f6454039"
+  },
+  "failure_followup": {
+    "path": "docs/audits/2026-10-22-full-v3-failure-followup.csv",
+    "sha256": "90d3e2c0915703e3228028a99a6ae7318b74a472a9b5d49cd3484de1066709fb"
+  },
+  "published_files": [
+    "docs/ROADMAP_FULL_PYTHON_OBSERVATIONS_2026-10-22.md",
+    "docs/audits/2026-10-22-full-v3-cases.csv",
+    "docs/audits/2026-10-22-full-v3-failure-followup.csv",
+    "docs/audits/2026-10-22-full-v3-roadmap-work-items.csv",
+    "docs/audits/2026-10-22-full-v3-source-map.csv",
+    "docs/audits/2026-10-22-full-v3-execution.json"
+  ],
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "all_line_semantic_review_complete": false,
+  "pushed": false
+}
