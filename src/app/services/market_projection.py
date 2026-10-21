@@ -155,9 +155,9 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
     velocity = detect_velocity_dsi(inputs["sales"], inputs["inventory"], window_days=window_days)
     bulk = detect_bulk_order_frequency(inputs["cases"], window_days=90)
     for sku, item in velocity.items():
-        sales_observed = inputs["sales_status"] in {"observed", "simulated"}
+        sales_available = inputs["sales_status"] in {"observed", "simulated"}
         inventory_observed = inputs["inventory_status"] == "observed"
-        if not sales_observed:
+        if not sales_available:
             item.update({
                 "units_sold": None, "units_per_day": None, "velocity": None,
                 "dsi_days": None, "dead_stock": None,
@@ -168,7 +168,7 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
                 "stockout": None, "dead_stock": None,
             })
         item["measurement_truth"] = {
-            "sales": "observed" if sales_observed else "not_collected",
+            "sales": inputs["sales_status"] if sales_available else "not_collected",
             "inventory": "observed" if inventory_observed else (
                 "not_disclosed" if inputs["inventory_status"] == "unavailable"
                 else "not_collected"
@@ -201,7 +201,9 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
             if str(row.get("sku") or "") == sku and row.get("source_record_id")
         ]
         item["metrics"] = [
-            metric.model_dump(mode="json")
+            (metric.model_copy(update={"status": "simulated"})
+             if item["status"] == "simulated" and metric.value is not None
+             else metric).model_dump(mode="json")
             for metric in inventory_productivity(
                 tenant_id=tenant_id, sku=sku,
                 units_sold=int(item.get("units_sold") or 0),
@@ -215,6 +217,17 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
         item["metrics"].append(
             gmroi_unavailable(tenant_id=tenant_id, subject_id=sku).model_dump(mode="json"))
     return velocity
+
+
+def _projection_demand_trend(projection: Dict[str, Any], units_per_day: float | None) -> str:
+    simulated = (projection.get("source_status") or {}).get("sales") == "simulated"
+    if projection.get("dead_stock") is True:
+        return "simulated_dead_stock" if simulated else "dead_stock"
+    if units_per_day is not None and units_per_day > 0:
+        return "simulated_sales" if simulated else "observed_sales"
+    if units_per_day == 0:
+        return "simulated_zero" if simulated else "observed_zero"
+    return "not_verified"
 
 
 def projection_evidence(
@@ -236,12 +249,7 @@ def projection_evidence(
             "tenant_id": tenant_id,
             "sku": sku,
             "rank": rank,
-            "demand_trend": (
-                "dead_stock" if projection.get("dead_stock") is True
-                else "observed_sales" if units_per_day is not None and units_per_day > 0
-                else "observed_zero" if units_per_day == 0
-                else "not_verified"
-            ),
+            "demand_trend": _projection_demand_trend(projection, units_per_day),
             "forecast_units_30d": (
                 round(units_per_day * 30.0, 2) if units_per_day is not None else None
             ),
