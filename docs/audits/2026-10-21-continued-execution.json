@@ -1,8 +1,15 @@
 {
-  "recorded_at": "2026-10-21T02:41:34.243912+00:00",
-  "checkpoint_head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+  "recorded_at": "2026-10-21T08:37:41.157126+00:00",
+  "checkpoint_head": "d68f37ac3cc01f6afa93c5a39a506d5b74b410c1",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "d68f37ac Give cart test requests independent SQLite transactions and guaranteed owner cleanup",
+    "b548cf07 Publish research shelves and retained buyer facts through one case-bound terminal response",
+    "80c33dd3 Scope outbound monitoring to the operator tenant and repair CV circuit audit",
+    "bf4db849 Integrate owned requirement selection and simulated stock controls with buyer case APIs",
+    "fde5ef56 Preserve owned selected-scope research across router outages and switch proposals",
+    "a986e17d Restore streamed database results and redact privacy failure channels",
+    "11ec4cd0 Record complete fresh-shop browser ledger and bounded API, ownership and cart progress",
     "8dc3f3f5 Confirm cart clears before reporting success and expose recovery after failure",
     "9affa8ba Run buyer browser fixtures with signed identities and real current product SKUs",
     "3d82d28f Expose current cart undo and prevent stale snapshot recovery after cache failure",
@@ -104,31 +111,31 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 95,
-      "insertions": 4479,
-      "deletions": 1310
+      "files": 131,
+      "insertions": 6594,
+      "deletions": 1805
     },
     "tests": {
-      "files": 163,
-      "insertions": 9211,
-      "deletions": 1248
+      "files": 189,
+      "insertions": 10726,
+      "deletions": 1287
     },
     "frontend": {
-      "files": 22,
-      "insertions": 212,
-      "deletions": 56
+      "files": 35,
+      "insertions": 852,
+      "deletions": 67
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-21T02:39:06.681517+00:00",
-    "head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+    "recorded_at": "2026-10-21T08:21:53.815415+00:00",
+    "head": "d68f37ac3cc01f6afa93c5a39a506d5b74b410c1",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 472,
-    "tracked_changed": 233,
-    "untracked": 239,
+    "git_status_entries": 403,
+    "tracked_changed": 201,
+    "untracked": 202,
     "staged": 0,
-    "files": 5721,
-    "text_lines": 979473,
+    "files": 5729,
+    "text_lines": 979978,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -198,7 +205,7 @@
       "dump": 10,
       "env.production.template": 1,
       "eval": 8,
-      "frontend": 326,
+      "frontend": 328,
       "full_pytest_after_finalfix.log": 1,
       "full_pytest_after_fix.log": 1,
       "full_pytest_after_flags_fix.log": 1,
@@ -239,18 +246,172 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1556,
+      "tests": 1562,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19586,
+    "functions": 19611,
     "production_functions_over_200": 99,
     "broad_production_handlers": 5587,
     "swallowed_production_handlers": 2027,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W03/W04",
+      "path": "src/app/services/recommendation_core/turn_router.py",
+      "symbol": "_bounded_fallback_decision",
+      "line": 627,
+      "function_lines": 230,
+      "file_lines": 2789,
+      "git_state": "working-tree changes or untracked prerequisite",
+      "sha256": "74f8c00c77c6a84b26e89e3952e027b3991b138242c4410d13d9e780f1ed4d22",
+      "remaining": "live model refinement/replacement, concurrent consumers and complete semantic qualification"
+    },
+    {
+      "work_package": "W00/W03",
+      "path": "src/app/security/buyer_principal.py",
+      "symbol": "require_shopping_case_principal",
+      "line": 164,
+      "function_lines": 24,
+      "file_lines": 212,
+      "git_state": "committed",
+      "sha256": "337c8d6040de8bb358a37c471d61374d492daf44cf0a064252e6c75834d6dba9",
+      "remaining": "all buyer/operator roles and deployed identity/session policy"
+    },
+    {
+      "work_package": "W00/W03",
+      "path": "src/app/routers/shopping_case_contracts.py",
+      "symbol": "select_contract",
+      "line": 53,
+      "function_lines": 14,
+      "file_lines": 78,
+      "git_state": "committed",
+      "sha256": "3673ae2f1195c4cbb67e9aa8e976d6296d3459bf2b4cbf193653fc2105f2baef",
+      "remaining": "remaining source uploads, stale browser responses and real contract enrolment"
+    },
+    {
+      "work_package": "W05/W08",
+      "path": "src/app/services/case_inventory_acceptance.py",
+      "symbol": "accept_request",
+      "line": 52,
+      "function_lines": 57,
+      "file_lines": 108,
+      "git_state": "committed",
+      "sha256": "057f55eb983fd10efed54d0ce55b2645d0e220e93a6d35f13abbec9b95f4ad65",
+      "remaining": "native multi-location contention and complete operational recovery"
+    },
+    {
+      "work_package": "W04/W05",
+      "path": "src/app/services/chat_case_continuity.py",
+      "symbol": "restore_case_id",
+      "line": 6,
+      "function_lines": 19,
+      "file_lines": 139,
+      "git_state": "committed",
+      "sha256": "47fd5f55432d0cc204c3c0bba1f97afffba340ff84f66c5be633682d76fbf8dc",
+      "remaining": "distributed recovery, erasure and complete concurrent restoration"
+    },
+    {
+      "work_package": "W04/W05",
+      "path": "src/app/services/chat_case_continuity.py",
+      "symbol": "project_retained_facts",
+      "line": 27,
+      "function_lines": 26,
+      "file_lines": 139,
+      "git_state": "committed",
+      "sha256": "47fd5f55432d0cc204c3c0bba1f97afffba340ff84f66c5be633682d76fbf8dc",
+      "remaining": "all privacy planes and complete concurrent presentation consumers"
+    },
+    {
+      "work_package": "W03/W04",
+      "path": "src/app/services/chat_terminal_projection.py",
+      "symbol": "project_chat_terminal",
+      "line": 5,
+      "function_lines": 198,
+      "file_lines": 202,
+      "git_state": "committed",
+      "sha256": "c2df7077d7fb8436612705898dafffb9678807549f8e894c314a4a8e9785aaef",
+      "remaining": "remaining source/role/UI matrices and complete live evidence"
+    },
+    {
+      "work_package": "W03/W11",
+      "path": "src/app/services/chat_research_entry.py",
+      "symbol": "research_entry_authorization",
+      "line": 18,
+      "function_lines": 12,
+      "file_lines": 91,
+      "git_state": "committed",
+      "sha256": "9e277d702e0965fd16767e8d13674b95c5820d11288e3e390288da05c9533270",
+      "remaining": "deployed profile/policy equivalence and live provider certification"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/services/outbound_email_monitor.py",
+      "symbol": "list_outbound_anomalies",
+      "line": 400,
+      "function_lines": 38,
+      "file_lines": 437,
+      "git_state": "committed",
+      "sha256": "051eb2b85cf1cc2234caa1deb66e27f950e8655db7d19cae850c7576769b2805",
+      "remaining": "all monitoring and communication sinks, deployment and privacy coverage"
+    },
+    {
+      "work_package": "W01/W11",
+      "path": "src/app/services/parallel_agent_executor.py",
+      "symbol": "_run_cv",
+      "line": 66,
+      "function_lines": 138,
+      "file_lines": 452,
+      "git_state": "committed",
+      "sha256": "0a5061eaca22100f7baaa7835dc0bda851a20052d7989d737802475cd7130779",
+      "remaining": "complete CV provider/queue lifecycle, latency and required model profiles"
+    },
+    {
+      "work_package": "W04/W15",
+      "path": "tests/chaos/test_native_case_terminal_state.py",
+      "symbol": "test_native_evidence_continuation_preserves_scope_and_material_change_invalidates",
+      "line": 42,
+      "function_lines": 15,
+      "file_lines": 76,
+      "git_state": "committed",
+      "sha256": "10e313075b34eb9f6411be86cc7440d2d760e87703941476b8e0c05dec9791f1",
+      "remaining": "full application PostgreSQL restore, concurrent consumers and deployment"
+    },
+    {
+      "work_package": "W01/W13",
+      "path": "tests/services/test_cart_test_database_ownership.py",
+      "symbol": "test_secondary_session_rollback_cannot_undo_a_cart_fixture_transaction",
+      "line": 9,
+      "function_lines": 12,
+      "file_lines": 58,
+      "git_state": "committed",
+      "sha256": "89dbda3a3149fa8a212106d6ec2e39d7e3e181f5dcd8fe10ba890626ca214201",
+      "remaining": "production SQLite locking, original parity ordering and complete process endurance"
+    },
+    {
+      "work_package": "W07/W11",
+      "path": "tests/api/test_privacy_error_disclosure.py",
+      "symbol": "test_failed_erasure_job_keeps_only_a_generic_reason_and_subject_hash",
+      "line": 82,
+      "function_lines": 18,
+      "file_lines": 116,
+      "git_state": "committed",
+      "sha256": "3e4acf82d557d5f39eb1357f6a67021168a6ad3a6118d640468a7fc80403f82b",
+      "remaining": "all privacy planes, operational logs, approved exports and distributed recovery"
+    },
+    {
+      "work_package": "W01/W07",
+      "path": "tests/chaos/test_request_database_owner_postgres.py",
+      "symbol": "test_native_legacy_session_stream_uses_the_owner_and_normalizes_rows",
+      "line": 103,
+      "function_lines": 32,
+      "file_lines": 134,
+      "git_state": "committed",
+      "sha256": "ad334a567b3af9355b509f56b4061ed72cb1ed9fb307e4ed1663b57fda2af08f",
+      "remaining": "remaining SQLAlchemy result protocols, all deployed consumers and complete PostgreSQL application gates"
+    },
     {
       "work_package": "W01",
       "path": "src/app/models/database_ownership.py",
@@ -420,11 +581,11 @@
       "work_package": "W07",
       "path": "src/app/routers/privacy.py",
       "symbol": "export_user_data",
-      "line": 390,
+      "line": 392,
       "function_lines": 116,
-      "file_lines": 673,
+      "file_lines": 675,
       "git_state": "committed",
-      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+      "sha256": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b",
       "remaining": "actual signed HTTP identity binding and complete data-plane exports"
     },
     {
@@ -872,10 +1033,10 @@
       "path": "src/app/models/db.py",
       "symbol": "db_session",
       "line": 1251,
-      "function_lines": 149,
-      "file_lines": 1557,
+      "function_lines": 156,
+      "file_lines": 1564,
       "git_state": "working-tree changes or untracked prerequisite",
-      "sha256": "b22af926a61926a7c7cf0a2900d865285236ce56ed2f686120fe7b59cb29500c",
+      "sha256": "8fa5bc3d57de4fb20efe058d3e3038769a1a1fcaf25d9273f53cfdf4be02bf25",
       "remaining": "competing transactions, fault recovery and endurance"
     },
     {
@@ -896,7 +1057,7 @@
       "line": 288,
       "function_lines": 4528,
       "file_lines": 4891,
-      "git_state": "working-tree changes or untracked prerequisite",
+      "git_state": "committed",
       "sha256": "db55c623ed33f95aad5ce2ecb92acf78a6322e0fe24b094b678df5c6c7d31d57",
       "remaining": "stale intake responses, exact stock-to-draft browser handoff"
     },
@@ -907,7 +1068,7 @@
       "line": 124,
       "function_lines": 33,
       "file_lines": 272,
-      "git_state": "working-tree changes or untracked prerequisite",
+      "git_state": "committed",
       "sha256": "41fe1d183179d5b038b004398b2593dcc9d1e2cfc1de0c64c579090b02940297",
       "remaining": "refinement, replacement, repeat and reload matrix"
     },
@@ -940,7 +1101,7 @@
       "line": 514,
       "function_lines": 53,
       "file_lines": 1094,
-      "git_state": "working-tree changes or untracked prerequisite",
+      "git_state": "committed",
       "sha256": "4551a06f6447dfb0b1a144aa246a644dcba264cb72dcc3804d8a10727a0640e4",
       "remaining": "canonical SQL state erasure and worker recovery"
     },
@@ -950,9 +1111,9 @@
       "symbol": "_subject_decisions",
       "line": 81,
       "function_lines": 26,
-      "file_lines": 673,
+      "file_lines": 675,
       "git_state": "committed",
-      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+      "sha256": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b",
       "remaining": "indexed exact legacy ownership and large-controller performance"
     },
     {
@@ -960,21 +1121,21 @@
       "path": "src/app/routers/privacy.py",
       "symbol": "delete_user_data",
       "line": 247,
-      "function_lines": 126,
-      "file_lines": 673,
+      "function_lines": 128,
+      "file_lines": 675,
       "git_state": "committed",
-      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+      "sha256": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b",
       "remaining": "every retained SQL plane, failure resume and restore policy"
     },
     {
       "work_package": "W07",
       "path": "src/app/routers/privacy.py",
       "symbol": "redact_user_data",
-      "line": 617,
+      "line": 619,
       "function_lines": 57,
-      "file_lines": 673,
+      "file_lines": 675,
       "git_state": "committed",
-      "sha256": "c81fdbe5ae3bb1ea9e180049721762c66d2a6c64ab05c86fcd7b79248ce15ed8",
+      "sha256": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b",
       "remaining": "remaining data planes and durable partial-work recovery"
     },
     {
@@ -7158,19 +7319,19 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 95,
-      "added": 4479,
-      "removed": 1310
+      "files": 131,
+      "added": 6594,
+      "removed": 1805
     },
     "Tests": {
-      "files": 163,
-      "added": 9211,
-      "removed": 1248
+      "files": 189,
+      "added": 10726,
+      "removed": 1287
     },
     "Frontend": {
-      "files": 22,
-      "added": 212,
-      "removed": 56
+      "files": 35,
+      "added": 852,
+      "removed": 67
     },
     "Migrations": {
       "files": 20,
@@ -7183,20 +7344,20 @@
       "removed": 13
     },
     "Runtime/configuration": {
-      "files": 15,
-      "added": 2333,
+      "files": 16,
+      "added": 2354,
       "removed": 2441
     },
     "Documentation/other": {
-      "files": 12,
-      "added": 29114,
+      "files": 13,
+      "added": 32991,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 331,
-    "added": 46225,
-    "removed": 5069
+    "files": 408,
+    "added": 54393,
+    "removed": 5614
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -13206,5 +13367,1575 @@
     },
     "source_manifest_sha256": "2998031f2c6de6c0db5115d956ef8c4f2d9b7c4e2d9e50d6b56307f7cfa148be",
     "limitations": "Four passing cases use the preserved ROOT application source and an externally prepared owned Redis/planner profile. Runtime supervisor cache labels are inherited; the explicit override, native cache key counts and retained canaries prove actual Redis. No claim of full committed-source product qualification. Canonical ambiguity spec remains uncommitted and fails required positive delivery when interpreter is offline."
+  },
+  "streamed_privacy_and_error_channels": {
+    "commit": "a986e17d61217e4df4ca5612edb11b109a749bc2",
+    "files": [
+      {
+        "path": "src/app/models/db.py",
+        "sha256": "8aa17b1ec7c3e75130e89e9091bf4297f2facd22b2aef52203f0814654f7aea0"
+      },
+      {
+        "path": "src/app/routers/privacy.py",
+        "sha256": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b"
+      },
+      {
+        "path": "tests/unit/test_database_result_streaming.py",
+        "sha256": "391f9ba4abb08f1a9ed4afdaa3e269049110cf9917ab8bc70937e47617cb3b25"
+      },
+      {
+        "path": "tests/api/test_privacy_error_disclosure.py",
+        "sha256": "3e4acf82d557d5f39eb1357f6a67021168a6ad3a6118d640468a7fc80403f82b"
+      },
+      {
+        "path": "tests/chaos/test_request_database_owner_postgres.py",
+        "sha256": "ad334a567b3af9355b509f56b4061ed72cb1ed9fb307e4ed1663b57fda2af08f"
+      }
+    ],
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_database_result_streaming.py",
+        "tests/api/test_privacy_error_disclosure.py",
+        "tests/services/test_privacy_decision_subject.py",
+        "tests/services/test_privacy_store_scope.py",
+        "tests/services/test_user_data_inventory.py",
+        "tests/services/test_privacy_redis_boundaries.py",
+        "tests/api/test_request_database_ownership.py",
+        "tests/unit/test_request_database_middleware.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-streaming-cohort-focused-rerun\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-error-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 57.359,
+      "peaks": {
+        "rss_bytes": 337154048,
+        "handles": 1601,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 64,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "api": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-streaming-cohort-api-rerun\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-error-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 395.094,
+      "peaks": {
+        "rss_bytes": 765353984,
+        "handles": 4135,
+        "threads": 83
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 331,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "postgresql": {
+      "purpose": "Disposable PostgreSQL request ownership across streaming, WebSockets and background contexts",
+      "complete": true,
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 0,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/models/db.py": "8aa17b1ec7c3e75130e89e9091bf4297f2facd22b2aef52203f0814654f7aea0",
+        "src/app/routers/privacy.py": "ce4b21d628c793dabb654571351ad03afca758a2acb4208484550a1b2da5868b",
+        "tests/unit/test_database_result_streaming.py": "391f9ba4abb08f1a9ed4afdaa3e269049110cf9917ab8bc70937e47617cb3b25",
+        "tests/api/test_privacy_error_disclosure.py": "3e4acf82d557d5f39eb1357f6a67021168a6ad3a6118d640468a7fc80403f82b",
+        "tests/chaos/test_request_database_owner_postgres.py": "ad334a567b3af9355b509f56b4061ed72cb1ed9fb307e4ed1663b57fda2af08f"
+      },
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 17.671
+    },
+    "postgresql_resources": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\run_privacy_streaming_postgres.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.266,
+      "peaks": {
+        "rss_bytes": 263868416,
+        "handles": 987,
+        "threads": 30
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "other_candidate_python_files_matching_head": 3009,
+    "original_async_session_append_preserved_lines": 29,
+    "original_async_session_append_sha256": "b9625e9016e8822be7b979ace9728d9cc8e24ef6fb4fcb75a635860f28e563ee",
+    "valid_reds": {
+      "streaming_iterator_and_real_privacy_consumer": 3,
+      "native_sql_trigger_private_parameter_disclosures": 3
+    },
+    "prerequisite_attempts": "Initial privacy failure attempt hit correct export policy denial and missing streaming protocol. A second missing-table fixture was partly invalid because compatibility bootstrap recreated tables. The final trigger-based native DBAPI failures alone prove the three SQL disclosure reds. No export authorization bypass was used.",
+    "limitations": "Bounded synchronous result iteration and two privacy HTTP/erasure-job failure channels; not all SQLAlchemy result protocols, all privacy error paths, approved export workflow, operational logging, canonical case erasure, concurrent recovery or final release qualification. Full-v6 diagnostics run older frozen source and remain distinct."
+  },
+  "windows_host_interruption": {
+    "events": {
+      "source": "Read-only Windows System event log; only named nonidentity fields retained",
+      "events": [
+        {
+          "id": 42,
+          "utc": "2026-10-21T02:58:50.3077048Z",
+          "target_state": 4,
+          "reason": 0
+        },
+        {
+          "id": 107,
+          "utc": "2026-10-21T02:58:52.4252156Z",
+          "target_state": 4
+        },
+        {
+          "id": 1,
+          "utc": "2026-10-21T05:05:47.5009369Z",
+          "old_time": "2026-10-21T02:58:52.4251973Z",
+          "new_time": "2026-10-21T05:05:47.5000000Z",
+          "reason": 2
+        },
+        {
+          "id": 1,
+          "utc": "2026-10-21T01:35:41.5007665Z",
+          "old_time": "2026-10-21T01:28:54.5614789Z",
+          "new_time": "2026-10-21T01:35:41.5000000Z",
+          "reason": 2
+        }
+      ],
+      "limitations": "Sleep/resume and clock correction correlate with interrupted profiles. Earlier ~418-second setup stalls correlate with the earlier ~407-second correction; this is an inference, not a repaired database/application hang."
+    },
+    "profiles": {
+      "full-working-tree-v6-run": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "-c",
+          "import json\nfrom pathlib import Path\nimport pytest\nclass CollectionLedger:\n    def pytest_collection_finish(self, session):\n        rows=[{'nodeid':item.nodeid,'path':str(item.path),'line':item.location[1]+1} for item in session.items]\n        Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\full-working-tree-v6-run\\\\collection.json').write_text(json.dumps({'selected':len(rows),'cases':rows},indent=2),encoding='utf-8')\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\full-working-tree-v6-run\\\\tests.xml'],plugins=[CollectionLedger()]))\n"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+        "native_exit_code": 1,
+        "elapsed_seconds": 8502.015,
+        "peaks": {
+          "rss_bytes": 737677312,
+          "handles": 4454,
+          "threads": 86
+        },
+        "resource_violation": "profile_deadline",
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "privacy-streaming-cohort-focused": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/unit/test_database_result_streaming.py",
+          "tests/api/test_privacy_error_disclosure.py",
+          "tests/services/test_privacy_decision_subject.py",
+          "tests/services/test_privacy_store_scope.py",
+          "tests/services/test_user_data_inventory.py",
+          "tests/services/test_privacy_redis_boundaries.py",
+          "tests/api/test_request_database_ownership.py",
+          "tests/unit/test_request_database_middleware.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-streaming-cohort-focused\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-error-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 7687.265,
+        "peaks": {
+          "rss_bytes": 335564800,
+          "handles": 1586,
+          "threads": 34
+        },
+        "resource_violation": "profile_deadline",
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "privacy-streaming-cohort-api": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/api",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\privacy-streaming-cohort-api\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\privacy-error-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 7677.203,
+        "peaks": {
+          "rss_bytes": 379662336,
+          "handles": 1864,
+          "threads": 40
+        },
+        "resource_violation": "profile_deadline",
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      }
+    },
+    "source_unchanged_after_interruption": true,
+    "cleanup": {
+      "survivors": [],
+      "scope": "Owned source working directories only; excludes tool ancestor processes"
+    },
+    "limitations": "Host sleep/resume and subsequent clock correction correlate with deadlines. No complete JUnit exists for these interrupted runs. Earlier 418-second setup stalls correlate with an earlier 407-second correction; this remains an inference and is not a repair for SQLite locking or the earlier 151-second security request. Budgets and power settings were not changed."
+  },
+  "python_browser_prerequisite": {
+    "installation": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "playwright",
+        "install",
+        "--only-shell",
+        "chromium"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 20.781,
+      "peaks": {
+        "rss_bytes": 196378624,
+        "handles": 231,
+        "threads": 17
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "six_case_qualification": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/browser/test_checkout_flow.py",
+        "tests/browser/test_storefront_smoke.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\python-browser-six-owned-cache\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+      "native_exit_code": 0,
+      "elapsed_seconds": 42.406,
+      "peaks": {
+        "rss_bytes": 279678976,
+        "handles": 1205,
+        "threads": 38
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "scope": "Pinned Python Playwright headless browser installed in an isolated artifact cache. Python packages, global browser cache and Node dependencies are unchanged. The six earlier missing-binary setup errors remain historical; the separate six-case rerun executes successfully."
+  },
+  "full_python_v6_continuation": {
+    "source_head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+    "source_manifest_sha256": "3eddef05a7721a0079f89f9c900cd6008617843745b2f82a87f28c8aa498b4f3",
+    "selected_original": 8560,
+    "previously_reported": 623,
+    "continuation_selected": 7937,
+    "continuation_selection_sha256": "a2c9ff65f0ec46fca8b89c07ada3911ee4a9efdf1cfed8b9e912aeba2b6d8518",
+    "observed_at": "2026-10-21T08:37:41.360672+00:00",
+    "phase_counts_at_capture": {
+      "('call', 'passed')": 937,
+      "('call', 'skipped')": 17,
+      "('setup', 'skipped')": 107,
+      "('call', 'failed')": 1
+    },
+    "failed_ids_at_capture": [
+      "tests/integration/test_frontend_backend_parity.py::test_product_item_contract"
+    ],
+    "complete": false,
+    "limitations": "Older frozen source includes original WIP and predates the stream/error repair. Continuation validates the unchanged full collection and executes only the 7937 IDs not reported by the interrupted window. This is a partitioned diagnostic, not a monolithic green gate, and source/profile counts cannot be added to other versions.",
+    "receipt": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-c",
+        "import json\nfrom pathlib import Path\nimport pytest\nselection=json.loads(Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\full-working-tree-v6-continuation-selection.json').read_text(encoding='utf-8'))\nwanted=set(selection['remaining'])\noriginal=set(selection['previously_completed'])|wanted\nclass ContinuationLedger:\n    @pytest.hookimpl(trylast=True)\n    def pytest_collection_modifyitems(self,session,config,items):\n        actual={item.nodeid for item in items}\n        if actual != original:\n            raise pytest.UsageError('Frozen collection IDs changed; refusing incomplete continuation')\n        excluded=[item for item in items if item.nodeid not in wanted]\n        items[:]=[item for item in items if item.nodeid in wanted]\n        config.hook.pytest_deselected(items=excluded)\n    def pytest_collection_finish(self,session):\n        rows=[{'nodeid':item.nodeid,'path':str(item.path),'line':item.location[1]+1} for item in session.items]\n        Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\full-working-tree-v6-continuation\\\\collection.json').write_text(json.dumps({'selected':len(rows),'cases':rows},indent=2),encoding='utf-8')\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\full-working-tree-v6-continuation\\\\tests.xml'],plugins=[ContinuationLedger()]))\n"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+      "native_exit_code": 1,
+      "elapsed_seconds": 1308.141,
+      "peaks": {
+        "rss_bytes": 804511744,
+        "handles": 5030,
+        "threads": 87
+      },
+      "resource_violation": "process_handles_over_5000",
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "status": "failed_at_5030_process_handles; later diagnostic windows provide exact ID coverage"
+  },
+  "parity_order_diagnostic": {
+    "frozen_isolated": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_frontend_backend_parity.py::test_product_item_contract",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\frontend-backend-parity-frozen-isolated\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+      "native_exit_code": 0,
+      "elapsed_seconds": 12.235,
+      "peaks": {
+        "rss_bytes": 293068800,
+        "handles": 1012,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "current_isolated": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_frontend_backend_parity.py::test_product_item_contract",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\frontend-backend-parity-current-isolated\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire",
+      "native_exit_code": 0,
+      "elapsed_seconds": 13.047,
+      "peaks": {
+        "rss_bytes": 299606016,
+        "handles": 1021,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "frozen_module": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_frontend_backend_parity.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\frontend-backend-parity-module-frozen\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+      "native_exit_code": 0,
+      "elapsed_seconds": 15.531,
+      "peaks": {
+        "rss_bytes": 294277120,
+        "handles": 1035,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "ordered_prefix_selected": 236,
+    "ordered_prefix_complete": true,
+    "limitations": "Original empty-product failure remains unresolved. Both isolated runs, the eight-case module and an ordered 236-case prefix passed on their identified sources. The prefix JUnit includes 199 passes, 37 runtime skips and four collection-module skips; these passing replays do not establish a causal fix.",
+    "ordered_prefix_result": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "-c",
+        "import json\nfrom pathlib import Path\nimport pytest\nwanted=set(json.loads(Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\parity-ordered-prefix-ids.json').read_text(encoding='utf-8')))\nclass Diagnostic:\n    @pytest.hookimpl(trylast=True)\n    def pytest_collection_modifyitems(self,session,config,items):\n        actual={i.nodeid for i in items}\n        if not wanted.issubset(actual):\n            raise pytest.UsageError('Required frozen prefix IDs missing')\n        excluded=[i for i in items if i.nodeid not in wanted]\n        items[:]=[i for i in items if i.nodeid in wanted]\n        config.hook.pytest_deselected(items=excluded)\n    def pytest_collection_finish(self,session):\n        Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\parity-ordered-prefix-diagnostic\\\\collection.json').write_text(json.dumps([i.nodeid for i in session.items],indent=2),encoding='utf-8')\n    @pytest.hookimpl(hookwrapper=True)\n    def pytest_runtest_makereport(self,item,call):\n        outcome=yield\n        report=outcome.get_result()\n        if report.failed and 'test_frontend_backend_parity.py' in item.nodeid:\n            local=call.excinfo.traceback[-1].frame.f_locals if call.excinfo else {}\n            data={'nodeid':item.nodeid,'phase':report.when,'body':local.get('body'),\n                  'captured_sections':report.sections,'failure':str(report.longrepr)}\n            with Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\parity-ordered-prefix-diagnostic\\\\parity-failures.jsonl').open('a',encoding='utf-8') as f:\n                f.write(json.dumps(data,default=str)+'\\n')\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\parity-ordered-prefix-diagnostic\\\\tests.xml'],plugins=[Diagnostic()]))\n"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v6-snapshot",
+      "native_exit_code": 0,
+      "elapsed_seconds": 375.141,
+      "peaks": {
+        "rss_bytes": 482226176,
+        "handles": 2684,
+        "threads": 60
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 240,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 41
+      }
+    }
+  },
+  "integrated_selected_scope_router": {
+    "commit": "fde5ef56de735b0a2e48a548eb9761ea0c7fa2e0",
+    "base": "a986e17d61217e4df4ca5612edb11b109a749bc2",
+    "files": [
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "sha256": "cdf63aad4c756582744f59906b34248de03f4c3d665996cc066e1c316999883b"
+      },
+      {
+        "path": "tests/services/test_selected_scope_router_continuity.py",
+        "sha256": "b4db230c32e50593b521b8326dd675b5d0300215290586aaf180693b874c49a7"
+      }
+    ],
+    "other_python_files_matching_committed_base": 3013,
+    "qualification": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_selected_scope_router_continuity.py",
+        "tests/services/test_turn_router_clarification.py",
+        "tests/services/test_router_refine.py",
+        "tests/services/test_recommendation_router_boundaries.py",
+        "tests/unit/test_recommend_intent_router.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-router-clean-green\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-router-clean-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 53.219,
+      "peaks": {
+        "rss_bytes": 296333312,
+        "handles": 1076,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 85,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "valid_red": {
+      "tests": 10,
+      "failures": 2,
+      "passed_negative_controls": 8
+    },
+    "preserved_working_tree_hashes": {
+      "src/app/services/recommendation_core/turn_router.py": "74f8c00c77c6a84b26e89e3952e027b3991b138242c4410d13d9e780f1ed4d22",
+      "tests/services/test_selected_scope_router_continuity.py": "b4db230c32e50593b521b8326dd675b5d0300215290586aaf180693b874c49a7"
+    },
+    "source_complete_before_test_process": true,
+    "comparison_normalization": "CRLF to LF, required by Git archive export attributes; no other normalization",
+    "limits": "Continuity only. No granted fit, research consent, mutation or commerce authority; complete ordinary browser workflow remains open."
+  },
+  "integrated_case_surfaces": {
+    "commit": "bf4db849c11fb28b1bef4ec5e9157fc74b1b9d99",
+    "parent": "fde5ef56de735b0a2e48a548eb9761ea0c7fa2e0",
+    "tested_base": "a986e17d61217e4df4ca5612edb11b109a749bc2",
+    "staged_files": [
+      "src/app/routers/shopping_case_product_offers.py",
+      "src/app/routers/shopping_case_inventory.py",
+      "src/app/services/buyer_supplier_selection.py",
+      "src/app/services/buyer_supplier_quotes.py",
+      "src/app/services/buyer_supplier_constraints.py",
+      "src/app/services/case_inventory_view.py",
+      "src/app/services/case_inventory_acceptance.py",
+      "src/app/routers/shopping_case_contracts.py",
+      "src/app/services/case_catalog_projection.py",
+      "src/app/services/shopping_case_supplier_continuation.py",
+      "frontend/src/components/CaseContractSelection.tsx",
+      "frontend/src/components/StockAcceptancePanel.tsx",
+      "frontend/src/components/BuyerSupplierQuotes.tsx",
+      "frontend/src/components/CaseProductOffers.tsx",
+      "frontend/src/App.tsx",
+      "src/app/routers/shopping_cases.py",
+      "src/app/services/governed_product_offers.py",
+      "src/app/services/electronics_shop_scenario.py",
+      "src/app/services/shop_operational_history.py",
+      "config/electronics_shop_scenario.json",
+      "frontend/src/lib/queryIntent.ts",
+      "tests/api/test_case_contract_selection.py",
+      "tests/api/test_conversational_stock_acceptance.py",
+      "tests/api/test_case_product_offers.py",
+      "tests/services/test_case_inventory_acceptance.py",
+      "tests/services/test_buyer_supplier_selection.py",
+      "tests/services/test_buyer_supplier_quotes.py",
+      "tests/services/test_governed_product_offers.py",
+      "frontend/src/lib/__tests__/queryIntent.test.ts",
+      "tests/api/test_shopping_case_requirement_acceptance.py",
+      "frontend/e2e/ordinary-case-requirements.spec.ts",
+      "frontend/e2e/helpers/chatTurn.ts"
+    ],
+    "exact_candidate_inputs": [
+      {
+        "path": "src/app/routers/shopping_case_product_offers.py",
+        "sha256": "426acd0e357197f55f6a6e25cbcfd7910f0338986b17523488843db64ec028f0"
+      },
+      {
+        "path": "src/app/routers/shopping_case_inventory.py",
+        "sha256": "5d3031dc250357eb473da10e7d55fcb436ae6a17437b2352ad8177b1fe28c4b1"
+      },
+      {
+        "path": "src/app/services/buyer_supplier_selection.py",
+        "sha256": "d04b8b719e0fe018c2780aa5600b7f8364fcafbf008956310b72918a108ade54"
+      },
+      {
+        "path": "src/app/services/buyer_supplier_quotes.py",
+        "sha256": "d5c1f180e6fc3467f47392c6fc8bd134a98b04b29ed80ce5a30e74cda534b6af"
+      },
+      {
+        "path": "src/app/services/buyer_supplier_constraints.py",
+        "sha256": "a65677e9baa570e341f107508421e5de34ea3f7fc3ba09f9685316cee047c70a"
+      },
+      {
+        "path": "src/app/services/case_inventory_view.py",
+        "sha256": "9089953665c2ccd6fd541824c36736d11a14a680bb4a17cb792ed39200f96622"
+      },
+      {
+        "path": "src/app/services/case_inventory_acceptance.py",
+        "sha256": "057f55eb983fd10efed54d0ce55b2645d0e220e93a6d35f13abbec9b95f4ad65"
+      },
+      {
+        "path": "src/app/routers/shopping_case_contracts.py",
+        "sha256": "3673ae2f1195c4cbb67e9aa8e976d6296d3459bf2b4cbf193653fc2105f2baef"
+      },
+      {
+        "path": "src/app/services/case_catalog_projection.py",
+        "sha256": "3020358aaaf1ce32acc4043f0521f98f162992bfe938d864ffbd7e416a0906f2"
+      },
+      {
+        "path": "src/app/services/shopping_case_supplier_continuation.py",
+        "sha256": "d703e80c21ea8ae991f9bfe13116638d2a8aba1efe3f526bd9b28e3383795a30"
+      },
+      {
+        "path": "frontend/src/components/CaseContractSelection.tsx",
+        "sha256": "7a8c2bf33672ec92977c5711c1ac7e69b411640cd6971328c9f3b9db3b78a311"
+      },
+      {
+        "path": "frontend/src/components/StockAcceptancePanel.tsx",
+        "sha256": "64f2db89b6e6bd095e9f5bb182096ea277a2bf4b4cf7781ac74a1e2cc0bc6c9a"
+      },
+      {
+        "path": "frontend/src/components/BuyerSupplierQuotes.tsx",
+        "sha256": "0fc40d505b3e3879f45bdc88b376e43d70439b4f8177b0c22eb6657b319d1446"
+      },
+      {
+        "path": "frontend/src/components/CaseProductOffers.tsx",
+        "sha256": "8b5038a01f0b8057d1c4252d65c8069e9a34cc08cbb3d70baa6f188eec835237"
+      },
+      {
+        "path": "frontend/src/App.tsx",
+        "sha256": "2ed26b213d4aecd5031c4b0319dc8821030f745f5b9ca852c8d4e9a137d66bd0"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "sha256": "b2edcbf6f6e87299a4946ee5e1fd798e68e06d8038a5275a587900797a210cf3"
+      },
+      {
+        "path": "src/app/services/governed_product_offers.py",
+        "sha256": "00e089a145d3d13d315b0d5a30f85a47c2a0408fb5f455ce84d701c4d659e018"
+      },
+      {
+        "path": "src/app/services/electronics_shop_scenario.py",
+        "sha256": "16c3006a4ea13c4e88ab43d97490fb5bf67a7e3fe4f6dd9f6ba4b1af82e105f7"
+      },
+      {
+        "path": "src/app/services/shop_operational_history.py",
+        "sha256": "46022b7763c1e29f4096ff9bb486e965e00aaa5f70913d0e98cd0286dd5e8090"
+      },
+      {
+        "path": "config/electronics_shop_scenario.json",
+        "sha256": "17c98090f9e4d78787cd6cd909041dc347e3c5d9abc797c902270c151809fb3b"
+      },
+      {
+        "path": "frontend/src/lib/queryIntent.ts",
+        "sha256": "21724a72c7bd5ee2087e0cb90e5685f740bacbdf620f59c5f42ae6cb184a3abe"
+      },
+      {
+        "path": "tests/api/test_case_contract_selection.py",
+        "sha256": "8e008a1459cbeb0d4c5dfba88379505eca68da6f202c363ab09e9449bb9c5867"
+      },
+      {
+        "path": "tests/api/test_conversational_stock_acceptance.py",
+        "sha256": "c255124f4ea2b3983b5317bef813349fade294337cd3e9e988a0b7fcd4c5e685"
+      },
+      {
+        "path": "tests/api/test_case_product_offers.py",
+        "sha256": "163f5357bfd155cc5ca5a40e8d3d9b6beaa3b5ffe5a0f49bbe41eda5927d1a99"
+      },
+      {
+        "path": "tests/services/test_case_inventory_acceptance.py",
+        "sha256": "177c6312e3216be4b3cc16e982bc67e1f60597e819daa25c411aba67e1308f32"
+      },
+      {
+        "path": "tests/services/test_buyer_supplier_selection.py",
+        "sha256": "da51ca9c53cd1a2873e36f226badb8b64824804eb0abb507cf214189eac6d03e"
+      },
+      {
+        "path": "tests/services/test_buyer_supplier_quotes.py",
+        "sha256": "d253022f015e1345d2ec80885cd38d63d62b35d2baa8bf010fa535256d52dd6a"
+      },
+      {
+        "path": "tests/services/test_governed_product_offers.py",
+        "sha256": "8f5f2a70135891e51e6064bad530e8cf218b1fd9afd757b6ef4c4323cc9e6fda"
+      },
+      {
+        "path": "tests/services/test_case_contract_binding.py",
+        "sha256": "8f4bf8ecf62be3390957cbb800bd349efe6fcf9e66f265a917208c9a990b3a12"
+      },
+      {
+        "path": "tests/services/test_v2_contract_binding.py",
+        "sha256": "58af2f99ae04a9d292be7f7603758e2f74dd37af616d7a109f2126ad60257a0b"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/queryIntent.test.ts",
+        "sha256": "5fd408cfc21fbd3e2e792177b602557d5519a9404725df2f0fd32cd72675d9cf"
+      },
+      {
+        "path": "tests/api/test_shopping_case_requirement_acceptance.py",
+        "sha256": "b81a6a7e75deee301f78b86c6144cebfc57062c02de53ebfe7673044066ab2c9"
+      },
+      {
+        "path": "frontend/e2e/ordinary-case-requirements.spec.ts",
+        "sha256": "c757406a6377ecabb6e94143600a243896a732b5094ec92e761a19a22655309c"
+      },
+      {
+        "path": "frontend/e2e/helpers/chatTurn.ts",
+        "sha256": "8c57a22e3b9cb5ce743bb3cac9cd68a584759937c98c2d72b573a32ec1f1a72a"
+      }
+    ],
+    "other_python_files_matching_tested_base": 3009,
+    "api": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-api-v5-rerun\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 538.703,
+      "peaks": {
+        "rss_bytes": 707551232,
+        "handles": 4182,
+        "threads": 84
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 338,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api/test_case_contract_selection.py",
+        "tests/api/test_conversational_stock_acceptance.py",
+        "tests/api/test_case_product_offers.py",
+        "tests/services/test_case_inventory_acceptance.py",
+        "tests/services/test_buyer_supplier_selection.py",
+        "tests/services/test_buyer_supplier_quotes.py",
+        "tests/services/test_governed_product_offers.py",
+        "tests/services/test_case_contract_binding.py",
+        "tests/services/test_v2_contract_binding.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-focused-v3\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 33.891,
+      "peaks": {
+        "rss_bytes": 277917696,
+        "handles": 1122,
+        "threads": 32
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 89,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "ui": {
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate\\frontend",
+      "native_exit_code": 0,
+      "elapsed_seconds": 26.156,
+      "peaks": {
+        "rss_bytes": 360300544,
+        "handles": 482,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "types": {
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate\\frontend",
+      "native_exit_code": 0,
+      "elapsed_seconds": 11.75,
+      "peaks": {
+        "rss_bytes": 509177856,
+        "handles": 168,
+        "threads": 12
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "browser": {
+      "complete": true,
+      "commercial_effects": "sandbox/disabled",
+      "results": [
+        {
+          "spec": "ordinary-case-requirements.spec.ts",
+          "native_exit_code": 0,
+          "stats": {
+            "startTime": "2026-10-21T07:30:06.439Z",
+            "duration": 3883.8840000000005,
+            "expected": 1,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "unrelated_canary_retained": true,
+          "native_cache_keys": 35,
+          "resource_receipt": {
+            "command": [
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow_integration_browser_entry.py",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate\\.artifacts\\workflow-integration-ordinary-chat-requirements-specs-v1\\ordinary-case-requirements\\owned-cache-private.json",
+              "--directory",
+              "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate\\.artifacts\\workflow-integration-ordinary-chat-requirements-specs-v1\\ordinary-case-requirements",
+              "--label",
+              "preview",
+              "--api-port",
+              "8104",
+              "--ui-port",
+              "5194",
+              "--frontend-mode",
+              "preview",
+              "ordinary-case-requirements.spec.ts"
+            ],
+            "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\workflow-integration-candidate",
+            "native_exit_code": 0,
+            "elapsed_seconds": 20.109,
+            "peaks": {
+              "rss_bytes": 278630400,
+              "handles": 1184,
+              "threads": 81
+            },
+            "resource_violation": null,
+            "offline_models": true,
+            "commercial_effects": "sandbox/disabled"
+          },
+          "ports_closed": {
+            "8104": true,
+            "5194": true
+          }
+        }
+      ],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "changed_source_inputs": [],
+      "selected_source_inputs": 5527,
+      "elapsed_seconds": 61.531
+    },
+    "preserved_requirement_assertions": 245,
+    "all_root_file_hashes_preserved": true,
+    "limits": "Ordinary selection and API stock/quote/offer controls qualified. Broader ordinary forty-unit workflow still fails its later terminal shelf projection; no completion of market intelligence, purchasing, native cross-database concurrency or release gates claimed. API candidate base100 and separately qualified parent101 are recorded distinctly."
+  },
+  "integrated_terminal_chat": {
+    "commit": "b548cf07e9ebacbff0baf167fb46e72e7cd39273",
+    "parent": "80c33dd33ab45bc10a973d30fbf4244866f7357b",
+    "comparison_base": "bf4db849c11fb28b1bef4ec5e9157fc74b1b9d99",
+    "other_python_files_matching_comparison_base": 3003,
+    "staged_files": [
+      "src/app/routers/chat.py",
+      "src/app/services/chat_case_continuity.py",
+      "src/app/services/chat_guard_projection.py",
+      "src/app/services/chat_research_entry.py",
+      "src/app/services/chat_transport.py",
+      "src/app/services/chat_turn_projection.py",
+      "src/app/services/conversation_case_state.py",
+      "src/app/services/turn_transition.py",
+      "src/app/services/research_outcome.py",
+      "src/app/services/research_policy.py",
+      "src/app/services/terminal_research_narration.py",
+      "src/app/services/terminal_research_reconciliation.py",
+      "src/app/services/terminal_qualification.py",
+      "src/app/services/chat_terminal_projection.py",
+      "src/app/services/requirement_claim_reconciliation.py",
+      "src/app/routers/shopping_cases.py",
+      "src/app/services/commercial_terms.py",
+      "frontend/src/App.tsx",
+      "src/app/services/clarification_state.py",
+      "src/app/services/recommendation_core/trace_ontology.py",
+      "src/app/services/bulk_intent.py",
+      "src/app/services/semantic_research_fixture.py",
+      "src/app/services/evidence_orchestrator.py",
+      "tests/services/test_chat_case_continuity.py",
+      "tests/services/test_conversation_case_state.py",
+      "tests/services/test_research_outcome.py",
+      "tests/services/test_turn_transition.py",
+      "tests/services/test_terminal_research_reconciliation.py",
+      "tests/services/test_terminal_research_narration.py",
+      "tests/services/test_terminal_qualification_security.py",
+      "tests/services/test_semantic_research_fixture.py",
+      "tests/api/test_shopping_case_requirement_acceptance.py",
+      "tests/api/test_chat_graceful_degrade.py",
+      "tests/chaos/test_native_case_terminal_state.py",
+      "frontend/e2e/ordinary-chat-shortfall.spec.ts",
+      "frontend/e2e/platform-audit-memory.spec.ts",
+      "frontend/e2e/buyer-only-procurement.spec.ts",
+      "frontend/e2e/helpers/currentQualification.ts",
+      "frontend/e2e/helpers/turnOracle.ts"
+    ],
+    "exact_candidate_inputs": [
+      {
+        "path": "src/app/routers/chat.py",
+        "sha256": "db55c623ed33f95aad5ce2ecb92acf78a6322e0fe24b094b678df5c6c7d31d57"
+      },
+      {
+        "path": "src/app/services/chat_case_continuity.py",
+        "sha256": "47fd5f55432d0cc204c3c0bba1f97afffba340ff84f66c5be633682d76fbf8dc"
+      },
+      {
+        "path": "src/app/services/chat_guard_projection.py",
+        "sha256": "9b196597a62a1aa996cb9f35bcfef76b99f35ebf2646134016a9a50827a1d072"
+      },
+      {
+        "path": "src/app/services/chat_research_entry.py",
+        "sha256": "9e277d702e0965fd16767e8d13674b95c5820d11288e3e390288da05c9533270"
+      },
+      {
+        "path": "src/app/services/chat_transport.py",
+        "sha256": "402845f16b1c9326ede25bfa848e2e1c1c87c0a006cc4204489aa89b13d5bfbd"
+      },
+      {
+        "path": "src/app/services/chat_turn_projection.py",
+        "sha256": "73c9d41e6221b07f15cbc315d635a2f53bff1c83edaa0aaffa7d8e4a918c9729"
+      },
+      {
+        "path": "src/app/services/conversation_case_state.py",
+        "sha256": "4551a06f6447dfb0b1a144aa246a644dcba264cb72dcc3804d8a10727a0640e4"
+      },
+      {
+        "path": "src/app/services/turn_transition.py",
+        "sha256": "41fe1d183179d5b038b004398b2593dcc9d1e2cfc1de0c64c579090b02940297"
+      },
+      {
+        "path": "src/app/services/research_outcome.py",
+        "sha256": "d3caea3c55768d9d7c5e60fd2c34532a2109e757956ff63a383c7744374d62fb"
+      },
+      {
+        "path": "src/app/services/research_policy.py",
+        "sha256": "e8ed56eb65e260eacbc24372e5116f476e61924211351422c3638253868178b9"
+      },
+      {
+        "path": "src/app/services/terminal_research_narration.py",
+        "sha256": "86e5f7493c2ce885f0bec20741e06a1a3242967bc8ea65fa3bf7653196def9c2"
+      },
+      {
+        "path": "src/app/services/terminal_research_reconciliation.py",
+        "sha256": "ed52313a0a24471f969b1c6460fc1668bd101793707df57b9c4d41a639e7125f"
+      },
+      {
+        "path": "src/app/services/terminal_qualification.py",
+        "sha256": "c84ef1a26f16fd109b827d3641ec72a7e54c3ec987569f3da5b8ecf7aafa8859"
+      },
+      {
+        "path": "src/app/services/chat_terminal_projection.py",
+        "sha256": "c2df7077d7fb8436612705898dafffb9678807549f8e894c314a4a8e9785aaef"
+      },
+      {
+        "path": "src/app/services/requirement_claim_reconciliation.py",
+        "sha256": "7f913e9731faa1cf26895d1b3c91e819879479333bb212a431a3c10ed8800726"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/services/commercial_terms.py",
+        "sha256": "b1bacca8f797eb2803b6868773157fbd3406c7aec264e741f8ee9775947bd376"
+      },
+      {
+        "path": "frontend/src/App.tsx",
+        "sha256": "6c87c2c35e68221cd69ccf6cd5745eaf887251a319fafb5bfc051e9401f74fcd"
+      },
+      {
+        "path": "src/app/services/clarification_state.py",
+        "sha256": "435f03bc52d92af4c28da395fe350317db7b5922de3d8a7c105a3d7440c54f96"
+      },
+      {
+        "path": "src/app/services/recommendation_core/trace_ontology.py",
+        "sha256": "12667512d071dfa19e9a9e05370de8bcaa4111862111efb36f39066e6f2f3ce9"
+      },
+      {
+        "path": "src/app/services/bulk_intent.py",
+        "sha256": "d0daef78b7926907a2d786b5e5609fc18cec67a9ed2af55b400caa478fc86032"
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "sha256": "cdf63aad4c756582744f59906b34248de03f4c3d665996cc066e1c316999883b"
+      },
+      {
+        "path": "src/app/services/semantic_research_fixture.py",
+        "sha256": "c020c1eb9165e67014801b59a39b56de2fa17bb51bcb8d33028991375e19f147"
+      },
+      {
+        "path": "src/app/services/evidence_orchestrator.py",
+        "sha256": "4d8853cd190c5d42a69428ab31426271a662b89cae48589b98e42552547c758a"
+      },
+      {
+        "path": "tests/services/test_chat_case_continuity.py",
+        "sha256": "3c54bb096002841e36a69d4d77240eef7693189426b2f7e237536aeedced0f20"
+      },
+      {
+        "path": "tests/services/test_chat_transport.py",
+        "sha256": "28444b6e902b3a399e556ea081fa011e42886b56df52f0982dcf2824be765506"
+      },
+      {
+        "path": "tests/services/test_conversation_case_state.py",
+        "sha256": "fdd700c5071379fa5672533dd4f64aca70ff403eb85123401824aab735f2497b"
+      },
+      {
+        "path": "tests/services/test_research_policy.py",
+        "sha256": "1125f596c054023705454a2e971a2fac79624a6a771e1e0f704156265ee88026"
+      },
+      {
+        "path": "tests/services/test_research_outcome.py",
+        "sha256": "5d7725ba71b95d84de5a470ca2cba5e466f7f4e578cdd0d6100f2ffcb3879e11"
+      },
+      {
+        "path": "tests/services/test_requirement_claim_reconciliation.py",
+        "sha256": "8a9ef68df2c30114d803dab820731df3632bc685d1da877cc0447e93252478ef"
+      },
+      {
+        "path": "tests/services/test_turn_transition.py",
+        "sha256": "8f454c43efedcce30bfa84e6196c0d4eb38df2bdab50b1354b59c67b3b43e318"
+      },
+      {
+        "path": "tests/services/test_turn_outcome_contract.py",
+        "sha256": "0b81220b9c19b30a2650dcddf0af530ac77eebb0ad06628e9785e547f0d70a6d"
+      },
+      {
+        "path": "tests/services/test_terminal_research_reconciliation.py",
+        "sha256": "38f1f5e7b8bdde20975603577be43d3514e3d182b0a013406bd73552c7c221d4"
+      },
+      {
+        "path": "tests/services/test_terminal_research_narration.py",
+        "sha256": "b8958eef09eb8ecb4a2cf19757c05039a44a04562721f0fab1686fb32fbfc27a"
+      },
+      {
+        "path": "tests/services/test_terminal_qualification_security.py",
+        "sha256": "47cfdda5eb740957b787a32f2cd9efe810aa9a4483f445c375cb0824c7bb8cec"
+      },
+      {
+        "path": "tests/services/test_semantic_research_fixture.py",
+        "sha256": "e0bfd711f1900960973de0ecd3a0f80095966c5c0441b027c307085bb1a7054b"
+      },
+      {
+        "path": "tests/api/test_shopping_case_requirement_acceptance.py",
+        "sha256": "01330718894d56c2af6ddba94d62aebc81c12ff1ece4c42ee2245551ac355206"
+      },
+      {
+        "path": "tests/services/test_trace_ontology_workload.py",
+        "sha256": "d98b6810b91149a6c131ebb21eabab904f4c7524a58926fabce0de1b5d2184e9"
+      },
+      {
+        "path": "tests/api/test_chat_graceful_degrade.py",
+        "sha256": "f1eddeebca1b991abb595d3682443c85531dd12ebab1a4601f08f6f684fdd095"
+      },
+      {
+        "path": "tests/chaos/test_native_case_terminal_state.py",
+        "sha256": "10e313075b34eb9f6411be86cc7440d2d760e87703941476b8e0c05dec9791f1"
+      },
+      {
+        "path": "frontend/e2e/ordinary-chat-shortfall.spec.ts",
+        "sha256": "c762c369112cbdcca2b8ff66ec0434f9e695ddf31b16ba630b603ee8c06a4649"
+      },
+      {
+        "path": "frontend/e2e/platform-audit-memory.spec.ts",
+        "sha256": "643782ec290fd1cbe1ca29acb84f2e47df28207f89746cff5c54fcffa2b59e65"
+      },
+      {
+        "path": "frontend/e2e/buyer-only-procurement.spec.ts",
+        "sha256": "dcf8a825bcf9cb073d1dbd8959c344cdd3d3228b3da824e02d0c77d76c999cfd"
+      },
+      {
+        "path": "frontend/e2e/helpers/currentQualification.ts",
+        "sha256": "31f042bab2ca2a1cc64202146a4e171d1bf3fc26d77896a5505dc6daeca082b5"
+      },
+      {
+        "path": "frontend/e2e/helpers/turnOracle.ts",
+        "sha256": "1dc9ff46d9ceab079f2667c12112646bbc794d750c3d3cc29117c284f5e896ff"
+      }
+    ],
+    "focused": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_chat_case_continuity.py",
+        "tests/services/test_chat_transport.py",
+        "tests/services/test_conversation_case_state.py",
+        "tests/services/test_research_policy.py",
+        "tests/services/test_research_outcome.py",
+        "tests/services/test_requirement_claim_reconciliation.py",
+        "tests/services/test_turn_transition.py",
+        "tests/services/test_turn_outcome_contract.py",
+        "tests/services/test_terminal_research_reconciliation.py",
+        "tests/services/test_terminal_research_narration.py",
+        "tests/services/test_terminal_qualification_security.py",
+        "tests/services/test_semantic_research_fixture.py",
+        "tests/services/test_trace_ontology_workload.py",
+        "tests/api/test_shopping_case_requirement_acceptance.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\terminal-chat-cohort-focused-v2\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 90.125,
+      "peaks": {
+        "rss_bytes": 335581184,
+        "handles": 1358,
+        "threads": 35
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 158,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "api": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\terminal-chat-cohort-api-migrated\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 419.203,
+      "peaks": {
+        "rss_bytes": 757833728,
+        "handles": 4181,
+        "threads": 84
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 338,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "integration": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_bulk_intent.py",
+        "tests/services/test_chat_budget_canonical_parity.py",
+        "tests/integration/test_chat_history_api.py",
+        "tests/integration/test_chat_recommend_integration.py",
+        "tests/integration/test_chat_additive_workload_continuation.py",
+        "tests/integration/test_chat_narration_forwarding.py",
+        "tests/integration/test_frontend_backend_parity.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\terminal-chat-cohort-integration\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 34.937,
+      "peaks": {
+        "rss_bytes": 300941312,
+        "handles": 1144,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "postgresql": {
+      "purpose": "Disposable PostgreSQL request ownership across streaming, WebSockets and background contexts",
+      "complete": true,
+      "counts": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "exit_code": 0,
+      "changed_inputs": [],
+      "source_inputs": {
+        "src/app/services/conversation_case_state.py": "4551a06f6447dfb0b1a144aa246a644dcba264cb72dcc3804d8a10727a0640e4",
+        "src/app/services/turn_transition.py": "41fe1d183179d5b038b004398b2593dcc9d1e2cfc1de0c64c579090b02940297",
+        "src/app/services/chat_case_continuity.py": "47fd5f55432d0cc204c3c0bba1f97afffba340ff84f66c5be633682d76fbf8dc",
+        "tests/chaos/test_native_case_terminal_state.py": "10e313075b34eb9f6411be86cc7440d2d760e87703941476b8e0c05dec9791f1"
+      },
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "elapsed_seconds": 28.328
+    },
+    "types": {
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\frontend",
+      "native_exit_code": 0,
+      "elapsed_seconds": 11.812,
+      "peaks": {
+        "rss_bytes": 525144064,
+        "handles": 167,
+        "threads": 12
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "browsers": [
+      {
+        "name": "selected-scope-integration-ordinary-chat-browser-v6",
+        "receipt": {
+          "complete": true,
+          "commercial_effects": "sandbox/disabled",
+          "results": [
+            {
+              "spec": "ordinary-chat-shortfall.spec.ts",
+              "native_exit_code": 0,
+              "stats": {
+                "startTime": "2026-10-21T07:34:06.319Z",
+                "duration": 8068.8,
+                "expected": 1,
+                "skipped": 0,
+                "unexpected": 0,
+                "flaky": 0
+              },
+              "unrelated_canary_retained": true,
+              "native_cache_keys": 70,
+              "resource_receipt": {
+                "command": [
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected_scope_integration_browser_entry.py",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-v6\\ordinary-chat-shortfall\\owned-cache-private.json",
+                  "--directory",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-v6\\ordinary-chat-shortfall",
+                  "--label",
+                  "preview",
+                  "--api-port",
+                  "8104",
+                  "--ui-port",
+                  "5194",
+                  "--frontend-mode",
+                  "preview",
+                  "ordinary-chat-shortfall.spec.ts"
+                ],
+                "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+                "native_exit_code": 0,
+                "elapsed_seconds": 27.375,
+                "peaks": {
+                  "rss_bytes": 288247808,
+                  "handles": 1279,
+                  "threads": 81
+                },
+                "resource_violation": null,
+                "offline_models": true,
+                "commercial_effects": "sandbox/disabled"
+              },
+              "ports_closed": {
+                "8104": true,
+                "5194": true
+              }
+            }
+          ],
+          "owned_container_removed": true,
+          "owned_network_removed": true,
+          "changed_source_inputs": [],
+          "selected_source_inputs": 5534,
+          "elapsed_seconds": 64.578
+        }
+      },
+      {
+        "name": "selected-scope-integration-ordinary-chat-browser-memory-v7",
+        "receipt": {
+          "complete": true,
+          "commercial_effects": "sandbox/disabled",
+          "results": [
+            {
+              "spec": "platform-audit-memory.spec.ts",
+              "native_exit_code": 0,
+              "stats": {
+                "startTime": "2026-10-21T07:37:12.472Z",
+                "duration": 31737.769,
+                "expected": 7,
+                "skipped": 0,
+                "unexpected": 0,
+                "flaky": 0
+              },
+              "unrelated_canary_retained": true,
+              "native_cache_keys": 347,
+              "resource_receipt": {
+                "command": [
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected_scope_integration_browser_entry.py",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-memory-v7\\platform-audit-memory\\owned-cache-private.json",
+                  "--directory",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-memory-v7\\platform-audit-memory",
+                  "--label",
+                  "preview",
+                  "--api-port",
+                  "8104",
+                  "--ui-port",
+                  "5194",
+                  "--frontend-mode",
+                  "preview",
+                  "platform-audit-memory.spec.ts"
+                ],
+                "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+                "native_exit_code": 0,
+                "elapsed_seconds": 52.594,
+                "peaks": {
+                  "rss_bytes": 297164800,
+                  "handles": 1256,
+                  "threads": 81
+                },
+                "resource_violation": null,
+                "offline_models": true,
+                "commercial_effects": "sandbox/disabled"
+              },
+              "ports_closed": {
+                "8104": true,
+                "5194": true
+              }
+            }
+          ],
+          "owned_container_removed": true,
+          "owned_network_removed": true,
+          "changed_source_inputs": [],
+          "selected_source_inputs": 5535,
+          "elapsed_seconds": 90.063
+        }
+      },
+      {
+        "name": "selected-scope-integration-ordinary-chat-browser-buyer-only-v9",
+        "receipt": {
+          "complete": true,
+          "commercial_effects": "sandbox/disabled",
+          "results": [
+            {
+              "spec": "buyer-only-procurement.spec.ts",
+              "native_exit_code": 0,
+              "stats": {
+                "startTime": "2026-10-21T08:03:37.802Z",
+                "duration": 3839.6220000000003,
+                "expected": 1,
+                "skipped": 0,
+                "unexpected": 0,
+                "flaky": 0
+              },
+              "unrelated_canary_retained": true,
+              "native_cache_keys": 62,
+              "resource_receipt": {
+                "command": [
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected_scope_integration_browser_entry.py",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-buyer-only-v9\\buyer-only-procurement\\owned-cache-private.json",
+                  "--directory",
+                  "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate\\.artifacts\\selected-scope-integration-ordinary-chat-specs-buyer-only-v9\\buyer-only-procurement",
+                  "--label",
+                  "preview",
+                  "--api-port",
+                  "8104",
+                  "--ui-port",
+                  "5194",
+                  "--frontend-mode",
+                  "preview",
+                  "buyer-only-procurement.spec.ts"
+                ],
+                "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\selected-scope-integration-candidate",
+                "native_exit_code": 0,
+                "elapsed_seconds": 15.218,
+                "peaks": {
+                  "rss_bytes": 286453760,
+                  "handles": 1261,
+                  "threads": 78
+                },
+                "resource_violation": null,
+                "offline_models": true,
+                "commercial_effects": "sandbox/disabled"
+              },
+              "ports_closed": {
+                "8104": true,
+                "5194": true
+              }
+            }
+          ],
+          "owned_container_removed": true,
+          "owned_network_removed": true,
+          "changed_source_inputs": [],
+          "selected_source_inputs": 5536,
+          "elapsed_seconds": 35.984
+        }
+      }
+    ],
+    "preserved_root_bytes": true,
+    "scoped_lint": 0,
+    "separately_qualified_parent": "Outbound monitor/CV audit cohort changed four independent modules and removed an unused placeholder after this candidate was frozen; its 15-case qualification and global lint are recorded separately.",
+    "limits": "Nine browser assertions include simulated qualification and exact 40/15/25 draft/reload. Buyer-only profile has no operator API key. Market intelligence remains blocked with no current scoped evidence. No external email, purchase, complete release/security/endurance/distributed recovery certification claimed."
+  },
+  "outbound_monitor_and_cv_audit": {
+    "commit": "80c33dd33ab45bc10a973d30fbf4244866f7357b",
+    "base": "bf4db849c11fb28b1bef4ec5e9157fc74b1b9d99",
+    "tested_files": [
+      {
+        "path": "src/app/services/outbound_email_monitor.py",
+        "sha256": "051eb2b85cf1cc2234caa1deb66e27f950e8655db7d19cae850c7576769b2805"
+      },
+      {
+        "path": "src/app/services/parallel_agent_executor.py",
+        "sha256": "0a5061eaca22100f7baaa7835dc0bda851a20052d7989d737802475cd7130779"
+      },
+      {
+        "path": "src/app/services/email_providers.py",
+        "sha256": "40ee89f404d74b8945862ea15f8729f2193c56a09a4200e2b37d95cab8a060ee"
+      },
+      {
+        "path": "src/app/routers/admin_email_security.py",
+        "sha256": "fb2f029e1923293a10f7682a20db1c3a240409583bd3f9564fde069ffae6f7f6"
+      },
+      {
+        "path": "tests/services/test_parallel_cv_circuit_open.py",
+        "sha256": "fc30b5575a39cbc761fdbe148592ee5f0eb99756f824e4cd675f530920b78317"
+      },
+      {
+        "path": "tests/services/test_outbound_tenant_scope.py",
+        "sha256": "8e8e4d76e9dd723b77c6739313345582c10b5d95374a429741cda6a137b0a40a"
+      },
+      {
+        "path": "tests/services/test_outbound_email_monitor.py",
+        "sha256": "2e575d9535e6f7c3a50190bbbb057d2e1be3761169c023a9459684ebfde094f2"
+      },
+      {
+        "path": "tests/api/test_outbound_monitor_tenant_boundary.py",
+        "sha256": "92092ef4c0aeabdc9efbd99894f4543e4eb82e5958efcc58d40cf1e22e96ef28"
+      }
+    ],
+    "deleted_placeholders": [
+      "src/app/security/passive_payload_analysis_new.py"
+    ],
+    "qualification": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_parallel_cv_circuit_open.py",
+        "tests/services/test_outbound_tenant_scope.py",
+        "tests/services/test_outbound_email_monitor.py",
+        "tests/api/test_outbound_monitor_tenant_boundary.py",
+        "tests/security/test_passive_payload_analysis.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\outbound-circuit-native-green-v3\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\committed-lint-outbound-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 15.609,
+      "peaks": {
+        "rss_bytes": 273010688,
+        "handles": 1105,
+        "threads": 34
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "other_python_files_matching_committed_base": 3028,
+    "lint_undefined_names_before": 12,
+    "lint_undefined_names_after": 0,
+    "valid_reds": [
+      "Real authenticated HTTP response included foreign-tenant anomaly canary",
+      "Open CV circuit omitted health/trace/incident evidence"
+    ],
+    "preserved_root_bytes": true,
+    "limits": "Local monitoring and mocked CV circuit only; no external email was sent and complete security/deployment gates remain open."
+  },
+  "cart_fixture_transaction_ownership": {
+    "commit": "d68f37ac3cc01f6afa93c5a39a506d5b74b410c1",
+    "base": "b548cf07e9ebacbff0baf167fb46e72e7cd39273",
+    "files": [
+      {
+        "path": "tests/test_cart_stock_gates.py",
+        "sha256": "e677e89bcb7363507c27965001826d8042b4e18f845929329b33fe0ebd6abf54"
+      },
+      {
+        "path": "tests/services/test_cart_test_database_ownership.py",
+        "sha256": "89dbda3a3149fa8a212106d6ec2e39d7e3e181f5dcd8fe10ba890626ca214201"
+      }
+    ],
+    "qualification": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/services/test_cart_test_database_ownership.py",
+        "tests/test_cart_stock_gates.py",
+        "tests/test_cart_clear_undo_projection.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-fixture-ownership-final\\tests.xml"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\cart-fixture-ownership-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 72.515,
+      "peaks": {
+        "rss_bytes": 312885248,
+        "handles": 1418,
+        "threads": 38
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 31,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "preserved_existing_assertions": 83,
+    "other_python_files_matching_committed_base": 3043,
+    "controlled_reds": [
+      "Shared fixture connection let a second session observe and roll back the first session write: observed/persisted (1,0), expected (0,1)",
+      "Application setup failure left the temporary global owner installed and failed to dispose its engine"
+    ],
+    "official_reference": "https://docs.sqlalchemy.org/en/20/dialects/sqlite.html",
+    "limits": "Fixture repair, with original business assertions preserved. Earlier frozen cart 500 remains recorded. This is not a production SQLite locking, complete parity ordering or endurance repair."
+  },
+  "frozen_python_runtime_outcome_ledger": {
+    "source_head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+    "source_scope": "Frozen preserved working tree, including uncommitted integration dependencies",
+    "source_manifest_sha256": "3eddef05a7721a0079f89f9c900cd6008617843745b2f82a87f28c8aa498b4f3",
+    "original_unique_ids": 8560,
+    "unique_reported_ids": 8560,
+    "process_windows": 38,
+    "statuses": {
+      "call_pass_recorded": 8284,
+      "skip_recorded": 268,
+      "setup_prerequisite_requalified": 6,
+      "assertion_failure_recorded": 2
+    },
+    "skipped_case_ids": 268,
+    "public_ledger": "docs/audits/2026-10-21-python-frozen-outcome-ledger.csv",
+    "public_ledger_sha256": "1fe8c4c6900bc79b5f1b452947282d8ed43e2e2d66ad7c819cd613d95190d5c2",
+    "failed_assertion_ids": [
+      "tests/integration/test_frontend_backend_parity.py::test_product_item_contract",
+      "tests/test_cart_stock_gates.py::test_cart_age_warm_when_carried_over"
+    ],
+    "limitations": "Call outcomes from interrupted processes do not certify teardown. Thirty-five diagnostic partitions include four collection-module skips per process, excluded from these runtime-ID counts. Six original browser setup failures were separately requalified after installing the pinned browser. Two assertion failures remain recorded. The original 5,030-handle full-process failure is not replaced by these partitioned results. Source precedes the latest stream/privacy repair and integrated cohorts."
+  },
+  "frozen_python_source_integrity": {
+    "checked": 5734,
+    "changed": []
+  },
+  "roadmap_code_and_test_work_items": {
+    "path": "docs/audits/2026-10-21-roadmap-work-items.csv",
+    "sha256": "5f30e783790f17158d482184fd8f3177e8cd4123d10e28ae48091b2a3ba43e5a",
+    "packages": 16,
+    "scope": "Exact current code and representative existing-test lines, sizes, source hashes, remaining work, reasons, dependencies and required exit evidence. File length is not an estimate of remaining implementation work."
+  },
+  "second_host_interruption": {
+    "evidence_file": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\windows-second-host-interruption.json",
+    "sha256": "80aeeb6fb80c5218624272f23d041e46cde97c9f1befdab4e3a184f91443bd27",
+    "limitations": "Read-only Windows events record a second sleep/resume and clock correction. Interrupted API/red/partition receipts remain failed without complete JUnit. Original guard limits and power policy were not changed."
   }
 }
