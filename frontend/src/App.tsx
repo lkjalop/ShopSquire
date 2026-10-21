@@ -16,9 +16,11 @@ import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
 import { useHumanEscalation } from './hooks/useHumanEscalation';
 import { useShoppingCaseResearch } from './hooks/useShoppingCaseResearch';
+import CaseContractSelection from './components/CaseContractSelection';
+import StockAcceptancePanel from './components/StockAcceptancePanel';
 import { useShoppingCaseActions } from './hooks/useShoppingCaseActions';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
-import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
+import { apiRequestHeaders, apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
 import { nextSourcingTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -62,6 +64,7 @@ import {
   isComplaintIntent,
   isShoppingIntentQuery,
   requiresExternalResearchConsent,
+  isSpecificationPaste,
   shouldRouteToComplaint,
   type RightPanelMode,
 } from './lib/queryIntent';
@@ -405,6 +408,7 @@ export default function App() {
   // Keep their cart controls fail-closed unless the backend explicitly reports
   // positive product-fit evidence for the current response.
   const [recommendationActionsAuthorized, setRecommendationActionsAuthorized] = useState(false);
+  const [stockRequest, setStockRequest] = useState<{caseId:string;sku:string}|null>(null);
   const {
     ambiguityExploration,
     setAmbiguityExploration,
@@ -1580,13 +1584,9 @@ export default function App() {
     // Long, specification-shaped chat paste is a buyer claim proposal, not a new catalog
     // search. Extract it through the reviewable requirement-proposal endpoint so no pasted
     // claim silently qualifies a product.
-    const specificationSignals = q.match(
-      /\b(?:ram|memory|cpu|processor|cores?|threads?|ghz|gpu|nvidia|radeon|rtx|storage|disk|nvme|ssd|windows|linux|ethernet|network adapter|minimum|recommended)\b/gi,
-    ) || [];
     const pastedSpecifications = Boolean(
       ambiguityExploration?.case_id
-      && specificationSignals.length >= 2
-      && (q.length >= 50 || /\d+\s*(?:gb|tb|ghz|cores?|threads?)/i.test(q)),
+      && isSpecificationPaste(q),
     );
     if (pastedSpecifications) {
       setMessages((current) => [...current, { role: 'user', content: q, timestamp: new Date() }]);
@@ -3535,6 +3535,24 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {(activeShoppingCase?.case_id || ambiguityExploration?.case_id) && <CaseContractSelection
+                  caseId={(activeShoppingCase?.case_id || ambiguityExploration?.case_id)!} uid={uid}
+                  revision={activeShoppingCase?.revision}
+                  onChange={selection => {
+                    setActiveShoppingCase(current => current ? {...current,revision:selection.case_revision} : current);
+                    setProductShelves(null); setRecommendationShelf(null); setDisplayProducts([]);
+                    setRecommendationActionsAuthorized(false); setResearchOutcome(null);
+                    setArchitectureAlternatives(null); setSupplierContinuation(null);
+                  }} />}
+                {stockRequest && stockRequest.caseId === activeShoppingCase?.case_id && <StockAcceptancePanel
+                  caseId={stockRequest.caseId} uid={uid} sku={stockRequest.sku} revision={activeShoppingCase.revision}
+                  onAccepted={revision=>{
+                    setProductShelves(null);
+                    setRecommendationActionsAuthorized(false);
+                    setActiveShoppingCase(current=>current ? {...current,revision} : current);
+                    void refreshCart();
+                  }}
+                />}
                 <ConversationTimeline
                   messages={messages}
                   classNames={styles}
@@ -3846,6 +3864,13 @@ export default function App() {
                       researchStartedAt={researchStartedAt}
                     />
                   )}
+                  {import.meta.env.VITE_ENABLE_SIMULATED_STOCK === '1' && activeShoppingCase?.case_id && productShelves && !materialProductFitBlocked &&
+                    [...new Set(productShelves.shelves.flatMap(shelf=>[...shelf.initial,...shelf.next_page])
+                      .filter(item=>item.fit_status==='qualified').map(item=>item.product.sku))].map(sku=>(
+                      <button key={sku} onClick={()=>setStockRequest({caseId:activeShoppingCase.case_id,sku})}>
+                        Review simulated stock for {sku}
+                      </button>
+                    ))}
                   {productShelves && !materialProductFitBlocked && <ProductShelvesPanel
                     projection={productShelves}
                     onPropose={ambiguityExploration?.status === 'researched' ? proposeResearchedProduct : undefined}

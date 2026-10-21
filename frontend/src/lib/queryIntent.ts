@@ -39,6 +39,15 @@ export function requiresExternalResearchConsent(query: string): boolean {
   return researchVerb.test(q) && externalTarget.test(q);
 }
 
+export function isSpecificationPaste(query: string): boolean {
+  if (requiresExternalResearchConsent(query)) return false;
+  const fields = new Set((query.match(
+    /\b(?:ram|memory|cpu|processor|cores?|threads?|ghz|gpu|nvidia|radeon|rtx|storage|disk|nvme|ssd|windows|linux|ethernet|network adapter|minimum|recommended)\b/gi,
+  ) || []).map(value=>value.toLowerCase()));
+  // Repeated subject words and long prose are not concrete specifications.
+  return fields.size >= 2 && /\d+\s*(?:gb|tb|ghz|cores?|threads?)\b/i.test(query);
+}
+
 /**
  * A title-bearing game request belongs on the governed chat/router path, where the
  * literal title can be identity-resolved. Sending it through the generic open-world

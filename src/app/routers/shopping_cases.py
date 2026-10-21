@@ -29,6 +29,7 @@ from src.app.services.buyer_requirement_evidence import (
 )
 from src.app.services.awaitable_provider import await_provider_result
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
+from src.app.services.case_catalog_projection import project_case_catalog
 from src.app.services.infrastructure_alternative_projection import project_infrastructure_alternatives
 from src.app.services.evidence_acquisition_ladder import choose_evidence_stage
 from src.app.services.fulfillment_choice_reducer import reduce_fulfillment_choices
@@ -45,7 +46,15 @@ from src.app.services.source_requirement_review import create_source_review_prop
 logger = logging.getLogger("shopsquire.shopping_cases")
 
 
-router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"])
+from src.app.security.buyer_principal import require_shopping_case_principal
+
+router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"],
+                   dependencies=[Depends(require_shopping_case_principal)])
+from src.app.routers.shopping_case_contracts import router as contract_router
+router.include_router(contract_router)
+from src.app.routers.shopping_case_inventory import router as inventory_router
+from src.app.routers.shopping_case_product_offers import router as product_offers_router
+for child in (inventory_router,product_offers_router):router.include_router(child)
 
 
 from src.app.services.catalog_shortfall_projection import _case_budget_cents, _catalog_shortfall_alternative
@@ -356,9 +365,8 @@ def create_case_interpretation(
     case_persistence_ms = (perf_counter() - stage_started) * 1000.0
 
     stage_started = perf_counter()
-    projection = project_accepted_catalog(
-        db, accepted_claims=[], desired_outcome=plan.retained_purpose,
-        tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
+    projection = project_case_catalog(
+        db, case=case, uid=body.uid, accepted_claims=[], hypothesis_labels=plan_hypothesis_labels(plan),
         candidate_configuration_ids=candidate_set.configuration_ids,
     )
     product_shelves = projection.model_dump(mode="json")
@@ -802,12 +810,10 @@ async def _accept_requirement_proposal_with_db(
         raise HTTPException(status_code=409, detail={'code': str(exc)}) from exc
     result['budget_context'] = {'unit_budget_cents': unit_budget, 'quantity': order_quantity,
                                'case_revision': int(case.revision or 1)}
-    shelves = project_accepted_catalog(
-        db, accepted_claims=accepted,
+    shelves = project_case_catalog(
+        db, case=case, uid=body.uid, accepted_claims=accepted,
         budget_cents=unit_budget, requested_quantity=order_quantity,
         stretch_budget_cents=(result['stretch_consent'] or {}).get('unit_cap_cents'),
-        desired_outcome=case.retained_purpose or "Buyer accepted requirements",
-        tenant_id=tenant_id,
         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
             db, case_id=case_id, tenant_id=tenant_id,
         ).configuration_ids,
@@ -877,13 +883,11 @@ async def _accept_requirement_proposal_with_db(
                     corroboration["product_shelves"] = result["product_shelves"]
                 else:
                     official_projection = corroboration["product_shelves"]
-                    combined_projection = project_accepted_catalog(
-                        db,
+                    combined_projection = project_case_catalog(
+                        db, case=case, uid=body.uid,
                         accepted_claims=[*accepted, *official_claims],
                         budget_cents=unit_budget, requested_quantity=order_quantity,
                         stretch_budget_cents=(result['stretch_consent'] or {}).get('unit_cap_cents'),
-                        desired_outcome=case.retained_purpose or "Buyer accepted requirements",
-                        tenant_id=tenant_id,
                         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
                             db, case_id=case_id, tenant_id=tenant_id,
                         ).configuration_ids,
@@ -1480,10 +1484,8 @@ async def _resolve_case_evidence_source_with_db(
         search_url_template="", sources=[selected], tenant_id=tenant_id,
         evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
     ))
-    shelves = project_accepted_catalog(
-        db, accepted_claims=list(research.get("claims") or []),
-        desired_outcome=case.retained_purpose or "Buyer supplied evidence source",
-        tenant_id=tenant_id,
+    shelves = project_case_catalog(
+        db, case=case, uid=body.uid, accepted_claims=list(research.get("claims") or []),
         candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
             db, case_id=case_id, tenant_id=tenant_id,
         ).configuration_ids,

@@ -1,0 +1,21 @@
+{
+  "id": "electronics-shortfall-v1",
+  "simulation_only": true,
+  "effective_from": "2026-09-26T00:00:00+00:00",
+  "effective_to": "2026-09-27T00:00:00+00:00",
+  "currency": "AUD",
+  "locations": [
+    {"id": "store-a", "opening": 10, "sold": 3, "returned": 1, "reserved": 2},
+    {"id": "store-b", "opening": 5, "sold": 1, "returned": 0, "reserved": 0},
+    {"id": "warehouse", "opening": 5, "sold": 0, "returned": 0, "reserved": 0}
+  ],
+  "supplier": {
+    "name": "Fictional Supplier A",
+    "available_now": 10,
+    "later_quantity": 15,
+    "later_arrival": "2026-09-30T00:00:00+00:00",
+    "moq": 5,
+    "cost_basis_points_of_retail": 7000,
+    "price_breaks": [{"min_qty": 25, "discount_pct": 5}]
+  }
+}

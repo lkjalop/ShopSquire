@@ -8,8 +8,17 @@ import {
   isComplaintIntent,
   isShoppingIntentQuery,
   requiresExternalResearchConsent,
+  isSpecificationPaste,
   shouldRouteToComplaint,
 } from '../queryIntent';
+
+describe('specification intake',()=>{
+  it('keeps research requests and repeated workload words on the conversational path',()=>{
+    expect(isSpecificationPaste('Search online for Fictional Memory Lab requirements and check memory capacity.')).toBe(false);
+    expect(isSpecificationPaste('Can this memory application use memory across different projects?')).toBe(false);
+    expect(isSpecificationPaste('RAM 32GB minimum, storage 1TB NVMe, Windows 11 Pro recommended.')).toBe(true);
+  });
+});
 
 describe('hasNamedGameWorkload', () => {
   it('routes a buyer-authored game title to the identity-aware chat path', () => {

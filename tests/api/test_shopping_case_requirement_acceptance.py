@@ -10,6 +10,14 @@ from src.app.models.orm import Base, Product
 from src.app.routers.shopping_cases import router
 from src.app.services.buyer_requirement_evidence import extract_buyer_requirement_claims
 from src.app.services.taxonomy_registry import add_sold_node
+from tests.buyer_client import BuyerTestClient, TEST_SIGNING_KEY
+
+
+@pytest.fixture(autouse=True)
+def buyer_credentials(monkeypatch):
+    monkeypatch.setenv('JWT_SIGNING_KEY', TEST_SIGNING_KEY)
+    monkeypatch.setenv('BUYER_TENANT_BINDINGS_JSON',
+        '{"buyer-1":["default","tenant-a"],"buyer-proof":["default","tenant-a","tenant-b"]}')
 
 
 def _client(*, catalog_grounded: bool = True) -> TestClient:
@@ -36,6 +44,14 @@ def _client(*, catalog_grounded: bool = True) -> TestClient:
         migration.op = Operations(MigrationContext.configure(connection))
         migration.upgrade()
     app = FastAPI()
+    from src.app.platform.tenant_context import set_active_tenant_id, reset_active_tenant_id
+    @app.middleware('http')
+    async def tenant_context(request, call_next):
+        token = set_active_tenant_id(request.headers.get('x-tenant-id'))
+        try:
+            return await call_next(request)
+        finally:
+            reset_active_tenant_id(token)
     app.include_router(router)
     app.state.test_engine = engine
 
@@ -44,7 +60,7 @@ def _client(*, catalog_grounded: bool = True) -> TestClient:
             yield db
 
     app.dependency_overrides[get_db] = db_override
-    return TestClient(app)
+    return BuyerTestClient(app)
 
 
 def _enrol_local_research(monkeypatch, *, tenant_id: str = "default") -> None:
@@ -108,11 +124,12 @@ def test_acceptance_passes_durable_total_budget_and_quantity_to_fit(monkeypatch,
             {'state': json.dumps({'procurement_case_state': {'requested_quantity': 10,
                 'budget': {'amount_minor': 3000000, 'scope': 'total', 'currency': 'AUD'}}})})
     captured = []
-    original = shopping_cases.project_accepted_catalog
+    from src.app.services import case_catalog_projection
+    original = case_catalog_projection.project_accepted_catalog
     def project(db, **kwargs):
         captured.append(kwargs)
         return original(db, **kwargs)
-    monkeypatch.setattr(shopping_cases, 'project_accepted_catalog', project)
+    monkeypatch.setattr(case_catalog_projection, 'project_accepted_catalog', project)
     response = client.post(f"/api/v1/shopping-cases/budget-case/requirement-proposals/{proposal['proposal_id']}/accept",
         headers={'Idempotency-Key':'budget-acceptance-test'}, json={
             'uid':'budget-buyer', 'expected_proposal_version':1,

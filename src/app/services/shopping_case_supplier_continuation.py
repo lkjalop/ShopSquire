@@ -8,6 +8,7 @@ after a separate revision-bound confirmation.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Literal, Sequence
@@ -317,13 +318,25 @@ def select_fulfillment_option(
     idempotency_key: str, offers: Sequence[SupplierOfferInput],
     deadline_days: int | None = None,
     use_canonical_case_revision: bool = False,
+    commit: bool = True,
 ) -> tuple[FulfillmentSelection | None, str | None]:
+    request_digest = hashlib.sha256(json.dumps(dict(
+        tenant_id=tenant_id,case_id=case_id,uid=uid,expected_revision=expected_revision,
+        choice=choice,preferred_sku=preferred_sku,requested_quantity=requested_quantity,
+        available_now=available_now,deadline_days=deadline_days,
+        canonical_revision=use_canonical_case_revision,
+        offers=[offer.model_dump(mode='json') for offer in offers],
+    ),sort_keys=True,separators=(',',':')).encode()).hexdigest()
     replay = db.execute(select(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
         ShoppingCaseFulfillmentSelection.case_id == case_id,
         ShoppingCaseFulfillmentSelection.selection_idempotency_key == idempotency_key,
     )).scalar_one_or_none()
     if replay:
+        if not replay.request_digest:
+            return None, 'fulfillment_selection_replay_unverifiable'
+        if replay.request_digest != request_digest:
+            return None, 'fulfillment_selection_replay_conflict'
         return _decode(replay), None
     if use_canonical_case_revision:
         from src.app.services.shopping_case_revision import (
@@ -371,6 +384,7 @@ def select_fulfillment_option(
         available_now=available_now,
         offers_json=[item.model_dump(mode="json") for item in normalized],
         selection_idempotency_key=idempotency_key,
+        request_digest=request_digest,
         created_at=stamp, updated_at=stamp,
     )
     db.add(row)
@@ -379,6 +393,8 @@ def select_fulfillment_option(
     # and needlessly added another database round trip.
     db.flush()
     selection = _decode(row)
+    if not commit:
+        return selection, None
     db.commit()
     try:
         from src.app.services.hippograph_journey_producers import fulfillment_selection_edges
