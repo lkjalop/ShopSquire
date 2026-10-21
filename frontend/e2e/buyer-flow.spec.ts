@@ -1,21 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
-
-// The dev key the browser bundle already ships with (VITE_API_KEY) — used to seed the cart deterministically
-// over the API. Not a secret: it's inlined into the served JS.
-function devApiKey(): string {
-  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
-  const here = dirname(fileURLToPath(import.meta.url));
-  for (const rel of ['../.env.local', '../.env.development.local']) {
-    try {
-      const m = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
-      if (m && m[1].trim()) return m[1].trim();
-    } catch { /* next */ }
-  }
-  return '';
-}
+import { test, expect, buyerUid } from './helpers/authenticatedTest';
+import type { Page } from '@playwright/test';
 
 /**
  * Direct clickthrough of the shopper storefront against the live dev stack (Vite :5173 + backend :8080
@@ -48,8 +32,8 @@ test.describe('shopper storefront', () => {
     expect(body).not.toMatch(/\+in_stock|ram_gb_min|embedding_similarity|cross_encoder/);
   });
 
-  const T4_UID = `e2e-t4-buyer-${Date.now()}`;
-  const T4_SKU = 'LAP-0003';  // canonical, in-stock business laptop the amendment binds "__last__" to
+  const T4_UID = buyerUid;
+  const T4_SKU = process.env.ROADMAP_QUALIFIED_BASE_SKU;
 
   test('T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)', async ({ page }) => {
     // This regression targets the canonical query response + confirmation UI.
@@ -60,11 +44,12 @@ test.describe('shopper storefront', () => {
     // add, and the Redis-shortlist fallback is a cross-turn race — a real cart line makes the amendment
     // deterministic, which is what a production test needs).
     await page.addInitScript((uid) => { try { sessionStorage.setItem('uid', uid); } catch { /* no-op */ } }, T4_UID);
-    const key = devApiKey();
-    expect(key, 'VITE_API_KEY must be readable from .env.local for the cart seed').not.toEqual('');
+    expect(T4_SKU, 'prepare a current fictional shop with its exact laptop SKU').toBeTruthy();
+    const product = await page.request.get(`/api/v1/products/${T4_SKU}`);
+    expect(product.ok(), 'the amendment must reference a real fixture product').toBeTruthy();
     const seed = await page.request.put(`/api/v1/cart/items/${T4_SKU}`, {
-      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      data: { uid: T4_UID, sku: T4_SKU, quantity: 1 },
+      headers: { 'Content-Type': 'application/json' },
+      data: { uid: T4_UID, sku: T4_SKU, quantity: 1, allow_sourcing: true },
     });
     expect(seed.ok(), `cart seed failed (${seed.status()})`).toBeTruthy();
 

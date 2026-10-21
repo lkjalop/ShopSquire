@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, buyerUid } from './helpers/authenticatedTest';
+import type { Page } from '@playwright/test';
 
 
 async function send(page: Page, query: string) {
@@ -11,6 +12,7 @@ async function send(page: Page, query: string) {
   await input.fill(query);
   await input.press('Enter');
   const response = await responsePromise;
+  expect(response.ok(), `chat request failed: HTTP ${response.status()}`).toBeTruthy();
   const raw = await response.text();
   if (!raw.includes('data:')) return JSON.parse(raw);
   const frames = raw.replaceAll('\r\n', '\n').split('\n\n').reverse();
@@ -26,7 +28,7 @@ async function send(page: Page, query: string) {
 
 test('software budget truth is consistent and off-catalog sourcing is explicit and draft-only', async ({ page }) => {
   test.setTimeout(180_000);
-  const uid = `budget-role-rfq-${Date.now()}`;
+  const uid = buyerUid;
   await page.addInitScript(value => {
     localStorage.clear();
     sessionStorage.clear();

@@ -1,15 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, buyerUid } from './helpers/authenticatedTest';
 
 test('shopping-case panel and Decision Trace consume the same truth projection', async ({ page }) => {
-  const uid = `case-truth-${Date.now()}`;
+  const uid = buyerUid;
   const purpose = 'I need to simulate a PLC-controlled factory and cyberattacks against the OT network.';
-  const headers = {
-    'x-api-key': 'local-developer-key',
-    'x-tenant-id': 'default',
-  };
-
   const created = await page.request.post('/api/v1/shopping-cases/interpretations', {
-    headers,
     data: { uid, retained_purpose: purpose },
   });
   expect(created.status()).toBe(200);
@@ -18,7 +12,6 @@ test('shopping-case panel and Decision Trace consume the same truth projection',
 
   const traceResponse = await page.request.get(
     `/api/v1/trace/${encodeURIComponent(panel.trace_id)}/events`,
-    { headers },
   );
   expect(traceResponse.ok()).toBeTruthy();
   const trace = await traceResponse.json();
