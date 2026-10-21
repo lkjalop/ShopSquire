@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.app.security.egress_allowlist import EgressBlockedError
+
 
 _MAX_RESPONSE_BYTES = 256 * 1024
 _ALLOWED_STATUSES = {
@@ -157,6 +159,7 @@ class ValidatedReturnPartnerClient:
                 headers=headers,
                 json=dict(payload),
                 timeout=self._endpoint.timeout_seconds,
+                follow_redirects=False,
             )
             if 300 <= response.status_code < 400:
                 return PartnerOutcome(
@@ -183,6 +186,9 @@ class ValidatedReturnPartnerClient:
             return PartnerOutcome(
                 **{**outcome.__dict__, "provider_id": self._endpoint.provider_id}
             )
+        except EgressBlockedError:
+            return PartnerOutcome(status='policy_denied',provider_id=self._endpoint.provider_id,
+                detail='outbound_policy_denied')
         except (httpx.TimeoutException, httpx.NetworkError):
             return PartnerOutcome(
                 status="source_unavailable",
