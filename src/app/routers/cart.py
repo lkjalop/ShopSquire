@@ -753,16 +753,17 @@ def clear_cart(uid: str, session_epoch: str | None = None, redis=Depends(get_red
         signal = _guard_cart_request(surface="cart.clear", uid=uid, sku_values=[], quantity_values=[])
         cart_id, prior_items, _ = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.clear", signal=signal)
+        # Retire an older snapshot before this clear. If the new write fails,
+        # an unrelated earlier cart must never become the advertised undo.
+        try:
+            redis.delete(_undo_key(uid))
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="cart_snapshot_unavailable") from exc
         if prior_items:
             try:
                 redis.setex(_undo_key(uid), _undo_ttl(), json.dumps({
                     "items": prior_items, "restore_mode": "replace", "saved_at": _now_ts(),
                 }))
-            except Exception:
-                pass
-        else:
-            try:
-                redis.delete(_undo_key(uid))
             except Exception:
                 pass
         _save_cart(cart_id, [])
@@ -798,6 +799,7 @@ def clear_cart(uid: str, session_epoch: str | None = None, redis=Depends(get_red
             "trace_id": _cart_trace_id(cart_id),
             "decision_trace_id": _cart_trace_id(cart_id),
             "demand_projection": demand_projection,
+            "undo": _undo_available(redis, uid),
         }
 
 
