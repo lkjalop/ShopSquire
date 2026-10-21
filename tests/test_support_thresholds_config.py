@@ -1,16 +1,17 @@
 import json
+import os
+from tests.utils import write_feature_flags
 
 from src.app.routers.support_complaints import _build_evidence_tags, _evaluate_cv_rules
 
 
 def _read_flags() -> dict:
-    with open("config/feature_flags.json", "r", encoding="utf-8") as f:
+    with open(os.environ["FEATURE_FLAGS_PATH"], "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _write_flags(flags: dict) -> None:
-    with open("config/feature_flags.json", "w", encoding="utf-8") as f:
-        json.dump(flags, f, ensure_ascii=False, indent=2)
+    write_feature_flags(flags)
 
 
 def test_support_thresholds_drive_low_confidence_and_excessive_returns_rules():

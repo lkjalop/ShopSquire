@@ -1,16 +1,17 @@
 import json
+import os
+from tests.utils import write_feature_flags
 
 from src.app.services.inventory_agent import InventoryAgent, ReorderRecommendation
 
 
 def _read_flags() -> dict:
-    with open("config/feature_flags.json", "r", encoding="utf-8") as f:
+    with open(os.environ["FEATURE_FLAGS_PATH"], "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _write_flags(flags: dict) -> None:
-    with open("config/feature_flags.json", "w", encoding="utf-8") as f:
-        json.dump(flags, f, ensure_ascii=False, indent=2)
+    write_feature_flags(flags)
 
 
 def test_inventory_execute_reorder_uses_configured_approval_threshold():
