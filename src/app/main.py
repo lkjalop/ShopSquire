@@ -65,6 +65,7 @@ from src.app.bootstrap.intelligence_router_group import register_intelligence_ro
 from src.app.bootstrap.operational_router_group import register_operational_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
 from src.app.bootstrap.startup_readiness import run_startup_step
+from src.app.bootstrap.security_schema import ensure_security_ingest_ready
 from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
 from src.app.bootstrap.security_operations_router_group import (
     register_security_operations_router_group,
@@ -229,13 +230,9 @@ def create_app() -> FastAPI:
             operation=_ensure_decision_trace,
         )
 
-        def _ensure_security_ingest() -> None:
-            from src.app.security.security_event_ingest import ensure_security_event_ingest_table
-            if not ensure_security_event_ingest_table():
-                raise RuntimeError('security_event_ingest_schema_unavailable')
         run_startup_step(
             app, name="security_event_ingest_compatibility", criticality="optional",
-            operation=_ensure_security_ingest,
+            operation=ensure_security_ingest_ready,
         )
 
         def _ensure_playbook_tables() -> None:
