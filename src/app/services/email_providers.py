@@ -87,7 +87,7 @@ class SendGridProvider(BaseEmailProvider):
                         "agent_id": agent_id, "capability": "email_send", "dlp": _dlp,
                         "quarantine_id": _qid,
                         "release_via": (f"/api/v1/email/outbound/quarantine/{_qid}/release" if _qid else None)}
-            analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
+            analysis = analyze_agent_outbound_email(tenant_id=tenant_id, agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
             try:
                 thr = float(os.getenv("OUTBOUND_CONTAINMENT_SCORE_THRESHOLD", "0.75") or 0.75)
@@ -171,7 +171,7 @@ class SESProvider(BaseEmailProvider):
                 decision_id=decision_id,
                 meta={"provider": "ses"},
             )
-            analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
+            analysis = analyze_agent_outbound_email(tenant_id=tenant_id, agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
             try:
                 thr = float(os.getenv("OUTBOUND_CONTAINMENT_SCORE_THRESHOLD", "0.75") or 0.75)

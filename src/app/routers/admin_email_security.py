@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.deps import get_redis, DummyRedis
 from src.app.config import load_feature_flags, get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
@@ -3130,7 +3131,11 @@ def outbound_anomalies(
     from src.app.services.outbound_email_monitor import list_outbound_anomalies
 
     _ = role
-    return {"items": list_outbound_anomalies(limit=limit), "count": len(list_outbound_anomalies(limit=limit))}
+    try:
+        items = list_outbound_anomalies(tenant_id=current_tenant_id(), limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="outbound_monitor_unavailable") from exc
+    return {"items": items, "count": len(items)}
 
 
 @router.post("/outbound/simulate")
@@ -3146,7 +3151,10 @@ def outbound_simulate(
     )
 
     _ = role
-    tenant_id = (payload or {}).get("tenant_id")
+    _ensure_demo_routes_enabled()
+    tenant_id = current_tenant_id()
+    if (payload or {}).get("tenant_id") not in (None, tenant_id):
+        raise HTTPException(status_code=403, detail="tenant_scope_mismatch")
     agent_id = str((payload or {}).get("agent_id") or "agent-demo")
     to = str((payload or {}).get("to") or "c2@example.invalid")
     subject = str((payload or {}).get("subject") or "ping")
@@ -3174,7 +3182,7 @@ def outbound_simulate(
             _time.sleep(max(0.0, min(interval_sec, 2.0)))
         except Exception:
             pass
-    analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int((payload or {}).get("minutes") or 60))
+    analysis = analyze_agent_outbound_email(tenant_id=tenant_id, agent_id=agent_id, minutes=int((payload or {}).get("minutes") or 60))
     an_id = None
     if analysis.get("anomalous"):
         an_id = store_outbound_anomaly(

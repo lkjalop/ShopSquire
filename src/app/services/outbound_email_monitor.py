@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.services.decision_log import log_trace_event
 
 
@@ -138,7 +139,7 @@ def record_outbound_email_event(
         _meta["dlp_content"] = dlp
     row = {
         "id": ev_id,
-        "tenant_id": tenant_id,
+        "tenant_id": tenant_id or current_tenant_id(),
         "agent_id": str(agent_id or "unknown"),
         "to_hash": _hash16(to_s),
         "to_domain_hash": _hash16(dom) if dom else None,
@@ -191,7 +192,7 @@ def record_outbound_email_event(
             **{k: row[k] for k in ("tenant_id", "agent_id", "to_domain_hash", "thread_id_hash", "subject_entropy", "body_entropy", "created_at")}}
 
 
-def _recent_events(*, agent_id: str, minutes: int = 60, now_ts: int | None = None) -> List[Dict[str, Any]]:
+def _recent_events(*, tenant_id: str, agent_id: str, minutes: int = 60, now_ts: int | None = None) -> List[Dict[str, Any]]:
     _ensure_tables()
     now = int(now_ts) if now_ts is not None else int(time.time())
     since = now - int(max(1, minutes)) * 60
@@ -202,11 +203,11 @@ def _recent_events(*, agent_id: str, minutes: int = 60, now_ts: int | None = Non
                     """
                     SELECT id, created_at, subject_entropy, body_entropy, thread_id_hash, to_domain_hash
                     FROM outbound_email_events
-                    WHERE agent_id = :agent_id AND created_at >= :since
+                    WHERE tenant_id = :tenant_id AND agent_id = :agent_id AND created_at >= :since
                     ORDER BY created_at ASC
                     """
                 ),
-                {"agent_id": str(agent_id), "since": since},
+                {"tenant_id": tenant_id, "agent_id": str(agent_id), "since": since},
             ).fetchall()
         out = []
         for r in rows or []:
@@ -221,12 +222,13 @@ def _recent_events(*, agent_id: str, minutes: int = 60, now_ts: int | None = Non
                 }
             )
         return out
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError("outbound_monitor_unavailable") from exc
 
 
 def analyze_agent_outbound_email(
     *,
+    tenant_id: str | None = None,
     agent_id: str,
     minutes: int = 60,
     entropy_subject_threshold: float = 4.0,
@@ -234,7 +236,7 @@ def analyze_agent_outbound_email(
     periodic_cv_threshold: float = 0.15,
     now_ts: int | None = None,
 ) -> Dict[str, Any]:
-    events = _recent_events(agent_id=agent_id, minutes=minutes, now_ts=now_ts)
+    events = _recent_events(tenant_id=tenant_id or current_tenant_id(), agent_id=agent_id, minutes=minutes, now_ts=now_ts)
     reasons: List[str] = []
     score = 0.0
 
@@ -323,7 +325,7 @@ def store_outbound_anomaly(
                 {
                     "id": an_id,
                     "event_id": event_id,
-                    "tenant_id": tenant_id,
+                    "tenant_id": tenant_id or current_tenant_id(),
                     "agent_id": agent_id,
                     "severity": severity,
                     "reasons_json": json.dumps(reasons, ensure_ascii=False),
@@ -395,7 +397,7 @@ def store_outbound_anomaly(
     return an_id
 
 
-def list_outbound_anomalies(*, limit: int = 100) -> List[Dict[str, Any]]:
+def list_outbound_anomalies(*, tenant_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     _ensure_tables()
     limit = max(1, min(int(limit or 100), 500))
     try:
@@ -405,11 +407,12 @@ def list_outbound_anomalies(*, limit: int = 100) -> List[Dict[str, Any]]:
                     """
                     SELECT id, event_id, tenant_id, agent_id, severity, reasons_json, score, created_at
                     FROM outbound_email_anomalies
+                    WHERE tenant_id = :tenant_id
                     ORDER BY created_at DESC
                     LIMIT :limit
                     """
                 ),
-                {"limit": limit},
+                {"tenant_id": tenant_id, "limit": limit},
             ).fetchall()
         out: List[Dict[str, Any]] = []
         for r in rows or []:
@@ -430,52 +433,5 @@ def list_outbound_anomalies(*, limit: int = 100) -> List[Dict[str, Any]]:
                 }
             )
         return out
-    except Exception:
-            try:
-                contain_env = str(__import__("os").getenv("OUTBOUND_CONTAIN_ON_ANOMALY", "0")).strip().lower() in ("1", "true", "yes")
-            except Exception:
-                contain_env = False
-            try:
-                if contain_env and (severity in ("high", "critical") or float(analysis.get("score") or 0.0) >= 0.7):
-                    # Persist capability revoke via agent_containment service (policy-style control)
-                    try:
-                        from src.app.services.agent_containment import contain_agent
-                        ttl_env = __import__("os").getenv("OUTBOUND_CONTAIN_TTL_SECONDS", "900")
-                        ttl = None
-                        try:
-                            ttl = int(ttl_env)
-                        except Exception:
-                            ttl = None
-                        contain_agent(
-                            tenant_id=tenant_id,
-                            agent_id=agent_id,
-                            capability="email_outbound",
-                            score=float(analysis.get("score") or 0.0),
-                            reasons=reasons,
-                            actor="Outbound_Comms_Monitor",
-                            decision_id=decision_id,
-                            trace_id=decision_id,
-                            ttl_seconds=ttl,
-                        )
-                    except Exception:
-                        pass
-                    # Also emit a lightweight containment trace for UIs that don’t read containment table yet.
-                    try:
-                        log_trace_event(
-                            trace_id=decision_id,
-                            event_type="agent_contained",
-                            source_type="agent",
-                            source_id="Outbound_Comms_Monitor",
-                            target_type="agent",
-                            target_id=agent_id,
-                            payload={
-                                "mechanism": "outbound_email_monitor",
-                                "scope": "email_outbound",
-                                "reasons": reasons,
-                                "severity": severity,
-                            },
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+    except Exception as exc:
+        raise RuntimeError("outbound_monitor_unavailable") from exc

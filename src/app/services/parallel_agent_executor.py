@@ -152,7 +152,6 @@ def _run_cv(payload: Dict[str, Any], retries: int | None = None, timeout_ms: int
                     from src.app.services.decision_log import log_trace_event
                     from src.app.observability.metrics import (
                         record_cv_provider_latency,
-                        record_cb_state,
                         record_cv_provider_latency_tenant,
                     )
                     tid = str(payload.get("trace_id") or "")

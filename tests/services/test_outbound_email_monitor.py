@@ -41,7 +41,7 @@ def test_periodic_beacon_like_detection(monkeypatch):
             now_ts=int(times[i]),
         )
 
-    analysis = oem.analyze_agent_outbound_email(
+    analysis = oem.analyze_agent_outbound_email(tenant_id="t-out",
         agent_id=agent,
         minutes=120,
         periodic_cv_threshold=0.2,
@@ -83,7 +83,7 @@ def test_high_entropy_subject_detection(monkeypatch):
             now_ts=int(times.pop(0)),
         )
 
-    analysis = oem.analyze_agent_outbound_email(agent_id=agent, minutes=60, entropy_subject_threshold=3.5, now_ts=t0 + 30)
+    analysis = oem.analyze_agent_outbound_email(tenant_id="t-out", agent_id=agent, minutes=60, entropy_subject_threshold=3.5, now_ts=t0 + 30)
     # High-entropy subject alone is a signal, but does not necessarily cross the anomaly score threshold.
     assert analysis.get("anomalous") in (False, True)
     assert "high_entropy_subject" in (analysis.get("reasons") or [])
@@ -149,7 +149,7 @@ def test_thread_coherence_and_containment_trace(monkeypatch):
             decision_id=dec_id,
         )
 
-    analysis = oem.analyze_agent_outbound_email(
+    analysis = oem.analyze_agent_outbound_email(tenant_id="t-out",
         agent_id=agent,
         minutes=120,
         periodic_cv_threshold=0.25,
