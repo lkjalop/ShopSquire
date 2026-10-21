@@ -121,6 +121,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # they do not allow the model to mutate catalog, cart, procurement, or payment state.
     "semantic_resolution", "provisional_catalog_authority", "semantic_evidence", "approved_narration_evidence",
     "semantic_requirement_compilation", "infrastructure_alternatives",
+    # Read-only receipt already emitted by legacy_adapter; it records contract
+    # selection/coverage and does not grant product-fit or commerce authority.
+    "requirement_contract",
     "catalog_alignment", "supplier_enquiry_option", "preserve_current_view",
     "case_operation", "case_anchor", "state_changed",
     "case_obligations", "procurement_case_state", "case_patch_application",
@@ -186,6 +189,7 @@ class SuggestResponse(BaseModel):
     escalation: Optional[Any] = None
     proposal: Optional[Dict[str, Any]] = None
     session_summary: Optional[Dict[str, Any]] = None
+    requirement_contract: Optional[Dict[str, Any]] = None
 
 
 def response_shape(payload: Dict[str, Any]) -> str:
@@ -231,6 +235,9 @@ def validate_response(payload: Dict[str, Any]) -> List[str]:
     for key in ("products", "results"):
         if key in payload and not isinstance(payload[key], list):
             problems.append(f"{key} is not a list")
+    contract = payload.get("requirement_contract")
+    if contract is not None and not isinstance(contract, dict):
+        problems.append("requirement_contract is not a dict")
     oc = payload.get("off_catalog")
     if oc is not None:
         if not isinstance(oc, dict):
