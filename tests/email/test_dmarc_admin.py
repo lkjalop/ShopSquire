@@ -1,17 +1,18 @@
 import io
 import zipfile
 import json
+import time
+import pytest
 
-from fastapi.testclient import TestClient
+from tests.legacy_endpoint_runtime import endpoint_runtime
 
-from src.app.main import create_app
-
-
-def _client():
-    return TestClient(create_app())
+@pytest.fixture
+def client(endpoint_runtime):
+    return endpoint_runtime[1]
 
 
-def _sample_dmarc_xml():
+def _sample_dmarc_xml(*, report_end=None, domain='example.com'):
+    report_end = int(time.time()) if report_end is None else int(report_end)
     return b"""
 <feedback>
   <report_metadata>
@@ -54,14 +55,15 @@ def _sample_dmarc_xml():
     </policy_evaluated>
   </record>
 </feedback>
-"""
+""".replace(b'1700000000', str(report_end - 3600).encode()).replace(
+        b'1700003600', str(report_end).encode()).replace(b'example.com', domain.encode())
 
 
 _OWNER_HEADERS = {"x-api-key": "local-owner-key"}
 
 
-def test_dmarc_ingest_and_summary_xml():
-    c = _client()
+def test_dmarc_ingest_and_summary_xml(client):
+    c = client
     xml = _sample_dmarc_xml()
     files = {"file": ("dmarc.xml", xml, "application/xml")}
     r = c.post("/api/v1/security/dmarc/ingest", files=files, headers=_OWNER_HEADERS)
@@ -79,8 +81,8 @@ def test_dmarc_ingest_and_summary_xml():
     assert any(d[0] == "example.com" for d in domains)
 
 
-def test_dmarc_ingest_zip_and_summary():
-    c = _client()
+def test_dmarc_ingest_zip_and_summary(client):
+    c = client
     # Build a zip containing one XML
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w") as zf:
@@ -90,3 +92,24 @@ def test_dmarc_ingest_zip_and_summary():
     r = c.post("/api/v1/security/dmarc/ingest", files=files, headers=_OWNER_HEADERS)
     assert r.status_code == 200
     assert int(r.json().get("reports") or 0) >= 1
+
+
+def test_dmarc_summary_keeps_recent_and_historical_windows_distinct(client):
+    now = int(time.time())
+    for stamp, domain in ((now, 'recent.example'), (now - 60 * 86400, 'historical.example')):
+        response = client.post('/api/v1/security/dmarc/ingest',
+            files={'file': ('window.xml', _sample_dmarc_xml(report_end=stamp, domain=domain), 'application/xml')},
+            headers=_OWNER_HEADERS)
+        assert response.status_code == 200
+        assert response.json() == {'reports': 1, 'records': 2}
+    recent = client.get('/api/v1/security/dmarc/summary', params={'days': 30}, headers=_OWNER_HEADERS)
+    assert recent.status_code == 200
+    assert recent.json()['total_messages'] == 10
+    assert recent.json()['failed_messages'] == 3
+    assert recent.json()['fail_rate'] == pytest.approx(0.3)
+    assert {row[0] for row in recent.json()['top_domains']} == {'recent.example'}
+    historical = client.get('/api/v1/security/dmarc/summary', params={'days': 90}, headers=_OWNER_HEADERS)
+    assert historical.status_code == 200
+    assert historical.json()['total_messages'] == 20
+    assert historical.json()['failed_messages'] == 6
+    assert {row[0] for row in historical.json()['top_domains']} == {'recent.example', 'historical.example'}
