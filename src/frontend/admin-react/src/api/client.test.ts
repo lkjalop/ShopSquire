@@ -3,6 +3,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { http } from './client';
 
 describe('admin API request deadlines', () => {
+  it('uses the explicitly saved key ahead of the build-time default', async () => {
+    vi.stubEnv('VITE_API_KEY', 'build-default');
+    vi.resetModules();
+    const client = await import('./client');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      client.setClientApiKey('saved-operator');
+      await client.http('/api/v1/admin/me');
+      expect(fetchMock.mock.calls[0][1].headers['x-api-key']).toBe('saved-operator');
+    } finally {
+      client.clearClientApiKey();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
   it('aborts a request when its explicit deadline expires', async () => {
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });

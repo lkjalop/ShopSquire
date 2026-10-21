@@ -34,7 +34,7 @@ function getCsrfToken(): string {
 }
 
 function getApiKey(): string {
-  return API_KEY_ENV || VOLATILE_API_KEY || '';
+  return VOLATILE_API_KEY || API_KEY_ENV || '';
 }
 
 export function setClientApiKey(key: string) {
