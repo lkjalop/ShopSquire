@@ -388,14 +388,10 @@ def _requirements_block(case_state: Optional[Dict[str, Any]]) -> str:
     if not isinstance(typed, list):
         typed = reqs.get("accepted")
     if isinstance(typed, list):
-        labels = {
-            "operating_system": "Operating system", "os": "Operating system",
-            "ram_gb": "RAM", "storage_gb": "Storage", "storage_type": "Storage type",
-            "cpu": "CPU", "cpu_model": "CPU", "gpu": "GPU", "gpu_model": "GPU",
-            "gpu_vram_gb": "GPU VRAM", "architecture": "Architecture",
-            "api_compatibility": "API compatibility", "resolution": "Resolution",
-            "fps": "Frame rate", "project_scale": "Project scale",
-        }
+        from src.app.platform.store_profile import profile_slot
+        labels = profile_slot("requirement_attribute_labels", default={})
+        if not isinstance(labels, dict):
+            labels = {}
         allowed_authority = {
             "case_origin_critic_accepted", "accepted_case_only", "verified",
             "verified_official", "buyer_accepted",

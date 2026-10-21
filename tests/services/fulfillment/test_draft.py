@@ -643,3 +643,26 @@ def test_rfq_completeness_reason_unit():
     vague = dict(ok, deadline_date="the stated deadline")
     assert D.rfq_completeness_reason(vague) == "missing_rfq_fields:deadline_date"
     assert D.rfq_completeness_reason({}).startswith("missing_rfq_fields:")
+
+
+def test_typed_requirement_labels_come_from_active_profile(tmp_path, monkeypatch):
+    import json
+    from src.app.platform import store_profile
+    (tmp_path / 'industrial.json').write_text(json.dumps({
+        'id': 'industrial', 'requirement_attribute_labels': {'load_capacity': 'Rated working load'},
+    }), encoding='utf-8')
+    monkeypatch.setenv('STORE_PROFILES_DIR', str(tmp_path))
+    store_profile.reset_cache()
+    token = store_profile.set_active_profile_id('industrial')
+    try:
+        block = D._requirements_block({'requirements': {'accepted_claims': [
+            {'attribute': 'load_capacity', 'value': 150, 'unit': 'kg', 'authority_status': 'buyer_accepted'},
+            {'attribute': 'seal_rating', 'value': 'IP67', 'authority_status': 'buyer_accepted'},
+            {'attribute': 'unreviewed', 'value': 'PRIVATE', 'authority_status': 'pending'},
+        ]}})
+        assert 'Rated working load: 150 kg' in block
+        assert 'Seal Rating: IP67' in block
+        assert 'PRIVATE' not in block
+    finally:
+        store_profile.reset_active_profile_id(token)
+        store_profile.reset_cache()
