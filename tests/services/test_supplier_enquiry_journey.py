@@ -17,7 +17,7 @@ def prepare(db):
     db.execute(text("INSERT INTO shopping_case_fulfillment_selections VALUES ('sel','case','shop',2,'SKU',30)"))
     db.execute(text('CREATE TABLE inventory_reservation(tenant_id TEXT,reservation_id TEXT,quantity INTEGER,status TEXT,expires_at TEXT)'))
     db.execute(text("INSERT INTO inventory_reservation VALUES ('shop','selection:sel:warehouse',15,'reserved',:expiry)"),{'expiry':(NOW+timedelta(hours=2)).isoformat()})
-    db.execute(text('CREATE TABLE products(sku TEXT,price_cents INTEGER,currency TEXT,active BOOLEAN DEFAULT 1)'))
+    db.execute(text('CREATE TABLE products(sku TEXT,price_cents INTEGER,currency TEXT,active BOOLEAN DEFAULT TRUE)'))
     db.execute(text("INSERT INTO products(sku,price_cents,currency) VALUES ('SKU',100000,'AUD')"))
     db.commit()
 
