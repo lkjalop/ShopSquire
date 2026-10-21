@@ -82,6 +82,8 @@ def test_currency_amount_is_never_reinterpreted_as_item_quantity(query):
     [
         ("on a 2500 laptop", (None, 2500)),
         ("for a 3000 workstation", (None, 3000)),
+        ("need help with a 2000 laptop for digital twin?", (None, 2000)),
+        ("Can you advise me about a 2000 laptop?", (None, 2000)),
     ],
 )
 def test_article_led_bare_product_price_is_not_a_bulk_quantity(

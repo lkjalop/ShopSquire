@@ -37,6 +37,7 @@ class BudgetParse:
     mode: str               # range | ceiling | floor | around | revision_down | per_unit
     source_span: Optional[Tuple[int, int]] = None
 
+
     @property
     def found(self) -> bool:
         return self.budget_min is not None or self.budget_max is not None
@@ -324,8 +325,8 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     # 2) revision DOWN — "cut it to 1000 max", "drop the budget to 800": a new CEILING (floor cleared).
     #    Requires a budget cue and >= 100 so "reduce to 10" stays a quantity amendment.
     m = re.search(rf"\b(?:cut|drop|lower|bring|reduce)\s+(?:it|that|this|the\s+(?:budget|price|spend))?\s*"
-                  rf"(?:down\s+)?to\s*{_CUR}?\s*{_NUM}\b", q)
-    if m and re.search(rf"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|{_CUR}|\bgrand\b|\bk\b", q):
+                  rf"(?:down\s+)?to\s*{_CUR}?\s*{_NUM}\b(?:\s+max(?:imum)?\b)?", q)
+    if m and re.search(rf"\bmax(?:imum)?\b|\bbudget\b|\bspend\b|\bprice\b|{_CUR}|\bgrand\b|\bk\b", q):
         v = _to_int(m.group(1), m.group(2))
         if v is not None and v >= 100:
             return BudgetParse(None, v, "revision_down", m.span())
@@ -411,7 +412,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     # not permission to ignore the amount and start at the cheapest item. The
     # singular article separates it from quantities such as "need 100 laptops".
     m = re.search(
-        rf"\b(?:need|want|looking\s+for|on|for)\s+(?:a|an|one)\s+"
+        rf"\b(?:a|an|one)\s+"
         rf"{_CUR}?\s*{_NUM}{_UNIT_GUARD}\s+[a-z]",
         q,
     )

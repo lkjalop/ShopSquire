@@ -101,7 +101,8 @@ def _preceded_by_name_token(q: str, start: int) -> bool:
     return bool(prev and prev.isalpha() and prev not in _QTY_PRECEDING_OK)
 
 
-def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) -> Optional[Tuple[int, str]]:
+def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = (), *,
+                          max_qty: int = MAX_SOURCEABLE_QTY) -> Optional[Tuple[int, str]]:
     """Quantity for bulk-order intent + the MATCHED NUMBER TEXT (so the caller can excise it).
     Handles 'qty: 15', '15x', '15 laptops', '15 work laptops' (≤2 filler words), '30 or so laptops',
     'need about 25'. Returns (qty, number_text) or None."""
@@ -140,18 +141,20 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
         end = m.end(1)
         if _looks_like_date(start, end):
             return None
-        # Specification dimensions cannot become an item count via "need N".
+        # The broad "need <number>" path must obey the same dimensional
+        # guard as noun-bound counts ("need 16 GB" is not sixteen items).
         if _QTY_SPEC_FILLERS.match(q[end:].lstrip()):
             return None
         if start > 0 and (q[start - 1].isalnum() or q[start - 1] in "-_/."):
             return None
-        if end < len(q) and (q[end].isalnum() or q[end] in "_/."):
+        if end < len(q) and (q[end].isalnum() or q[end] in "_/"
+                or (q[end] == "." and end+1 < len(q) and q[end+1].isalnum())):
             return None
         try:
             qty = int(m.group(1))
         except (TypeError, ValueError):
             return None
-        if qty < 1 or qty > MAX_SOURCEABLE_QTY:
+        if qty < 1 or qty > max_qty:
             return None
         if _preceded_by_name_token(q, m.start(1)):
             return None
@@ -159,15 +162,15 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
             return None
         return qty, m.group(1)
 
-    m = re.search(r"\b(?:qty|quantity)\s*[:=#-]?\s*(\d{1,4})\b", q)
+    m = re.search(r"\b(?:qty|quantity)\s*(?:to\s+|[:=#-]\s*)?(\d{1,9})\b", q)
     if m:
         return _ok(m)
-    m = re.search(r"\b(\d{1,4})\s*[x×]\b", q)
+    m = re.search(r"\b(\d{1,9})\s*[x×]\b", q)
     if m:
         return _ok(m)
     # Hyphenated workload modifiers are still ordinary fillers ("20 game-development laptops").
     # The spec-filler guard below remains authoritative for "15-inch laptops" / "16GB laptops".
-    m = re.search(rf"\b(\d{{1,4}})\s+((?:[a-z]+(?:[-\s]+)){{0,3}}?)(?:{nouns})\b", q)
+    m = re.search(rf"\b(\d{{1,9}})\s+((?:[a-z]+(?:[-\s]+)){{0,3}}?)(?:{nouns})\b", q)
     if m:
         r = _ok(m, check_fillers=True)
         if r:
@@ -184,13 +187,13 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
             if not _QTY_SPEC_FILLERS.search(m.group(2) or ""):
                 return _NUMBER_WORDS[m.group(1)], m.group(1)
     m = re.search(r"\b(?:need|want|get|buy|order|purchase|looking\s+for|help\s+with)\s+"
-                  r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,4})\b", q)
+                  r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,9})\b", q)
     if m:
         return _ok(m)
     # Contextual amendments have an already-authorized subject, so no product noun is required.
     m = re.search(
         r"\b(?:make|set|change|reduce|drop|lower)(?:\s+(?:it|them|that|this|quantity|units?))?"
-        r"\s+to\s+(\d{1,4})\b",
+        r"\s+to\s+(\d{1,9})\b",
         q,
     )
     if m:

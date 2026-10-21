@@ -42,29 +42,9 @@ _CURRENCY = {
     "aud": "AUD", "usd": "USD", "cad": "CAD", "nzd": "NZD", "sgd": "SGD",
     "hkd": "HKD", "gbp": "GBP", "eur": "EUR", "jpy": "JPY",
 }
-_UNITS = {
-    "seat": "seat", "seats": "seat", "user": "user", "users": "user",
-    "device": "device", "devices": "device", "endpoint": "endpoint",
-    "endpoints": "endpoint", "licence": "licence", "licences": "licence",
-    "license": "licence", "licenses": "licence",
-    # Physical order units belong in the same literal commercial contract as
-    # seats/endpoints.  Keeping them here means a model outage cannot erase a
-    # buyer-authored bulk count before affordability and fulfilment arithmetic.
-    "laptop": "laptop", "laptops": "laptop",
-    "notebook": "notebook", "notebooks": "notebook",
-    "workstation": "workstation", "workstations": "workstation",
-    "desktop": "desktop", "desktops": "desktop",
-    "computer": "computer", "computers": "computer",
-    "server": "server", "servers": "server",
-    "tablet": "tablet", "tablets": "tablet",
-    "phone": "phone", "phones": "phone",
-    "unit": "unit", "units": "unit",
-}
+_UNITS = {'seat': 'seat', 'seats': 'seat', 'user': 'user', 'users': 'user', 'device': 'device', 'devices': 'device', 'endpoint': 'endpoint', 'endpoints': 'endpoint', 'licence': 'licence', 'licences': 'licence', 'license': 'licence', 'licenses': 'licence', 'unit': 'unit', 'units': 'unit'}
 
-_QUANTITY_UNITS = (
-    r"seats?|users?|devices?|endpoints?|licen[cs]es?|laptops?|notebooks?|"
-    r"workstations?|desktops?|computers?|servers?|tablets?|phones?|units?"
-)
+
 
 
 def stated_currency(text: str, *, money_only: bool = False) -> str | None:
@@ -75,18 +55,26 @@ def stated_currency(text: str, *, money_only: bool = False) -> str | None:
     if '£' in text:currencies.add('GBP')
     return next(iter(currencies)) if len(currencies)==1 else None
 
+
 def parse_commercial_terms(text: str, *, default_currency: str = "USD") -> CommercialTerms:
     q = str(text or "")
     ql = q.lower()
-    currency_match = re.search(r"\b(aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b", ql)
-    currency = _CURRENCY.get(currency_match.group(1), str(default_currency or "USD").upper()) if currency_match else str(default_currency or "USD").upper()
+    currency = stated_currency(q) or str(default_currency or 'USD').upper()
 
     parsed_budget = parse_budget(q)
     quantity = None
     quantity_unit = None
+    from src.app.platform.store_profile import profile_slot
+    from src.app.services.bulk_intent import extract_quantity_span
+    configured_units = profile_slot('commercial_quantity_units', default={})
+    units = {**_UNITS, **(configured_units if isinstance(configured_units, dict) else {})}
+    unit_pattern = '|'.join(re.escape(key) for key in sorted(units, key=len, reverse=True))
+    observed_count = extract_quantity_span(
+        re.sub(r'(?<=\d),(?=\d)', '', ql), unit_nouns=units, max_qty=100_000_000,
+    )
     quantity_match = re.search(
         r"\b(\d[\d,]{0,8})\s+(?:[a-z][a-z0-9+.-]*\s+){0,3}"
-        rf"({_QUANTITY_UNITS})\b", ql,
+        rf"({unit_pattern})\b", ql,
     )
     budget_span = parsed_budget.source_span if parsed_budget is not None else None
     overlaps_budget = bool(
@@ -101,9 +89,10 @@ def parse_commercial_terms(text: str, *, default_currency: str = "USD") -> Comme
             ql[max(0, quantity_match.start(1) - 8):quantity_match.start(1)],
         )
     )
-    if quantity_match and not overlaps_budget and not currency_prefixed:
+    if (quantity_match and observed_count and not overlaps_budget and not currency_prefixed
+            and observed_count[0] == int(quantity_match.group(1).replace(",", ""))):
         quantity = int(quantity_match.group(1).replace(",", ""))
-        quantity_unit = _UNITS.get(quantity_match.group(2))
+        quantity_unit = units.get(quantity_match.group(2))
 
     cadence = None
     cadence_match = re.search(r"\b(?:per\s+|/\s*)?(month|monthly|year|yearly|annual|annually|quarter|quarterly)\b", ql)
