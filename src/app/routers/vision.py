@@ -1496,10 +1496,11 @@ async def triage(
         if should_auto_queue(hypothesis):
             _steg_decoded = str((security_signals.get("steg_details") or {}).get("decoded_content") or "")
             _qr_urls = [str(u) for u in (security_signals.get("qr_payloads") or []) if str(u).strip()]
-            _sandbox_queue_result = queue_sandbox_detonation(
+            from starlette.concurrency import run_in_threadpool
+            _sandbox_queue_result = await run_in_threadpool(queue_sandbox_detonation,
                 hypothesis=hypothesis,
                 trace_id=str(resp.get("trace_id") or ""),
-                tenant_id=None,
+                tenant_id=current_tenant_id(),
                 decoded_content=_steg_decoded or None,
                 urls=_qr_urls,
                 steg_score=float((security_signals.get("steg_details") or {}).get("steg_score") or 0.0),

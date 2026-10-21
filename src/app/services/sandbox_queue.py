@@ -21,9 +21,7 @@ stores results back to the incident record.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -31,9 +29,8 @@ _log = logging.getLogger(__name__)
 
 _AUTO_QUEUE_HYPOTHESES = frozenset({"c2_beacon", "lolbin_command_sequence", "ransomware", "fileless_attack"})
 
-# Redis stream / Celery task name for sandbox jobs
+# The registered, authenticated worker task for sandbox jobs.
 _SANDBOX_TASK_NAME = "sandbox.detonate"
-_SANDBOX_STREAM_KEY = "sandbox:detonation:queue"
 
 
 def should_auto_queue(hypothesis: str) -> bool:
@@ -55,11 +52,17 @@ def queue_sandbox_detonation(
     """Queue a sandbox detonation job for the given hypothesis.
 
     Returns a dict describing what was queued (or the skip reason if not queued).
-    Non-blocking — all errors are logged and swallowed so detection is never
-    blocked by queue unavailability.
+    Publication is synchronous and uses a bounded transport without retries;
+    async request handlers must offload it. Results are recorded by the worker
+    in the trace, so publishing must not subscribe to the result backend.
+    A transport error leaves delivery unconfirmed, without publishing through
+    unsigned or unconsumed fallback streams.
     """
     if not should_auto_queue(hypothesis):
         return {"queued": False, "reason": "hypothesis_not_in_auto_queue_list", "hypothesis": hypothesis}
+    tenant_id = str(tenant_id or "").strip()
+    if not tenant_id:
+        return {"queued": False, "reason": "tenant_required", "hypothesis": hypothesis}
 
     job: Dict[str, Any] = {
         "hypothesis": str(hypothesis),
@@ -73,44 +76,26 @@ def queue_sandbox_detonation(
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Path 1: Celery (preferred — async worker pool)
     try:
         from src.app.workers.celery_app import celery_app
 
-        celery_app.send_task(
-            _SANDBOX_TASK_NAME,
-            kwargs={"job": job},
-            queue="security",
-        )
+        with celery_app.connection_for_write(
+            connect_timeout=1,
+            transport_options={"socket_connect_timeout": 1, "socket_timeout": 1,
+                               "retry_on_timeout": False, "max_retries": 0},
+        ) as connection:
+            celery_app.send_task(
+                _SANDBOX_TASK_NAME, kwargs={"job": job}, queue="security",
+                connection=connection, ignore_result=True, retry=False,
+            )
         _log.info("sandbox_queue: celery job queued hypothesis=%s trace=%s", hypothesis, trace_id)
         return {"queued": True, "path": "celery", "hypothesis": hypothesis, "trace_id": trace_id}
-    except Exception as _celery_exc:
-        _log.debug("sandbox_queue: celery unavailable, trying task_runner: %s", _celery_exc)
-
-    # Path 2: Redis Streams task runner (fallback)
-    try:
-        from src.app.workers.task_runner import submit_task
-
-        submit_task(_SANDBOX_TASK_NAME, job)
-        _log.info("sandbox_queue: task_runner job queued hypothesis=%s trace=%s", hypothesis, trace_id)
-        return {"queued": True, "path": "task_runner", "hypothesis": hypothesis, "trace_id": trace_id}
-    except Exception as _tr_exc:
-        _log.debug("sandbox_queue: task_runner unavailable, trying redis direct: %s", _tr_exc)
-
-    # Path 3: Redis direct XADD (best-effort persistence)
-    try:
-        from src.app.services.redis_factory import create_redis_client
-
-        _r = create_redis_client(decode_responses=False)
-        if _r is None:
-            raise RuntimeError("redis_factory_returned_none")
-        _r.xadd(_SANDBOX_STREAM_KEY, {"data": json.dumps(job, ensure_ascii=False, default=str)}, maxlen=5000)
-        _log.info("sandbox_queue: redis stream entry added hypothesis=%s trace=%s", hypothesis, trace_id)
-        return {"queued": True, "path": "redis_stream", "hypothesis": hypothesis, "trace_id": trace_id}
-    except Exception as _redis_exc:
-        _log.warning("sandbox_queue: all queue paths failed for hypothesis=%s: %s", hypothesis, _redis_exc)
-
-    return {"queued": False, "reason": "all_queue_paths_failed", "hypothesis": hypothesis}
+    except Exception as exc:
+        _log.warning("sandbox_queue: publication unconfirmed hypothesis=%s error=%s",
+                     hypothesis, type(exc).__name__)
+    return {"queued": False, "reason": "publication_unconfirmed",
+            "delivery_status": "unconfirmed", "hypothesis": hypothesis,
+            "trace_id": trace_id}
 
 
 def process_sandbox_job(job: Dict[str, Any]) -> Dict[str, Any]:
