@@ -1,8 +1,13 @@
 {
-  "recorded_at": "2026-10-21T08:37:41.157126+00:00",
-  "checkpoint_head": "d68f37ac3cc01f6afa93c5a39a506d5b74b410c1",
+  "recorded_at": "2026-10-21T10:02:02.589405+00:00",
+  "checkpoint_head": "3131768e5379fea5baddf9724077837512d45726",
   "assessment": "Execution continues; release is not certified",
   "commits": [
+    "3131768e Carry storefront tenant headers in ordinary buyer requests",
+    "bae1189e Fence purchase-order dispatch and persist tenant-owned audit history atomically",
+    "c3a2b424 Integrate reproducible browser fixtures and conservative catalogue ingestion",
+    "cbb0f498 Own parity requests and use migrated runtime SQLite fixtures",
+    "2f63446d Record source-bound workflow progress, frozen test coverage and remaining roadmap",
     "d68f37ac Give cart test requests independent SQLite transactions and guaranteed owner cleanup",
     "b548cf07 Publish research shelves and retained buyer facts through one case-bound terminal response",
     "80c33dd3 Scope outbound monitoring to the operator tenant and repair CV circuit audit",
@@ -111,31 +116,31 @@
   ],
   "committed_source_delta": {
     "production": {
-      "files": 131,
-      "insertions": 6594,
-      "deletions": 1805
+      "files": 145,
+      "insertions": 7461,
+      "deletions": 2097
     },
     "tests": {
-      "files": 189,
-      "insertions": 10726,
-      "deletions": 1287
+      "files": 202,
+      "insertions": 11899,
+      "deletions": 1344
     },
     "frontend": {
-      "files": 35,
-      "insertions": 852,
-      "deletions": 67
+      "files": 36,
+      "insertions": 897,
+      "deletions": 73
     }
   },
   "inventory": {
-    "recorded_at": "2026-10-21T08:21:53.815415+00:00",
-    "head": "d68f37ac3cc01f6afa93c5a39a506d5b74b410c1",
+    "recorded_at": "2026-10-21T09:55:09.794329+00:00",
+    "head": "3131768e5379fea5baddf9724077837512d45726",
     "branch": "checkpoint/turn-state-consolidation-20260830",
-    "git_status_entries": 403,
-    "tracked_changed": 201,
-    "untracked": 202,
+    "git_status_entries": 366,
+    "tracked_changed": 190,
+    "untracked": 176,
     "staged": 0,
-    "files": 5729,
-    "text_lines": 979978,
+    "files": 5733,
+    "text_lines": 980408,
     "by_root": {
       ".codex-logs": 23,
       ".dockerignore": 1,
@@ -205,7 +210,7 @@
       "dump": 10,
       "env.production.template": 1,
       "eval": 8,
-      "frontend": 328,
+      "frontend": 329,
       "full_pytest_after_finalfix.log": 1,
       "full_pytest_after_fix.log": 1,
       "full_pytest_after_flags_fix.log": 1,
@@ -246,18 +251,128 @@
       "start_voice_pilot.ps1": 1,
       "static": 277,
       "terraform": 4,
-      "tests": 1562,
+      "tests": 1565,
       "tmp_ollama_aliases": 3,
       "trace_unit_hang.log": 1
     },
     "python_syntax_errors": [],
-    "functions": 19611,
+    "functions": 19648,
     "production_functions_over_200": 99,
-    "broad_production_handlers": 5587,
-    "swallowed_production_handlers": 2027,
+    "broad_production_handlers": 5585,
+    "swallowed_production_handlers": 2025,
     "blocking_candidates_in_async": 0
   },
   "source_map": [
+    {
+      "work_package": "W01/W13",
+      "path": "tests/integration/test_parity_fixture_database_ownership.py",
+      "symbol": "test_parity_fixture_uses_runtime_journal_policy_and_migrated_schema",
+      "line": 12,
+      "function_lines": 9,
+      "file_lines": 51,
+      "git_state": "committed",
+      "sha256": "8df41d3eaee60397e085d1ade6dead908447bee0d36c68b80c79f53b6683bc6b",
+      "remaining": "production SQLite locking, full-process ordering and endurance"
+    },
+    {
+      "work_package": "W00/W13",
+      "path": "scripts/seed_inventory_from_txt.py",
+      "symbol": "parse_inventory",
+      "line": 182,
+      "function_lines": 60,
+      "file_lines": 341,
+      "git_state": "committed",
+      "sha256": "ba41281e92024b6c9bb94bf08588da5664dad4d41704511b5f07353fcbef071c",
+      "remaining": "real catalogue identity/source verification, all import families and complete consumer migration"
+    },
+    {
+      "work_package": "W06",
+      "path": "src/app/services/merchant_decision_dataset.py",
+      "symbol": "build_dataset",
+      "line": 26,
+      "function_lines": 62,
+      "file_lines": 179,
+      "git_state": "committed",
+      "sha256": "6f1eeef35d16a5c3a2093cf7a407f3421c28ef359e76c00d02be0d4eaa8dae00",
+      "remaining": "useful current scoped real market observations and non-simulation source admission"
+    },
+    {
+      "work_package": "W06/W11",
+      "path": "src/app/services/merchant_evidence_retrieval.py",
+      "symbol": "retrieve",
+      "line": 97,
+      "function_lines": 36,
+      "file_lines": 132,
+      "git_state": "committed",
+      "sha256": "f04b1ef59b5c33d0dd54832f7879a24f0468cec887f61d239793c2766a1dec9f",
+      "remaining": "real enrolled sources, trusted review/deployment and complete retrieval evaluation"
+    },
+    {
+      "work_package": "W09/W10",
+      "path": "src/app/services/fulfillment/purchase_order.py",
+      "symbol": "execute",
+      "line": 52,
+      "function_lines": 68,
+      "file_lines": 128,
+      "git_state": "committed",
+      "sha256": "07ef985f38a6f2082a17bbd963dde4d7a83eb4cae65009284e566a39ee2a249d",
+      "remaining": "real independent-person ERP approval, provider reconciliation and full deployment recovery"
+    },
+    {
+      "work_package": "W01/W10/W11",
+      "path": "src/app/services/recommendation_audit_outbox.py",
+      "symbol": "execute_recommendation_audit_job",
+      "line": 193,
+      "function_lines": 10,
+      "file_lines": 355,
+      "git_state": "committed",
+      "sha256": "a3203c071ebe509c0c67646df56024847b749018ee0acb47eeef5f993447a15d",
+      "remaining": "all distributed worker/database owners, privacy planes and deployment recovery"
+    },
+    {
+      "work_package": "W10/W11",
+      "path": "src/app/services/decision_log.py",
+      "symbol": "log_decision",
+      "line": 385,
+      "function_lines": 215,
+      "file_lines": 1131,
+      "git_state": "committed",
+      "sha256": "3f7642b7711af7961782f272d41f6ded3990436ed13d32f711ae0df243af5ada",
+      "remaining": "all trace consumers, concurrent insert identity and complete operational-log confidentiality"
+    },
+    {
+      "work_package": "W10/W11",
+      "path": "src/app/services/decision_log.py",
+      "symbol": "_close_decision_validity_in_session",
+      "line": 343,
+      "function_lines": 14,
+      "file_lines": 1131,
+      "git_state": "committed",
+      "sha256": "3f7642b7711af7961782f272d41f6ded3990436ed13d32f711ae0df243af5ada",
+      "remaining": "full bitemporal history/recovery and canonical privacy coverage"
+    },
+    {
+      "work_package": "W09",
+      "path": "src/app/services/fulfillment/category_budget_lock.py",
+      "symbol": "category_budget_lock",
+      "line": 8,
+      "function_lines": 14,
+      "file_lines": 21,
+      "git_state": "committed",
+      "sha256": "b0884b300abfdf6bff5bebee4e097dfa1d1fd25216a7aee055af9b8187d5a41b",
+      "remaining": "wiring every category-approval consumer to the same deployed guard"
+    },
+    {
+      "work_package": "W11",
+      "path": "src/app/services/dmarc_ingest.py",
+      "symbol": "get_summary",
+      "line": 105,
+      "function_lines": 31,
+      "file_lines": 135,
+      "git_state": "committed",
+      "sha256": "956de74a88a45c3204de396d71ee826b89a28297ee7794e5a24bb77ff5c8a1ff",
+      "remaining": "production ingest/sampling, all authenticated consumers and complete log/privacy policy"
+    },
     {
       "work_package": "W03/W04",
       "path": "src/app/services/recommendation_core/turn_router.py",
@@ -7319,19 +7434,19 @@
   },
   "committed_delta_by_scope": {
     "Application": {
-      "files": 131,
-      "added": 6594,
-      "removed": 1805
+      "files": 145,
+      "added": 7461,
+      "removed": 2097
     },
     "Tests": {
-      "files": 189,
-      "added": 10726,
-      "removed": 1287
+      "files": 202,
+      "added": 11899,
+      "removed": 1344
     },
     "Frontend": {
-      "files": 35,
-      "added": 852,
-      "removed": 67
+      "files": 36,
+      "added": 897,
+      "removed": 73
     },
     "Migrations": {
       "files": 20,
@@ -7339,25 +7454,25 @@
       "removed": 1
     },
     "Scripts": {
-      "files": 4,
-      "added": 353,
-      "removed": 13
+      "files": 14,
+      "added": 1160,
+      "removed": 20
     },
     "Runtime/configuration": {
-      "files": 16,
-      "added": 2354,
+      "files": 18,
+      "added": 2387,
       "removed": 2441
     },
     "Documentation/other": {
-      "files": 13,
-      "added": 32991,
+      "files": 15,
+      "added": 43341,
       "removed": 0
     }
   },
   "committed_delta_all": {
-    "files": 408,
-    "added": 54393,
-    "removed": 5614
+    "files": 450,
+    "added": 67668,
+    "removed": 5976
   },
   "durable_image_gate": {
     "receipt_sha256": "b6c8186981d31eeb815e11a26c2e17060582002608d5ca8aa335a98c90837dbc",
@@ -13671,7 +13786,7 @@
     "previously_reported": 623,
     "continuation_selected": 7937,
     "continuation_selection_sha256": "a2c9ff65f0ec46fca8b89c07ada3911ee4a9efdf1cfed8b9e912aeba2b6d8518",
-    "observed_at": "2026-10-21T08:37:41.360672+00:00",
+    "observed_at": "2026-10-21T10:02:02.716014+00:00",
     "phase_counts_at_capture": {
       "('call', 'passed')": 937,
       "('call', 'skipped')": 17,
@@ -13815,7 +13930,8 @@
         "errors": 0,
         "skipped": 41
       }
-    }
+    },
+    "new_controlled_fixture_repair": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d"
   },
   "integrated_selected_scope_router": {
     "commit": "fde5ef56de735b0a2e48a548eb9761ea0c7fa2e0",
@@ -14929,7 +15045,7 @@
   },
   "roadmap_code_and_test_work_items": {
     "path": "docs/audits/2026-10-21-roadmap-work-items.csv",
-    "sha256": "5f30e783790f17158d482184fd8f3177e8cd4123d10e28ae48091b2a3ba43e5a",
+    "sha256": "647e45636d6d4a28dc32f88348ce452b2a911a87eee7a32f124931c4dc5a95d9",
     "packages": 16,
     "scope": "Exact current code and representative existing-test lines, sizes, source hashes, remaining work, reasons, dependencies and required exit evidence. File length is not an estimate of remaining implementation work."
   },
@@ -14937,5 +15053,950 @@
     "evidence_file": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\windows-second-host-interruption.json",
     "sha256": "80aeeb6fb80c5218624272f23d041e46cde97c9f1befdab4e3a184f91443bd27",
     "limitations": "Read-only Windows events record a second sleep/resume and clock correction. Interrupted API/red/partition receipts remain failed without complete JUnit. Original guard limits and power policy were not changed."
-  }
+  },
+  "parity_fixture_runtime_ownership": {
+    "commit": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+    "base": "2f63446d4b5f730a279c87e19db5c935e06c0dd3",
+    "files": [
+      {
+        "path": "tests/integration/test_frontend_backend_parity.py",
+        "sha256": "51ea66ab017ff53862b32062ad47edbd5e86bfb034bac5e2d511a3a7904951c3"
+      },
+      {
+        "path": "tests/integration/test_parity_fixture_database_ownership.py",
+        "sha256": "8df41d3eaee60397e085d1ade6dead908447bee0d36c68b80c79f53b6683bc6b"
+      }
+    ],
+    "qualification": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_parity_fixture_database_ownership.py",
+        "tests/integration/test_frontend_backend_parity.py",
+        "tests/services/test_cart_test_database_ownership.py",
+        "tests/test_cart_stock_gates.py",
+        "tests/test_cart_clear_undo_projection.py",
+        "-q",
+        "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\parity-cart-fixture-integration-final\\tests.xml"
+      ],
+      "cwd": ".artifacts\\roadmap-execution-2026-10-20\\parity-fixture-ownership-candidate",
+      "native_exit_code": 0,
+      "elapsed_seconds": 90.172,
+      "peaks": {
+        "rss_bytes": 351199232,
+        "handles": 1524,
+        "threads": 39
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 41,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "preserved_existing_assertions": 23,
+    "other_python_files_matching_committed_base": 3044,
+    "controlled_reds": [
+      "Application factory changed ambient engine: response contained FOREIGN-PARITY-CANARY",
+      "Fixture journal mode was delete rather than the runtime WAL policy"
+    ],
+    "failed_intermediate": "File-backed metadata-only fixture: eight passes, one missing E0 row, SQLite locks",
+    "result": "Application runtime engine policy and actual Alembic migrations; full TestClient startup/shutdown",
+    "limits": "Fixture repair only. Earlier frozen parity failure remains recorded; original intermittent cause, production SQLite locking, security latency, and endurance are not closed.",
+    "unrelated_db_work_preserved_sha256": "8fa5bc3d57de4fb20efe058d3e3038769a1a1fcaf25d9273f53cfdf4be02bf25",
+    "pushed": false
+  },
+  "reproducible_fixture_and_catalogue_integration": {
+    "commit": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+    "base": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+    "files": [
+      {
+        "path": "config/merchant_market_pilot.json",
+        "sha256": "a91a87efd5efec3a366bd30d6419be03771621114b99849a3457da5a7a33ce1d"
+      },
+      {
+        "path": "config/product_offer_demo.json",
+        "sha256": "4eb3a220e8f223a6adf7b8eef095d00eeb5bf2e2ad411d58a4fd7fdc03582663"
+      },
+      {
+        "path": "scripts/prepare_roadmap_demo.py",
+        "sha256": "463911fa054e4ea92ed6f36a8f9e1e29642e8b94a12adb82f89233c312972ec6"
+      },
+      {
+        "path": "scripts/roadmap_runtime.py",
+        "sha256": "459d25c6503e75ae304111e7baed324632d8f15acf6e56e0a777f8f3622d05fb"
+      },
+      {
+        "path": "scripts/run_roadmap_browser.py",
+        "sha256": "9a937dbcf2af80c6a13f392056540ff54a05fdc0d2a800e0ebd8f0dfe6a58c9d"
+      },
+      {
+        "path": "scripts/seed_electronics_shop.py",
+        "sha256": "77c6fecef77284045acaaf48fddd9ef1e7f44ae68290ff4211b43366c975c539"
+      },
+      {
+        "path": "scripts/seed_inventory_from_txt.py",
+        "sha256": "ba41281e92024b6c9bb94bf08588da5664dad4d41704511b5f07353fcbef071c"
+      },
+      {
+        "path": "scripts/seed_merchant_market_pilot.py",
+        "sha256": "e3b1a254d051419677b449b883dd74305425923340cfbb9d2229603a666fd626"
+      },
+      {
+        "path": "scripts/seed_operator_inventory_demo.py",
+        "sha256": "5022619e10de4d8d6c7d7aff685e233c1da565d14c7390a996d664cdcd998d68"
+      },
+      {
+        "path": "scripts/seed_product_offer_demo.py",
+        "sha256": "eb7e9b7d6fe7762df3431ce79869fe22ee1d71f055e8cd3dab10788c44654949"
+      },
+      {
+        "path": "scripts/soak_portfolio_browser.py",
+        "sha256": "2bcc407d9b54f6dfae6556bef97a39eeba2e58693fcbf9589aa3b3679ddafec2"
+      },
+      {
+        "path": "scripts/soak_resource_sample.py",
+        "sha256": "ca934c16f6942bb9cbb041630d07d7f7e4e102431d4fa092cea8a938cb5f5dfc"
+      },
+      {
+        "path": "src/app/adapters/synthetic_market_operations.py",
+        "sha256": "8519870bfce349974cde234042546b56eba31e05c17628e8cde8c7569d1afe9b"
+      },
+      {
+        "path": "src/app/services/candidate_retriever.py",
+        "sha256": "90673cfe85c11a08b5ceabab0a20874c082276c24fdb4919ff63a263d8fd8937"
+      },
+      {
+        "path": "src/app/services/merchant_decision_dataset.py",
+        "sha256": "6f1eeef35d16a5c3a2093cf7a407f3421c28ef359e76c00d02be0d4eaa8dae00"
+      },
+      {
+        "path": "src/app/services/merchant_evidence_retrieval.py",
+        "sha256": "f04b1ef59b5c33d0dd54832f7879a24f0468cec887f61d239793c2766a1dec9f"
+      },
+      {
+        "path": "src/app/services/portfolio_qualification.py",
+        "sha256": "dbe500f6b5557af8a2d7d7c5ba438bad2f1893d81963bdea1e23548dc9f8a84c"
+      },
+      {
+        "path": "src/app/services/synthetic_canonical_replay.py",
+        "sha256": "ff6b125d723896cc2fadc550b678b924a52a9996b636a8f54bccb880cf4d0e12"
+      },
+      {
+        "path": "tests/api/test_outbound_monitor_tenant_boundary.py",
+        "sha256": "0093fb3461c7d3332bc0f8a83975de3b6777441ea6461671e237d4853e91e452"
+      },
+      {
+        "path": "tests/scripts/test_roadmap_runtime.py",
+        "sha256": "cf0f4438bb5a205bf6237b1dda52dc4fa095458ab5e2c2f2df6a3868d7968884"
+      },
+      {
+        "path": "tests/services/test_browser_soak_runner.py",
+        "sha256": "1f96928de641675baa48368f6b8d21eb63ff08fde62826d3c48ef888199b3183"
+      },
+      {
+        "path": "tests/services/test_merchant_decision_dataset.py",
+        "sha256": "db16c5c3bc0d502a09e2efc3b62ab3075d18263ce73adc1e09a79d956cc244b8"
+      },
+      {
+        "path": "tests/services/test_merchant_evidence_retrieval.py",
+        "sha256": "d50cb066ef9c795ed0e26ba67e6fdd0b0ffcc691d69e2a20cf2caf68118181ff"
+      },
+      {
+        "path": "tests/test_inventory_import_boundaries.py",
+        "sha256": "3eb339f1ce0c3be4aa85507d6f891d2f5fcb5151ce42e16a2ebf0072c0ae1f11"
+      },
+      {
+        "path": "tests/test_roadmap_browser_spec_selection.py",
+        "sha256": "9f9724400676e0b6cd9cac4b71843a2fdbfae24492635c52aa8254ca25363183"
+      }
+    ],
+    "qualification": {
+      "api": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/api",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-tooling-api-integration-final\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 427.14,
+        "peaks": {
+          "rss_bytes": 729120768,
+          "handles": 4199,
+          "threads": 84
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 339,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "focused": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/test_inventory_import_boundaries.py",
+          "tests/scripts/test_roadmap_runtime.py",
+          "tests/test_roadmap_browser_spec_selection.py",
+          "tests/services/test_browser_soak_runner.py",
+          "tests/services/test_merchant_decision_dataset.py",
+          "tests/services/test_merchant_evidence_retrieval.py",
+          "tests/services/test_current_qualification_fixture.py",
+          "tests/services/test_synthetic_canonical_replay.py",
+          "tests/services/test_candidate_retriever_caption.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-tooling-focused-green-v2\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 21.656,
+        "peaks": {
+          "rss_bytes": 272875520,
+          "handles": 990,
+          "threads": 29
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 50,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "seed": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "scripts.prepare_roadmap_demo",
+          "--directory",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\reproducible-seed-gate-v2"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 17.921,
+        "peaks": {
+          "rss_bytes": 75694080,
+          "handles": 394,
+          "threads": 4
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "browser": {
+        "complete": true,
+        "effects": "sandbox/disabled",
+        "results": [
+          {
+            "spec": "ordinary-chat-shortfall.spec.ts",
+            "profile": "reproducible-browser-01-ordinary-chat-shortfall",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:16:18.135Z",
+              "duration": 4690.705,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall",
+                "--label",
+                "preview",
+                "--api-port",
+                "8106",
+                "--ui-port",
+                "5196",
+                "--frontend-mode",
+                "preview",
+                "ordinary-chat-shortfall.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 17.422,
+              "peaks": {
+                "rss_bytes": 289202176,
+                "handles": 1265,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8106": true,
+              "5196": true
+            }
+          },
+          {
+            "spec": "platform-audit-memory.spec.ts",
+            "profile": "reproducible-browser-02-platform-audit-memory",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:16:39.664Z",
+              "duration": 18487.227,
+              "expected": 7,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory",
+                "--label",
+                "preview",
+                "--api-port",
+                "8106",
+                "--ui-port",
+                "5196",
+                "--frontend-mode",
+                "preview",
+                "platform-audit-memory.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 31.172,
+              "peaks": {
+                "rss_bytes": 305881088,
+                "handles": 1254,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8106": true,
+              "5196": true
+            }
+          },
+          {
+            "spec": "buyer-only-procurement.spec.ts",
+            "profile": "reproducible-browser-03-buyer-only-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:17:15.004Z",
+              "duration": 4761.634,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8106",
+                "--ui-port",
+                "5196",
+                "--frontend-mode",
+                "preview",
+                "buyer-only-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\reproducible-browser-tools-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 17.187,
+              "peaks": {
+                "rss_bytes": 286924800,
+                "handles": 1250,
+                "threads": 81
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8106": true,
+              "5196": true
+            }
+          }
+        ],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "source_head": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+        "selected_specs": [
+          "ordinary-chat-shortfall.spec.ts",
+          "platform-audit-memory.spec.ts",
+          "buyer-only-procurement.spec.ts"
+        ],
+        "elapsed_seconds": 126.531,
+        "changed_inputs": []
+      }
+    },
+    "preserved_outbound_assertions": 8,
+    "other_python_files_matching_committed_base": 3042,
+    "all_preserved_working_file_hashes": 406,
+    "browser_scope": "All runtime source hashes match the nine-browser input manifest. Only the independent outbound HTTP test fixture changed after that browser run.",
+    "controlled_reds": [
+      "Ten original parser controls failed on committed code",
+      "Clean archive had no scripts.prepare_roadmap_demo",
+      "Dataset/retrieval integration required missing replay arguments and document-ID rank fusion"
+    ],
+    "failed_attempts": "Original wider API gate: 338 passed, one missing membership table; repaired test owns actual migrated SQLite and retains all assertions.",
+    "limits": "Fictional fixtures and advisory datasets only. No real requirements certification, useful live market intelligence, provider send, production readiness or endurance claim.",
+    "pushed": false
+  },
+  "native_effect_and_audit_repairs": {
+    "commit": "bae1189edf4f3a0a79be86fc68e71783be0723c1",
+    "parent": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+    "captured_base": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+    "files": [
+      {
+        "path": "src/app/services/recommendation_audit_outbox.py",
+        "sha256": "a3203c071ebe509c0c67646df56024847b749018ee0acb47eeef5f993447a15d"
+      },
+      {
+        "path": "src/app/services/dmarc_ingest.py",
+        "sha256": "956de74a88a45c3204de396d71ee826b89a28297ee7794e5a24bb77ff5c8a1ff"
+      },
+      {
+        "path": "src/app/services/dmarc_schema.py",
+        "sha256": "fd3644222d13c0ba9d82b87d2f09266e7801b9de7afb3e636c47e5380559d627"
+      },
+      {
+        "path": "src/app/services/fulfillment/category_budget_lock.py",
+        "sha256": "b0884b300abfdf6bff5bebee4e097dfa1d1fd25216a7aee055af9b8187d5a41b"
+      },
+      {
+        "path": "src/app/services/fulfillment/purchase_order.py",
+        "sha256": "07ef985f38a6f2082a17bbd963dde4d7a83eb4cae65009284e566a39ee2a249d"
+      },
+      {
+        "path": "src/app/services/fulfillment/domain.py",
+        "sha256": "444ce0fc456ece106d4c47f8dbb409dc8387c54cbe3a0901e3981aa61a1a0d7b"
+      },
+      {
+        "path": "src/app/services/fulfillment/workflow.py",
+        "sha256": "47022760efa36a10a4de584166710ed27b247f2901103204a69f578b5d996981"
+      },
+      {
+        "path": "src/app/services/fulfillment/repository.py",
+        "sha256": "e1682394484bfa4b63fcf583e6dfe4bc846e8ccced4980330653b0d02bbb182d"
+      },
+      {
+        "path": "tests/chaos/test_effect_sink_postgres.py",
+        "sha256": "dff1d844a84a241694a2b853957ee2bd046c69b9e50a0a10a38d9553c2703d16"
+      },
+      {
+        "path": "tests/chaos/test_release_integrity_postgres.py",
+        "sha256": "93233ec5c66af05a28c9c7d2e0060468413b35143019b82a72f1cfc1fc7efc43"
+      },
+      {
+        "path": "tests/security/test_dmarc_boundaries.py",
+        "sha256": "c12dd926876213359492050c8e8e7f85a4f6cbe99934480e7955818c2b54ca6e"
+      },
+      {
+        "path": "tests/services/test_audit_worker_tenant_ownership.py",
+        "sha256": "868effed81e11369cf7e50543245d0d34ce85cc4216df230103d018c2fbaa500"
+      },
+      {
+        "path": "src/app/services/decision_log.py",
+        "sha256": "3f7642b7711af7961782f272d41f6ded3990436ed13d32f711ae0df243af5ada"
+      },
+      {
+        "path": "tests/services/test_decision_log_durable_identity.py",
+        "sha256": "1e83348bd9b135ce97e92aedda7f7ed912d836ae6464da6c448c85438464c742"
+      }
+    ],
+    "qualification": {
+      "focused": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_audit_worker_tenant_ownership.py",
+          "tests/services/test_decision_log_durable_identity.py",
+          "tests/services/test_recommendation_audit_outbox.py",
+          "tests/security/test_dmarc_boundaries.py",
+          "tests/services/fulfillment",
+          "tests/services/test_tenant_isolation_decision_logs.py",
+          "tests/services/test_insider_routing.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-focused-v3\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 106.797,
+        "peaks": {
+          "rss_bytes": 277667840,
+          "handles": 1871,
+          "threads": 34
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 433,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "api": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/api",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-api-integration-final\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 409.485,
+        "peaks": {
+          "rss_bytes": 783683584,
+          "handles": 4210,
+          "threads": 84
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 339,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "native_profile": {
+        "source_head": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+        "complete": true,
+        "providers": "disabled/sandbox",
+        "database_scope": "Disposable loopback PostgreSQL; no existing database used",
+        "scope": "Committed base plus exact prerequisite tooling and 12-file native repair manifests",
+        "qualification": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/chaos/test_demand_allocation_concurrency_postgres.py",
+            "tests/chaos/test_effect_sink_postgres.py",
+            "tests/chaos/test_release_integrity_postgres.py",
+            "tests/chaos/test_enquiry_recovery_postgres.py",
+            "tests/chaos/test_inventory_transactions_postgres.py",
+            "tests/chaos/test_money_concurrency_http.py",
+            "tests/chaos/test_money_concurrency_postgres.py",
+            "tests/chaos/test_outbound_dispatch_postgres.py",
+            "tests/chaos/test_refund_authority_postgres.py",
+            "tests/chaos/test_request_database_owner_postgres.py",
+            "tests/chaos/test_native_case_terminal_state.py",
+            "tests/services/test_audit_worker_tenant_ownership.py",
+            "tests/security/test_dmarc_boundaries.py",
+            "tests/services/test_decision_log_durable_identity.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-postgres-v2-tests\\tests.xml"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 39.625,
+          "peaks": {
+            "rss_bytes": 274952192,
+            "handles": 1165,
+            "threads": 46
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 78,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        },
+        "supervisor_exit_code": 0,
+        "changed_inputs": [],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "elapsed_seconds": 43.875
+      },
+      "browser": {
+        "complete": true,
+        "effects": "sandbox/disabled",
+        "results": [
+          {
+            "spec": "ordinary-chat-shortfall.spec.ts",
+            "profile": "native-release-browser-01-ordinary-chat-shortfall",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:48:10.378Z",
+              "duration": 4454.621999999999,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native_release_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall",
+                "--label",
+                "preview",
+                "--api-port",
+                "8108",
+                "--ui-port",
+                "5198",
+                "--frontend-mode",
+                "preview",
+                "ordinary-chat-shortfall.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 16.625,
+              "peaks": {
+                "rss_bytes": 287469568,
+                "handles": 1253,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8108": true,
+              "5198": true
+            }
+          },
+          {
+            "spec": "platform-audit-memory.spec.ts",
+            "profile": "native-release-browser-02-platform-audit-memory",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:48:31.715Z",
+              "duration": 16228.564000000002,
+              "expected": 7,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native_release_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory",
+                "--label",
+                "preview",
+                "--api-port",
+                "8108",
+                "--ui-port",
+                "5198",
+                "--frontend-mode",
+                "preview",
+                "platform-audit-memory.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 28.531,
+              "peaks": {
+                "rss_bytes": 380145664,
+                "handles": 1256,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8108": true,
+              "5198": true
+            }
+          },
+          {
+            "spec": "buyer-only-procurement.spec.ts",
+            "profile": "native-release-browser-03-buyer-only-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:49:04.169Z",
+              "duration": 3929.748,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native_release_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8108",
+                "--ui-port",
+                "5198",
+                "--frontend-mode",
+                "preview",
+                "buyer-only-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 16.234,
+              "peaks": {
+                "rss_bytes": 287182848,
+                "handles": 1244,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8108": true,
+              "5198": true
+            }
+          }
+        ],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "source_head": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+        "selected_specs": [
+          "ordinary-chat-shortfall.spec.ts",
+          "platform-audit-memory.spec.ts",
+          "buyer-only-procurement.spec.ts"
+        ],
+        "elapsed_seconds": 108.141,
+        "changed_inputs": []
+      }
+    },
+    "native_scope": "78 total checks; PostgreSQL concurrency/recovery modules plus explicit SQLite decision, worker and DMARC controls. Not 78 independent PostgreSQL tests.",
+    "receipt_label_clarification": "The native supervisor scope string still says 12 files; the protected source manifest and this exact input/commit proof cover all 14 qualified files.",
+    "other_python_files_matching_committed_parent": 3058,
+    "preserved_effect_assertions": 16,
+    "all_preserved_working_file_hashes": 382,
+    "controlled_reds": [
+      "Two actual fake-provider effects from a forced PostgreSQL PO race",
+      "Seven worker controls exposed ambient tenant use and inconsistent durable identity",
+      "Six decision controls exposed foreign history changes and false write success",
+      "Four additional controls exposed premature replacement closure, replay mutation and false closure success"
+    ],
+    "limits": "Sandbox provider effects only; live ERP remains blocked in the legacy command. Does not close independent-person deployment, global category-budget enforcement, production SQLite locking, distributed erasure or endurance.",
+    "pushed": false
+  },
+  "ordinary_browser_tenant_headers": {
+    "commit": "3131768e5379fea5baddf9724077837512d45726",
+    "parent": "bae1189edf4f3a0a79be86fc68e71783be0723c1",
+    "files": [
+      {
+        "path": "frontend/src/App.tsx",
+        "sha256": "f77f528bc988e732e25bfdd070cdf8ac2d4bd48817bd841b61c49e5f6e2da26a"
+      },
+      {
+        "path": "frontend/e2e/browser-native-tenant-procurement.spec.ts",
+        "sha256": "001c7a17fff368bc65d50be856ad448aedd1d8c5418c0af0e50cd6a562a6bf63"
+      }
+    ],
+    "qualification": {
+      "vitest": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\browser-native-tenant-candidate\\frontend\\node_modules\\vitest\\vitest.mjs",
+          "run",
+          "--maxWorkers=1",
+          "--reporter=json",
+          "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\frontend-tenant-unit\\vitest.json"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\browser-native-tenant-candidate\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 43.438,
+        "peaks": {
+          "rss_bytes": 293236736,
+          "handles": 276,
+          "threads": 78
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "vitest_counts": {
+        "numTotalTests": 387,
+        "numPassedTests": 387,
+        "numFailedTests": 0,
+        "numPendingTests": 0
+      },
+      "types": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\browser-native-tenant-candidate\\frontend\\node_modules\\typescript\\bin\\tsc",
+          "--noEmit"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\browser-native-tenant-candidate\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 6.328,
+        "peaks": {
+          "rss_bytes": 522797056,
+          "handles": 167,
+          "threads": 12
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "joint_browser": {
+        "complete": true,
+        "effects": "sandbox/disabled",
+        "results": [
+          {
+            "spec": "browser-native-tenant-procurement.spec.ts",
+            "profile": "frontend-tenant-native-joint-browser-01-browser-native-tenant-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T09:51:25.413Z",
+              "duration": 4274.179,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native_release_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\browser-tenant-green-specs\\browser-native-tenant-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate\\.artifacts\\browser-tenant-green-specs\\browser-native-tenant-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8108",
+                "--ui-port",
+                "5198",
+                "--frontend-mode",
+                "preview",
+                "browser-native-tenant-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\native-release-integration-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 16.64,
+              "peaks": {
+                "rss_bytes": 287584256,
+                "handles": 1267,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8108": true,
+              "5198": true
+            }
+          }
+        ],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "source_head": "bae1189edf4f3a0a79be86fc68e71783be0723c1",
+        "selected_specs": [
+          "browser-native-tenant-procurement.spec.ts"
+        ],
+        "elapsed_seconds": 39.984,
+        "changed_inputs": []
+      }
+    },
+    "other_source_files_matching_committed_parent": 4516,
+    "unchanged_frontend_inputs_matching_unit_candidate": 290,
+    "all_preserved_working_file_hashes": 368,
+    "controlled_red": "With only a real signed cookie and no ambient harness headers, stream and query both returned 403.",
+    "result": "Shared header helper carries the selected non-default tenant; the actual browser retains the exact 40/15/25 draft after reload without an operator key.",
+    "limits": "Current fictional qualification scope only. No useful live market analysis or final broad browser/release certification claimed.",
+    "pushed": false
+  },
+  "frozen_python_skip_prerequisites": {
+    "source_head": "8dc3f3f5e36b8d1d43a6284ce2efd6ebc8ecb266",
+    "runtime_skips": 268,
+    "distinct_reasons": 60,
+    "classes": {
+      "explicit_live_acceptance": 9,
+      "owned_model_profile": 29,
+      "explicit_browser_profile": 99,
+      "owned_application_stack": 20,
+      "owned_postgresql_profile": 47,
+      "missing_sample_asset": 14,
+      "owned_redis_profile": 19,
+      "explicit_integration_profile": 4,
+      "unfinished_test_fixture": 2,
+      "empty_test_dataset": 1,
+      "attachment_integration_profile": 1,
+      "official_public_source_protocol": 1,
+      "retired_v1_characterization": 21,
+      "missing_build_artifact": 1
+    },
+    "later_native_same_case_passes": 33,
+    "later_native_source": "cbb0f4981b6ef44a96d67f245bcc439a0100aa8d",
+    "collection_module_skips_excluded": 4,
+    "latest_integrated_native_same_case_passes": 44,
+    "latest_integrated_native_commit": "bae1189edf4f3a0a79be86fc68e71783be0723c1",
+    "ledger": "docs/audits/2026-10-21-python-skip-prerequisites.csv",
+    "ledger_sha256": "02b770e29877c275bf0763f3afa969e97fad07efe0981fc07f7c06c8f51e3dc9",
+    "limits": "Retired V1 tests are not automatically required live tests. Their declared successors still need individual mapping. Later same-case passes on a distinct source do not alter frozen outcomes or certify final-source release gates."
+  },
+  "clean_committed_browser_sweep_checkpoint": {
+    "captured_at": "2026-10-21T09:57:06.492453+00:00",
+    "source_head": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+    "selected_specs": 61,
+    "completed_specs": 27,
+    "expected_cases": 129,
+    "reported_case_ids": 59,
+    "statuses": {
+      "case_pass_record": 16,
+      "assertion_failure": 29,
+      "skipped": 14,
+      "pending": 70
+    },
+    "native_stats": {
+      "expected": 16,
+      "unexpected": 29,
+      "skipped": 14,
+      "flaky": 0
+    },
+    "ledger": "docs/audits/2026-10-21-clean-committed-browser-outcome-ledger.csv",
+    "ledger_sha256": "491c8e9f7694be3ccb93c93cff136225b0e5b827ee70d901c274c3324f12037c",
+    "progress_capture_sha256": "033eaf0de74823c9eb07cb20d14e70426790b75adb896df72d290a38b06ebfa4",
+    "limitations": "This is a checkpoint of a still-running 61-spec sweep on an earlier committed source. Pending is not skip or pass. Case passes in failed jobs do not certify those jobs. Later targeted fixes do not rewrite these outcomes. Legacy specs using bare python resolve the host Python, unlike the application server; that generator installation is not certified by the verified runtime lock."
+  },
+  "source_inventory_scope": "5733 eligible tracked/preserved files before documentation publication; hashes and text-line counts do not constitute semantic review of every line."
 }
