@@ -25,6 +25,7 @@ from src.app.services.commercial_decision_reducer import (
 from src.app.services.recommendation_core.workload_decision import (
     ProductConfigurationIdentity,
     WorkloadDecision,
+    row_has_unresolved_evidence,
 )
 
 
@@ -275,6 +276,16 @@ def _ordered(
     ))
 
 
+def _attribute_verdict(row) -> str:
+    if row.verdict in {"meets_minimum", "meets_recommended"} and row_has_unresolved_evidence(row):
+        return "not_verified"
+    return {
+        "meets_recommended": "strong", "meets_minimum": "meets",
+        "below_minimum": "failed", "contested": "contradicted",
+        "not_applicable": "not_applicable",
+    }.get(row.verdict, "not_verified")
+
+
 def _card_explanation(
     decision: WorkloadDecision | None, status: FitStatus,
 ) -> ProductCardExplanation:
@@ -286,10 +297,11 @@ def _card_explanation(
     meets = [
         row.attribute_label for row in decision.fit_ledger
         if row.verdict in {"meets_minimum", "meets_recommended"}
+        and not row_has_unresolved_evidence(row)
     ]
     gaps = [
         row.attribute_label for row in decision.fit_ledger
-        if row.verdict in {"unknown", "contested"}
+        if row_has_unresolved_evidence(row)
     ]
     misses = [
         row.attribute_label for row in decision.fit_ledger
@@ -489,7 +501,7 @@ def build_product_shelves(
                 ],
                 material_unknowns=[
                     row.attribute_label for row in ledger
-                    if row.verdict in {"unknown", "contested"}
+                    if row_has_unresolved_evidence(row)
                 ] + ([] if decision else ["fit ledger not recorded"]),
                 specification_freshness=specification_freshness,
                 unit_price_cents=candidate.price_cents,
@@ -511,7 +523,8 @@ def build_product_shelves(
                     relevance_score=candidate.relevance_score,
                     meets=(
                         [row.attribute_label for row in decision.fit_ledger
-                         if row.verdict in {"meets_minimum", "meets_recommended"}]
+                         if row.verdict in {"meets_minimum", "meets_recommended"}
+                         and not row_has_unresolved_evidence(row)]
                         if decision else []
                     ),
                     conditional=(
@@ -520,7 +533,7 @@ def build_product_shelves(
                     ),
                     unknowns=(
                         [row.attribute_label for row in decision.fit_ledger
-                         if row.verdict in {"unknown", "contested"}]
+                         if row_has_unresolved_evidence(row)]
                         if decision else ["fit ledger not recorded"]
                     ),
                     misses=(
@@ -541,14 +554,7 @@ def build_product_shelves(
                         [AttributeFitVerdict(
                             attribute=row.attribute_key,
                             label=row.attribute_label,
-                            verdict=(
-                                "strong" if row.verdict == "meets_recommended"
-                                else "meets" if row.verdict == "meets_minimum"
-                                else "failed" if row.verdict == "below_minimum"
-                                else "contradicted" if row.verdict == "contested"
-                                else "not_applicable" if row.verdict == "not_applicable"
-                                else "not_verified"
-                            ),
+                            verdict=_attribute_verdict(row),
                             requirement_class=row.requirement_class,
                             requirement_claim_ids=row.requirement_claim_ids,
                             capability_claim_ids=row.capability_claim_ids,

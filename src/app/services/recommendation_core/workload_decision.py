@@ -127,6 +127,14 @@ class WorkloadDecision(BaseModel):
     critic: CriticResult
 
 
+def row_has_unresolved_evidence(row: FitLedgerRow) -> bool:
+    """A positive comparison needs independently verified, current evidence."""
+    return row.verdict in {"unknown", "contested"} or (
+        row.verdict in {"meets_minimum", "meets_recommended"}
+        and (row.verification_status != "verified" or row.freshness_status != "fresh")
+    )
+
+
 def configuration_hash(*, sku: str, specs: Mapping[str, Any], form_factor: str) -> str:
     """Stable configuration identity over decision-material catalog facts."""
     material = {
@@ -196,7 +204,7 @@ def reduce_workload_decision(
     """Reduce authorized rows. The critic can only make the result less authoritative."""
     bounded_rows = list(rows)[:64]
     has_failure = any(row.verdict == "below_minimum" for row in bounded_rows)
-    has_gap = any(row.verdict in {"unknown", "contested"} for row in bounded_rows)
+    has_gap = any(row_has_unresolved_evidence(row) for row in bounded_rows)
     unresolved_workload = bool(
         not workload.artefact_name
         or len(workload.surviving_hypothesis_ids) > 1
@@ -246,14 +254,14 @@ def reduce_workload_decision(
         "unresolved": "Workload unresolved — no product qualification",
     }[overall]
     failures = [row.attribute_label for row in bounded_rows if row.verdict == "below_minimum"]
-    unknowns = [row.attribute_label for row in bounded_rows if row.verdict in {"unknown", "contested"}]
+    unknowns = [row.attribute_label for row in bounded_rows if row_has_unresolved_evidence(row)]
     verified_minimums = [
         row.attribute_label for row in bounded_rows
-        if row.verdict == "meets_minimum" and row.verification_status == "verified"
+        if row.verdict == "meets_minimum" and not row_has_unresolved_evidence(row)
     ]
     verified_headroom = [
         row.attribute_label for row in bounded_rows
-        if row.verdict == "meets_recommended" and row.verification_status == "verified"
+        if row.verdict == "meets_recommended" and not row_has_unresolved_evidence(row)
     ]
     blocks: list[dict[str, Any]] = [
         {"block": "verdict", "text": verdict_label, "claim_refs": []},
@@ -272,7 +280,7 @@ def reduce_workload_decision(
             "claim_refs": list(dict.fromkeys(
                 claim_id
                 for row in bounded_rows
-                if row.verdict == "meets_minimum" and row.verification_status == "verified"
+                if row.verdict == "meets_minimum" and not row_has_unresolved_evidence(row)
                 for claim_id in row.requirement_claim_ids + row.capability_claim_ids
             )),
         })
@@ -285,7 +293,7 @@ def reduce_workload_decision(
             "claim_refs": list(dict.fromkeys(
                 claim_id
                 for row in bounded_rows
-                if row.verdict == "meets_recommended" and row.verification_status == "verified"
+                if row.verdict == "meets_recommended" and not row_has_unresolved_evidence(row)
                 for claim_id in row.requirement_claim_ids + row.capability_claim_ids
             )),
         })
@@ -306,7 +314,7 @@ def reduce_workload_decision(
             "attribute_label": row.attribute_label,
         }
         for row in bounded_rows
-        if row.verdict in {"unknown", "contested"}
+        if row_has_unresolved_evidence(row)
     ]
     if ledger_gaps:
         blocks.append({
@@ -315,7 +323,7 @@ def reduce_workload_decision(
             "claim_refs": list(dict.fromkeys(
                 claim_id
                 for row in bounded_rows
-                if row.verdict in {"unknown", "contested"}
+                if row_has_unresolved_evidence(row)
                 for claim_id in row.requirement_claim_ids + row.capability_claim_ids
             )),
         })
@@ -366,14 +374,14 @@ def deterministic_narration(decision: WorkloadDecision) -> str:
     parts = [f"{verdict}: {scope}."]
     verified_minimums = [
         row.attribute_label for row in decision.fit_ledger
-        if row.verdict == "meets_minimum" and row.verification_status == "verified"
+        if row.verdict == "meets_minimum" and not row_has_unresolved_evidence(row)
     ]
     verified_headroom = [
         row.attribute_label for row in decision.fit_ledger
-        if row.verdict == "meets_recommended" and row.verification_status == "verified"
+        if row.verdict == "meets_recommended" and not row_has_unresolved_evidence(row)
     ]
     failures = [row.attribute_label for row in decision.fit_ledger if row.verdict == "below_minimum"]
-    gaps = [row.attribute_label for row in decision.fit_ledger if row.verdict in {"unknown", "contested"}]
+    gaps = [row.attribute_label for row in decision.fit_ledger if row_has_unresolved_evidence(row)]
     gaps.extend(decision.workload.material_unknowns)
     if verified_minimums:
         parts.append(

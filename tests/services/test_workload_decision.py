@@ -1,3 +1,5 @@
+import pytest
+
 from src.app.services.recommendation_core.workload_decision import (
     FitLedgerRow,
     ProductConfigurationIdentity,
@@ -101,6 +103,35 @@ def test_unverified_requirement_cannot_fail_product():
     )
     assert decision.critic.status == "blocked"
     assert "unverified_requirement_failed_product:ram_gb" in decision.critic.violations
+
+
+@pytest.mark.parametrize('verification', ['verified', 'unverified'])
+@pytest.mark.parametrize('freshness', ['fresh', 'stale', 'unknown'])
+@pytest.mark.parametrize('verdict', ['meets_minimum', 'meets_recommended'])
+def test_positive_fit_requires_verified_fresh_evidence_everywhere(verification, freshness, verdict):
+    from src.app.services.recommendation_core.product_shelves import ShelfCandidateInput, build_product_shelves
+    row = _row(verdict=verdict, verification_status=verification, freshness_status=freshness)
+    original = row.model_dump()
+    decision = reduce_workload_decision(
+        workload=WorkloadContract(artefact_name='FICTIONAL test workload'),
+        product=_product(), rows=[row],
+    )
+    authorized = verification == 'verified' and freshness == 'fresh'
+    assert decision.overall_decision == ('qualified_for_stated_scope' if authorized else 'conditional')
+    assert decision.compatibility_status == ('passes' if authorized else 'partial')
+    shelf = build_product_shelves([ShelfCandidateInput(
+        product=decision.product, title='FICTIONAL test configuration', price_cents=100000,
+        fit_by_scope={'shared': decision},
+    )]).shelves[0].initial[0]
+    assert shelf.fit_status == ('qualified' if authorized else 'conditional')
+    if not authorized:
+        assert 'RAM' in shelf.unknowns
+        assert 'RAM' not in shelf.meets
+        assert shelf.attribute_verdicts[0].verdict == 'not_verified'
+        assert 'Still unresolved: RAM' in deterministic_narration(decision)
+        assert not any(b['block'] in {'verified_strengths', 'verified_headroom'}
+                       for b in decision.authorized_narration_blocks)
+    assert row.model_dump() == original
 
 
 def test_catalog_only_identity_caps_qualification_at_conditional():

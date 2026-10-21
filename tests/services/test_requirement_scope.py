@@ -185,12 +185,67 @@ def test_complete_scoped_obligations_do_not_require_document_section_labels():
                     price_cents=150000, currency="AUD", stock=4),
     ], predicates, defs=load_defs("electronics"))
     assert cards and cards[0].fit["overall"] == "meets"
+    evaluated_shelf = _evaluated_scope_shelf(compiled)
     terminal = gate_terminal_catalog_projection(
         research_status="completed", products=[card.as_dict() for card in cards],
-        product_shelves=None, catalog_authority=result.catalog_authority,
+        product_shelves=evaluated_shelf.model_dump(mode='json'),
+        catalog_authority=result.catalog_authority,
     )
     assert terminal.recommendation_status == "qualified"
     assert terminal.products[0]["sku"] == "complete-fixture"
+
+
+def _evaluated_scope_shelf(compiled, *, missing=False, stale=False):
+    """Explicit fictional observations pass through the real evidence/fit reducers."""
+    from datetime import datetime, timedelta, timezone
+    from src.app.models.orm import ProductConfiguration, ProductEvidenceObservation
+    from src.app.services.accepted_catalog_projection import _decision, _identity
+    from src.app.services.recommendation_core.product_shelves import ShelfCandidateInput, build_product_shelves
+    from src.app.services.recommendation_core.workload_decision import configuration_hash
+
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    specs = {r.attribute_key: r.value for r in compiled.requirements}
+    configuration = ProductConfiguration(
+        id='scoped-fixture-config', tenant_id='tenant-a', sku='complete-fixture',
+        title='FICTIONAL scoped workstation', mpn='FIXTURE-ONLY-1', form_factor='laptop',
+        configuration_hash=configuration_hash(sku='complete-fixture', form_factor='laptop', specs=specs),
+        price_cents=150000, currency='AUD', source_url='fixture://scoped-workstation',
+    )
+    claims = [{**r.model_dump(), 'attribute': r.attribute_key,
+        'claim_id': r.source_claim_ids[0], 'authority_status': 'verified_official',
+        'artefact_name': 'FICTIONAL scoped workload', 'simulation_only': True}
+        for r in compiled.requirements]
+    observations = [ProductEvidenceObservation(
+        id='fixture-observation-' + key, configuration_id=configuration.id,
+        attribute_key=key, value_json={'value': value, 'simulation_only': True},
+        claim_class='attested', evidence_status='observed', source_id='fixture:catalogue',
+        source_record_id='fixture:scoped-workstation', source_excerpt='Explicit fictional test observation',
+        observed_at=now-timedelta(days=31) if stale else now,
+    ) for key, value in specs.items() if not (missing and key == 'os')]
+    decision = _decision(configuration, claims, scope_id='shared',
+        desired_outcome='FICTIONAL scoped workload', budget_cents=None,
+        observations=observations, availability_status='unknown', now=now)
+    return build_product_shelves([ShelfCandidateInput(
+        product=_identity(configuration), title=configuration.title, price_cents=150000,
+        fit_by_scope={'shared': decision},
+    )])
+
+
+@pytest.mark.parametrize('missing,stale', [(True, False), (False, True)])
+def test_complete_requirements_cannot_qualify_missing_or_stale_product_evidence(missing, stale):
+    from src.app.services.terminal_research_reconciliation import gate_terminal_catalog_projection
+    rows = [claim('ram_gb', 16), claim('storage_gb', 128)]
+    rows.extend({**claim(key, value), 'operator': '='} for key, value in [
+        ('cpu_model', 'Example CPU'), ('gpu_model', 'Example GPU'),
+        ('os', 'Windows 11'), ('storage_type', 'nvme_ssd'),
+    ])
+    compiled = compile_authoritative_requirements(rows, scope=scope())
+    assert not compiled.rejections
+    evaluated = _evaluated_scope_shelf(compiled, missing=missing, stale=stale)
+    terminal = gate_terminal_catalog_projection(research_status='completed',
+        products=[{'sku': 'complete-fixture'}], product_shelves=evaluated.model_dump(mode='json'),
+        catalog_authority='permitted', requirement_completeness='complete')
+    assert terminal.recommendation_status == 'no_qualified_products'
 
 
 def test_different_workloads_cannot_complete_each_other_in_one_provider_row():
