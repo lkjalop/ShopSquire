@@ -1,0 +1,3613 @@
+{
+  "captured_at": "2026-10-21T12:49:27.079495+00:00",
+  "source_head": "af18ae17ac98f1afc837474d45eff4eac6e99814",
+  "local_commits_since_0d551213": 119,
+  "inventory": {
+    "captured_at": "2026-10-21T12:46:14.372716+00:00",
+    "source_head": "af18ae17ac98f1afc837474d45eff4eac6e99814",
+    "files": 5760,
+    "existing_files": 5760,
+    "text_files": 5723,
+    "text_lines": 1044066,
+    "bytes": 95621616,
+    "dirty_paths": 359,
+    "staged_paths": [],
+    "content_states": {
+      "committed_bytes": 3192,
+      "committed_content_line_ending_variant": 2206,
+      "modified_working_content": 184,
+      "untracked": 178
+    },
+    "index_flags": {
+      "H": 5582
+    },
+    "python_files": 3151,
+    "python_functions": 19685,
+    "python_syntax_errors": [],
+    "largest_functions": [
+      {
+        "path": "src/app/routers/chat.py",
+        "symbol": "_chat_query_impl",
+        "line": 288,
+        "lines": 4528,
+        "source_sha256": "db55c623ed33f95aad5ce2ecb92acf78a6322e0fe24b094b678df5c6c7d31d57"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab",
+        "line": 867,
+        "lines": 2328,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "create_app",
+        "line": 198,
+        "lines": 2216,
+        "source_sha256": "11b1ab375af05214a1fc38e217ac20711a1cf4cd19f595c3536b2096594f9af3"
+      },
+      {
+        "path": "src/app/security/email_security.py",
+        "symbol": "evaluate_email_security",
+        "line": 836,
+        "lines": 2021,
+        "source_sha256": "5b06ff98490fcd36785e2c1667fff299d629e61b7362ce3bd033492ff2315801"
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "symbol": "_route_turn_raw",
+        "line": 1412,
+        "lines": 1351,
+        "source_sha256": "74f8c00c77c6a84b26e89e3952e027b3991b138242c4410d13d9e780f1ed4d22"
+      },
+      {
+        "path": "src/app/routers/vision.py",
+        "symbol": "triage",
+        "line": 533,
+        "lines": 1303,
+        "source_sha256": "598fb79f0a9481a603fb1812dba9ff6498cb1f0b3c275998aaab57e082cd175e"
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "symbol": "_recommend_turn",
+        "line": 183,
+        "lines": 1303,
+        "source_sha256": "fb5ac2e3ddcd22813c73ff3336529820aa067d21bdbef8ed338ec5394fca59e2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint",
+        "line": 1669,
+        "lines": 1245,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "_run_internal",
+        "line": 2683,
+        "lines": 1154,
+        "source_sha256": "78b6eea97d24a6d09a62c96a64fb23462e5e97ec5b82677da4da4163cbc83ec9"
+      },
+      {
+        "path": "src/app/models/db.py",
+        "symbol": "_bootstrap_minimal_sqlite_tables",
+        "line": 191,
+        "lines": 1057,
+        "source_sha256": "8fa5bc3d57de4fb20efe058d3e3038769a1a1fcaf25d9273f53cfdf4be02bf25"
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "run_nlp_cv",
+        "line": 820,
+        "lines": 987,
+        "source_sha256": "78b6eea97d24a6d09a62c96a64fb23462e5e97ec5b82677da4da4163cbc83ec9"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "analyze",
+        "line": 197,
+        "lines": 853,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/flows/nqe.py",
+        "symbol": "propose",
+        "line": 245,
+        "lines": 846,
+        "source_sha256": "547805a3b6edd1ed1931a330e703f6d6da895b47ea93a8d6a7f0a76432c767c1"
+      },
+      {
+        "path": "src/app/services/official_workload_research.py",
+        "symbol": "research_official_sources",
+        "line": 850,
+        "lines": 659,
+        "source_sha256": "bb395a0b1bb5e91d20c0f998ee29caea99329cf2b2e9145f5659f8787f3e1452"
+      },
+      {
+        "path": "src/app/services/cv_tier2_pipeline.py",
+        "symbol": "_run_tier2_impl",
+        "line": 508,
+        "lines": 647,
+        "source_sha256": "63fc4856eba2ae9f2bd47ac69df60ab9fb175643cbb81e448135520b74bae99e"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint_guest",
+        "line": 2917,
+        "lines": 638,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/shopping_case_open_world_research.py",
+        "symbol": "execute_open_world_publisher_discovery_async",
+        "line": 212,
+        "lines": 631,
+        "source_sha256": "439b5f9220288ee83337d4b9ee756123f5456912715edbc8bb6d7bbbb6295c01"
+      },
+      {
+        "path": "src/app/services/recommendation_facade.py",
+        "symbol": "dispatch_recommendation_core_typed",
+        "line": 951,
+        "lines": 492,
+        "source_sha256": "b8503e34d4cced1864cd0d65336f105a799f51acec061c019d65069e445fcbe4"
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "upload",
+        "line": 1073,
+        "lines": 458,
+        "source_sha256": "ebe23e16035220fe25c1dfecf19712faa2461262d57f096b186023cd6b90b594"
+      },
+      {
+        "path": "src/app/routers/returns.py",
+        "symbol": "submit_return",
+        "line": 535,
+        "lines": 447,
+        "source_sha256": "dbfbd43f3978e25b06979bad5ffdda1651471e3df66a2949521b49c102511de5"
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "lifespan",
+        "line": 200,
+        "lines": 423,
+        "source_sha256": "11b1ab375af05214a1fc38e217ac20711a1cf4cd19f595c3536b2096594f9af3"
+      },
+      {
+        "path": "src/app/security/observer.py",
+        "symbol": "compute_risk",
+        "line": 389,
+        "lines": 411,
+        "source_sha256": "be714310f2e390a8642d089829b2020f6c73258077217c8922870fb62bc5a8c6"
+      },
+      {
+        "path": "src/app/workers/celery_app.py",
+        "symbol": "make_celery",
+        "line": 16,
+        "lines": 410,
+        "source_sha256": "011d08509bc975707e3763f218797fa8eaa0c4595510bbffd69221815e55d6d6"
+      },
+      {
+        "path": "src/app/services/recommendation_compatibility.py",
+        "symbol": "serve_v2_compatibility",
+        "line": 392,
+        "lines": 404,
+        "source_sha256": "dd3634184c50cefc5971215a272e98dbd85017a06bee420a02873c3a48341443"
+      },
+      {
+        "path": "src/app/security/email_security_rules.py",
+        "symbol": "extract_indicators",
+        "line": 483,
+        "lines": 399,
+        "source_sha256": "48d2e3f895877c4a4e2553c936fd2b79b99c89358c5160de5f9da4815fcdb4b0"
+      },
+      {
+        "path": "src/app/security/email_structured_findings.py",
+        "symbol": "_build_structured_findings",
+        "line": 23,
+        "lines": 398,
+        "source_sha256": "86f6e265913609a5e890054ae0e20b6d6f9b26156ac682e76621560611c50f8d"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "create_case_interpretation",
+        "line": 197,
+        "lines": 391,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/services/checkout_upsell.py",
+        "symbol": "recommend_checkout_upsell",
+        "line": 738,
+        "lines": 390,
+        "source_sha256": "aa4afca4f2e8a3f027a6532b95699dcf3ebc12f697c36d310e95721ae0746ad2"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "add_images",
+        "line": 3628,
+        "lines": 387,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      },
+      {
+        "path": "src/app/services/recommendation_response_finalizer.py",
+        "symbol": "finalize_core_response",
+        "line": 120,
+        "lines": 380,
+        "source_sha256": "a664259909892fe896db9cd2143f031db937c790694b84cc5e6210d9393355c9"
+      },
+      {
+        "path": "src/app/routers/shopping_cases.py",
+        "symbol": "_accept_requirement_proposal_with_db",
+        "line": 693,
+        "lines": 364,
+        "source_sha256": "0018d7ed5715530c39cee827b7f388ca23d2ec9c571d7196db1e37d11d2fb711"
+      },
+      {
+        "path": "src/app/security/email_security_verdict.py",
+        "symbol": "verdict",
+        "line": 48,
+        "lines": 358,
+        "source_sha256": "404ea4830a275e5597edc30978be15c4396bcc7a70634414965ff76fb6bae53b"
+      },
+      {
+        "path": "src/app/services/demand_allocation.py",
+        "symbol": "allocation_workbench",
+        "line": 1037,
+        "lines": 356,
+        "source_sha256": "bede7c9b8b2869963d7d582b0abea0c92b929641f04584e0ee76cd9b9db6f25d"
+      },
+      {
+        "path": "src/app/services/shopping_case_enrolled_research.py",
+        "symbol": "execute_enrolled_official_research",
+        "line": 85,
+        "lines": 354,
+        "source_sha256": "83bd17414514ee7d8c1c9f84272cafac0643901c1872172f4d30054f4019c068"
+      },
+      {
+        "path": "src/app/services/recommendations.py",
+        "symbol": "rerank_candidates_with_factors",
+        "line": 1842,
+        "lines": 353,
+        "source_sha256": "c207325af124efd98832c49c827ee6e9acb985c23a3499622c655ada823fee87"
+      },
+      {
+        "path": "src/app/security/linked_artifact_analysis.py",
+        "symbol": "analyze_linked_artifact",
+        "line": 938,
+        "lines": 345,
+        "source_sha256": "89c1b5692e72c9819323ec18e2cc472bb1be4273f3c3c0d50ad611da6b3165e7"
+      },
+      {
+        "path": "src/app/services/recommendation_core/trace_ontology.py",
+        "symbol": "build_execution_steps",
+        "line": 38,
+        "lines": 345,
+        "source_sha256": "12667512d071dfa19e9a9e05370de8bcaa4111862111efb36f39066e6f2f3ce9"
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab_threat_hunt",
+        "line": 521,
+        "lines": 343,
+        "source_sha256": "d9dcb818206a4e9f1bb85ebd1ae29616816ab31e71eaebce5a6891d9e344eff3"
+      },
+      {
+        "path": "src/app/services/inventory_agent.py",
+        "symbol": "execute_reorder",
+        "line": 1021,
+        "lines": 342,
+        "source_sha256": "0aabe9364b40e11d4521c80c3d0c249867977f0bcd031598daec46c02e10fad0"
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "triage",
+        "line": 1335,
+        "lines": 331,
+        "source_sha256": "14d9ca9fb2e9299f6d6d8f777b46bf7557045e1502ad4841349d01d7e084c230"
+      }
+    ],
+    "inventory_sha256": "18f9f5d80d1bc4d2406dfb602c1fe35ffcb15e7f80ef92ba6a8ce989df3ea963",
+    "scope": "Every tracked or nonignored untracked repository input visible before publication. Ignored environments, private runtime outputs and generated checkpoint outputs are outside this inventory.",
+    "limitation": "Physical line counts, byte hashes and AST structure do not establish semantic review or execution of every line. Different source snapshots and process windows remain separate."
+  },
+  "committed_line_delta": {
+    "Documentation/other": {
+      "files": 17,
+      "added": 44834,
+      "removed": 0
+    },
+    "Runtime/configuration": {
+      "files": 18,
+      "added": 2387,
+      "removed": 2441
+    },
+    "Migrations": {
+      "files": 20,
+      "added": 523,
+      "removed": 1
+    },
+    "Frontend": {
+      "files": 45,
+      "added": 1264,
+      "removed": 431
+    },
+    "Scripts": {
+      "files": 14,
+      "added": 1160,
+      "removed": 20
+    },
+    "Application": {
+      "files": 146,
+      "added": 7550,
+      "removed": 2098
+    },
+    "Tests": {
+      "files": 215,
+      "added": 12294,
+      "removed": 1682
+    }
+  },
+  "repair_receipts": {
+    "bulk-availability-owner-commit-verification.json": {
+      "commit": "bd9b5e31780548f628b338b191040e827bf0ced6",
+      "parent": "9a56bea9a0c56095cd2a17123bbd70d3e0d01b49",
+      "files": [
+        {
+          "path": "tests/api/test_bulk_availability_e2e.py",
+          "sha256": "a8844e4536d6504f0c01d35b5548bbad45aa6c8a9b6a4ad62982a3fa52f41f36"
+        },
+        {
+          "path": "tests/services/test_bulk_availability_fixture_ownership.py",
+          "sha256": "3c00217d0e00f05d9f2be6bb75b29a56b4a25132b60c8c7d815f272d981b1deb"
+        }
+      ],
+      "red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_bulk_availability_fixture_ownership.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\bulk-availability-owner-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\bulk-availability-owner-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 27.11,
+        "peaks": {
+          "rss_bytes": 304009216,
+          "handles": 1010,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "qualification": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_bulk_availability_fixture_ownership.py",
+          "tests/api/test_bulk_availability_e2e.py",
+          "tests/integration/test_parity_fixture_database_ownership.py",
+          "tests/integration/test_frontend_backend_parity.py",
+          "tests/services/test_cart_test_database_ownership.py",
+          "tests/test_cart_stock_gates.py",
+          "tests/test_cart_clear_undo_projection.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\bulk-availability-parity-cart-integration\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\bulk-availability-owner-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 121.469,
+        "peaks": {
+          "rss_bytes": 352468992,
+          "handles": 1558,
+          "threads": 38
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 43,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "preserved_working_assertions": 9,
+      "other_python_matching_parent": 3071,
+      "preserved_working_files": 369,
+      "pushed": false,
+      "original_head_oracle_change": "Existing WIP replaces the obsolete prose-prefix assertion with delivery-not-proven, escalation and exact quantity/horizon assertions; all current working-tree assertions retained.",
+      "result": "Owned temporary file database uses canonical runtime policy and Alembic head; explicit seeding and request owner survive an ambient engine switch; client lifespan and engine close.",
+      "limit": "Repairs a controlled fixture defect; does not establish the cause of every intermittent availability failure, production locking or full-suite handle growth."
+    },
+    "admin-key-precedence-commit-verification.json": {
+      "commit": "0778168ed428d3ef18cff4f453af77e4cf7cff0c",
+      "parent": "bd9b5e31780548f628b338b191040e827bf0ced6",
+      "files": [
+        {
+          "path": "src/frontend/admin-react/src/api/client.test.ts",
+          "sha256": "ac74d402adc47e7a19adac4c50a2837591291a19ee9977a69480fdc2f2575875"
+        },
+        {
+          "path": "src/frontend/admin-react/src/api/client.ts",
+          "sha256": "4ef9f4e9f8eb9a2fd90ccac26783f44d3f4fed372d7b87eee1fc96ab88bb1ea3"
+        }
+      ],
+      "qualifications": {
+        "green": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--reporter=json",
+            "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-key-precedence-green\\vitest.json"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-key-precedence-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 2.343,
+          "peaks": {
+            "rss_bytes": 149807104,
+            "handles": 445,
+            "threads": 78
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "types": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-key-precedence-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 4.328,
+          "peaks": {
+            "rss_bytes": 405843968,
+            "handles": 167,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "build": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vite/bin/vite.js",
+            "build"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-key-precedence-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 1.578,
+          "peaks": {
+            "rss_bytes": 124706816,
+            "handles": 263,
+            "threads": 81
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      "unit_counts": {
+        "total": 48,
+        "passed": 48,
+        "failed": 0,
+        "skipped": 0
+      },
+      "controlled_red": "The actual client sent build-default after saved-operator was explicitly set.",
+      "other_admin_files_matching_parent": 81,
+      "preserved_working_files": 368,
+      "pushed": false,
+      "limit": "Request-header precedence only. Other admin/dashboard WIP and full browser, body-stream deadline and operator authentication qualification remain separate."
+    },
+    "admin-body-deadline-commit-verification.json": {
+      "commit": "68cbd8298ada9b2e597548ea2a887043047aa2c2",
+      "parent": "0778168ed428d3ef18cff4f453af77e4cf7cff0c",
+      "files": [
+        {
+          "path": "src/frontend/admin-react/src/api/client.body-deadline.test.ts",
+          "sha256": "5dc6a6655aab0e96d8cd165af03652d94639b5a02fe319fc94dc5b0a14d2a314"
+        },
+        {
+          "path": "src/frontend/admin-react/src/api/client.ts",
+          "sha256": "ed8701c3ce84edb63dce4de281635b9be25f229267a6e4f7890d062bd9853c7a"
+        },
+        {
+          "path": "src/frontend/admin-react/package.json",
+          "sha256": "cb160dc51b6c42a1faaedec7ec07b2d5e3bbd7f9822a392cca67a6e40bb9bdbf"
+        },
+        {
+          "path": "src/frontend/admin-react/package-lock.json",
+          "sha256": "baa7e45eb2d162207a0426b43eca0a0ecee442b291b8891acc6d4c8d4f7d069c"
+        }
+      ],
+      "qualifications": {
+        "final-unit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--reporter=json",
+            "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-body-deadline-final-unit\\vitest.json"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-body-deadline-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 2.515,
+          "peaks": {
+            "rss_bytes": 139669504,
+            "handles": 449,
+            "threads": 78
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "final-types": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-body-deadline-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 5.375,
+          "peaks": {
+            "rss_bytes": 488198144,
+            "handles": 167,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "final-build": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vite/bin/vite.js",
+            "build"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\admin-body-deadline-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 1.156,
+          "peaks": {
+            "rss_bytes": 172388352,
+            "handles": 223,
+            "threads": 41
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      "unit_counts": {
+        "total": 52,
+        "passed": 52,
+        "failed": 0,
+        "skipped": 0
+      },
+      "controlled_red": "Real owned loopback server flushes headers immediately and delays body: success JSON/download resolve past deadline; error JSON reports HTTP failure instead of deadline. Three valid reds, one success control.",
+      "dependency": {
+        "added": [
+          "node_modules/@types/node",
+          "node_modules/undici-types"
+        ],
+        "existing_package_entries_unchanged": 172,
+        "installation": "Candidate-only npm ci --ignore-scripts --no-audit --no-fund completed: 150 packages; ROOT node_modules preserved."
+      },
+      "other_admin_files_matching_parent": 80,
+      "preserved_working_files": 370,
+      "pushed": false,
+      "audit": {
+        "vulnerable_packages": 1,
+        "package": "vite",
+        "preexisting_exact_lock_entry": true,
+        "advisories": [
+          "https://github.com/advisories/GHSA-698v-4r3x-3vcv",
+          "https://github.com/advisories/GHSA-r825-w8mm-5pxw",
+          "https://github.com/advisories/GHSA-587h-7wmj-h5pm"
+        ],
+        "status": "Separate minimal patched Vite cohort being prepared; not zero-audit/release certification."
+      },
+      "limit": "Download helper now completes the body before returning readable Response content; exported status/headers/body preserved, transport URL metadata is not retained. ROOT installed dependencies remain untouched while other profiles run. No claim about original 151-second server request."
+    },
+    "vite-editor-security-commit-verification.json": {
+      "commit": "657ab41586c9a576dfd4cf93a84c32b60256d746",
+      "parent": "68cbd8298ada9b2e597548ea2a887043047aa2c2",
+      "files": [
+        {
+          "path": "frontend/package.json",
+          "sha256": "b2382bfa8976a16fc345ee9bade29ca049cab819644c037447abf456a10d033f"
+        },
+        {
+          "path": "frontend/package-lock.json",
+          "sha256": "5970b73cf3ba3d7403a34a358b902192c1a0fffd3e9065edb7fc9f095c27fcf5"
+        },
+        {
+          "path": "src/frontend/admin-react/package.json",
+          "sha256": "af5243a9d5929ff9b9fadd44ef03120c78624b553a6c4e0e5101b7660c4c68b1"
+        },
+        {
+          "path": "src/frontend/admin-react/package-lock.json",
+          "sha256": "431950eef2be391af852c1a8e4813dec934165b4c4b5379268f8cb7cbc21e64e"
+        }
+      ],
+      "qualifications": {
+        "storefront_install": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+            "ci",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--fetch-timeout=20000",
+            "--fetch-retries=0"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\frontend",
+          "native_exit_code": 0,
+          "elapsed_seconds": 15.563,
+          "peaks": {
+            "rss_bytes": 368771072,
+            "handles": 338,
+            "threads": 16
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "storefront_unit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--reporter=json",
+            "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-storefront-unit\\vitest.json"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\frontend",
+          "native_exit_code": 0,
+          "elapsed_seconds": 7.094,
+          "peaks": {
+            "rss_bytes": 320290816,
+            "handles": 474,
+            "threads": 78
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "storefront_types": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\frontend",
+          "native_exit_code": 0,
+          "elapsed_seconds": 13.265,
+          "peaks": {
+            "rss_bytes": 531439616,
+            "handles": 168,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "storefront_build": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vite/bin/vite.js",
+            "build"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\frontend",
+          "native_exit_code": 0,
+          "elapsed_seconds": 0.547,
+          "peaks": {
+            "rss_bytes": 36356096,
+            "handles": 150,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "storefront_audit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+            "audit",
+            "--json",
+            "--fetch-timeout=20000",
+            "--fetch-retries=0"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\frontend",
+          "native_exit_code": 0,
+          "elapsed_seconds": 1.078,
+          "peaks": {
+            "rss_bytes": 82530304,
+            "handles": 206,
+            "threads": 16
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "admin_install": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+            "ci",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--fetch-timeout=20000",
+            "--fetch-retries=0"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 16.578,
+          "peaks": {
+            "rss_bytes": 234061824,
+            "handles": 308,
+            "threads": 16
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "admin_unit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--reporter=json",
+            "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-admin-unit\\vitest.json"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 3.937,
+          "peaks": {
+            "rss_bytes": 153509888,
+            "handles": 450,
+            "threads": 78
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "admin_types": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 8.531,
+          "peaks": {
+            "rss_bytes": 488718336,
+            "handles": 167,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "admin_build": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "node_modules/vite/bin/vite.js",
+            "build"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 0.547,
+          "peaks": {
+            "rss_bytes": 34996224,
+            "handles": 123,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "admin_audit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.EXE",
+            "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+            "audit",
+            "--json",
+            "--fetch-timeout=20000",
+            "--fetch-retries=0"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 1.062,
+          "peaks": {
+            "rss_bytes": 84844544,
+            "handles": 206,
+            "threads": 16
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      "browser": {
+        "complete": true,
+        "effects": "sandbox/disabled",
+        "results": [
+          {
+            "spec": "ordinary-chat-shortfall.spec.ts",
+            "profile": "vite-editor-browser-01-ordinary-chat-shortfall",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T11:17:10.852Z",
+              "duration": 5084.834999999999,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite_editor_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\ordinary-chat-shortfall",
+                "--label",
+                "preview",
+                "--api-port",
+                "8120",
+                "--ui-port",
+                "5210",
+                "--frontend-mode",
+                "preview",
+                "ordinary-chat-shortfall.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 18.938,
+              "peaks": {
+                "rss_bytes": 295456768,
+                "handles": 1265,
+                "threads": 81
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8120": true,
+              "5210": true
+            }
+          },
+          {
+            "spec": "platform-audit-memory.spec.ts",
+            "profile": "vite-editor-browser-02-platform-audit-memory",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T11:17:35.363Z",
+              "duration": 22802.514,
+              "expected": 7,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite_editor_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\platform-audit-memory",
+                "--label",
+                "preview",
+                "--api-port",
+                "8120",
+                "--ui-port",
+                "5210",
+                "--frontend-mode",
+                "preview",
+                "platform-audit-memory.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 37.61,
+              "peaks": {
+                "rss_bytes": 356904960,
+                "handles": 1255,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8120": true,
+              "5210": true
+            }
+          },
+          {
+            "spec": "buyer-only-procurement.spec.ts",
+            "profile": "vite-editor-browser-03-buyer-only-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T11:18:17.389Z",
+              "duration": 4922.967000000001,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite_editor_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\buyer-only-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8120",
+                "--ui-port",
+                "5210",
+                "--frontend-mode",
+                "preview",
+                "buyer-only-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 19.781,
+              "peaks": {
+                "rss_bytes": 287580160,
+                "handles": 1268,
+                "threads": 81
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8120": true,
+              "5210": true
+            }
+          },
+          {
+            "spec": "browser-native-tenant-procurement.spec.ts",
+            "profile": "vite-editor-browser-04-browser-native-tenant-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T11:18:38.000Z",
+              "duration": 3775.9440000000004,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite_editor_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\browser-native-tenant-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate\\.artifacts\\committed-browser-specs\\browser-native-tenant-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8120",
+                "--ui-port",
+                "5210",
+                "--frontend-mode",
+                "preview",
+                "browser-native-tenant-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\vite-editor-security-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 15.282,
+              "peaks": {
+                "rss_bytes": 283598848,
+                "handles": 1242,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8120": true,
+              "5210": true
+            }
+          }
+        ],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "source_head": "68cbd8298ada9b2e597548ea2a887043047aa2c2",
+        "selected_specs": [
+          "ordinary-chat-shortfall.spec.ts",
+          "platform-audit-memory.spec.ts",
+          "buyer-only-procurement.spec.ts",
+          "browser-native-tenant-procurement.spec.ts"
+        ],
+        "elapsed_seconds": 186.36,
+        "changed_inputs": []
+      },
+      "sources": [
+        "https://github.com/vitejs/launch-editor/security/advisories/GHSA-587h-7wmj-h5pm",
+        "https://github.com/vitejs/launch-editor/security/advisories/GHSA-698v-4r3x-3vcv",
+        "https://github.com/vitejs/launch-editor/security/advisories/GHSA-r825-w8mm-5pxw"
+      ],
+      "lock_delta": [
+        {
+          "project": "storefront",
+          "changed": [
+            {
+              "path": "node_modules/@emnapi/core",
+              "before": "2.0.0-alpha.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/@emnapi/runtime",
+              "before": "2.0.0-alpha.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/@emnapi/wasi-threads",
+              "before": "2.0.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/@napi-rs/wasm-runtime",
+              "before": "1.2.2",
+              "after": null
+            },
+            {
+              "path": "node_modules/@oxc-project/types",
+              "before": "0.142.0",
+              "after": "0.154.0"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-android-arm-eabi",
+              "before": null,
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-android-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-darwin-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-darwin-x64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-freebsd-x64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm-gnueabihf",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm64-musl",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-ppc64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-s390x-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-x64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-x64-musl",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-openharmony-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-wasm32-wasi",
+              "before": "1.2.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/@rolldown/binding-win32-arm64-msvc",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-win32-x64-msvc",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@tybys/wasm-util",
+              "before": "0.10.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/nanoid",
+              "before": "3.3.18",
+              "after": "3.3.20"
+            },
+            {
+              "path": "node_modules/postcss",
+              "before": "8.5.25",
+              "after": "8.5.31"
+            },
+            {
+              "path": "node_modules/rolldown",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/tslib",
+              "before": "2.8.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/vite",
+              "before": "8.2.0",
+              "after": "8.2.4"
+            }
+          ]
+        },
+        {
+          "project": "admin",
+          "changed": [
+            {
+              "path": "node_modules/@emnapi/core",
+              "before": "2.0.0-alpha.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/@emnapi/runtime",
+              "before": "2.0.0-alpha.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/@emnapi/wasi-threads",
+              "before": "2.0.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/@napi-rs/wasm-runtime",
+              "before": "1.2.2",
+              "after": null
+            },
+            {
+              "path": "node_modules/@oxc-project/types",
+              "before": "0.142.0",
+              "after": "0.154.0"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-android-arm-eabi",
+              "before": null,
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-android-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-darwin-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-darwin-x64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-freebsd-x64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm-gnueabihf",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-arm64-musl",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-ppc64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-s390x-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-x64-gnu",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-linux-x64-musl",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-openharmony-arm64",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-wasm32-wasi",
+              "before": "1.2.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/@rolldown/binding-win32-arm64-msvc",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@rolldown/binding-win32-x64-msvc",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/@tybys/wasm-util",
+              "before": "0.10.3",
+              "after": null
+            },
+            {
+              "path": "node_modules/nanoid",
+              "before": "3.3.18",
+              "after": "3.3.20"
+            },
+            {
+              "path": "node_modules/postcss",
+              "before": "8.5.25",
+              "after": "8.5.31"
+            },
+            {
+              "path": "node_modules/rolldown",
+              "before": "1.2.1",
+              "after": "1.2.14"
+            },
+            {
+              "path": "node_modules/tslib",
+              "before": "2.8.1",
+              "after": null
+            },
+            {
+              "path": "node_modules/vite",
+              "before": "8.2.0",
+              "after": "8.2.4"
+            }
+          ]
+        }
+      ],
+      "unit_counts": {
+        "storefront": 387,
+        "admin": 52
+      },
+      "audits": {
+        "storefront": 0,
+        "admin": 0
+      },
+      "other_source_files_matching_parent": 4586,
+      "preserved_working_files": 373,
+      "pushed": false,
+      "limit": "Fresh Windows installations and ten current fictional workflow/memory/buyer browser checks only. Optional native bindings on other OS/architectures and the whole release remain unqualified. ROOT installs stay unchanged during active frozen Python profiles; locks and existing installed packages differ until alignment."
+    },
+    "http-histogram-resource-commit-verification.json": {
+      "commit": "582dd8a208ae96e41165b329a4e6893626925ddd",
+      "parent": "657ab41586c9a576dfd4cf93a84c32b60256d746",
+      "files": [
+        {
+          "path": "src/app/observability/http_histogram.py",
+          "sha256": "3c6664ec983d1dc9f9bc480cf44dd30a809f557dc085a538db86a8c526839d12"
+        },
+        {
+          "path": "src/app/observability/metrics.py",
+          "sha256": "d7f816b8b8e5dd8078680de8d0f671842ac527e878ef755f421d00e7a9d18e71"
+        },
+        {
+          "path": "tests/observability/test_http_histogram_resources.py",
+          "sha256": "da21a97669f6abb2d5832afe723150316286f61c52d93ac8409939c19c40be12"
+        }
+      ],
+      "red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/observability/test_http_histogram_resources.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-final-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\http-histogram-final-red-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 27.953,
+        "peaks": {
+          "rss_bytes": 269258752,
+          "handles": 2954,
+          "threads": 33
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 7,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "qualifications": {
+        "http-histogram-resource-protocol": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/observability/test_http_histogram_resources.py",
+            "tests/observability/test_http_metric_cardinality.py",
+            "tests/test_metrics.py",
+            "tests/unit/test_metrics_rbac.py",
+            "tests/integration/test_metrics_increment.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-protocol\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 19.954,
+          "peaks": {
+            "rss_bytes": 271110144,
+            "handles": 1093,
+            "threads": 40
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 16,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        },
+        "http-histogram-api-integration": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/api",
+            "tests/observability/test_http_histogram_resources.py",
+            "tests/observability/test_http_metric_cardinality.py",
+            "tests/test_metrics.py",
+            "tests/unit/test_metrics_rbac.py",
+            "tests/integration/test_metrics_increment.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-api-integration\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 448.563,
+          "peaks": {
+            "rss_bytes": 735244288,
+            "handles": 3226,
+            "threads": 84
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 355,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "historical_prefix": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "-c",
+          "import json\nfrom pathlib import Path\nimport sys\nimport pytest\nsys.path.insert(0,'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20')\nfrom native_handle_types import snapshot\nselection=json.loads(Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\v7-histogram-fixed-prefix819-diagnostic\\\\selection.json').read_text())\nwanted=set(selection['selected'])\nclass Metrics:\n    number=0\n    @pytest.hookimpl(hookwrapper=True,tryfirst=True)\n    def pytest_runtest_teardown(self,item,nextitem):\n        yield\n        self.number+=1\n        if self.number==1 or self.number%100==0 or self.number==819:\n            from prometheus_client import REGISTRY\n            rows=[]\n            for collector in list(REGISTRY._collector_to_names):\n                children=getattr(collector,'_metrics',None)\n                values=list(children.values()) if isinstance(children,dict) else [collector]\n                locks=0\n                for child in values:\n                    for value in vars(child).values():\n                        candidates=value if isinstance(value,(list,tuple)) else [value]\n                        locks+=sum(type(entry).__module__=='prometheus_client.values' and hasattr(entry,'_lock') for entry in candidates)\n                rows.append(dict(name=getattr(collector,'_name',type(collector).__name__),\n                                 kind=type(collector).__name__,children=len(values),value_locks=locks))\n            row=dict(number=self.number,nodeid=item.nodeid,handles=snapshot(),metrics=rows)\n            with Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\v7-histogram-fixed-prefix819-diagnostic\\\\metrics.jsonl').open('a',encoding='utf-8') as stream:\n                stream.write(json.dumps(row)+'\\n')\nclass Prefix:\n    @pytest.hookimpl(trylast=True)\n    def pytest_collection_modifyitems(self,config,items):\n        assert {item.nodeid for item in items}==set(selection['original'])\n        excluded=[item for item in items if item.nodeid not in wanted]\n        items[:]=[item for item in items if item.nodeid in wanted]\n        assert [item.nodeid for item in items]==selection['selected']\n        config.hook.pytest_deselected(items=excluded)\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\v7-histogram-fixed-prefix819-tests\\\\tests.xml'],plugins=[Prefix(),Metrics()]))\n"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\v7-http-histogram-fixed-snapshot",
+        "native_exit_code": 0,
+        "elapsed_seconds": 1021.563,
+        "peaks": {
+          "rss_bytes": 881496064,
+          "handles": 3926,
+          "threads": 88
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 823,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 139
+        }
+      },
+      "browser": {
+        "complete": true,
+        "effects": "sandbox/disabled",
+        "results": [
+          {
+            "spec": "browser-native-tenant-procurement.spec.ts",
+            "profile": "http-histogram-browser-01-browser-native-tenant-procurement",
+            "native_exit_code": 0,
+            "stats": {
+              "startTime": "2026-10-21T11:23:47.662Z",
+              "duration": 3997.457,
+              "expected": 1,
+              "skipped": 0,
+              "unexpected": 0,
+              "flaky": 0
+            },
+            "resources": {
+              "command": [
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http_histogram_browser_entry.py",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate\\.artifacts\\committed-browser-specs\\browser-native-tenant-procurement\\owned-cache-private.json",
+                "--directory",
+                "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate\\.artifacts\\committed-browser-specs\\browser-native-tenant-procurement",
+                "--label",
+                "preview",
+                "--api-port",
+                "8122",
+                "--ui-port",
+                "5212",
+                "--frontend-mode",
+                "preview",
+                "browser-native-tenant-procurement.spec.ts"
+              ],
+              "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate",
+              "native_exit_code": 0,
+              "elapsed_seconds": 16.093,
+              "peaks": {
+                "rss_bytes": 287072256,
+                "handles": 1102,
+                "threads": 78
+              },
+              "resource_violation": null,
+              "offline_models": true,
+              "commercial_effects": "sandbox/disabled"
+            },
+            "control_canary_retained": true,
+            "ports_closed": {
+              "8122": true,
+              "5212": true
+            }
+          }
+        ],
+        "owned_container_removed": true,
+        "owned_network_removed": true,
+        "source_head": "657ab41586c9a576dfd4cf93a84c32b60256d746",
+        "selected_specs": [
+          "browser-native-tenant-procurement.spec.ts"
+        ],
+        "elapsed_seconds": 80.735,
+        "changed_inputs": []
+      },
+      "allocation": {
+        "application": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-resource-candidate",
+        "rows": [
+          {
+            "collector": "Histogram",
+            "series": 128,
+            "before": {
+              "handles": 367,
+              "locks": 212
+            },
+            "after": {
+              "handles": 2417,
+              "locks": 2262
+            },
+            "delta": {
+              "handles": 2050,
+              "locks": 2050
+            }
+          },
+          {
+            "collector": "HttpLatencyHistogram",
+            "series": 128,
+            "before": {
+              "handles": 2417,
+              "locks": 2262
+            },
+            "after": {
+              "handles": 2547,
+              "locks": 2392
+            },
+            "delta": {
+              "handles": 130,
+              "locks": 130
+            }
+          }
+        ],
+        "scope": "Dedicated process allocation probe with one premeasurement GC; does not alter the full-run runner or resource guards."
+      },
+      "baseline_full_prefix": {
+        "receipt": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-X",
+            "utf8",
+            "-c",
+            "import json\nfrom pathlib import Path\nimport pytest\nselection=json.loads(Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\clean-pipeline-old-metric-prefix\\\\selection.json').read_text())\nwanted=set(selection['selected'])\nclass Prefix:\n    @pytest.hookimpl(trylast=True)\n    def pytest_collection_modifyitems(self,config,items):\n        assert [item.nodeid for item in items]==selection['original']\n        excluded=[item for item in items if item.nodeid not in wanted]\n        items[:]=[item for item in items if item.nodeid in wanted]\n        assert [item.nodeid for item in items]==selection['selected']\n        config.hook.pytest_deselected(items=excluded)\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\clean-pipeline-old-metric-prefix-tests\\\\tests.xml'],plugins=[Prefix()]))\n"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-final-red-candidate",
+          "native_exit_code": 1,
+          "elapsed_seconds": 337.812,
+          "peaks": {
+            "rss_bytes": 574246912,
+            "handles": 3469,
+            "threads": 83
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 263,
+            "failures": 7,
+            "errors": 12,
+            "skipped": 23
+          }
+        },
+        "matching_phase_outcomes": 259,
+        "assertion_failures": 7,
+        "setup_errors": 12,
+        "interpretation": "Same first259 outcomes under prior and repaired metric binding; broad full-run gaps remain."
+      },
+      "other_python_files_matching_parent": 3072,
+      "preserved_working_files": 369,
+      "pushed": false,
+      "sources": [
+        "https://prometheus.github.io/client_python/collector/custom/"
+      ],
+      "limits": "Single-process public collector preserves full buckets/sum/count/created series; real native multiprocess writers remain on the standard backend. Historical prefix skips and clean-source broad failures are still open. Full 8338-case candidate run continues. No all-line semantic, final resource/endurance or release certification."
+    },
+    "collection-owner-commit-verification.json": {
+      "commit": "15b7179efbabb441fbdb2fc408e11c3dcc920cd6",
+      "parent": "582dd8a208ae96e41165b329a4e6893626925ddd",
+      "files": [
+        {
+          "path": "tests/legacy_endpoint_runtime.py",
+          "sha256": "938c322d039eb145b3a448fd47fe6e93de8c02a2ca65afad8c6b5cf2629338d9"
+        },
+        {
+          "path": "tests/test_admin_overview.py",
+          "sha256": "6b17160864507373aebe48f62df0e336bf33298b60f347b4e23217becdf549c2"
+        },
+        {
+          "path": "tests/test_orders_status.py",
+          "sha256": "f68cc758fb712b5ee3f410c7f111739fde252825d5b88e0e1d4216aefd02569e"
+        },
+        {
+          "path": "tests/test_order_history_paging.py",
+          "sha256": "9cfbebdf6c1e71cf38a728f60e2186b5157a34170e69b86f5b19fe14b331d549"
+        },
+        {
+          "path": "tests/test_security_event_tags.py",
+          "sha256": "d9cde26aeb8c27b384602e771668c9914ea5d1f80fe0145985d94ac21bc67b2e"
+        },
+        {
+          "path": "tests/services/test_legacy_endpoint_collection_ownership.py",
+          "sha256": "439da32ba60984ad3a9b922676c7c61d45a37e2b9c11157a717e3e185cbaa6f5"
+        }
+      ],
+      "red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_legacy_endpoint_collection_ownership.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\collection-owner-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\collection-owner-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 50.328,
+        "peaks": {
+          "rss_bytes": 269316096,
+          "handles": 977,
+          "threads": 34
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 4,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "qualifications": {
+        "collection-owner-green": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/services/test_legacy_endpoint_collection_ownership.py",
+            "tests/test_admin_overview.py",
+            "tests/test_orders_status.py",
+            "tests/test_order_history_paging.py",
+            "tests/test_security_event_tags.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\collection-owner-green\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\collection-owner-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 70.921,
+          "peaks": {
+            "rss_bytes": 322134016,
+            "handles": 1336,
+            "threads": 37
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        },
+        "collection-owner-api-integration": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/api",
+            "tests/services/test_legacy_endpoint_collection_ownership.py",
+            "tests/test_admin_overview.py",
+            "tests/test_orders_status.py",
+            "tests/test_order_history_paging.py",
+            "tests/test_security_event_tags.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\collection-owner-api-integration\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\collection-owner-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 486.922,
+          "peaks": {
+            "rss_bytes": 727777280,
+            "handles": 3482,
+            "threads": 81
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 348,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "full_collection_prefix": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "-c",
+          "import json\nfrom pathlib import Path\nimport pytest\nselection=json.loads(Path('C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\collection-owner-full-prefix-v2\\\\selection.json').read_text())\nwanted=set(selection['selected'])\nclass Prefix:\n    @pytest.hookimpl(trylast=True)\n    def pytest_collection_modifyitems(self,config,items):\n        found={item.nodeid for item in items}\n        original=set(selection['original'])\n        assert original<=found\n        extras=found-original\n        assert len(extras)==4 and all(node.startswith(selection['extra_module']) for node in extras)\n        excluded=[item for item in items if item.nodeid not in wanted]\n        items[:]=[item for item in items if item.nodeid in wanted]\n        assert [item.nodeid for item in items]==selection['selected']\n        config.hook.pytest_deselected(items=excluded)\nraise SystemExit(pytest.main(['tests','--run-slow','-q','--junitxml='+'C:\\\\AI\\\\ShopSquire\\\\.artifacts\\\\roadmap-execution-2026-10-20\\\\collection-owner-full-prefix-v2-tests\\\\tests.xml'],plugins=[Prefix()]))\n"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\collection-owner-candidate",
+        "native_exit_code": 0,
+        "elapsed_seconds": 275.922,
+        "peaks": {
+          "rss_bytes": 515575808,
+          "handles": 2534,
+          "threads": 81
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 263,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 23
+        }
+      },
+      "fixed_same_prefix_failures": {
+        "assertion_failures": 7,
+        "setup_errors": 12,
+        "case_ids": [
+          "tests/api/test_admin_inventory_generic_deep_provider_jobs.py::test_generic_provider_delta_and_outbound",
+          "tests/api/test_admin_inventory_netsuite_jobs.py::test_netsuite_delta_and_outbound_jobs",
+          "tests/api/test_chat_case_read_revision.py::test_case_recall_preserves_material_revision_and_accepted_selection[How many laptops did I ask for and what was my budget and delivery destination?]",
+          "tests/api/test_chat_case_read_revision.py::test_case_recall_preserves_material_revision_and_accepted_selection[Summarise my quantity, per-unit budget and delivery destination without taking any action.]",
+          "tests/api/test_chat_case_tasks.py::test_corrupt_derived_view_cannot_override_canonical_task_facts[False]",
+          "tests/api/test_chat_case_tasks.py::test_corrupt_derived_view_cannot_override_canonical_task_facts[True]",
+          "tests/api/test_chat_case_tasks.py::test_draft_read_keeps_the_accepted_selection_and_case_revision",
+          "tests/api/test_chat_case_tasks.py::test_ordinary_chat_delivers_a_shortfall_draft_without_authorizing_effects[False]",
+          "tests/api/test_chat_case_tasks.py::test_ordinary_chat_delivers_a_shortfall_draft_without_authorizing_effects[True]",
+          "tests/api/test_chat_case_tasks.py::test_ordinary_chat_returns_cited_market_analysis_for_the_owned_case",
+          "tests/api/test_chat_graceful_degrade.py::test_recommend_hop_failure_degrades_to_200_not_502",
+          "tests/api/test_chat_owned_evidence_intake.py::test_evidence_proposal_uses_the_final_owned_case[continuation]",
+          "tests/api/test_chat_owned_evidence_intake.py::test_evidence_proposal_uses_the_final_owned_case[fresh]",
+          "tests/api/test_chat_owned_evidence_intake.py::test_evidence_proposal_uses_the_final_owned_case[replacement]",
+          "tests/api/test_chat_shortfall_task_quantity.py::test_shortfall_count_keeps_canonical_total_and_material_revision[False-Draft an email for a 50 unit shortfall in my current request.]",
+          "tests/api/test_chat_shortfall_task_quantity.py::test_shortfall_count_keeps_canonical_total_and_material_revision[False-Draft an email to the supplier for the 25 unit shortfall.]",
+          "tests/api/test_chat_shortfall_task_quantity.py::test_shortfall_count_keeps_canonical_total_and_material_revision[True-Draft an email for a 50 unit shortfall in my current request.]",
+          "tests/api/test_chat_shortfall_task_quantity.py::test_shortfall_count_keeps_canonical_total_and_material_revision[True-Draft an email to the supplier for the 25 unit shortfall.]",
+          "tests/api/test_pipeline_e2e_fraud_and_warehouse.py::test_e2e_pipeline_with_fraud_and_warehouse"
+        ],
+        "selected": 259,
+        "after_call_pass_records": 240,
+        "after_runtime_skips": 19,
+        "extra_collection_skip_reports": 4
+      },
+      "original_assertions_preserved": 16,
+      "other_python_files_matching_parent": 3070,
+      "preserved_working_files": 369,
+      "preserved_authored_wip": "Five original working versions archived privately before adapting them; unique order/subject seeds retained.",
+      "effect": "Importing any of the four endpoint modules preserves engine/session/security policy. Runtime-only clients own a migrated private SQLite database, app owner and complete lifespan.",
+      "limits": "Repairs observed collection contamination and the exact first259 failures. Other module-scoped client lifetimes, full clean-process resource retention and all required profiles remain open. No production behavior change, push or final release claim.",
+      "pushed": false
+    },
+    "api-fixture-lifetime-commit-verification.json": {
+      "commit": "4b9071af020d3dbe74197961f1c992276c67bc79",
+      "parent": "15b7179efbabb441fbdb2fc408e11c3dcc920cd6",
+      "files": [
+        {
+          "path": "tests/api/test_complaints_pipeline_smoke.py",
+          "sha256": "9400304f522c75542128b35865bfa981e5826cf1bbc837465301dff08e2c3790"
+        },
+        {
+          "path": "tests/api/test_pipeline_e2e_fraud_and_warehouse.py",
+          "sha256": "4344a339ea7162081fbac5b0ea63987a5a0a73016a93b29fd9ca2b3d5e252cc5"
+        },
+        {
+          "path": "tests/api/test_redteam_storefront_security_wiring.py",
+          "sha256": "894278524fa99fa2fb2cea53f57ef8156c957fc2ed1dc916afed01cc06a4feb6"
+        },
+        {
+          "path": "tests/api/test_support_complaints_security.py",
+          "sha256": "7963276d1041d7391883d10142aa1a05c53ff0ec61537996cbe1b2ba48c85954"
+        },
+        {
+          "path": "tests/services/test_api_fixture_lifetime_ownership.py",
+          "sha256": "99aaf75e3e573a67c963abaf0ad513a935e4e7cba718cc60b3bef3df794f41b2"
+        }
+      ],
+      "red": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-m",
+          "pytest",
+          "tests/services/test_api_fixture_lifetime_ownership.py",
+          "-q",
+          "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-red\\tests.xml"
+        ],
+        "cwd": ".artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-candidate",
+        "native_exit_code": 1,
+        "elapsed_seconds": 72.828,
+        "peaks": {
+          "rss_bytes": 276856832,
+          "handles": 1033,
+          "threads": 34
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled",
+        "counts": {
+          "tests": 4,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "qualifications": {
+        "api-fixture-lifetime-green": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/services/test_api_fixture_lifetime_ownership.py",
+            "tests/api/test_complaints_pipeline_smoke.py",
+            "tests/api/test_pipeline_e2e_fraud_and_warehouse.py",
+            "tests/api/test_redteam_storefront_security_wiring.py",
+            "tests/api/test_support_complaints_security.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-green\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 74.156,
+          "peaks": {
+            "rss_bytes": 333824000,
+            "handles": 1514,
+            "threads": 61
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        },
+        "api-fixture-lifetime-api-integration": {
+          "command": [
+            "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/api",
+            "tests/services/test_legacy_endpoint_collection_ownership.py",
+            "tests/services/test_api_fixture_lifetime_ownership.py",
+            "tests/test_admin_overview.py",
+            "tests/test_orders_status.py",
+            "tests/test_order_history_paging.py",
+            "tests/test_security_event_tags.py",
+            "-q",
+            "--junitxml=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-api-integration\\tests.xml"
+          ],
+          "cwd": ".artifacts\\roadmap-execution-2026-10-20\\api-fixture-lifetime-candidate",
+          "native_exit_code": 0,
+          "elapsed_seconds": 505.032,
+          "peaks": {
+            "rss_bytes": 670023680,
+            "handles": 2941,
+            "threads": 84
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled",
+          "counts": {
+            "tests": 352,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "original_assertions_preserved": 25,
+      "other_python_files_matching_parent": 3072,
+      "preserved_working_files": 364,
+      "pushed": false,
+      "controlled_scope": "Four actual prior API client fixtures were used in one module, then a second module checked the original engine, factory, environment and application-cache keys. Each first database-use probe passed before its subsequent owner check failed.",
+      "effect": "Function-scoped monkeypatched database configuration and complete TestClient lifetimes release owners before the next case. Nested child pytest receipts are separate from parent case records.",
+      "limits": "Test infrastructure only; preserves original business assertions. Does not establish production locking, the cause of the earlier long security request, complete resource/endurance closure or all required live profiles."
+    },
+    "admin-public-build-commit-verification.json": {
+      "commit": "af18ae17ac98f1afc837474d45eff4eac6e99814",
+      "parent": "4b9071af020d3dbe74197961f1c992276c67bc79",
+      "files": [
+        {
+          "path": "src/frontend/admin-react/src/api/client.test.ts",
+          "sha256": "03107dad07ef0971008488861208c19b8af976cb9b0d666988196f7f44012457"
+        },
+        {
+          "path": "src/frontend/admin-react/src/api/client.public-build.test.ts",
+          "sha256": "4faa16e5be665151063787f7985ca34853e3a9f350e5e5e53bb216ec57b3a62e"
+        },
+        {
+          "path": "src/frontend/admin-react/src/api/client.ts",
+          "sha256": "4fe50cf2b95d2df19d1ae569922447e8e67b4b577c92e4ecd0a09efedc200319"
+        },
+        {
+          "path": "src/frontend/admin-react/src/components/DeveloperPanel.tsx",
+          "sha256": "01d87ec730f1a0cdc58ea4eeb23b6a68da0f7214db0de0519158a58614131a61"
+        }
+      ],
+      "red": {
+        "profile": "admin-public-build-red-v2",
+        "passed": 3,
+        "failed": 2,
+        "skipped": 0,
+        "findings": [
+          "Actual production JavaScript includes a synthetic build credential.",
+          "Clearing the selected key reactivates a build credential."
+        ]
+      },
+      "invalid_initial_control": "First logout probe reused a consumed Response. Build-canary red was valid; corrected fresh-Response logout probe is the reported red-v2.",
+      "qualifications": {
+        "unit": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.exe",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--reporter=json",
+            "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-public-build-green-unit\\vitest.json"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-public-build-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 2.359,
+          "peaks": {
+            "rss_bytes": 154624000,
+            "handles": 460,
+            "threads": 78
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "types": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.exe",
+            "node_modules/typescript/bin/tsc",
+            "--noEmit"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-public-build-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 5.265,
+          "peaks": {
+            "rss_bytes": 494657536,
+            "handles": 167,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        },
+        "build": {
+          "command": [
+            "C:\\Program Files\\nodejs\\node.exe",
+            "node_modules/vite/bin/vite.js",
+            "build"
+          ],
+          "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\admin-public-build-candidate\\src\\frontend\\admin-react",
+          "native_exit_code": 0,
+          "elapsed_seconds": 1.078,
+          "peaks": {
+            "rss_bytes": 36147200,
+            "handles": 143,
+            "threads": 12
+          },
+          "resource_violation": null,
+          "offline_models": true,
+          "commercial_effects": "sandbox/disabled"
+        }
+      },
+      "unit_counts": {
+        "total": 54,
+        "passed": 54,
+        "failed": 0,
+        "skipped": 0
+      },
+      "other_admin_files_matching_parent": 81,
+      "preserved_working_files": 363,
+      "pushed": false,
+      "limit": "Production bundle canary and explicit header selection/clearing only. Operator authentication, remaining admin WIP and deployment role policies remain separate gates."
+    }
+  },
+  "root_frontend_previous_qualification": {
+    "captured_at": "2026-10-21T11:58:48.846849+00:00",
+    "source": {
+      "head": "582dd8a208ae96e41165b329a4e6893626925ddd",
+      "files": {
+        "frontend/.env.example": "92a2b9b2dc760db244e839dd077ac220491b642a91e0abf4035876b5b2818a8a",
+        "frontend/README.md": "7b24f8655f406b3eeacc396110d082926d59cf1fecac5f8259a2782968425765",
+        "frontend/e2e/accepted-stock.spec.ts": "85f06253f091892515030c3b86242bf382c5ec5aabf2845c01b37724a59fa719",
+        "frontend/e2e/adversarial-case-isolation.spec.ts": "516ea65557262ee114bbc6dae329cc637298433af0f93e83084036867f6c0051",
+        "frontend/e2e/artifact-security-boundary.spec.ts": "36f10cf78d434d5b38e4b2469dfc53e8685c8c7833dafdae70f5a96583dd4755",
+        "frontend/e2e/browser-native-tenant-procurement.spec.ts": "001c7a17fff368bc65d50be856ad448aedd1d8c5418c0af0e50cd6a562a6bf63",
+        "frontend/e2e/budget-subject-rfq-live.spec.ts": "61b0896ffde88fc8a8c3a3d11853bda76e128c0bc6fa8be8385371fca3dbdf54",
+        "frontend/e2e/bulk-order-economics-live.spec.ts": "25ac0ca933e29a1c4efea3cccd613452e0e3c275264f24bfd00a18f8b130ab50",
+        "frontend/e2e/buyer-evidence-source-live.spec.ts": "0c7d25cf9de11167d13673fa54fa0b1d8f747f3d5686ec5e5a8e642af69ca706",
+        "frontend/e2e/buyer-flow.spec.ts": "86460540f5aadd771e8e492abbb5c18cd1c2ea090c3256f69110eb4d9187a8ca",
+        "frontend/e2e/buyer-only-procurement.spec.ts": "dcf8a825bcf9cb073d1dbd8959c344cdd3d3228b3da824e02d0c77d76c999cfd",
+        "frontend/e2e/canonical-ambiguous-procurement.spec.ts": "da7545ce4a86e73a957db4de5da3738330d75f71a054b9fc351cbdd02fab018e",
+        "frontend/e2e/cart-clear-outage.spec.ts": "002e293be10229885bebc9d312e4373e4354539b1bc8415d8b209bb023148df4",
+        "frontend/e2e/cart-clear-restore.spec.ts": "805216a7a2ce3516297ae383794ae13cc484d64e903ba6941e8ef1c9073c4018",
+        "frontend/e2e/case-contract-selection.spec.ts": "8f65ea54f3730036140c38e0758558cd7d646b05f212cf17cebec239f173a772",
+        "frontend/e2e/case-panel-trace-consistency.spec.ts": "7c8d7f87af22ce35f687edd8efb86dd4bf5f6f32a7c47f0ec83da21229b094e0",
+        "frontend/e2e/commercial-interpretation.spec.ts": "85181c627fb7afc0b2ebd241066f387e3575144f3dce2ab714f5299a5c149ed5",
+        "frontend/e2e/consented-live-research.spec.ts": "fd3d8094744c3516f8a7675776f730c883e2e68b853974f68a067e6d4c4688ed",
+        "frontend/e2e/context-retention.spec.ts": "f92dac3d9ebf7326b5efaffe94ca1ab9137b416eb6f50f92dda7264b1ad87318",
+        "frontend/e2e/conversational-integrity.spec.ts": "993a43a3ad8550607551cf2eeefa0b3480e07e280c645a3f0542f3438004138c",
+        "frontend/e2e/conversational-qualification.spec.ts": "7c6bbb84b62abd2eba8b3a57108a692616525732e355da855bad6333a37f02fb",
+        "frontend/e2e/conversational-spatiotemporal-certificate.spec.ts": "e44345117919fb68f74ac3225cdcdd5c6d4e4413d6292df615eaffec0467f9b7",
+        "frontend/e2e/decision-run-disturbance.spec.ts": "294ed4d6329c9fc43e1199921162aeba91d5916fa5b67a9578290892da754c81",
+        "frontend/e2e/decision-trace-live-audit.spec.ts": "938416a3753aa31500d6b8a10db5f627b087e50c7a617f5462696ed8115aa7b5",
+        "frontend/e2e/decision-trace-navigation.spec.ts": "d8fd2c3a1c60da734b140df806c2da8c2d2656cc748cbaa29e880b4569963826",
+        "frontend/e2e/decision-trace-procurement-operations.spec.ts": "d72a588385f044268e9c01378bce991f485f00153f2113e9d244aefa06cd31ba",
+        "frontend/e2e/decision-trace-temporal-contact.spec.ts": "54557bc606a95ae6c5a0ab401f1c2c12957163222124515ab4478627d9bb6428",
+        "frontend/e2e/electronics-shop-scenario.spec.ts": "8e0c0c329614bf961808a5baeb808ddff30aaf5b2ab4be803bded3fe067c674c",
+        "frontend/e2e/empty-profile-auth.spec.ts": "8c23b723c936ac98208df43731d0e6cafc8ea69230a747d80ea59bcdc305b467",
+        "frontend/e2e/fit-deadline-trace.spec.ts": "ec93cec51a08c1d8166e5f73620e208a59d9a896e0c46b9df4803eab242e598b",
+        "frontend/e2e/five-year-fleet-consent-regression.spec.ts": "04d27337698f4bcdf2d755b505e1e354dd9cb6d07a4fbd970dd3d66aa2592663",
+        "frontend/e2e/governed-conversation-lifecycle.spec.ts": "dbba3661a856a4c9957b3e24f7de679fc2db23d089879773993a8128485786a0",
+        "frontend/e2e/governed-product-offers.spec.ts": "40c7c9a8a3d1de6b7ecbdc7cf24c298649a87a6c792a961f0689ed8bd9c96dd2",
+        "frontend/e2e/helpers/authenticatedTest.ts": "39ae36628c221a1e781b9447bd26920c30323df9d3920205dc08848ca3ddeb13",
+        "frontend/e2e/helpers/chatTurn.ts": "8c57a22e3b9cb5ce743bb3cac9cd68a584759937c98c2d72b573a32ec1f1a72a",
+        "frontend/e2e/helpers/currentQualification.ts": "31f042bab2ca2a1cc64202146a4e171d1bf3fc26d77896a5505dc6daeca082b5",
+        "frontend/e2e/helpers/fixtureMerchant.ts": "3ad36d93677e55d7560dd71fcfcfa0b6a26a525c4159aacdff006d72852da38a",
+        "frontend/e2e/helpers/turnOracle.ts": "1dc9ff46d9ceab079f2667c12112646bbc794d750c3d3cc29117c284f5e896ff",
+        "frontend/e2e/inventory-scheduler.spec.ts": "2e3b09568d4298cdee80674635143d73e5b6a23bcac949c72fef177340e43c9f",
+        "frontend/e2e/legacy-review-failure.spec.ts": "4dcdfe848a5b9ff109d43ecf5e89e124e20bc61a1dd1e490a46a2dcdec039de1",
+        "frontend/e2e/live-acceptance-budget.spec.ts": "0398c97fa8d831614f4804446b71310eeb11fa703e5ba72f5e9aa2588cf8df33",
+        "frontend/e2e/live-buyer-regression-matrix.spec.ts": "972f189c12487f981d56ed56baf11898fc6695493ebbb97156deb26de5831232",
+        "frontend/e2e/live-external-ot-research-certification.spec.ts": "7448588e3e6d11d837930f354bba68ce22c25c1dc6fff9e23e1991453a267836",
+        "frontend/e2e/live-external-search-battery.spec.ts": "6833db767a669ffa3c192d6da9edc2d682aa2c2d770daf8590ead908c96aba83",
+        "frontend/e2e/live-novel-title-intelligence.spec.ts": "3d4f87fb9049f037f3c58ce19456498bf55b042abd07eb8d20ce54173e08ccf0",
+        "frontend/e2e/live-procurement-disturbance-certificate.spec.ts": "8fe20009822df9c0451c690534d83aa86906e637fe82673eee8519646cf3124b",
+        "frontend/e2e/live-research-memory-assessment.spec.ts": "ddf95416190a3a31d063ecb927450827c911493292c35fc142c7be7ecb6cdfd7",
+        "frontend/e2e/live-turn-trace-continuity.spec.ts": "46b14ae5a5489ec99113480918c586d8f37b147a856a4a502c1716a62f83d485",
+        "frontend/e2e/live-unresolved-purchase-boundary.spec.ts": "72cf4dac4715c35b658eec9f7fc0a23a2730711e7c3aa084483918478f8bf0f5",
+        "frontend/e2e/market-adaptation.spec.ts": "786cab19ee97d75d4f37e92330b16d40167f095369695cb6abdc38d5a807ffac",
+        "frontend/e2e/memory-restart.spec.ts": "c05d56e69ef472df4c43e06670f3b41fc3759efd25eae9feb7e319cbb6991143",
+        "frontend/e2e/merchant-replenishment.spec.ts": "af78c991770011bb83a30c9f06c8bf0900c7b7371bcf4d690b24c6f1bfb99097",
+        "frontend/e2e/model-offline-turn-outcome.spec.ts": "15a1c0842012affd7719592fc250171450ea6586e21a4bfafc65bb4661e1491a",
+        "frontend/e2e/official-research-authorization.spec.ts": "b50d44c138dd982974dcfa8605b7b5fc2446807c952aa92dcfa5c623af27d91c",
+        "frontend/e2e/open-world-unseen-live-matrix.spec.ts": "e9dcf53090251ca28a137c22ac09d6405d3ca4ffd1f13df80803f51d05280c54",
+        "frontend/e2e/open-world-workload-regression.spec.ts": "befce6a322d9521d01e2573348839d9bc174cb403a1b33686600e9f9c82b8845",
+        "frontend/e2e/operator-inventory.spec.ts": "ddbba28e1e16c62f06ae04471efb3f722633c25ff8602a024638c54a62dfe27f",
+        "frontend/e2e/ordinary-case-requirements.spec.ts": "c757406a6377ecabb6e94143600a243896a732b5094ec92e761a19a22655309c",
+        "frontend/e2e/ordinary-chat-shortfall.spec.ts": "c762c369112cbdcca2b8ff66ec0434f9e695ddf31b16ba630b603ee8c06a4649",
+        "frontend/e2e/platform-audit-memory.spec.ts": "643782ec290fd1cbe1ca29acb84f2e47df28207f89746cff5c54fcffa2b59e65",
+        "frontend/e2e/portfolio-narration-preview.spec.ts": "d086a270b88e1392693d0535b3c7983593e6d1e54739e1812ad2266162a78adc",
+        "frontend/e2e/portfolio-qualification.spec.ts": "154cec9880869ea91e6bc319468c9d8cab83f331177520765001a3b27c51b080",
+        "frontend/e2e/portfolio-recording-walkthrough.spec.ts": "4987241da2ef56aaf04bf2e5624782685121fc9754ccf5dcd511e71e745106c6",
+        "frontend/e2e/portfolio-supplier-continuation.spec.ts": "cc77f97a93399d8da6dfff91ba2eadf4115d574a1f68eb07ed443f2fb819cf7f",
+        "frontend/e2e/privacy-session-isolation.spec.ts": "0d15438bab2617fe402eb4bc0a0b46720e7ebe8810feecf0470ec1f9df6e456f",
+        "frontend/e2e/procurement-amendment-permutations.spec.ts": "4dd239a00a95233444ce65189a2f67b0a24dda677e80c6d90eb768911d95713e",
+        "frontend/e2e/procurement-journey.spec.ts": "d6adf271730067693b327927eaf68613f2813280c32fce8b9802515aafb737f6",
+        "frontend/e2e/procurement-trace.spec.ts": "ef46516f52d3a76e5332d36ad46d50230b5d4cf012153269b009b7e1ee49aafc",
+        "frontend/e2e/qualified-commercial-journey.spec.ts": "c59c530172e78eb96d5c569e8eb116077316659bfe12872d4cf544d9da1d3fe4",
+        "frontend/e2e/requirement-load-recovery.spec.ts": "432b8cab49be222d4609dfad57827736eb3e7ac381590a2a614ee9a74def4171",
+        "frontend/e2e/research-degradation-live.spec.ts": "aa1d9791eefc7236ec2c59962fa83aabe7b47089c256d85a3097af3b23ecb5b5",
+        "frontend/e2e/research-disconnect-live.spec.ts": "a7d174ee56444d3585d18dc1d30758476ba962c5311cef45a61c4eb1af8364c6",
+        "frontend/e2e/research-origin-degradation-kind.spec.ts": "f3d661f6186426a9eb85dd95d04a7da12c80658daee30fb793564653e0b41c05",
+        "frontend/e2e/research-partial-engine-live.spec.ts": "4e91b08a0e34e20b9b1da9dc147b9340e43e1f6ca47de190eaa89ec678fa7405",
+        "frontend/e2e/roadmap-browser-soak.spec.ts": "642523ee49914bf087a74a9dc5ef9b28069aa5325be6560a091dcccbb335232c",
+        "frontend/e2e/rotating-intelligence-certificate.spec.ts": "a8736235d54167a7b1e3647f5b055fbee838a3608ab199c0ee41942f97776b36",
+        "frontend/e2e/semantic-resolution-journey.spec.ts": "05cb3ac0790c2990d2c45d16f7ee2d2341cb3f5981c9950a6e41e624f5496d28",
+        "frontend/e2e/shopping-case-fast-lane-timing.spec.ts": "94ef4eab5a0bdb400b001bc281cb660cc10ec1338595ea5bc7eed29ad5c6ffa7",
+        "frontend/e2e/shopping-case-sse-revision-supersession.spec.ts": "057a73aa8a380ace4f75c6c62baaf6292a445dc783af13c98f58c32f3608c2e3",
+        "frontend/e2e/six-prompt-live-research-certification.spec.ts": "eef8875f6382866875841784fbadd4361e6791230669152652e3fa89334795bd",
+        "frontend/e2e/split-fulfillment.spec.ts": "f908bf3e4a113f209963421ef04141d03e72061a39f39afb0161650fb0070c44",
+        "frontend/e2e/supplier-enquiry-journey.spec.ts": "fa9f8ce3355af0d404052be71ffc2d4025b1029b96c1c4d6c3e51cedd1f525fe",
+        "frontend/e2e/supplier-recovery.spec.ts": "2d7a6b276e30c1f5da8c550603bb029fab2f474d6a55c4adb216ac0e2b016f4c",
+        "frontend/e2e/terminal-response-race.spec.ts": "b83f0bbb60c2825a0ab6a2b4c077fad207ca7d6b03c278ce60e08e4935d55523",
+        "frontend/e2e/turn-transition-revision-matrix.spec.ts": "d46dc5c5567e148bc1eef793b810e75dd3647dd4b42f6736d9cd767e5648019f",
+        "frontend/e2e/unresolved-workload-authority.spec.ts": "f07810a77d1afaddb7231823254740eb7d7ae3674f17b35b24012933d724f5af",
+        "frontend/e2e/uploaded-requirements-journey.spec.ts": "564bfd3ae92ceba82985334ca775ead8e182541dc7fc19713732236d96660437",
+        "frontend/e2e/varied-image-continuity.spec.ts": "4783b31df797bba76da069f18b7c4be1d3d02ae01a138eb724f12a2303d36382",
+        "frontend/e2e/voice-v2-pilot.spec.ts": "c2cc577208af551068e672f157cd231a25e2373720e962a339ee81bacffe6cf5",
+        "frontend/index.html": "c0d3ee0d1c41c7d9442cfd96e0ac040f322242d97e2b51a7583cba687ad75b17",
+        "frontend/package-lock.json": "5970b73cf3ba3d7403a34a358b902192c1a0fffd3e9065edb7fc9f095c27fcf5",
+        "frontend/package.json": "b2382bfa8976a16fc345ee9bade29ca049cab819644c037447abf456a10d033f",
+        "frontend/playwright.config.ts": "d02dee5f5f268277b29a88e6b1119d6eedf4b3067e7dbe1aadbf0751af12c8d5",
+        "frontend/public/static/images/placeholder.svg": "ed569505f1563e30bb45a3d949622b461c935ae5219e0a13b689fd98b89d7cec",
+        "frontend/src/AdminShell.jsx": "83e6fb4744d6168046888da1608d14de259ff6c2ba954dd7a0b925fec2db78c6",
+        "frontend/src/App.module.css": "b7e09cbfdce27a5c7a2b7569155c97d822034e724ff48e7e70cd101de8892589",
+        "frontend/src/App.tsx": "f77f528bc988e732e25bfdd070cdf8ac2d4bd48817bd841b61c49e5f6e2da26a",
+        "frontend/src/components/AdminDashboard.tsx": "255f2dc3ed88ca8bf1b6de5307dc836717a9aa5c7baa3ded3f6cb4f9aa3d7157",
+        "frontend/src/components/AffordabilityResolutionCard.tsx": "52fb8ac2d34f3e7e3b501507ffcdda93d21c5239e7c2b7806f3bad600f05b36e",
+        "frontend/src/components/AmbiguityExplorationPanel.tsx": "968df9874e3a746fec5eea0067dba41f00b334f88bbdb5bf8ebb28daa7f43dda",
+        "frontend/src/components/AppErrorBoundary.tsx": "7bc5e9e33b3ccb8254544ec020bdf28d75347070223e72a15ea1e93aff07028d",
+        "frontend/src/components/ArchitectureAlternativesPanel.tsx": "5496283fa7d8e6928a27b63e39c27861f6f1bcdbe40dbac4c5a6456c5f8b987c",
+        "frontend/src/components/AttachmentButton.module.css": "ba41b92ec26ba4ab456b6c70f7eb7c016763e27ddbb8623d802a38568d5a83ae",
+        "frontend/src/components/AttachmentButton.tsx": "767ffcf818d4f989b8b3d2f1d81149b9769271f968cfccc7f6122bcfc91b4e6d",
+        "frontend/src/components/BulkAlternatives.tsx": "d47b703b8de2fa8c6d3bfa403d3afc810af147fe057e854d179c99210f88dbdc",
+        "frontend/src/components/BuyerClaimReconciliationCard.tsx": "bcdfee76c4f18afcc1e3b3481e89901234d4267e74554f833a8d2cd228ca64f7",
+        "frontend/src/components/BuyerRequirementReviewCard.test.tsx": "8afd9fe9a686a519b90e4bcae0ed88342a9c187baba6dee4aabab12d9ab3c4d6",
+        "frontend/src/components/BuyerRequirementReviewCard.tsx": "daee2f709d864d720d8cfef1f2a804d0ef726ca158762685e337b2e5727565c9",
+        "frontend/src/components/BuyerSupplierQuotes.tsx": "0fc40d505b3e3879f45bdc88b376e43d70439b4f8177b0c22eb6657b319d1446",
+        "frontend/src/components/CVResultsPanel.module.css": "262ea1f23004fc675a73cd15d372c1f01b6447063e5ff93f253a15bcb78311e3",
+        "frontend/src/components/CVResultsPanel.tsx": "0a6a516f81c129ad4b1fda90fc07437fff42855d74279867bb3f49dcb257bdb2",
+        "frontend/src/components/CameraButton.module.css": "65a282b65ce757d836cf0dde8ab4de0174843a6366d8d0f07fdb9835f3586c4c",
+        "frontend/src/components/CameraButton.tsx": "6e501541784cd245efd7a09ecec5d7e7242063e47af92a905ce11e41f2c87eb4",
+        "frontend/src/components/CartPanel.module.css": "4d09190def8d28ab28e8be3594138c4a9ba223f6770ed0592e778427c0ae8ee9",
+        "frontend/src/components/CartPanel.tsx": "14a8bbf5491bf4e8c86fa5ed1d771c38388720f39e5abc547afd2bbf4b6d4840",
+        "frontend/src/components/CaseContractSelection.tsx": "7a8c2bf33672ec92977c5711c1ac7e69b411640cd6971328c9f3b9db3b78a311",
+        "frontend/src/components/CaseProductOffers.tsx": "8b5038a01f0b8057d1c4252d65c8069e9a34cc08cbb3d70baa6f188eec835237",
+        "frontend/src/components/ChatOverlay.module.css": "e9dff2e6a2304c018522d0c6b253fb255b33c0d77fdadd134310a7304e14cab1",
+        "frontend/src/components/ChatOverlay.tsx": "03620dfef629fdb0213efb6ae45e8012160c8415417f604cbd2ed65c4d253dd0",
+        "frontend/src/components/ConversationTimeline.test.tsx": "bacd0324ecd489944ad8f2cb21167335b4878d1a8327fd46d64d860be959aa9b",
+        "frontend/src/components/ConversationTimeline.tsx": "2b78e1a862d91dd28b4fade12d3cb5075d602117e61550e35cf2eb19b6f2a44a",
+        "frontend/src/components/DecisionTrace.module.css": "8f1105966cc49ad150fd9e62e15300e2e93e3cead19976c33c0166a33a9f7157",
+        "frontend/src/components/DecisionTrace.tsx": "7cc1bcc68c0fc4d7eaf0730ca51fc490f6e8f61b0c9ebbaa8e5167e35b5961a4",
+        "frontend/src/components/DisambiguationButtons.module.css": "e52067089b542342f48ccddf9115d37f67577cdb46dd7fb55447a37882ff1aa3",
+        "frontend/src/components/DisambiguationButtons.tsx": "d4167ee74877cf9e6cd8d43151ee202652e68f648d0da14e426dbfaec7c1c2d7",
+        "frontend/src/components/ElectronicsShopScenario.tsx": "244ac7d04f24a73ce997fbb5540880c9c5b6b48a25523540950493187c20cf35",
+        "frontend/src/components/EscalationRoom.module.css": "9a80a27196739d6130d4124da6a3b71a26313b2b6207387d877066a96910218a",
+        "frontend/src/components/EscalationRoom.tsx": "b7db766d01ba62bea6503825b498b5bf1b20454dfbc32e25bec9a45b3faade5c",
+        "frontend/src/components/ExternalResearchPanel.module.css": "cac60d757360a16a48f967266688efe2ec1bd4215b0504791288bec0e8f77b4e",
+        "frontend/src/components/ExternalResearchPanel.tsx": "0b5981a9f38546f02d0f6c856fa2109c29ff71904a13a4eab4b4ecaa8bc2722f",
+        "frontend/src/components/FulfilmentJourney.tsx": "ac91a2fe270e6e2a7d9a64903ae1e4c2da5eb3b0622742a1f8096666981c59e2",
+        "frontend/src/components/FulfilmentOptions.tsx": "02e82dbc480e737f2e5e20630f332401e22a3dcf929a5d035394039d61fab19f",
+        "frontend/src/components/FulfilmentResolutionCard.tsx": "07ab3bb12812eb628ae408a5c61151a508a1d795b5f9fee3891d70f485908082",
+        "frontend/src/components/FulfilmentTraceLink.tsx": "725d8c329c36b3f776625f80ed45930a143d2e7c1c0b7a6b3c0d44885baec8d7",
+        "frontend/src/components/ImageRecommendPanel.module.css": "3e74e168b5e85b80db5f83fd004464fa348de6618b878c487b01422805795385",
+        "frontend/src/components/ImageRecommendPanel.tsx": "e6adb9d9665c0a806b6c20909df27b0ac603df501ced2bfff3f5536a34265b70",
+        "frontend/src/components/InlineMessageText.tsx": "6e90f74be47acb259f45e3780db8d81b62e9fd2fc1583bb91f53b0c425fd3235",
+        "frontend/src/components/InventoryOperationsPanel.tsx": "cf238924c1bcdd59b3173a6afd7f4946f28414c0b892b54bc2415fd5eb7341e0",
+        "frontend/src/components/LoginModal.tsx": "17d84e8d90298bb611e7c0bc8ca1c7e60fd6cf07bdd4c4a4f18fed1e10a0cf1c",
+        "frontend/src/components/MerchantDecisionCard.tsx": "56a242930c860b54be4a4fab9ee4ce168b0a8fbb88371ae3a3ceff2975f194a3",
+        "frontend/src/components/MultiIntentCard.tsx": "cb0544c68f2d9f4aa802793b265efe21f6f618b6f76060b53f8869603afd8d2a",
+        "frontend/src/components/OOBVerification.tsx": "ea92c9c62a1f78198b7b75f0d5415358aa5ba9cd0fb18d71e25469f38781a13e",
+        "frontend/src/components/OffCatalogSourcingCard.tsx": "0ce4e4e495b4c8e7831c35c4a46ebe60cd753225ef320ead5c18211698730b17",
+        "frontend/src/components/PendingCartChangeCard.tsx": "57ce387b11808d21ad645b389508c7c470df832474c05250dda50d60e5220604",
+        "frontend/src/components/PortfolioQualification.tsx": "c9b86eb1f7369e2aaaae88daa12dfded46050789bbcdda47854172d7370eef0d",
+        "frontend/src/components/ProcurementCertificationShowcase.module.css": "d34e4e2303cbb7470131810bb29b42eb5d829a58ffb30c92a827e297124ab962",
+        "frontend/src/components/ProcurementCertificationShowcase.tsx": "6e7ed7c0df6e158f25fe03f6236c6c03089e4725db41f6767f647858a4f67b5a",
+        "frontend/src/components/ProcurementOperationalTrace.tsx": "ab56843e77d272badbbf811cc820256567c8ce83e8b4e099f4447d2c25810dc0",
+        "frontend/src/components/ProductComparison.module.css": "899509dd2922ca0eb33c5ea551c7bfb448635d2038cf2b3683732c38b7e0dae7",
+        "frontend/src/components/ProductComparison.tsx": "7f73c0ea3d80994196ae9864ef1446c5953aaae491acac32c5d76653f984ea76",
+        "frontend/src/components/ProductGrid.module.css": "e46d11b1c0b9bfae128ed8c95d7c33a26e91245ca19318df4ff88372200baa4b",
+        "frontend/src/components/ProductGrid.tsx": "44a33466eeafa907a131ae0c00516b993ed79e5da7d18dd1fffaf36aa3cc4529",
+        "frontend/src/components/ProductOfferDemo.tsx": "daa9c332ad3ae0d84289c8adfb38d042932d678747f1e8cede46c730d2c7c239",
+        "frontend/src/components/ProductShelvesPanel.tsx": "077a484b975cdf117e3102533b8eed9f9d1fbc7f78ef8a9aa71e32407d54ef8e",
+        "frontend/src/components/ProductWhyEvidence.module.css": "a0ec33b809d5643b64b04f780d8533159ef8ab0c2a5d274e9829d7922f891977",
+        "frontend/src/components/ProductWhyEvidence.tsx": "88cc7186ff4b46c9c185fb0790d5a0dbf0e2135b02645d6cde422db0472cb678",
+        "frontend/src/components/RecommendationShelf.module.css": "e0d23c83c64f850558b1216394e2474a20b1043cd1cfb05fb734fef2e897a4a9",
+        "frontend/src/components/RecommendationShelf.tsx": "ada9de4d5abd7c22920481744c31e3f3a752328fc7e2d71177ac419e7cf00ac0",
+        "frontend/src/components/ResearchOutcomeSummary.tsx": "6ec5e0d7d6b9599e87c8aeeec3e51bcc02722455aba8769e357d96367fb149b8",
+        "frontend/src/components/ReturnLifecycleTrace.tsx": "337dc8ba0bdbe9540e3809e59cdf19525e71ade0881f70ff46d6ace9f6b0ed6c",
+        "frontend/src/components/RightPanelExtras.tsx": "ffb542c1547d8928d797073490bcae54ffdf1c36387c0995cb4d25e181275d40",
+        "frontend/src/components/SemanticResolutionTrace.tsx": "6a1d65de8784c8dfd3568a1b3bdbf76fc973e09237c921169af604f5517053ce",
+        "frontend/src/components/SourcingIntentCard.tsx": "c4c8d93448d33372bc056e932f300f4fbdc2737343752d159a25addfb613e5b0",
+        "frontend/src/components/SplitFulfillmentCard.tsx": "61100dd3d7fc1b3d4fa2f3301594f84c873d53477e05482e9f67bb72a1c4271a",
+        "frontend/src/components/StockAcceptancePanel.tsx": "64f2db89b6e6bd095e9f5bb182096ea277a2bf4b4cf7781ac74a1e2cc0bc6c9a",
+        "frontend/src/components/StorefrontEmphasisBanner.tsx": "f2ed5f22fdbdaa50d936f7d0243aea877c2651ccdc8de4d0ba37be4ecfa1dc46",
+        "frontend/src/components/StorefrontTrustBanner.module.css": "913d47ccb615b26f332eb987d69d3e3c74af19c0d0bc89b5583785e2ddc6b1e4",
+        "frontend/src/components/StorefrontTrustBanner.tsx": "926e684421bb1b2d11a61ecedafa6f1acc14941eefe4e31cf405be0ba884c03d",
+        "frontend/src/components/SupplierContinuationCard.tsx": "71b296b29afb6bb74ff359a03a4b059078877f2e5116a8c1d267ebed5ff2bd4e",
+        "frontend/src/components/SupplierEnquiryPanel.tsx": "bddf90ef008f49c8a7d3159d3f87369564a95e652ee98c104313726c1be81fac",
+        "frontend/src/components/WorkloadResearchTrace.tsx": "7b57069dcb626ce9b3f5b7859e72461aababed6aa2d8493b51db6fd7897864ca",
+        "frontend/src/components/__tests__/AffordabilityResolutionCard.test.tsx": "8179ec80c1e6d28e3b87a9e1bc54144f9811ac493ac6e29921c264ed99230a45",
+        "frontend/src/components/__tests__/AmbiguityEvidenceSourceResolver.test.tsx": "8a1bf6b115f1ad20f06fdb6c24fbd45ff7ed2942f73dd7ea2de61abed94e52c2",
+        "frontend/src/components/__tests__/ArtifactSecuritySummary.test.tsx": "ac8d953f25080fbaaca946cbd867ed22adb5df17ffbfe4d96b51bdee3feb3308",
+        "frontend/src/components/__tests__/AttachmentButton.test.tsx": "67a5a2e84b5309caf3f1e313e87d3efa38fedc2e2cd8ed717dea23d494516aee",
+        "frontend/src/components/__tests__/BuyerClaimReconciliationCard.test.tsx": "21a2e9fd605066a33fdf0fea4d982589fb490fce977be2728aa0d5d2c07025fc",
+        "frontend/src/components/__tests__/BuyerRequirementReviewCard.test.tsx": "03ddf5c47b347c81fdd61a65eadef95f3b952e0d340367c18299422a60b0d877",
+        "frontend/src/components/__tests__/BuyerSupplierQuotes.test.tsx": "691af3b09b658061fcfe8fc4f3c56eac7d24550a05f072ab2693f88104da0708",
+        "frontend/src/components/__tests__/CanonicalSlateDisposition.test.tsx": "2a04c0b6694d7bd66e2b4bbcd09d27af916984389e35913c8572a67cb849c57e",
+        "frontend/src/components/__tests__/CartPanel.sourcing.test.tsx": "170ab74705b745a64ae3903d9d24b38cc614706d818ee727d063adaf904b245a",
+        "frontend/src/components/__tests__/CaseContractSelection.test.tsx": "946c24a6f7e74040a1d76f5683a9dc4a81b4ed19f0deae03bb6c80e690612f0c",
+        "frontend/src/components/__tests__/DecisionTraceNavigation.test.tsx": "f1935ea6f2ba88dd69c100a97b31b6fc483d3536ebba250b6b981cdc315147da",
+        "frontend/src/components/__tests__/DecisionTraceOntology.test.tsx": "ee0c20713017739850e982c47d84d52ad4e9f7088f0288d34ca11c5bf98de56a",
+        "frontend/src/components/__tests__/ExternalResearchPanel.test.tsx": "cb1503f15205b0ca79e20327af6ac82917c270f4d456e4d062c8a4b871a002e5",
+        "frontend/src/components/__tests__/FulfilmentJourney.test.tsx": "7662e7f44648ca2a43794ad3042543e79348794b324fb02fba369aaf2f844ed3",
+        "frontend/src/components/__tests__/FulfilmentOptions.test.tsx": "e99fccd7b70c6792dcd0c7284ddb8b9c046e9b4caa5d1c12cb9a6e03726748c6",
+        "frontend/src/components/__tests__/FulfilmentTraceLink.test.tsx": "cfe12c251720a44f44c8df76a54e86274ebe63826329eff39f4b9d72e98eab3d",
+        "frontend/src/components/__tests__/HumanCartProposal.test.ts": "d2bef31f05af5dee98b9811c662d3b539d7d18f9448d3edfdd46e59a2d55acd3",
+        "frontend/src/components/__tests__/ImageRecommendPanel.test.ts": "e48081be72c3e2c240b0f75979b9bfd21be64ea7b72ca20239dc6530900ccec5",
+        "frontend/src/components/__tests__/ImageRecommendPanelAuthority.test.tsx": "4ca417b35ba0a874755da569aa0a5ac7d93c23f7868d4130455c46d7cad57ff0",
+        "frontend/src/components/__tests__/ImageRecommendPanelCanonical.test.tsx": "7744f0a732737f50135ada593fce85aacfda27da8a1ef2b73f6ac38d1d32b9be",
+        "frontend/src/components/__tests__/InlineMessageText.test.tsx": "9641ad3817ecaeeaf462616979f4f6c80cc44240272147d05b84f6d7744349b1",
+        "frontend/src/components/__tests__/LoginModal.test.tsx": "5024cd395a42c30a0ddf4f82a0445498ffd9cd51fbc0106c7c9f9eb3b99fe383",
+        "frontend/src/components/__tests__/MarketIntelligencePanel.test.tsx": "6d1a3aa4aff048c8b6620ef7b483484379c43febb78790577b1cca9d19967bb8",
+        "frontend/src/components/__tests__/MultiIntentCard.test.tsx": "7f87e25f96dcf8541e8eb29a2a75d1b81c04e85713207a83ab1da34033e2e2a8",
+        "frontend/src/components/__tests__/OffCatalogSourcingCard.test.tsx": "268f0df12b20a9ba31facc203157480ca865b9a6ca27aae5d10ca8e64db5eee7",
+        "frontend/src/components/__tests__/PendingCartChangeCard.test.tsx": "0c3609e15a349290c9b39c2622114f0bec9bb65de59b332676a1bfeaf456df48",
+        "frontend/src/components/__tests__/ProcurementCertificationShowcase.test.tsx": "5b2f8cc1eed1e0409af0a1a846881454e9fa86ea87b40f947f76b8276af01996",
+        "frontend/src/components/__tests__/ProcurementOperationalTrace.test.tsx": "93798cc6785806264458783e15c0fac2d0f0c6b1beaf61be0ce778a43e199167",
+        "frontend/src/components/__tests__/ProductGrid.test.tsx": "c576d2596fb67ac517f90b148327e0cb007a458baebef2c8a50bb0fdcae25d00",
+        "frontend/src/components/__tests__/ProductWhyEvidence.test.tsx": "7105db815e02b2a124e781e0b4d40b536a6bc3a7f0947cecd3483815f04477a4",
+        "frontend/src/components/__tests__/RawTracePanel.test.tsx": "dfc8f7823bcb3dcc482f0de63acbb06adad5a581581ebeeb7322345d600c33d6",
+        "frontend/src/components/__tests__/RecommendationShelf.test.tsx": "6a928169facdaf4e02663ffcc7c163b03faf4545d780dd707e7e7406dc41a9b0",
+        "frontend/src/components/__tests__/ResearchOutcomeSummary.test.tsx": "b5d4c5230e0c00105ed61e41aafb71d9b2d54a6de6b5c5f19eb23144bd834d16",
+        "frontend/src/components/__tests__/ResearchTruthPanels.test.tsx": "0ecc75d031856ece92531ac42e98bf598ce7d09bd9a3909b859d0693d28c28d4",
+        "frontend/src/components/__tests__/ReturnLifecycleTrace.test.tsx": "d080ebc783e60d8c7971ab5013bd70717ec89319836e4be680a7453ebeb1a21b",
+        "frontend/src/components/__tests__/SemanticResolutionTrace.test.tsx": "845df6d9790f38796abda83808e13ca6b68b7078447b842ed991d59f6b09a94b",
+        "frontend/src/components/__tests__/SourcingIntentCard.test.tsx": "b43a2998b1869ca1af6069047eac776fba2419ec8cdd7a6c36639dd7b7276c39",
+        "frontend/src/components/__tests__/SplitFulfillmentCard.test.tsx": "17658debd615f0e958ec8d29fb2ef2f8d572305a4a8b8464936428bf50f9eb04",
+        "frontend/src/components/__tests__/StorefrontTrustBanner.test.tsx": "f38339457d8758e184a20305a3962d1f0dc1c44e971decbbfe678361957f5b5e",
+        "frontend/src/components/__tests__/SupplierContinuationCard.test.tsx": "7fe0e80a9aaf9866f85b72d929a32d691367dcfebfe2bbdbfd3328600f77bb53",
+        "frontend/src/components/__tests__/SupplierEnquiryPanel.test.tsx": "382ba333836a84bf7718a7507824a79689f4ef6e9a6b25d99a95ccab3bb89ec8",
+        "frontend/src/components/__tests__/WorkloadResearchTrace.test.tsx": "e3eb2d5639a390af2c5314a3b9cf17236bd7a97e5fba09bf40cb8a2588eac621",
+        "frontend/src/components/decision-trace/AuditTracePanel.tsx": "714d43868e2d449b4b474e9a164abcd799401cd625052c297a00c6db0c62eef7",
+        "frontend/src/components/decision-trace/DecisionRunTracePanel.tsx": "70a8d8099ae017f5df3c784e019beeceaf6143352a70c8031f3fdd973d002b87",
+        "frontend/src/components/decision-trace/HippographEvidencePanel.tsx": "a922061c326a666d1fba7f66c483e180686fcf4277beef62baea5403d0730617",
+        "frontend/src/components/decision-trace/HippographViewSelector.tsx": "8beee0b70612573af6776ce69c492c4b11c504682a95f8bda1aba42552fd0c60",
+        "frontend/src/components/decision-trace/MarketIntelligencePanel.tsx": "aab3c778299b272918040b589c0ea858451ef7a0208d868ea21b9ca9aacdd291",
+        "frontend/src/components/decision-trace/PendingProcurementPlan.tsx": "42b1cf380a20c708cb29b0b3993d502c43800d1636a668ef7d3bc9fa46fa8f69",
+        "frontend/src/components/decision-trace/ProcurementAuditPanel.tsx": "20cf9b193427ce1a0f4882386763d46cf62374830ec0bfd7f502e51cab6ba7de",
+        "frontend/src/components/decision-trace/ProcurementEconomicsPanel.tsx": "fc4139b8acf683c86690de5cf30a25bbaf3d2b8c8debbec75671cc40937d8ff2",
+        "frontend/src/components/decision-trace/ProcurementEventTable.tsx": "6455acd0476166846689b8cc3fcec1123fc27bc1b3e54a4b5d48ea5f697d4996",
+        "frontend/src/components/decision-trace/ProcurementMarketPanel.tsx": "95f28b5459de061d1ae2d7ae6a4b312d5db033dd84fa5729af92efb77942647b",
+        "frontend/src/components/decision-trace/ProcurementTracePanel.tsx": "d4be66b1ffd2cb87a8005505a488b620f87411dd7219ff8a710823bf71bd76c6",
+        "frontend/src/components/decision-trace/RawTracePanel.tsx": "8cf2dc139588c09cdd16245270686c0dc4447e5e8f375227b9e8198d30870d8f",
+        "frontend/src/components/decision-trace/SupplierRfqTracePanel.tsx": "b6544b1e27dfcd07175906a498042dbee6f9a55a0dd1e2d8d006bc5ea220c41b",
+        "frontend/src/components/decision-trace/TurnHistoryPanel.tsx": "faefaf68253a17fbfe7f8fe542f7bfdf746a602f810a0cf860e20c85a9d55ed6",
+        "frontend/src/components/decision-trace/__tests__/DecisionRunTracePanel.test.tsx": "f43393044baeb10560b1d4ccb7e11f8d9323cf87f77bff6915e817781748b7a4",
+        "frontend/src/components/decision-trace/__tests__/HippographEvidencePanel.test.tsx": "c5ba5d816adad9402ab2ef0cfe99ffbc6813714a82ab17384b1ffbb26522059d",
+        "frontend/src/components/decision-trace/__tests__/HippographViewSelector.test.tsx": "7f567d8c7a6cfad7dee57ec75b83caae0954bad2ade655bc241607394c9f55f8",
+        "frontend/src/components/decision-trace/__tests__/ProcurementPresentation.test.tsx": "9f5fc8130582ce8aa63a4c1b5bfa30f4723e6a3f86429b64b13429fa4797acfa",
+        "frontend/src/components/decision-trace/__tests__/ProcurementTracePanel.test.tsx": "9966b68c1113cb9b2827f25044be6eb30f16ab69ac1e45ff2f186d2ac4f9dbbb",
+        "frontend/src/components/decision-trace/__tests__/TurnHistoryPanel.test.tsx": "e161c3bb4c1985aaf4f16c4972db8a0505e1829c58a75c862f8696736dd57835",
+        "frontend/src/components/decision-trace/__tests__/marketHippographProjection.test.ts": "edef72c4ab08a4bce9c050e9210409be753c4c2ae73c7400b1eccf197f722611",
+        "frontend/src/components/decision-trace/__tests__/procurementTraceProjection.test.ts": "3c25dab0bac2ccf79edd59e3c0744ef7733f329872b8f9c2afb2e9946789aa7a",
+        "frontend/src/components/decision-trace/__tests__/traceProjections.test.ts": "00438655d5424b370d327bc792024c5373164798ba8e61da2bfbc0c4ec213a7e",
+        "frontend/src/components/decision-trace/marketHippographProjection.ts": "b4e926dd36dd65dfc4bae3d371e3133c4f465addde8bf62bcfb23025309c7662",
+        "frontend/src/components/decision-trace/procurementTraceProjection.ts": "69cc4f2af42c0f772b3651a8273d9ee4f08daefffd5fb76b8916e3523c28c8b3",
+        "frontend/src/components/decision-trace/traceNavigation.ts": "7446d68994abcf53b7ed342afa3a5a69edc5eea324cb2ba8393aec062f6099f0",
+        "frontend/src/components/decision-trace/traceProjections.ts": "e49ea2f898a890cd76dda43a0739121928e7a37cd1c6f2e5ff37e283a98aaf94",
+        "frontend/src/components/security/ArtifactSecuritySummary.tsx": "a669511dc9ddc137af0b8bd6a9f3928bcd95ad6b36175802f55d9d4f3b43632e",
+        "frontend/src/conversationTypes.ts": "71fddcdd7c13602cdd92ae817bdaf3739a7155a9050ed0f2b3c887a2887adb38",
+        "frontend/src/hooks/useDecisionTraceData.test.ts": "df71d1638517ef01e598d9a4ad76dc9ec984a5e4fbd4d243195eb30f20213eba",
+        "frontend/src/hooks/useDecisionTraceData.ts": "3ae4046f9976c2c81e69c51a4ee1ed441d3871b4d445c432357503318e7278fa",
+        "frontend/src/hooks/useDualSTT.test.tsx": "5c68c5e30a5f97a5107eb97f8382c8c48a62dca09fceaa432191b06b9d40d984",
+        "frontend/src/hooks/useDualSTT.ts": "7bcefb27cdd5eb034455da9c81d71b297e07a6260d279949419a3462aa631b07",
+        "frontend/src/hooks/useHippographView.ts": "a2fbf39507a15c9590964e678b096f2b5ecccfebc5275ec8aab91e7a0095f454",
+        "frontend/src/hooks/useHumanEscalation.ts": "5fda471b188e1d3f45c5e23683dd80790359a3b6b7ca98b855a1aad190ca16cf",
+        "frontend/src/hooks/useIncidentConversation.ts": "8b609382ed7ecbba592a9d605f97ba14e2931a24c88d6710b278c056195b23a1",
+        "frontend/src/hooks/useMarketHippographTrace.test.tsx": "3bb2227aa4b2c512a63e415a928443190bad669055399c6f481be367c3dde322",
+        "frontend/src/hooks/useMarketHippographTrace.ts": "afd7980bf254a613329a9ac99788256d18209c09848f0db81e1eb362fbf4f445",
+        "frontend/src/hooks/useProcurementTrace.test.ts": "bc98be55dbadaf39f1c377cb7c0bc727cbf1838b0fef21b66a5918900e649456",
+        "frontend/src/hooks/useProcurementTrace.ts": "e932c3641eabbff098ec00fad7544929b81f9d8bda24f5365ea08903b93e649f",
+        "frontend/src/hooks/useShoppingCaseActions.ts": "7a73478fcca525543ef891568337e5cbd4d04140d275c0c464dd6801e6c51449",
+        "frontend/src/hooks/useShoppingCaseResearch.test.ts": "39a7db3e11adb4738439b6d08eec1509392ceedd192063dbd924b83878c0242d",
+        "frontend/src/hooks/useShoppingCaseResearch.test.tsx": "3bd6c0e7ee68d0e805b8eceaa248a6549a6201b82844f4597c519c2e6cdd9621",
+        "frontend/src/hooks/useShoppingCaseResearch.ts": "703d1101c4dd143ced89c838ff539e14ecf9a1fba0823b3a7d12a1418b2f0900",
+        "frontend/src/i18n/index.ts": "e46cd0a26b4890ac1af8b1e2b62a36846eeae98aa2572280509f4b782ded7d06",
+        "frontend/src/i18n/locales/en.json": "99f5b24dafff3892b4b1e33a8e99263274954d11f9598f0a0d8a66e997013f69",
+        "frontend/src/i18n/locales/es.json": "bf0af36d7f6c9284cfef20d87c356a3a69decfb62dc064104cf3536db51ae720",
+        "frontend/src/i18n/locales/fr.json": "5d440e264a50bc2d383bc6979b0ef2b9695a022dde5219d79511e460eb009791",
+        "frontend/src/index.css": "28e0e3b3dd1df2883f8778a4ca618c3b521133427cb42320fe748de8f11f2f96",
+        "frontend/src/lib/__tests__/api.test.ts": "61b37f8e18be28646d830c2b093fa297685786a284db8691f57b4226653b2ab0",
+        "frontend/src/lib/__tests__/browserSession.test.ts": "9663ba6ca52968f48225c3b12aa0335f6834278a6b85bbdc60de0eb05ea03316",
+        "frontend/src/lib/__tests__/bulkBudget.test.ts": "9bba6c0e3b3b1805921cd493c17b26ea0962738c02cd732c2e828824dcbad043",
+        "frontend/src/lib/__tests__/cartSession.test.ts": "b396fa6e10f022e3a51a47c7b17edf754caaeced45383d73eab27eaf5b253488",
+        "frontend/src/lib/__tests__/dealEconomicsDisplay.test.ts": "6ba08529d461b72c01195392dc6656265d034c411e897ba4148ad0aeb3abfb39",
+        "frontend/src/lib/__tests__/evidenceDisplay.test.ts": "a660684b985b2464840197ab8d0dd91dab6653ea983a60e5a4d24854dd75fcd8",
+        "frontend/src/lib/__tests__/fulfilmentResolution.test.ts": "0a2eb272364d5b8610d8981498fe7a4482ec6e84daf683962a30b0f43de14b2a",
+        "frontend/src/lib/__tests__/pii.test.ts": "a96ec16328fe2a4a2201d0ae1f97904d31a9d78c5cc53bab3152d2a2c0acc9a7",
+        "frontend/src/lib/__tests__/postPurchaseIntent.test.ts": "42cb04ecfa15ddc37978c01edecee08eb3e51a6e5fd866b3ad868e5d04b92fed",
+        "frontend/src/lib/__tests__/procEventExplain.test.ts": "68a66a751ac19b4102c5dec60f8efcb81b56c47f74a1c3a3365f6a93e608a655",
+        "frontend/src/lib/__tests__/procurementGateDisplay.test.ts": "9915020932ef7072e28ca1793a25a8b6a56832e6e33c2f4628068837d3a64a35",
+        "frontend/src/lib/__tests__/queryIntent.test.ts": "5fd408cfc21fbd3e2e792177b602557d5519a9404725df2f0fd32cd72675d9cf",
+        "frontend/src/lib/__tests__/retry.test.ts": "60024c49dbd2022f79010d49781bc3fd0ea03708b344e45243b432b413b613a0",
+        "frontend/src/lib/__tests__/sourcing.test.ts": "3e7c37d13d5aa6d4f4a941a4c292c69bf94a0358820f3888cf99fd3d9e7b3840",
+        "frontend/src/lib/__tests__/terminalInstallation.test.ts": "42c4be4c6716929febfb6ee2bec62cbf4a917497742dfea8306c32c31df0dbe3",
+        "frontend/src/lib/__tests__/terminalShelves.test.ts": "eef1405db6b15a1038a0c6d1a70ea131da0707ae194c34fe3bdc69c1317031e8",
+        "frontend/src/lib/__tests__/trace.test.ts": "d82e636951646f270c29789d49b3799a91e8e4dcdecd45cb3da79e4ad6515a3e",
+        "frontend/src/lib/__tests__/tracePresentation.test.ts": "a2390b3ae9a1f5aa309a54d4787d6a5018dc1e154782db795b1d924865d8cd5b",
+        "frontend/src/lib/__tests__/turnOracle.test.ts": "32d0c25a12b87c6b64376ec073f5108fa94b12b23db5463dbdfd32977c441243",
+        "frontend/src/lib/api.ts": "157bdaa433570f917851cb817f35d35c1058214be56a21a9757597cdd297ebbf",
+        "frontend/src/lib/apiError.test.ts": "75abf8b643931a98d05a87795141da89e15506f17571c6c2416e0e08d68755fb",
+        "frontend/src/lib/apiError.ts": "f7505f2b4723eda042024a42d485f7fc1e6a6f0dfe8a621a0e1cfb6f7eba82e5",
+        "frontend/src/lib/browserSession.ts": "2a2858798139e887b87b612757d6445c87b076d9dd6a1ce50ba5d23365f1d4e2",
+        "frontend/src/lib/bulkBudget.ts": "fa2dc0a1af771840566c158ade4a5d468155808a54ec1d2844d564b71791c11b",
+        "frontend/src/lib/buyerQuestion.test.ts": "bbf0be32da9f188489ce02fc7a0f2d2c1cbbd07b32e20c2ad094248d3c584b08",
+        "frontend/src/lib/buyerQuestion.ts": "d8243cd2e28fc66c81db1277a771b3570a7e905ee1a588835160b92eefedad8c",
+        "frontend/src/lib/cartSession.ts": "641de9e83be127f1efe30ee6e0fef4396d55f5e37231064ab55792be2b39a49a",
+        "frontend/src/lib/chatOutcome.test.ts": "aaeeb9216d274f7f830f067d9afa5b683b2e17f106936704e495538cd05e52c3",
+        "frontend/src/lib/chatOutcome.ts": "42a6667b85556af23d6f10a09fed532cf165f636300884082a01659b74320b86",
+        "frontend/src/lib/csrf.ts": "12a3ad33d74affe4a6139a8d034cce19c03021ce09248d08549a05dd9b359fc8",
+        "frontend/src/lib/dealEconomicsDisplay.ts": "0d1dad6bd6ebd068680ef872c333616cbcaa75ddc002197a755d1514e60797cb",
+        "frontend/src/lib/evidenceDisplay.ts": "c55b944bf6ae16da74ad8dc0579cf93ef405da3344b2f9155d7bfd6a7fc6e537",
+        "frontend/src/lib/fulfilmentResolution.ts": "c05f39df4b0cd09e7abbda69f9012d140d8599239011d7aacb7fc5ce30269fbd",
+        "frontend/src/lib/humanCartProposal.ts": "bd159ea62bb4d48afd4c5ca3a603021184aedbf9890fa5bec75fb2a333cca3f4",
+        "frontend/src/lib/imageEvidenceAuthority.test.ts": "4598a75598aae5ebdf7a54f6ce5097e623d3ebe731cc0553ad8b6a57c4ac2bea",
+        "frontend/src/lib/imageEvidenceAuthority.ts": "309e9d8b16390eb1734b49b771195df9c240885864d1b3c0759261206599dcd6",
+        "frontend/src/lib/imageProcessing.ts": "98a6531b5407718733fe1af71c588516d1a6ac311eebed6c0f8d4d2bb4015f2f",
+        "frontend/src/lib/money.test.ts": "6b0e5fdc5e8a2772308264e692812229b8b5fa572b8d68c0ff02a2015bf35ed4",
+        "frontend/src/lib/money.ts": "b4c6777726547b0e3df649424580c8db9e933c2bc3d22ebca6dec6edd60b089a",
+        "frontend/src/lib/pii.ts": "69fd9ca68440960f974856a7be75989e100dc042f9f9439c441518878c4cf2ca",
+        "frontend/src/lib/postPurchaseIntent.ts": "a639e80fcdf633557da8f507deb3136b30ce8575c4aebc3481a73431ba644b11",
+        "frontend/src/lib/procEventExplain.ts": "682d832c0af0ddc63d284b042bd25a3a3804facc7d6fc737f18b86648f477906",
+        "frontend/src/lib/procurementGateDisplay.ts": "a0e77e687f97b26e764d545c96cf81f5c760a5cf60ff5af45e7765cbf3b1622a",
+        "frontend/src/lib/productDisplay.ts": "62bdeeff025da6f3d640a10a2869fc5cacff375f2b0b6c83925e04b87933aee6",
+        "frontend/src/lib/proportionateAlternatives.test.ts": "65beafc354965f93f0f285e9ff108d48038c71a5ffab60927a93963b44521074",
+        "frontend/src/lib/proportionateAlternatives.ts": "c4f52b0fe6cac3727600d09e0f59b7d1eb99526453c9f6929936633871777f5f",
+        "frontend/src/lib/queryIntent.ts": "21724a72c7bd5ee2087e0cb90e5685f740bacbdf620f59c5f42ae6cb184a3abe",
+        "frontend/src/lib/retry.ts": "88fe850b8cb70f6d76c1c22b56d33fb8a7f887175175bae2159e9660fee08aff",
+        "frontend/src/lib/shoppingCaseActions.test.ts": "51427a893ae40f91b3de990421474d80842ea99b5ef5f9ccfdd1ac4652b95f8b",
+        "frontend/src/lib/shoppingCaseActions.ts": "57932aa08bc63b16556922a255b92971d30730e1fa250af808b382bf3e1cbdf2",
+        "frontend/src/lib/sourcing.ts": "bbca22dca929bbfdde3096c156164d00f5273b7b172070ae9503ed9f1d4ec670",
+        "frontend/src/lib/terminalInstallation.ts": "4a69dd394e39cd20cc8a776efae785149ede78ef6f669704aef55d9a4af3ed68",
+        "frontend/src/lib/terminalShelves.ts": "9d9a64f127c50f4d7d6edcd80fed855e47791152abbe4319d686c305a3b22439",
+        "frontend/src/lib/trace.ts": "0ae1e5d980f63a08ada5123506bd5f3083b7e68446b310160525da73fab3e87e",
+        "frontend/src/lib/tracePresentation.ts": "b15ffd8ef5dbe1720d43a0a0d5708ba622f885bab22e24f0d4d982a34ec15f04",
+        "frontend/src/main.jsx": "c0cbd36c4e1074a9c2e4d1d69540ed92e70b1b00320489eae2fbf7cf18f5ff45",
+        "frontend/src/main.tsx": "af4908243ad9f1960fc7546fb79cc491fc9f6949683ee8c9f0c1887614da6f6d",
+        "frontend/src/presentationEvents.test.ts": "f892dfdff25dfd6907baf730072dcb0152e22472d9724c393d6bf37d4e141fc6",
+        "frontend/src/presentationEvents.ts": "034343f349cfa068e4710ace89a8f1acd57c32805ef3bd367e1e59066016090e",
+        "frontend/src/store/__tests__/stores.test.ts": "0488a3974efb610eee7e23c75c6aee132de652bd92eb93a4bb365774161b5c23",
+        "frontend/src/store/index.ts": "8266bf627b59df7ec428e76a066bae53865fbd1bfec71de916fc64bce84adf4a",
+        "frontend/src/test/setup.ts": "f73c464b9ccf75ee45f0bc50ba8ec24347018a161a3dc5eeb24f226f60802c67",
+        "frontend/src/utils/a11y.ts": "b72f4deb100d14b150070cee2a650618d59937192faf28a401836563c9774361",
+        "frontend/src/utils/imageProcessing.ts": "6db2fc66047b93a21c2d53c09a7ea8910257bc288d54c244ccd2580d24a9b412",
+        "frontend/src/vite-env.d.ts": "8edbd7187ca5d80198e9e5e8622b79f0ab0245a7fe9fd655bf6d782c8bf115d8",
+        "frontend/tsconfig.json": "3bbcb86dd84ba61c02b40ea83e8cfbd4f6ed7e8e9d4c34b9bce78f3a25c69c27",
+        "frontend/vite.config.ts": "1aafe8e73a383eea645f76f6881fe4468cb76e16db9affce49c931125f45e5e3",
+        "frontend/vite.log": "5b38ed607d1ef4061c3c53d1d35c80c7cad4990eba93ddd84d174ddf5114555c",
+        "src/frontend/admin-react/README.md": "ba0c511e13cf50e0bffdf4672a0add09a27b51ca7b5a28fef24e9941e901ae62",
+        "src/frontend/admin-react/index.html": "729193f484048a6e21e18382c292c127bc684662726a40bba3722e229b196e30",
+        "src/frontend/admin-react/package-lock.json": "431950eef2be391af852c1a8e4813dec934165b4c4b5379268f8cb7cbc21e64e",
+        "src/frontend/admin-react/package.json": "af5243a9d5929ff9b9fadd44ef03120c78624b553a6c4e0e5101b7660c4c68b1",
+        "src/frontend/admin-react/src/App.tsx": "8c0b23ddff14c207fa322cf003819d53d48dd2b56b8f2b4284ab0482fb9058aa",
+        "src/frontend/admin-react/src/adminNavigation.test.ts": "bad2c9b5f5c06e8447a46510c4a0960018c23caaf8a41d908c3bc69206371c4a",
+        "src/frontend/admin-react/src/adminNavigation.ts": "c5e3b574d2fb882121feda75f65acb918eeb5271050047a72494267da0c7ce10",
+        "src/frontend/admin-react/src/api.ts": "b2cc77e5ccf28e9dac93aacf3409da25d4e01ff412812f6ba66ef2886d1edfb6",
+        "src/frontend/admin-react/src/api/accounts.ts": "996dded77cdc63858b3af854c12154b1eb6c4392af3fed5d9ac153a902a0c084",
+        "src/frontend/admin-react/src/api/adminContracts.test.ts": "7b4603de766177fa60cb0f4eb94273d2a9b629609ede095279aff7b55ad24ebf",
+        "src/frontend/admin-react/src/api/client.body-deadline.test.ts": "5dc6a6655aab0e96d8cd165af03652d94639b5a02fe319fc94dc5b0a14d2a314",
+        "src/frontend/admin-react/src/api/client.test.ts": "ac74d402adc47e7a19adac4c50a2837591291a19ee9977a69480fdc2f2575875",
+        "src/frontend/admin-react/src/api/client.ts": "ed8701c3ce84edb63dce4de281635b9be25f229267a6e4f7890d062bd9853c7a",
+        "src/frontend/admin-react/src/api/decisions.ts": "72b4f7359aa3043da63b47e5f5cd6d1ae939186ddb21837d00ba81db5bafe688",
+        "src/frontend/admin-react/src/api/fulfillment.ts": "81c0d8f701cee6b5d007f5f5719cd5073bfd65d7e1a8e821bdd02183caebc808",
+        "src/frontend/admin-react/src/api/marketIntel.ts": "60f67d825272d31f0b3d4938d86476972c7cd0f7af6abaacfcbe9eebff426f1c",
+        "src/frontend/admin-react/src/api/supplyRisk.ts": "8828b2bfc6e7d395a8320a72bcd62b013f0796bf8a25e6182f589702087bb944",
+        "src/frontend/admin-react/src/components/AccountIntelligence.test.tsx": "0409f02b12743a94dbb58966a30075aa1e25e5c80481046462a60940df6586ae",
+        "src/frontend/admin-react/src/components/AccountIntelligence.tsx": "d3ea8cd9c30c232d7cd2185743a0bce1e790e2909c9ae2c52349931e356d7e28",
+        "src/frontend/admin-react/src/components/AgentIntelligence.tsx": "971ae180eec5848d45b6c5b41394d4cd8bd40da1f0ca283c340785cf9c01b38b",
+        "src/frontend/admin-react/src/components/Analytics.tsx": "b11069ad4818eb793cedc91293942ce627df83b4cdf348d06923eaacf3a88ab2",
+        "src/frontend/admin-react/src/components/AppErrorBoundary.tsx": "37bd4870692f2774bec04ac1d56a86ca7ad8287ca1771d394d14c28269ccb5d8",
+        "src/frontend/admin-react/src/components/Approvals.tsx": "544d298d3e9a84b2f9d2ebe1fffd058aef22972e250712d79004cd27311ecd07",
+        "src/frontend/admin-react/src/components/CVIncidents.tsx": "a8f5b70f00a4e4e6923b1ba1396ab4afc2f42a355572e1bc30e359cd229924b9",
+        "src/frontend/admin-react/src/components/Compliance.tsx": "4430a0546c311f9a7ee42769d710b7d376f18f1a2d3ec246fcfe6826e53d9e90",
+        "src/frontend/admin-react/src/components/Decisions.tsx": "5407e97a76aef93258baad1696532d2d067f50499ce8fa3a4ccb4763d41dd6b5",
+        "src/frontend/admin-react/src/components/DeveloperPanel.tsx": "32a15c2fabe36d90ccbb24dcf7919a06915ea5e182c52d3fa71fde331716b181",
+        "src/frontend/admin-react/src/components/EmailIncidents.tsx": "fc69d8e53f0208bdcbb961c6e1da7676759e7ee3aef5799e7657444543fb207a",
+        "src/frontend/admin-react/src/components/EmailXdr.tsx": "619b3f7cf3e573c1c31b00817ca92ba06593ce505b67b1fa69f0d67de724f14b",
+        "src/frontend/admin-react/src/components/EscalationsConsole.tsx": "2efcdd8ccf938c213be7b1c99769f78f824d4ee61bad72f6449e9acde99e256b",
+        "src/frontend/admin-react/src/components/GRC.tsx": "9671b9d2726b753d658fe66bf76feb4eb42ab4369fc39c0d9754a9e0d50d78c4",
+        "src/frontend/admin-react/src/components/GrafanaDashboards.tsx": "bf4a9c379b5c805f05442f4f95fe426bd387d51dca08078536c33e03417b93b8",
+        "src/frontend/admin-react/src/components/Incidents.tsx": "f0f8a862ff6458a4cf7f7901f353772dbc163efb5a613a5e695f3fc77e5019d2",
+        "src/frontend/admin-react/src/components/InventorySync.test.tsx": "4ce10775871ad4a0f2a8c188cf7b01e65ab1de6e885d780e60785f5ca89f7467",
+        "src/frontend/admin-react/src/components/InventorySync.tsx": "50bdea80b6d07d9a3acbea3bbf66c1344eb3a9fb8b2aa9dbf591f0183f9acb6a",
+        "src/frontend/admin-react/src/components/InvestorMetrics.tsx": "d75326ebf7e86bf113b763e92e916966ca26f1f880e414f0b023b49b6a599d34",
+        "src/frontend/admin-react/src/components/MaestroRegistry.tsx": "a5278da5b68cbe5c69f95bd93498519367290823276527ee231b0d7a22c524ec",
+        "src/frontend/admin-react/src/components/MarketIntelligence.test.tsx": "13503fd31896d7541e9bf580e1b9f9f31e0515eff260566ee235e77361efe204",
+        "src/frontend/admin-react/src/components/MarketIntelligence.tsx": "257ac85b3adf7b29ca0f76d28d38557f47a69eff50a5e3997803617ce63e41ee",
+        "src/frontend/admin-react/src/components/MerchantBIPro.tsx": "5c8d441d4884ca7deb7248e0b1d8e4ba90a1623a4754cfe8195250d3ba27246c",
+        "src/frontend/admin-react/src/components/Orders.tsx": "e8fa94a9fd85b1ad0a5a07c11c3c7423002fcaa339524d7a971b4e5d372c9bca",
+        "src/frontend/admin-react/src/components/Overview.test.tsx": "a52da8c19b88903e7817441362c7775ac0724ca9661fbe7dc69393e5a5173570",
+        "src/frontend/admin-react/src/components/Overview.tsx": "eed3dff1a0fdab8bb1ea4af52f8b432cb6765f174baf23aa6905e59d815e4302",
+        "src/frontend/admin-react/src/components/OwnerPanel.tsx": "6e3bb3db086dd777793a0b9656fd5c54a7e24b62de82e3bb1db12ed5a8d5bcdf",
+        "src/frontend/admin-react/src/components/Playbooks.tsx": "fe3fc1b5f64a9584d6feeacf8c69462b0117fc2736b95d50a675037968bf3399",
+        "src/frontend/admin-react/src/components/ProcurementCases.tsx": "35d929c71148a70580caa8dc9b45a97215dd27694434874c66cc51294eb7228b",
+        "src/frontend/admin-react/src/components/ReturnClaims.test.tsx": "5725af0deefa37fa6499a823e830b8e3960d15cff2c80ac963237aee92fbd2e2",
+        "src/frontend/admin-react/src/components/ReturnClaims.tsx": "1497daef2f2022d60eef2211c01565a5ffa4934c51fc788284ebebe60d0f7c7d",
+        "src/frontend/admin-react/src/components/RulesAdmin.tsx": "6510944c3d810d4dc5c41db42e3abfbff6f3963b72cd7edd474079e7f0267f3f",
+        "src/frontend/admin-react/src/components/Security.tsx": "d59580209e005ad4cbac7b19d442ce68e56c96e4343c03b38b7e2536261a5333",
+        "src/frontend/admin-react/src/components/SupplyChainSim.tsx": "2b549f033b88d60d19408f702c6697e985248cb88b912adc5a364bcb325ff2a5",
+        "src/frontend/admin-react/src/components/SupplyRiskWorkbench.test.tsx": "f54e22a8eb7328de64228bd188ccc80a2c7c62c2380a4b5da59bb042e6658011",
+        "src/frontend/admin-react/src/components/SupplyRiskWorkbench.tsx": "2ee33f63638dd1b00902bcea88ef4f9e96f7c65d8d8d6214f577428749da80b8",
+        "src/frontend/admin-react/src/components/procurement/ActionBar.tsx": "488c0c4e839a71d1ce7e31e04e4b2626686ffe45c55c4d5f579fa9e200482d71",
+        "src/frontend/admin-react/src/components/procurement/AllocationWorkbench.test.tsx": "b25c1dedf6efa7ab112a06f3c34d689bf8f1bf5b449e3eddbc032698a4603c20",
+        "src/frontend/admin-react/src/components/procurement/AllocationWorkbench.tsx": "379cb76eba205c5b44d046ee93c380e37a715326945e23173908461e491b35a7",
+        "src/frontend/admin-react/src/components/procurement/AutonomyAudit.test.tsx": "26814304bea9275b5d1e757641c06595e0905b6cf3e2aedbfb72f22c2238e330",
+        "src/frontend/admin-react/src/components/procurement/AutonomyAudit.tsx": "2fba3f83c2ae6e4b26a9d29148ad0b6a40489b1cd2a4221e9f9b48c26d6c0ca8",
+        "src/frontend/admin-react/src/components/procurement/CaseJourney.test.tsx": "e8f7a184ba14cd8c5d8c4a90ba6805fb91b75992cda629d7237d3b69e7bb3749",
+        "src/frontend/admin-react/src/components/procurement/CaseJourney.tsx": "3f019254ef55f6858fc7541478269e845059c581bd809e5911fe08c7359afed5",
+        "src/frontend/admin-react/src/components/procurement/CaseQueue.test.tsx": "6a1231a43c31af0a5035938b51df5293136edef4eab0a85e8184aa85ea0f4cc5",
+        "src/frontend/admin-react/src/components/procurement/CaseQueue.tsx": "430fe29a802bf0020b2afb4c071b950f4049c60bdb3e958886f918e4178e71ae",
+        "src/frontend/admin-react/src/components/procurement/CreateFromOrder.test.tsx": "19da29a414ad91b1704cc8b3ccbd7c0bde9e18d1b4d17e6568396ae92179b22b",
+        "src/frontend/admin-react/src/components/procurement/CreateFromOrder.tsx": "d85cc9282d133c2fb26ec9c4c4e0238ac0056de1eb228cdf547c868797d3f42a",
+        "src/frontend/admin-react/src/components/procurement/DecisionIntelligence.test.tsx": "8ddb488d04ad396951e9a8f54aa94005510980f0a67f6567338770bb62b1ee4a",
+        "src/frontend/admin-react/src/components/procurement/DecisionIntelligence.tsx": "442bbf9fccbfbcb715c0b9e52c86ee92b6cd29c2fd07e2df511a41987d034b50",
+        "src/frontend/admin-react/src/components/procurement/ForecastEvidence.test.tsx": "6902a2f48c86dc200f73f6f53ee87867e18a0598fa142ce42b511f55fe77210f",
+        "src/frontend/admin-react/src/components/procurement/ForecastEvidence.tsx": "dce8115600a33f9fc497d7b9fe8c9e8c20bb5685908126f5577b865e471e8fa9",
+        "src/frontend/admin-react/src/components/procurement/ProcurementNotifications.test.tsx": "d2c3df448e973328adec047394ef09b4ce266d990a989dad573144b75b619f46",
+        "src/frontend/admin-react/src/components/procurement/ProcurementNotifications.tsx": "9d63e1f1465bd019d57bd6ee1269aff2c656576b3cbf4b870bcb46be52bbd7c3",
+        "src/frontend/admin-react/src/components/procurement/QuotePacket.tsx": "466b17c6e8ecfdd051f3bbe2c479cb98ba1c93fecd6fd6c1217e5615d7a2c6d7",
+        "src/frontend/admin-react/src/components/procurement/RfqFanout.test.tsx": "4c3729a0177af7b35651128eb6cae5e38418aa39b773cbaf63056dfec73f710b",
+        "src/frontend/admin-react/src/components/procurement/RfqFanout.tsx": "90dd59c0ad2c03ec6c3dd119dd93fbdd0a2a0cda0e88471d6f9bcfbe066bc7c4",
+        "src/frontend/admin-react/src/components/procurement/SupplierCandidates.test.tsx": "1abb5f0c57f59aa3b4b2a6e7cff1af0baeef00aa91cad3a4f22e44bde014fe5b",
+        "src/frontend/admin-react/src/components/procurement/SupplierCandidates.tsx": "325458d70e027d72c0f5e16525778710ff48baa33ab11511eb78240e877222c6",
+        "src/frontend/admin-react/src/components/procurement/SupplierDraftPacket.test.tsx": "1b565c368e4649deee0bea23455d7e8a3df216919eabb0df31ad9745a6fad3df",
+        "src/frontend/admin-react/src/components/procurement/SupplierDraftPacket.tsx": "2153dbb8d42091045752463f2939405ce0f9b0ba389ff98c0c2584ef425ee2c4",
+        "src/frontend/admin-react/src/lib/actionError.test.ts": "157dad1b8389f713bcde09de7f8ac3425087203cace177686da06116338d61c3",
+        "src/frontend/admin-react/src/lib/actionError.ts": "6d7fb255e61eef27d7cdc49d067755a86a3b11d0f8c2299ee94c9875245573d3",
+        "src/frontend/admin-react/src/main.tsx": "edd5d2c3d8a500ab794466995844149a3efa3f71d32c28f445eb759d8e128f3b",
+        "src/frontend/admin-react/src/styles.css": "5fd5fe570e6e4482dbbfd2485b814e41443f1150aa69e5a5c12ee6bdb2619962",
+        "src/frontend/admin-react/src/test/setup.ts": "fa5a82b962893f665a7cddb44363fb398af9c882c6da28f88c42028e4ab1b049",
+        "src/frontend/admin-react/src/vite-env.d.ts": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+        "src/frontend/admin-react/tsconfig.json": "4adf0bc856a9d1a58f3783c00b0df7ac3da35788b98fa3870c4730839bc160f1",
+        "src/frontend/admin-react/vite.config.ts": "5b7cef6db0f39718d02f164b702b272ba04ff952f6013d6f42281a8eacbbff7d"
+      },
+      "scope": "Current preserved ROOT frontend code, including uncommitted work; newly aligned installed dependencies. Not committed-source or browser delivery certification.",
+      "historical_boundary": "Older shared ROOT dependency junctions now resolve the updated installation; historical receipts retain their original capture and need a fresh old-lock install for replay."
+    },
+    "qualifications": {
+      "storefront_install": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+          "ci",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          "--fetch-timeout=20000",
+          "--fetch-retries=0"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 13.047,
+        "peaks": {
+          "rss_bytes": 311087104,
+          "handles": 288,
+          "threads": 16
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "storefront_unit": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--reporter=json",
+          "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\root-storefront-current-unit\\vitest.json"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 6.953,
+        "peaks": {
+          "rss_bytes": 308346880,
+          "handles": 486,
+          "threads": 78
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "storefront_types": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/typescript/bin/tsc",
+          "--noEmit"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 10.532,
+        "peaks": {
+          "rss_bytes": 523231232,
+          "handles": 167,
+          "threads": 12
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "storefront_build": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/vite/bin/vite.js",
+          "build"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 0.562,
+        "peaks": {
+          "rss_bytes": 35790848,
+          "handles": 137,
+          "threads": 12
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "storefront_audit": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+          "audit",
+          "--json",
+          "--fetch-timeout=20000",
+          "--fetch-retries=0"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\frontend",
+        "native_exit_code": 0,
+        "elapsed_seconds": 1.063,
+        "peaks": {
+          "rss_bytes": 82706432,
+          "handles": 206,
+          "threads": 16
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "admin_install": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+          "ci",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          "--fetch-timeout=20000",
+          "--fetch-retries=0"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\src\\frontend\\admin-react",
+        "native_exit_code": 0,
+        "elapsed_seconds": 5.578,
+        "peaks": {
+          "rss_bytes": 263176192,
+          "handles": 270,
+          "threads": 16
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "admin_unit": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--reporter=json",
+          "--outputFile=C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\root-admin-current-unit\\vitest.json"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\src\\frontend\\admin-react",
+        "native_exit_code": 0,
+        "elapsed_seconds": 4.156,
+        "peaks": {
+          "rss_bytes": 141266944,
+          "handles": 459,
+          "threads": 78
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "admin_types": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/typescript/bin/tsc",
+          "--noEmit"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\src\\frontend\\admin-react",
+        "native_exit_code": 0,
+        "elapsed_seconds": 7.641,
+        "peaks": {
+          "rss_bytes": 471363584,
+          "handles": 167,
+          "threads": 12
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "admin_build": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "node_modules/vite/bin/vite.js",
+          "build"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\src\\frontend\\admin-react",
+        "native_exit_code": 0,
+        "elapsed_seconds": 0.532,
+        "peaks": {
+          "rss_bytes": 37728256,
+          "handles": 158,
+          "threads": 12
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "admin_audit": {
+        "command": [
+          "C:\\Program Files\\nodejs\\node.EXE",
+          "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+          "audit",
+          "--json",
+          "--fetch-timeout=20000",
+          "--fetch-retries=0"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\src\\frontend\\admin-react",
+        "native_exit_code": 0,
+        "elapsed_seconds": 1.062,
+        "peaks": {
+          "rss_bytes": 84140032,
+          "handles": 206,
+          "threads": 16
+        },
+        "resource_violation": null,
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      }
+    },
+    "unit_counts": {
+      "storefront": 408,
+      "admin": 54
+    },
+    "installation_closure": {
+      "storefront": {
+        "installed_versions_matching_lock": 172,
+        "optional_platform_packages_absent": 26
+      },
+      "admin": {
+        "installed_versions_matching_lock": 143,
+        "optional_platform_packages_absent": 25
+      }
+    },
+    "audits": {
+      "storefront": 0,
+      "admin": 0
+    },
+    "scope": "Current ROOT including preserved WIP; separate from the committed-source 387/52 and ten-browser cohort.",
+    "limitation": "Unit/type/build and dependency checks only. Known browser business failures, required live profiles and full backend gates remain."
+  },
+  "root_frontend_qualification_limit": "408 storefront / 54 admin refers to the captured ROOT source before af18ae17. The new clean committed admin candidate independently passes 54 including two new credential controls. These counts overlap and are not summed.",
+  "full_python_profiles": {
+    "working_tree_v8": {
+      "profile": "full-working-tree-v8-run",
+      "source_head": "15b7179efbabb441fbdb2fc408e11c3dcc920cd6",
+      "scope": "Frozen preserved working tree, including uncommitted integration dependencies",
+      "collected": 8625,
+      "reported_cases": 1154,
+      "phase_outcomes": {
+        "call:passed": 943,
+        "setup:skipped": 195,
+        "call:skipped": 16
+      },
+      "unreported": 7471,
+      "last_case": "tests/security/test_admin_mfa_totp.py::test_enroll_returns_secret_and_otpauth_uri",
+      "last_resources": {
+        "rss_bytes": 701284352,
+        "threads": 56,
+        "cached_apps": 1,
+        "handles": 4891
+      },
+      "receipt": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v8-entry.py"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v8-snapshot",
+        "native_exit_code": 1,
+        "elapsed_seconds": 1555.766,
+        "peaks": {
+          "rss_bytes": 846012416,
+          "handles": 5016,
+          "threads": 84
+        },
+        "resource_violation": "process_handles_over_5000",
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "status": "finished",
+      "captured_at": "2026-10-21T12:49:27.079495+00:00",
+      "source_after": {
+        "checked": 5759,
+        "changed": []
+      }
+    },
+    "clean_committed_v2": {
+      "profile": "clean-committed-v2-run",
+      "source_head": "4b9071af020d3dbe74197961f1c992276c67bc79",
+      "scope": "Clean committed application/test source after collection and fixture lifetime repairs; preserved ROOT WIP remains separate.",
+      "collected": 8346,
+      "reported_cases": 785,
+      "phase_outcomes": {
+        "call:passed": 647,
+        "setup:skipped": 122,
+        "call:skipped": 11,
+        "call:failed": 5
+      },
+      "unreported": 7561,
+      "last_case": "tests/integration/test_attribution_capture.py::test_e0_records_bandit_arm_not_ab_variant",
+      "last_resources": {
+        "rss_bytes": 660094976,
+        "threads": 61,
+        "cached_apps": 1,
+        "handles": 3815
+      },
+      "receipt": null,
+      "status": "running",
+      "captured_at": "2026-10-21T12:49:27.079495+00:00"
+    },
+    "earlier_clean_116": {
+      "profile": "http-histogram-full-clean-run",
+      "source_head": "657ab41586c9a576dfd4cf93a84c32b60256d746",
+      "scope": "Clean committed source plus three exact histogram inputs; includes no unrelated ROOT WIP.",
+      "collected": 8338,
+      "reported_cases": 898,
+      "phase_outcomes": {
+        "call:passed": 706,
+        "setup:skipped": 126,
+        "call:failed": 37,
+        "setup:failed": 12,
+        "call:skipped": 17
+      },
+      "unreported": 7440,
+      "last_case": "tests/llm/test_text_models_presence.py::test_ollama_text_models_basic[qwen2.5:latest]",
+      "last_resources": {
+        "rss_bytes": 814055424,
+        "threads": 56,
+        "cached_apps": 7,
+        "handles": 4912
+      },
+      "receipt": {
+        "command": [
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+          "-X",
+          "utf8",
+          "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-full-clean-entry.py"
+        ],
+        "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\http-histogram-full-clean-snapshot",
+        "native_exit_code": 1,
+        "elapsed_seconds": 1384.547,
+        "peaks": {
+          "rss_bytes": 925966336,
+          "handles": 5039,
+          "threads": 83
+        },
+        "resource_violation": "process_handles_over_5000",
+        "offline_models": true,
+        "commercial_effects": "sandbox/disabled"
+      },
+      "status": "finished",
+      "captured_at": "2026-10-21T12:49:27.079495+00:00"
+    }
+  },
+  "v7_observation_summary": {
+    "captured_at": "2026-10-21T11:50:06.159805+00:00",
+    "source_head": "9a56bea9a0c56095cd2a17123bbd70d3e0d01b49",
+    "cases": 8609,
+    "outcomes": {
+      "call_pass_record": 8336,
+      "skipped": 273
+    },
+    "original_full_resource_failure": {
+      "command": [
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\html-parser-verified-env\\Scripts\\python.exe",
+        "-X",
+        "utf8",
+        "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v7-entry.py"
+      ],
+      "cwd": "C:\\AI\\ShopSquire\\.artifacts\\roadmap-execution-2026-10-20\\full-working-tree-v7-snapshot",
+      "native_exit_code": 1,
+      "elapsed_seconds": 986.422,
+      "peaks": {
+        "rss_bytes": 871759872,
+        "handles": 5003,
+        "threads": 85
+      },
+      "resource_violation": "process_handles_over_5000",
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "originally_reported": 819,
+    "partitioned": 7790,
+    "partitions": {
+      "results": [
+        {
+          "partition": 1,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 28
+          },
+          "peaks": {
+            "rss_bytes": 483749888,
+            "handles": 2308,
+            "threads": 62
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 2,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 56
+          },
+          "peaks": {
+            "rss_bytes": 413638656,
+            "handles": 1700,
+            "threads": 35
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 3,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 8
+          },
+          "peaks": {
+            "rss_bytes": 636776448,
+            "handles": 2051,
+            "threads": 65
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 4,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 15
+          },
+          "peaks": {
+            "rss_bytes": 627040256,
+            "handles": 1962,
+            "threads": 64
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 5,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 541818880,
+            "handles": 1869,
+            "threads": 39
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 6,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 391622656,
+            "handles": 1619,
+            "threads": 36
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 7,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 364466176,
+            "handles": 1397,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 8,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 379944960,
+            "handles": 1471,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 9,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 366698496,
+            "handles": 1435,
+            "threads": 34
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 10,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 378851328,
+            "handles": 1435,
+            "threads": 32
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 11,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 386400256,
+            "handles": 1445,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 12,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 393089024,
+            "handles": 1417,
+            "threads": 34
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 13,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 377380864,
+            "handles": 1418,
+            "threads": 34
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 14,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 378470400,
+            "handles": 1502,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 15,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 366501888,
+            "handles": 1411,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 16,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 5
+          },
+          "peaks": {
+            "rss_bytes": 407597056,
+            "handles": 1469,
+            "threads": 55
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 17,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 368926720,
+            "handles": 1474,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 18,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 374648832,
+            "handles": 1424,
+            "threads": 34
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 19,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 372105216,
+            "handles": 1435,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 20,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 395710464,
+            "handles": 1489,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 21,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 376606720,
+            "handles": 1427,
+            "threads": 32
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 22,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 5
+          },
+          "peaks": {
+            "rss_bytes": 393310208,
+            "handles": 1410,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 23,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 365264896,
+            "handles": 1428,
+            "threads": 32
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 24,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 396304384,
+            "handles": 1457,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 25,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 399167488,
+            "handles": 1672,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 26,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 9
+          },
+          "peaks": {
+            "rss_bytes": 393080832,
+            "handles": 1471,
+            "threads": 34
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 27,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 429514752,
+            "handles": 1759,
+            "threads": 57
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 28,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 394612736,
+            "handles": 1431,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 29,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 368427008,
+            "handles": 1427,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 30,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 381452288,
+            "handles": 1505,
+            "threads": 35
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 31,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 403288064,
+            "handles": 1422,
+            "threads": 33
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 32,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 444588032,
+            "handles": 1940,
+            "threads": 60
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 33,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 26
+          },
+          "peaks": {
+            "rss_bytes": 422600704,
+            "handles": 1689,
+            "threads": 37
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 34,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 15
+          },
+          "peaks": {
+            "rss_bytes": 389881856,
+            "handles": 1576,
+            "threads": 35
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 35,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 5
+          },
+          "peaks": {
+            "rss_bytes": 375369728,
+            "handles": 1586,
+            "threads": 35
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 36,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 376221696,
+            "handles": 1606,
+            "threads": 37
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 37,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 408936448,
+            "handles": 1944,
+            "threads": 37
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 38,
+          "selected": 200,
+          "exit": 0,
+          "counts": {
+            "tests": 204,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 4
+          },
+          "peaks": {
+            "rss_bytes": 435466240,
+            "handles": 1892,
+            "threads": 36
+          },
+          "resource_violation": null
+        },
+        {
+          "partition": 39,
+          "selected": 190,
+          "exit": 0,
+          "counts": {
+            "tests": 194,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 10
+          },
+          "peaks": {
+            "rss_bytes": 381890560,
+            "handles": 1488,
+            "threads": 33
+          },
+          "resource_violation": null
+        }
+      ],
+      "complete": true
+    },
+    "repeated_collection_skip_reports": 156,
+    "source_after": {
+      "checked": 5750,
+      "changed": []
+    },
+    "ledger": "docs/audits/2026-10-21-python-v7-frozen-outcome-ledger.csv",
+    "ledger_sha256": "cbfe82e87a558c32cc5c28c0e20ff051ccc8bc446f820b9d0f67e657d951665c",
+    "limitation": "Complete ID-level observation coverage across different process windows. Original full-process resource failure, missing required prerequisites and historical outcomes remain unchanged. Later histogram prefix uses two changed source modules and is separate evidence."
+  },
+  "final_earlier_clean_browser": {
+    "captured_at": "2026-10-21T11:01:01.183797+00:00",
+    "source_head": "c3a2b42407e4b86977bc41a8ce65b258185384d1",
+    "specs": 61,
+    "cases": 129,
+    "original_stats": {
+      "expected": 28,
+      "unexpected": 65,
+      "skipped": 32,
+      "flaky": 0
+    },
+    "original_unreported": 4,
+    "followups": {
+      "selected": 4,
+      "passed": 0,
+      "failed": 4,
+      "skipped": 0,
+      "flaky": 0
+    },
+    "final_statuses": {
+      "case_pass_record": 28,
+      "assertion_failure": 69,
+      "skipped": 32
+    },
+    "ledger": "docs/audits/2026-10-21-final-clean-browser-outcome-ledger.csv",
+    "ledger_sha256": "fc393002df86e193426da9c9007c41388f6fe9cf220e6fd2ee5077142c8fc583",
+    "limitation": "Offline owned fixture on source108. Original shared deadline remains a failed gate. Actor/live prerequisites were not supplied by these four older specs. Later targeted repairs and existing historical ledgers are separate evidence. Host bare-python generators remain an installation boundary."
+  },
+  "maintainability_failures": [
+    {
+      "path": "src/app/main.py",
+      "symbol": "create_app",
+      "actual": 2216,
+      "ceiling": 2206
+    },
+    {
+      "path": "src/app/models/db.py",
+      "symbol": "_bootstrap_minimal_sqlite_tables",
+      "actual": 1057,
+      "ceiling": 200
+    },
+    {
+      "path": "src/app/routers/chat.py",
+      "symbol": "_chat_query_impl",
+      "actual": 4528,
+      "ceiling": 4482
+    },
+    {
+      "path": "src/app/routers/pricing.py",
+      "symbol": "suggest",
+      "actual": 239,
+      "ceiling": 238
+    },
+    {
+      "path": "src/app/services/decision_log.py",
+      "symbol": "log_trace_event",
+      "actual": 301,
+      "ceiling": 300
+    },
+    {
+      "path": "src/app/services/recommendation_compatibility.py",
+      "symbol": "serve_v2_compatibility",
+      "actual": 404,
+      "ceiling": 389
+    },
+    {
+      "path": "src/app/services/recommendation_core/turn_router.py",
+      "symbol": "_bounded_fallback_decision",
+      "actual": 230,
+      "ceiling": 221
+    },
+    {
+      "path": "src/app/services/recommendation_core/turn_router.py",
+      "symbol": "_route_turn_raw",
+      "actual": 1351,
+      "ceiling": 1347
+    }
+  ],
+  "roadmap": {
+    "path": "docs/audits/2026-10-21-followup-roadmap-work-items.csv",
+    "packages": 16,
+    "sha256": "cc14a2b2d6ca0e6770c9f3f6751b20aeb8bef632b677c72432e973aee7cc670d"
+  },
+  "source_map": {
+    "path": "docs/audits/2026-10-21-followup-source-map.csv",
+    "anchors": 57,
+    "sha256": "8558b57a6ddf91d8f1f14656f504d46312b5cf2e9eaa449da317b779afa9c0da"
+  },
+  "published_files": [
+    "docs/ROADMAP_EXECUTION_FOLLOWUP_2026-10-21.md",
+    "docs/audits/2026-10-21-followup-file-inventory.csv",
+    "docs/audits/2026-10-21-followup-roadmap-work-items.csv",
+    "docs/audits/2026-10-21-followup-source-map.csv",
+    "docs/audits/2026-10-21-followup-execution.json",
+    "docs/audits/2026-10-21-python-v7-frozen-outcome-ledger.csv",
+    "docs/audits/2026-10-21-final-clean-browser-outcome-ledger.csv"
+  ],
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "pushed": false,
+  "limits": [
+    "No semantic review or execution certificate for every line.",
+    "Different source/profile/process outcomes are never added as one suite.",
+    "No all-required-profile release, useful real market intelligence, production recovery or endurance certification.",
+    "Commercial effects remain disabled/sandbox; no external message or purchase was sent."
+  ]
+}
