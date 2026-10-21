@@ -22,8 +22,11 @@ def _as_utc(value: Any) -> datetime | None:
         return None
 
 
-def _recent(rows: Iterable[Dict[str, Any]], key: str, since: datetime) -> list[Dict[str, Any]]:
-    return [row for row in rows if (_as_utc(row.get(key)) or datetime.min.replace(tzinfo=timezone.utc)) >= since]
+def _recent(
+    rows: Iterable[Dict[str, Any]], key: str, since: datetime, until: datetime,
+) -> list[Dict[str, Any]]:
+    return [row for row in rows
+            if (observed := _as_utc(row.get(key))) is not None and since <= observed <= until]
 
 
 def _optional_rows(db, table_name: str, statement: str, params: Dict[str, Any] | None = None):
@@ -42,6 +45,55 @@ def _optional_rows(db, table_name: str, statement: str, params: Dict[str, Any] |
             return db.execute(text(statement), params or {}).fetchall()
     except Exception:
         return []
+
+
+def _current_inventory_rows(db, *, tenant_id: str, now: datetime):
+    """Project current physical ATP, never a future order's confirmed quantity.
+
+    Older SQLite fixtures may omit optional validity/safety columns. Their
+    observation still has the same one-day bound; malformed declared validity
+    fails closed. Filter before selecting the latest location snapshot, and
+    compare normalized instants rather than lexically ordered timestamp text.
+    """
+    schema = inspect(db.connection())
+    if not schema.has_table("inventory_atp_fact"):
+        return [], "unavailable"
+    columns = {column["name"] for column in schema.get_columns("inventory_atp_fact")}
+    optional = ", ".join(
+        name if name in columns else f"NULL AS {name}"
+        for name in ("valid_from", "valid_to", "safety_stock_quantity")
+    )
+    rows = _optional_rows(db, "inventory_atp_fact", (
+        "SELECT sku, location_id, on_hand_quantity, committed_quantity, observed_at, "
+        "source_system, confidence, source_record_id, " + optional +
+        " FROM inventory_atp_fact WHERE tenant_id=:tenant AND status='active'"
+    ), {"tenant": tenant_id})
+    latest = {}
+    eligible = []
+    for row in rows:
+        observed = _as_utc(row[4])
+        valid_from = _as_utc(row[8]) if row[8] is not None else observed
+        valid_to = (_as_utc(row[9]) if row[9] is not None
+                    else observed + timedelta(days=1) if observed is not None else None)
+        if (observed is None or valid_from is None or valid_to is None
+                or not now - timedelta(days=1) <= observed <= now
+                or not valid_from <= now < valid_to):
+            continue
+        counts = (row[2], row[3], row[10] if row[10] is not None else 0)
+        if not all(isinstance(value, int) and value >= 0 for value in counts):
+            continue
+        eligible.append((observed, row, counts))
+    for observed, row, (on_hand, reserved, safety) in sorted(
+        eligible, key=lambda item: item[0], reverse=True,
+    ):
+        key = (str(row[0] or ""), str(row[1] or "default"))
+        latest.setdefault(key, {
+            "sku": row[0], "location_id": row[1], "on_hand": on_hand,
+            "reserved": reserved, "available": max(0, on_hand - reserved - safety),
+            "updated_at": row[4], "source_system": row[5],
+            "confidence": float(row[6] or 0.0), "source_record_id": row[7],
+        })
+    return list(latest.values()), "observed" if latest else "insufficient_data"
 
 
 def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict[str, Any]:
@@ -65,7 +117,7 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
         sales_rows = _recent([
             {"sku": row[0], "quantity": row[1], "event_time": row[2],
              "source_system": row[3], "source_record_id": row[4]} for row in rows
-        ], "event_time", since)
+        ], "event_time", since, now)
     # sales_metrics is a legacy, unscoped demo fixture. It may inform only the
     # default demo tenant; it must never bleed into a real tenant projection.
     if (
@@ -81,39 +133,8 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
         if rows:
             sales_rows = _recent([
                 {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
-            ], "event_time", since)
-    inventory_status = "unavailable"
-    rows = _optional_rows(
-        db,
-        "inventory_atp_fact",
-        (
-            "SELECT sku, location_id, on_hand_quantity, committed_quantity, "
-            "confirmed_quantity, observed_at, source_system, confidence, source_record_id "
-            "FROM inventory_atp_fact WHERE tenant_id=:tenant AND status='active' "
-            "ORDER BY observed_at DESC"
-        ),
-        {"tenant": tenant_id},
-    )
-    if rows:
-        latest: Dict[tuple[str, str], Any] = {}
-        for row in rows:
-            key = (str(row[0] or ""), str(row[1] or "default"))
-            latest.setdefault(key, row)
-        inventory_rows = [
-            {
-                "sku": row[0], "location_id": row[1],
-                "on_hand": int(row[2] or 0), "reserved": int(row[3] or 0),
-                "available": int(
-                    row[4] if row[4] is not None else int(row[2] or 0) - int(row[3] or 0)),
-                "updated_at": row[5], "source_system": row[6],
-                "confidence": float(row[7] or 0.0), "source_record_id": row[8],
-            }
-            for row in latest.values()
-            if _as_utc(row[5]) and _as_utc(row[5]) >= now - timedelta(days=1)
-        ]
-        inventory_status = "observed" if inventory_rows else "insufficient_data"
-    elif inspect(db.connection()).has_table("inventory_atp_fact"):
-        inventory_status = "insufficient_data"
+            ], "event_time", since, now)
+    inventory_rows, inventory_status = _current_inventory_rows(db, tenant_id=tenant_id, now=now)
     rows = _optional_rows(
         db,
         "fulfillment_case",
@@ -137,7 +158,7 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
                     "case_id": case_id, "sku": line.get("item_ref"),
                     "quantity": line.get("quantity"), "occurred_at": occurred_at,
                 })
-        case_rows = _recent(case_rows, "occurred_at", now - timedelta(days=90))
+        case_rows = _recent(case_rows, "occurred_at", now - timedelta(days=90), now)
     sales_status = (
         "observed" if sales_rows and tenant_id != "default"
         else "simulated" if sales_rows
