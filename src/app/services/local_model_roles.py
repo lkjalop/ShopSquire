@@ -190,7 +190,7 @@ def execute_local_model_role(
     fixture = transport is not None and expected == "0" * 64
     verification_status = "test_fixture" if fixture else verify_ollama_artifact(
         base_url=base_url, model=model, expected_digest=expected,
-        timeout_s=min(max(timeout_s, 0.1), 2.0),
+        timeout_s=min(max(timeout_s, 0.05), 2.0),
     ).status
     if verification_status not in {"verified", "test_fixture"}:
         from src.app.observability.pilot_runtime_metrics import record_model_outcome
@@ -227,7 +227,7 @@ def execute_local_model_role(
         })
         raise RuntimeError("local_model_queue_timeout")
     remaining = deadline - time.perf_counter()
-    if remaining <= 0:
+    if remaining < 0.05:
         gate.release()
         _record_schedule({
             "role": role, "priority": priority, "status": "timed_out",
@@ -245,7 +245,7 @@ def execute_local_model_role(
         data_classes={
             "aggregate_market" if role == "market_narrator" else "buyer_workload"
         },
-        timeout_ms=round(min(max(remaining, 0.05), 120.0) * 1_000),
+        timeout_ms=int(min(remaining, 120.0) * 1_000),
         max_output_tokens=max_output_tokens,
         scheduler_queue_ms=round(queue_ms, 2),
         scheduler_deadline_ms=round(max(float(timeout_s), 0.05) * 1_000),

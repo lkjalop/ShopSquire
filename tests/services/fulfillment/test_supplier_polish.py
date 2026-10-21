@@ -31,6 +31,14 @@ def test_polish_returns_safe_rewrite(monkeypatch):
 
 
 def test_polish_passes_a_timeout(monkeypatch):
+    from types import SimpleNamespace
+    from src.app.services import local_model_roles as roles
+
+    # This case checks propagation with no elapsed queue/verification work;
+    # remaining-budget reductions have separate clock-controlled coverage.
+    gate = roles._PriorityModelGate(1)
+    monkeypatch.setattr(roles, "time", SimpleNamespace(perf_counter=lambda: 0.0))
+    monkeypatch.setattr(roles, "_model_gate", lambda *_args: gate)
     monkeypatch.setenv("OLLAMA_URL", "http://127.0.0.1:11434")
     seen = {}
 
