@@ -358,18 +358,20 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             "deleted_records": deleted,
             "action_required": action_required,
         }
-    except Exception as exc:
+    except Exception:
         try:
             finish_job(
                 job_id,
                 tenant_id=tenant_id,
-                stages={"tenant_scoped_database": {"status": "failed", "error": str(exc)[:240]}},
+                stages={"tenant_scoped_database": {
+                    "status": "failed", "error_code": "privacy_database_operation_failed",
+                }},
                 action_required=["operator_retry_required"],
                 failed=True,
             )
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="privacy_erasure_failed") from None
 
 
 @router.get("/deletion-jobs/{job_id}")
@@ -669,5 +671,5 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
         return {"status": "redacted" if complete else "action_required", "uid": uid, "uid_hash": uid_hash,
                 "redacted_counts": redacted,
                 "action_required": [] if complete else ["redis_or_cache_redaction_incomplete"]}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="privacy_redaction_failed") from None

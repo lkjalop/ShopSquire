@@ -1329,6 +1329,10 @@ def db_session():
                     self._res = res
                     self._sql = (sql or "").lower()
 
+                def __iter__(self):
+                    for row in self._res:
+                        yield self._convert_row(row)
+
                 def fetchone(self):
                     row = self._res.fetchone()
                     if row is None:
@@ -1343,16 +1347,19 @@ def db_session():
                             self._mr = mapping_res
                             self._sql = sql
 
+                        def _convert_mapping(self, row):
+                            data = dict(row)
+                            for key in ("escalated", "blocked"):
+                                if key in data and isinstance(data[key], int):
+                                    data[key] = bool(data[key])
+                            return data
+
+                        def __iter__(self):
+                            for row in self._mr:
+                                yield self._convert_mapping(row)
+
                         def all(self):
-                            rows = self._mr.all()
-                            out = []
-                            for r in rows:
-                                d = dict(r)
-                                for k in ("escalated", "blocked"):
-                                    if k in d and isinstance(d[k], int):
-                                        d[k] = bool(d[k])
-                                out.append(d)
-                            return out
+                            return [self._convert_mapping(row) for row in self._mr.all()]
 
                         def __getattr__(self, name):
                             return getattr(self._mr, name)

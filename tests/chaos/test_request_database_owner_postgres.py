@@ -1,5 +1,6 @@
 """Real PostgreSQL request ownership, using only owned certificate schemas."""
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 from threading import Barrier
 from uuid import uuid4
@@ -96,3 +97,38 @@ def test_native_request_overrides_and_restores_inherited_background_owner(native
         with client_for(native_owners[0]) as client:
             assert client.get('/probe').json() == {'owner': 0}
         assert read_owner() == 2
+
+
+@pytest.mark.parametrize('mode', ['mappings', 'rows', 'privacy'])
+def test_native_legacy_session_stream_uses_the_owner_and_normalizes_rows(native_owners, mode):
+    engine = native_owners[0]
+    with engine.begin() as db:
+        db.execute(text('CREATE TABLE streaming_probe(id INTEGER, escalated BOOLEAN, blocked BOOLEAN)'))
+        db.execute(text('INSERT INTO streaming_probe VALUES (1,FALSE,TRUE),(2,TRUE,FALSE)'))
+        db.execute(text('CREATE TABLE decision_logs(id TEXT,tenant_id TEXT,input_data TEXT,valid_from TEXT)'))
+        for key, tenant, uid in [('owned','controller-a','buyer_7'),
+                                  ('other','controller-a','buyerX7'),
+                                  ('foreign','controller-b','buyer_7')]:
+            db.execute(text('INSERT INTO decision_logs VALUES (:id,:tenant,:payload,:clock)'),
+                       {'id':key,'tenant':tenant,'payload':json.dumps({'uid':uid}),'clock':'2026-10-21'})
+    with database_owner(engine):
+        with database.db_session() as db:
+            if mode == 'privacy':
+                from src.app.deps import hash_uid
+                from src.app.routers.privacy import _subject_decisions
+                rows = _subject_decisions(db, tenant_id='controller-a', uid='buyer_7', uid_hash=hash_uid('buyer_7'))
+                assert [row['id'] for row in rows] == ['owned']
+            else:
+                result = db.execute(text('SELECT * FROM streaming_probe ORDER BY id'),
+                                    execution_options={'stream_results': True, 'yield_per': 1})
+                if mode == 'mappings':
+                    rows = list(result.mappings())
+                    assert rows == [{'id':1,'escalated':False,'blocked':True},
+                                    {'id':2,'escalated':True,'blocked':False}]
+                    assert rows[0]['escalated'] is False and rows[0]['blocked'] is True
+                else:
+                    rows = list(result)
+                    assert rows == [(1,False,True),(2,True,False)]
+                    assert rows[0][1] is False and rows[0][2] is True
+                result.close()
+    assert read_owner() == 2
