@@ -83,7 +83,12 @@ async function raiseForStatus(r: Response): Promise<void> {
   throw err;
 }
 
-async function fetchWithDeadline(path: string, opts?: HttpOptions, withContentType = true): Promise<Response> {
+async function fetchWithDeadline<T>(
+  path: string,
+  opts: HttpOptions | undefined,
+  withContentType: boolean,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
   const { timeoutMs: requestedTimeout, signal: callerSignal, ...requestOpts } = opts || {};
   const timeoutMs = Math.max(1, Math.min(Number(requestedTimeout ?? DEFAULT_HTTP_TIMEOUT_MS), 300_000));
   const controller = new AbortController();
@@ -94,12 +99,19 @@ async function fetchWithDeadline(path: string, opts?: HttpOptions, withContentTy
     new DOMException(`Request exceeded ${timeoutMs}ms deadline`, 'TimeoutError'),
   ), timeoutMs);
   try {
-    return await fetch(`${apiBase()}${path}`, {
+    const response = await fetch(`${apiBase()}${path}`, {
       ...requestOpts,
       headers: buildHeaders(opts, withContentType),
       credentials: 'include',
       signal: controller.signal,
     });
+    await raiseForStatus(response);
+    return await consume(response);
+  } catch (error) {
+    // Body readers may report a generic AbortError. Keep the actual caller or
+    // deadline reason so the UI can distinguish cancellation from a timeout.
+    if (controller.signal.aborted) throw controller.signal.reason ?? error;
+    throw error;
   } finally {
     window.clearTimeout(timer);
     callerSignal?.removeEventListener('abort', forwardAbort);
@@ -107,13 +119,19 @@ async function fetchWithDeadline(path: string, opts?: HttpOptions, withContentTy
 }
 
 export async function http<T>(path: string, opts?: HttpOptions): Promise<T> {
-  const r = await fetchWithDeadline(path, opts);
-  await raiseForStatus(r);
-  return r.json();
+  return fetchWithDeadline(path, opts, true, response => response.json());
 }
 
 export async function httpResponse(path: string, opts?: HttpOptions): Promise<Response> {
-  const r = await fetchWithDeadline(path, opts, false);
-  await raiseForStatus(r);
-  return r;
+  return fetchWithDeadline(path, opts, false, async response => {
+    if (!response.body) return response;
+    // The export caller consumes a complete blob. Finish that read while the
+    // deadline still owns the request, then return readable response content.
+    const body = await response.arrayBuffer();
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  });
 }
