@@ -38,16 +38,19 @@ def bearer(**changes):
 
 
 @pytest.mark.parametrize(
-    "changes",
+    ("claim", "invalid_value"),
     [
-        {"exp": 1},
-        {"iss": "other-issuer"},
-        {"aud": "other-audience"},
-        {"iat": int(time.time()) + 600},
+        ("exp", 1),
+        ("iss", "other-issuer"),
+        ("aud", "other-audience"),
+        ("iat", 600),
     ],
 )
-def test_invalid_bearer_cannot_supply_person_or_email(changes):
-    token = bearer(**changes)
+def test_invalid_bearer_cannot_supply_person_or_email(claim, invalid_value):
+    # Collection can precede execution by more than the future-token interval.
+    # Make the intended invalid issue time relative to this actual request.
+    value = int(time.time()) + invalid_value if claim == "iat" else invalid_value
+    token = bearer(**{claim: value})
     assert auth._bearer_subject(token) is None
     assert auth._bearer_email(token) is None
 
