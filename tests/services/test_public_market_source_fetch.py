@@ -18,6 +18,35 @@ from src.app.services.public_market_source_fetch import (
 )
 
 
+def test_http_transport_stops_streaming_before_oversized_body_is_buffered(monkeypatch):
+    from src.app.security.egress_allowlist import scoped_egress_domains
+    import httpx
+    from src.app.services.public_market_source_fetch import _default_transport
+    consumed=[]
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            for index in range(100):
+                consumed.append(index)
+                yield b'x'*1024
+    original=httpx.Client
+    mock=httpx.MockTransport(lambda _:httpx.Response(200,stream=Stream()))
+    monkeypatch.setattr(httpx,'Client',lambda **kwargs:original(transport=mock,**kwargs))
+    with scoped_egress_domains(['www.saferproducts.gov']), pytest.raises(ValueError,match='response_too_large'):
+        _default_transport('https://www.saferproducts.gov/RestWebServices/Recall',{}, {},1,max_response_bytes=2048)
+    assert len(consumed)<=3
+
+
+def test_market_network_policy_denial_is_distinct_from_unavailable():
+    from src.app.security.egress_allowlist import EgressBlockedError
+    def denied(*args):raise EgressBlockedError('https://www.saferproducts.gov')
+    with _db() as db:
+        result=fetch_public_market_source(db,tenant_id='tenant-a',source_id='cpsc_recalls',
+            query={'title':'dresser'},enabled=True,transport=denied)
+    assert result['outcome']=='denied'
+    assert result['error_code']=='outbound_policy_denied'
+    assert result['execution_allowed'] is False
+
+
 def _db():
     engine = create_engine(
         "sqlite://",

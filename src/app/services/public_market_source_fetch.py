@@ -12,12 +12,14 @@ import os
 import re
 import uuid
 import csv
+from functools import partial
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from sqlalchemy import text
+from src.app.security.egress_allowlist import EgressBlockedError
 
 from src.app.services.market_evidence_policy import resolve_contradictions
 from src.app.services.market_source_registry import (
@@ -43,6 +45,10 @@ Transport = Callable[
 ]
 
 
+class ResponseTooLarge(ValueError):
+    """The decoded provider body exceeded its configured byte budget."""
+
+
 def _utc(value: datetime | None = None) -> datetime:
     selected = value or datetime.now(timezone.utc)
     if selected.tzinfo is None:
@@ -61,6 +67,8 @@ def _default_transport(
     params: dict[str, str],
     headers: dict[str, str],
     timeout: float,
+    *,
+    max_response_bytes: int = 2_000_000,
 ) -> PublicHttpResponse:
     import httpx
 
@@ -71,12 +79,19 @@ def _default_transport(
         follow_redirects=False,
         headers={"User-Agent": "ShopSquire-market-intelligence/1.0", **headers},
     ) as client:
-        response = client.get(url, params=params) if params else client.get(url)
-    return PublicHttpResponse(
-        status_code=int(response.status_code),
-        headers={str(key).lower(): str(value) for key, value in response.headers.items()},
-        body=bytes(response.content),
-    )
+        with client.stream("GET", url, params=params or None) as response:
+            chunks = []
+            size = 0
+            for chunk in response.iter_bytes(chunk_size=min(65536, max_response_bytes + 1)):
+                size += len(chunk)
+                if size > max_response_bytes:
+                    raise ResponseTooLarge("response_too_large")
+                chunks.append(chunk)
+            return PublicHttpResponse(
+                status_code=int(response.status_code),
+                headers={str(key).lower(): str(value) for key, value in response.headers.items()},
+                body=b"".join(chunks),
+            )
 
 
 def _normalize_cpsc_query(query: dict[str, Any]) -> dict[str, str]:
@@ -680,6 +695,16 @@ def group_contradictions(
     ]
 
 
+def _fetch_failure(source_id: str, outcome: str, error_code: str) -> dict[str, Any]:
+    return {
+        "source_id": source_id,
+        "outcome": outcome,
+        "error_code": error_code,
+        "authority": "advisory_only",
+        "execution_allowed": False,
+    }
+
+
 def fetch_public_market_source(
     db,
     *,
@@ -769,7 +794,10 @@ def fetch_public_market_source(
     }
     release: dict[str, Any] = {}
     try:
-        selected_transport = transport or _default_transport
+        selected_transport = transport or partial(
+            _default_transport,
+            max_response_bytes=int(profile.get("max_response_bytes") or 2_000_000),
+        )
         if kind == "usgs_mcs_sciencebase_csv":
             response, release = _usgs_data_response(
                 profile,
@@ -783,22 +811,14 @@ def fetch_public_market_source(
                 headers,
                 float(profile.get("timeout_seconds") or 8),
             )
+    except EgressBlockedError:
+        return _fetch_failure(source_id, "denied", "outbound_policy_denied")
+    except ResponseTooLarge:
+        return _fetch_failure(source_id, "malformed", "response_too_large")
     except ValueError:
-        return {
-            "source_id": source_id,
-            "outcome": "malformed",
-            "error_code": "provider_metadata_invalid",
-            "authority": "advisory_only",
-            "execution_allowed": False,
-        }
+        return _fetch_failure(source_id, "malformed", "provider_metadata_invalid")
     except Exception:
-        return {
-            "source_id": source_id,
-            "outcome": "unavailable",
-            "error_code": "provider_unavailable",
-            "authority": "advisory_only",
-            "execution_allowed": False,
-        }
+        return _fetch_failure(source_id, "unavailable", "provider_unavailable")
     if len(response.body) > int(profile.get("max_response_bytes") or 2_000_000):
         return {
             "source_id": source_id,
