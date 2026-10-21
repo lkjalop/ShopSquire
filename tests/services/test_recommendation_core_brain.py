@@ -1534,8 +1534,14 @@ def test_typed_active_case_keeps_quantity_free_current_order_turn_in_procurement
 
 def test_invalid_case_patch_is_visible_rejection_not_legacy_degradation(db, monkeypatch):
     from src.app.services import procurement_case_preflight
+    from src.app.models.orm import Base, ShoppingCase
+    Base.metadata.create_all(db.get_bind())
+    db.add(ShoppingCase(case_id='case-60', tenant_id='default', uid='u1', revision=1))
+    db.commit()
+    attempts = []
 
     def reject_patch(*_args, **_kwargs):
+        attempts.append(_kwargs)
         raise ValueError("source_destination_not_found")
 
     monkeypatch.setattr(
@@ -1562,6 +1568,7 @@ def test_invalid_case_patch_is_visible_rejection_not_legacy_degradation(db, monk
 
     response = recommend_turn(db, envelope, llm_fn=lambda _prompt, _timeout: raw)
 
+    assert len(attempts) == 1, "the owned case must reach the intended rejection boundary"
     assert response.grounding == "unverified"
     assert response.extras["case_patch_application"] == {
         "status": "rejected",
