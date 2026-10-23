@@ -1,0 +1,89 @@
+name: Repository evidence (scoped)
+
+on:
+  push:
+    branches: [main, master, "checkpoint/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install scoped API and test profile
+        run: |
+          python -m pip install -r requirements/bootstrap-runtime.txt
+          python -m pip install -r requirements/api-runtime.txt -r requirements/test-runtime.txt
+          python -m pip check
+      - name: Check generated profiles and public documentation links
+        run: |
+          python -m scripts.generate_runtime_requirements --platform linux --check
+          python -m scripts.generate_runtime_requirements --platform windows --check
+          python scripts/check_repository_evidence.py
+      - name: Run the walkthrough's focused tests
+        env:
+          APP_ENV: test
+          CUDA_VISIBLE_DEVICES: "-1"
+          PAYMENT_EXECUTION_ENABLED: "0"
+          MODEL_WARMUP_ON_STARTUP: "0"
+          OLLAMA_URL: http://127.0.0.1:1
+          REDIS_URL: redis://127.0.0.1:1/0
+        run: |
+          mkdir -p test-results
+          python -m pytest -q --junitxml=test-results/focused-core.xml \
+            tests/services/test_typed_recommendation_stage_coordinator.py \
+            tests/services/test_local_model_roles.py tests/services/test_research_policy.py
+      - name: Preserve focused results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: focused-core-evidence
+          path: test-results/**
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: [frontend, src/frontend/admin-react]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+      - name: Install, test and build the locked frontend
+        working-directory: ${{ matrix.directory }}
+        run: |
+          npm ci
+          npm test
+          npx tsc --noEmit
+          npm run build
+
+  architecture-ratchets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Check file growth
+        run: python scripts/check_source_file_sizes.py
+      - name: Check function growth (known debt remains blocking)
+        if: always()
+        run: python scripts/check_function_sizes.py

@@ -1,37 +1,63 @@
-name: Integration Tests
+name: Integration contracts (owned services)
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, master]
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
-      docker:
-        image: docker:24.0.0
-        options: --privileged
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shopsquire_integration
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      APP_ENV: test
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shopsquire_integration
+      ROADMAP_OWNED_REDIS_URL: redis://127.0.0.1:6379/1
+      REDIS_TEST_URL: redis://127.0.0.1:6379/15
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
     steps:
       - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
-      - name: Set up Docker Compose
+          python-version: "3.11"
+      - name: Install locked backend and test tools
+        uses: ./.github/actions/install-backend
+      - name: Run integration contracts
+        # External live-stack/provider tests retain their explicit prerequisites.
+        # A skip is reported as such, never a live-provider certification.
         run: |
-          sudo apt-get update && sudo apt-get install -y docker-compose
-      - name: Start integration stack
-        run: docker-compose up -d --build
-      - name: Wait for services
-        run: sleep 10
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Run integration tests
-        run: pytest -q tests/integration
-      - name: Tear down
+          mkdir -p test-results
+          python -m pytest -q tests/integration --timeout=120 --timeout-method=thread \
+            --junitxml=test-results/integration.xml
+      - name: Retain results including failures and skips
         if: always()
-        run: docker-compose down
+        uses: actions/upload-artifact@v6
+        with:
+          name: integration-contract-results
+          path: test-results/**

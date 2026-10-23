@@ -1,0 +1,252 @@
+{
+  "assessed_date": "2026-10-23",
+  "source_base": "a4cbf28e121fed9f13067a600c8a822d6d191d05",
+  "scope": "Repository presentation, CI and evidence; zero application source or original test modifications in the publication candidate.",
+  "implementation_programme_resumed": false,
+  "release_green": false,
+  "overall_completion_percentage": null,
+  "all_line_semantic_review_claimed": false,
+  "initial_dirty_paths": 333,
+  "initial_unpublished_checkpoint_commits": 208,
+  "python_profiles": [
+    {
+      "native_exit_code": 0,
+      "elapsed_seconds": 25.969,
+      "peaks": {
+        "rss_bytes": 269852672,
+        "handles": 902,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "profile": "github-portfolio-core-20261023"
+    },
+    {
+      "native_exit_code": 0,
+      "elapsed_seconds": 19.407,
+      "peaks": {
+        "rss_bytes": 270356480,
+        "handles": 887,
+        "threads": 29
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "profile": "github-publication-script-checks-20261023"
+    }
+  ],
+  "browser": {
+    "complete": true,
+    "passed": 9,
+    "failed": 0,
+    "skipped": 0,
+    "attempts_per_case": 1,
+    "actor_scope": "Eight operator-assisted controls; one native buyer control auditing zero operator headers.",
+    "application_overlay_files": 0,
+    "test_overlay_files": 0,
+    "changed_inputs": [],
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "control_canaries_retained": true,
+    "ports_closed": true,
+    "elapsed_seconds": 162.64
+  },
+  "frontend": {
+    "node": "22.23.4",
+    "npm": "10.9.9",
+    "vitest": "4.1.12",
+    "vite": "8.2.4",
+    "storefront_passed": 387,
+    "admin_passed": 63,
+    "steps": [
+      {
+        "surface": "storefront",
+        "step": "install",
+        "exit_code": 0,
+        "elapsed_seconds": 43.469
+      },
+      {
+        "surface": "storefront",
+        "step": "unit",
+        "exit_code": 0,
+        "elapsed_seconds": 10.797
+      },
+      {
+        "surface": "storefront",
+        "step": "types",
+        "exit_code": 0,
+        "elapsed_seconds": 15.765
+      },
+      {
+        "surface": "storefront",
+        "step": "build",
+        "exit_code": 0,
+        "elapsed_seconds": 1.61
+      },
+      {
+        "surface": "admin",
+        "step": "install",
+        "exit_code": 0,
+        "elapsed_seconds": 6.203
+      },
+      {
+        "surface": "admin",
+        "step": "unit",
+        "exit_code": 0,
+        "elapsed_seconds": 4.953
+      },
+      {
+        "surface": "admin",
+        "step": "types",
+        "exit_code": 0,
+        "elapsed_seconds": 5.359
+      },
+      {
+        "surface": "admin",
+        "step": "build",
+        "exit_code": 0,
+        "elapsed_seconds": 6.828
+      }
+    ],
+    "fresh_npm_ci": true
+  },
+  "static_checks": [
+    {
+      "check": "file-size",
+      "exit_code": 1,
+      "output_lines": [
+        "WARN_OVERSIZE frontend/src/App.tsx: 4381 lines",
+        "WARN_OVERSIZE frontend/src/components/AdminDashboard.tsx: 1076 lines",
+        "WARN_OVERSIZE frontend/src/components/DecisionTrace.tsx: 4358 lines",
+        "WARN_OVERSIZE src/app/flows/nqe.py: 1090 lines",
+        "WARN_OVERSIZE src/app/main.py: 2409 lines",
+        "WARN_OVERSIZE src/app/models/db.py: 1535 lines",
+        "WARN_OVERSIZE src/app/observability/metrics.py: 1754 lines",
+        "WARN_OVERSIZE src/app/routers/admin.py: 4106 lines",
+        "WARN_OVERSIZE src/app/routers/admin_bi.py: 2139 lines",
+        "WARN_OVERSIZE src/app/routers/admin_email_security.py: 3252 lines",
+        "WARN_OVERSIZE src/app/routers/auth.py: 1192 lines",
+        "WARN_OVERSIZE src/app/routers/cart.py: 1113 lines",
+        "WARN_OVERSIZE src/app/routers/chat.py: 4891 lines",
+        "WARN_OVERSIZE src/app/routers/cv.py: 1530 lines",
+        "WARN_OVERSIZE src/app/routers/decisions.py: 2602 lines",
+        "WARN_OVERSIZE src/app/routers/escalation_room.py: 2200 lines",
+        "WARN_OVERSIZE src/app/routers/fulfillment_cases.py: 2439 lines",
+        "WARN_OVERSIZE src/app/routers/merchant_dashboard.py: 3203 lines",
+        "WARN_OVERSIZE src/app/routers/returns.py: 1020 lines",
+        "WARN_OVERSIZE src/app/routers/security_integrations.py: 1217 lines",
+        "WARN_OVERSIZE src/app/routers/shopping_cases.py: 2063 lines",
+        "WARN_OVERSIZE src/app/routers/support_complaints.py: 4025 lines",
+        "WARN_OVERSIZE src/app/routers/vision.py: 1833 lines",
+        "WARN_OVERSIZE src/app/security/auth.py: 1073 lines",
+        "WARN_OVERSIZE src/app/security/email_security.py: 2856 lines",
+        "WARN_OVERSIZE src/app/security/framework_correlation.py: 1379 lines",
+        "WARN_OVERSIZE src/app/security/linked_artifact_analysis.py: 1282 lines",
+        "WARN_OVERSIZE src/app/security/observer.py: 1049 lines",
+        "WARN_OVERSIZE src/app/services/account_intelligence.py: 1333 lines",
+        "WARN_OVERSIZE src/app/services/checkout_upsell.py: 1224 lines",
+        "WARN_OVERSIZE src/app/services/conversation_case_state.py: 1094 lines",
+        "WARN_OVERSIZE src/app/services/cv_tier2_pipeline.py: 1154 lines",
+        "WARN_OVERSIZE src/app/services/decision_log.py: 1131 lines",
+        "WARN_OVERSIZE src/app/services/demand_allocation.py: 1707 lines",
+        "WARN_OVERSIZE src/app/services/fulfillment/draft.py: 1097 lines",
+        "WARN_OVERSIZE src/app/services/inventory_agent.py: 1400 lines",
+        "WARN_OVERSIZE src/app/services/official_workload_research.py: 1616 lines",
+        "WARN_OVERSIZE src/app/services/orchestrator.py: 3911 lines",
+        "WARN_OVERSIZE src/app/services/playbook_engine.py: 1767 lines",
+        "WARN_OVERSIZE src/app/services/recommend_budget_advisor.py: 1027 lines",
+        "WARN_OVERSIZE src/app/services/recommendation_core/core.py: 2794 lines",
+        "WARN_OVERSIZE src/app/services/recommendation_core/turn_router.py: 2786 lines",
+        "WARN_OVERSIZE src/app/services/recommendation_facade.py: 1469 lines",
+        "WARN_OVERSIZE src/app/services/recommendations.py: 2297 lines",
+        "WARN_OVERSIZE src/app/services/recruiting_pipeline.py: 1017 lines",
+        "WARN_OVERSIZE src/frontend/admin-react/src/api.ts: 1252 lines",
+        "WARN_OVERSIZE src/frontend/admin-react/src/components/MerchantBIPro.tsx: 1218 lines",
+        "WARN_OVERSIZE src/frontend/storefront-react/src/App.jsx: 4003 lines",
+        "WARN_OVERSIZE src/frontend/widget/shopsquire-widget.js: 1443 lines",
+        "OVERSIZE_GROWTH src/app/routers/admin_email_security.py: 3252 lines exceeds ceiling 3244"
+      ]
+    },
+    {
+      "check": "function-size",
+      "exit_code": 1,
+      "output_lines": [
+        "src/app/models/db.py:_bootstrap_minimal_sqlite_tables: 1057 > 200",
+        "src/app/routers/chat.py:_chat_query_impl: 4528 > 4482",
+        "src/app/routers/merchant_dashboard.py:merchant_email_lab: 2331 > 2328",
+        "src/app/services/decision_log.py:log_trace_event: 301 > 300",
+        "src/app/services/recommendation_compatibility.py:serve_v2_compatibility: 404 > 389",
+        "src/app/services/recommendation_core/turn_router.py:_bounded_fallback_decision: 238 > 221",
+        "src/app/services/recommendation_core/turn_router.py:_route_turn_raw: 1348 > 1347"
+      ]
+    },
+    {
+      "check": "linux-profiles",
+      "exit_code": 0,
+      "output_lines": []
+    },
+    {
+      "check": "windows-profiles",
+      "exit_code": 0,
+      "output_lines": []
+    },
+    {
+      "check": "qualified-python-pip-check",
+      "exit_code": 0,
+      "output_lines": [
+        "No broken requirements found."
+      ]
+    }
+  ],
+  "actionlint": {
+    "release": "v1.7.12",
+    "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_windows_amd64.zip",
+    "sha256": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",
+    "workflow_count": 18,
+    "exit_code": 0
+  },
+  "poetry_lock_check": {
+    "version": "2.4.1",
+    "exit_code": 0,
+    "deprecated_metadata_warnings": true
+  },
+  "history_scan": {
+    "base": "origin/checkpoint/turn-state-consolidation-20260830",
+    "head": "a4cbf28e121fed9f13067a600c8a822d6d191d05",
+    "objects": 2754,
+    "text_blobs": 1345,
+    "binary_blobs": 1,
+    "private_files": 886,
+    "private_values": 431,
+    "scope": "New objects reachable from unpublished commits; exact owned credentials plus selected high-confidence key patterns. Not a universal secret certification.",
+    "findings": 0
+  },
+  "excluded_browser_attempt": {
+    "case_passes": 9,
+    "final_integrity_status": "failed",
+    "changed_files": [
+      ".github/workflows/ci_smoke.yml",
+      ".github/workflows/security_scans.yml"
+    ],
+    "reason": "CI-only metadata changed during first run; excluded from qualified result and repeated with no changed inputs."
+  },
+  "limitations": [
+    "Existing qualified Python environment, not a new full default Poetry install.",
+    "Fresh focused checks do not replace older complete broad browser or full Python matrices.",
+    "Hosted run results are separate; architectural and dependency gates remain unresolved.",
+    "No live model/search/provider, real email, purchase or payment effect."
+  ]
+}

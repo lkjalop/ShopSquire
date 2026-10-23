@@ -1,317 +1,97 @@
 # ShopSquire
 
-Python 3.11 is the verified baseline and minimum. The image-decoding security baseline uses Pillow 13.
+An evidence-governed commerce prototype: conversational buying, inventory and procurement proposals, with explicit boundaries between observations, evidence, authorization and execution.
 
-> An evidence-governed commerce decision and bounded-agent platform.
+**Start with the [engineering walkthrough](docs/portfolio/ENGINEERING_WALKTHROUGH.md), [current ASCII architecture](docs/architecture/CURRENT_ARCHITECTURE_2026-10-23.md), and [evidence and remaining roadmap](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md).** Implementation is substantially AI-assisted. This is an engineering portfolio and an unfinished product; release readiness has not been established.
 
-ShopSquire adds a native intelligence and control layer to commerce operations. It can
-stand on its own when a retailer does not have mature planning infrastructure, or
-complement an existing ERP, commerce, planning or supply-chain platform.
+## What it can demonstrate now
 
-It is **not** a replacement for NetSuite, SAP, Kinaxis, o9, Blue Yonder, Shopify or a
-customer's system of record. Those systems remain authoritative. ShopSquire gives their
-facts a governed path into recommendations, market intelligence, procurement proposals
-and carefully bounded actions.
+| Capability | Evidence and limits |
+|---|---|
+| Remember corrections across turns and reload | Quantity, currency, per-unit/total budget and destination corrections; seven buyer-only browser checks pass. Distributed erasure and crash recovery remain open. |
+| Prepare a stock-shortfall enquiry | A signed buyer's 40-unit request against 15 available produces a 25-unit shortfall and retained draft. No supplier message is sent. |
+| Separate authority from model suggestions | Typed stages, deterministic policy and tenant/case controls; named refusal/degradation checks. This does not certify every provider or browser flow. |
+| Explain evidence and commercial state | Decision Trace, procurement projections and audit records. Some navigation tests mock trace data; those passes do not prove live intelligence. |
+| Compare inventory and market observations | Current-stock/event-validity controls have SQLite and native PostgreSQL checks. Completed, cited market intelligence through ordinary chat remains open. |
+| Bound untrusted attachments and workers | Named security, signing and sandbox-publisher checks. Broader browser coverage still fails, including actor/admission contracts. |
 
-The core design rule is:
+The [browser review](docs/BROWSER_CLICKTHROUGH_DELTA_AND_NEXT_STEPS_2026-10-22.md) retains complete case ledgers, source revisions, actor distinctions and a failure screenshot. Remembered quantity alone is not task completion. An unavailable-search refusal is not completed market analysis.
 
-```text
-observations -> evidence -> hypotheses -> proposals -> authorization -> execution
-```
-
-Model-generated text cannot skip those boundaries and become business authority.
-
-The conversational control path is a constrained semantic proposal architecture: a model may
-propose a typed dialogue act and exact references; JSON schema and tenant/case consistency
-validate it; a deterministic reducer accepts, clarifies or rejects it. Parallel evidence lanes
-remain concurrent, but commercial authority stays in canonical state, policy and explicit
-authorization. See [Governed conversation and escalation](docs/architecture/GOVERNED_CONVERSATION_AND_ESCALATION.md).
-
-## Why it exists
-
-Most AI commerce demos optimize for a persuasive answer. ShopSquire explores the harder
-problem: what may the system believe and do when customer intent, inventory, supplier
-messages, forecasts and external market signals disagree?
-
-It combines:
-
-- conversational product discovery and recommendation;
-- canonical inventory, currency and unit-of-measure semantics;
-- forecast comparison and replenishment proposals;
-- dependency-grounded market and supply-risk intelligence;
-- governed procurement and supplier communication;
-- tenant-scoped evidence, security gates and decision traces;
-- shadow experiments, replay and bounded feedback through Hippograph.
-
-## Three portfolio stories
-
-The public project is intentionally presented through three end-to-end stories rather
-than as a catalogue of screens and agents:
-
-1. **Evidence-governed decisions** — a buyer request becomes a recommendation with
-   provenance, uncertainty, explicit authority and a replayable Decision Trace.
-2. **Supply intelligence to bounded procurement** — a market signal becomes relevant
-   only through a time-valid component, supplier, facility, region, freight or substitute
-   dependency path; the result is an option or proposal, never an unsupported causal claim.
-3. **Attack-resistant bounded autonomy** — untrusted messages and attachments are
-   observed, quarantined and enriched without being allowed to mutate quote, purchase-order,
-   inventory or payment state. Consequential execution remains policy- and human-gated.
-
-These stories share one canonical fact and control layer. They are not three disconnected
-AI demonstrations.
-
-## Platform map
+## Architecture at a glance
 
 ```text
- Buyers / operators / suppliers / public sources / existing systems
-                              |
-                              v
- +------------------------------------------------------------------+
- | Connector and identity boundary                                  |
- | signed tenant | source authority | licensing | freshness | inbox |
- +-------------------------------+----------------------------------+
-                                 |
-                                 v
- +------------------------------------------------------------------+
- | Canonical observation and evidence layer                         |
- | products | parties | UoM | FX | inventory events | messages      |
- | append-only history | corrections | bitemporal provenance         |
- +-------------------------------+----------------------------------+
-                                 |
-              +------------------+------------------+
-              v                                     v
- +-----------------------------+       +----------------------------+
- | Decision intelligence       |       | Trust and control          |
- | forecast + inventory        |       | evidence comparison        |
- | market + dependency paths   |       | quarantine + policy gates  |
- | recommendation + Hippograph |       | budgets + human approval   |
- +--------------+--------------+       +-------------+--------------+
-                +----------------------+--------------+
-                                       v
- +------------------------------------------------------------------+
- | Typed proposals and bounded execution                            |
- | recommendation | replenishment | RFQ draft | lifecycle | pricing |
- | idempotent jobs | durable outbox | rollback / abstention          |
- +-------------------------------+----------------------------------+
-                                 |
-                                 v
- +------------------------------------------------------------------+
- | Outcomes, calibration and decision trace                         |
- | actuals | counterfactuals | forecast value added | audit | replay |
- +------------------------------------------------------------------+
+ Buyer / operator browser                     Optional external providers
+ React storefront + admin                    models / search / email / ERP
+          | signed identity + tenant                    ^
+          v                                             | scoped adapters
+ FastAPI admission -> canonical case + turn state ------+ (policy gated)
+          |                      |
+          | model proposes       | SQL facts / inventory / accepted evidence
+          v                      v
+ Typed route -> deterministic validation -> retrieval -> fit/commercial stages
+                                                        |
+                         +------------------------------+
+                         v
+                 evidence adjudication
+                         |
+            +------------+-------------+
+            v                          v
+  buyer answer / trace          draft / action proposal
+                                       |
+                            approval + explicit effect gate
+                                       |
+                              outbox / signed worker
+                                       |
+                           sandbox / bounded adapter
+
+ SQL: durable cases, evidence, inventory, audit   Redis: scoped cache / queues
+ Hippograph: advisory relationship recall      Outcomes: trace / replay / eval
 ```
 
-See [Platform architecture](docs/SHOPSQUIRE_PLATFORM_ARCHITECTURE_2026-07-29.md)
-for the module-level diagrams and authority boundaries.
+This maps components, not a release certification. Ordinary preference browsing without workload-qualification claims is a proposed product-contract clarification. See the [detailed map and file tour](docs/architecture/CURRENT_ARCHITECTURE_2026-10-23.md).
 
-## Bounded autonomy
+## Evidence snapshot
 
-ShopSquire grants authority by action type, tenant, confidence, value limit and operating
-mode. It does not have one global "autonomous" switch.
+These historical profiles are separate, not an additive test total or one green release.
 
-| Level | Behaviour | Current evidence |
+| Profile | Result | Source |
 |---|---|---|
-| Observe | Ingest, normalize, trace and detect conflicts | Implemented locally |
-| Advise | Forecast, explain, rank and propose options | Implemented locally |
-| Prepare | Create case snapshots, RFQ drafts and bounded action plans | Implemented locally |
-| Execute low-risk action | Only through policy, experiment and rollback gates | Narrow and feature-gated |
-| Consequential execution | Purchase, payment and material lifecycle changes | Human/policy authorization required |
+| Latest completed full Python process | 8,237 passed, 3 failed, 280 item skips; 4 additional collection skips | `a517f22e` |
+| Completed broad Playwright matrix | 41 passed, 68 failed, 32 skipped; 63 specs / 141 cases | `0e177ea4` |
+| Focused browser review | 12 passed, 5 failed; 17 cases | `abde83af` |
+| Buyer-only memory replay | 7 passed; one test-setup overlay removes operator headers | `abde83af` |
+| Frontend verification | 387 storefront + 63 admin unit passes, types/builds pass | Qualified installation at `0e177ea4` |
 
-The platform is best described today as **strongly agentic in analysis and preparation,
-selectively autonomous in low-risk reversible actions, and deliberately non-autonomous
-for consequential commercial commitments**.
+The [public evidence index](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md#evidence-and-reproduction) links committed ledgers. Raw `.artifacts/` directories are local run products, unavailable to GitHub readers. Hosted Actions results must be checked separately; no all-green badge is claimed.
 
-## Hippograph
+## Reproduce a focused check
 
-Hippograph is ShopSquire's tenant-scoped feedback and relationship graph. It projects
-decision traces, conversions, catalog relationships, market findings and optional human
-feedback into a recall surface.
-
-```text
- observed trace + outcome + finding + human correction
-                         |
-                         v
-             tenant-scoped graph projection
-                         |
-                         v
-           reward-weighted, decayed related recall
-                         |
-              +----------+-----------+
-              v                      v
-      evidence annotation     bounded shadow nudge
-                                   |
-                           experiment + rollback gate
-```
-
-It helps the platform remember which products, findings and relationships have mattered
-in similar contexts without treating graph recall as truth. Recall is advisory by default.
-A ranking nudge is capped, auditable, reversible and experiment-gated; the current offline
-evaluation does not justify enrolling Hippograph as a general V2 ranking authority.
-
-## Trust architecture
-
-Trust comes from inspectable constraints, not an assertion that an agent is trustworthy:
-
-- signed or authoritative tenant context at production boundaries;
-- append-only observations with provenance, event time and availability time;
-- explicit `observed`, `derived`, `estimated`, `simulation_only` and unknown states;
-- currency and UoM comparability gates;
-- dependency paths before external signals become product exposure claims;
-- contradiction and incomparable-scope handling;
-- bounded tools, deadlines, idempotency and durable job state;
-- quarantine for untrusted supplier content;
-- separate proposal, authorization and execution records;
-- immutable case-context snapshots and bitemporal audit;
-- kill switches, shadow modes, counterfactual replay and rollback.
-
-These mechanisms are exercised with deterministic replay, adversarial tests and local
-production-shaped browser tests. They are not a substitute for real-world outcome evidence.
-
-## What is proven, and what is not
-
-| Claim | Status |
-|---|---|
-| Canonical contracts, governance boundaries and deterministic replay | Tested locally |
-| V2 recommendation routing and archived legacy router | Implemented and characterized |
-| Forecast model discrimination on replayable synthetic histories | Tested locally |
-| Tenant-scoped supply-risk and procurement workbenches | Implemented locally |
-| Malicious supplier content cannot directly change economic state | Covered by service/browser regressions |
-| Hosted worker/browser, service, V2 and security workflows | Proven on the publication branch; general contract matrix still being closed |
-| PostgreSQL production-shaped migration evidence | Empty PostgreSQL migration rehearsal is proven; retained hosted upgrade/rollback evidence remains a release gate |
-| Live Gmail/M365 and ERP/provider certification | Not claimed |
-| Reduced stockouts, increased margin or supplier performance | Requires a design-partner shadow pilot |
-
-Synthetic data is used to prove invariants, failure behaviour, model discrimination and
-replayability. It is permanently marked `simulation_only`; it is not evidence of business lift.
-
-## A 12-minute demo
-
-1. **Buyer decision:** enter a constrained request and show the recommendation, authority
-   path and decision trace.
-2. **Forecast:** compare seasonal naive, EWMA, Croston/SBA and TSB, including WAPE, MASE,
-   bias, uncertainty and explicit insufficient states.
-3. **Supply risk:** open a disruption scenario and show the time-valid dependency path,
-   source licence, contradictions, alternative explanations and bounded impact range.
-4. **Procurement:** open the immutable case snapshot, supplier evidence, landed-cost
-   comparison and gated RFQ proposal.
-5. **Attack resistance:** replay a malicious trusted-domain supplier response and show
-   unchanged quote, PO, economics and payment state.
-6. **Replay:** show the seed, event ledger, correction/reversal and counterfactual result.
-
-The concise interview narrative and the concepts behind the demo are in the
-[AI/ML portfolio guide](docs/SHOPSQUIRE_AI_ML_PORTFOLIO_DEMO_GUIDE_2026-07-29.md).
-Hosted run IDs, artifact boundaries and the recording sequence are pinned in the
-[procurement demonstration evidence index](docs/demo/PROCUREMENT_DEMONSTRATION_EVIDENCE.md).
-
-## Local start
-
-Prerequisites vary by profile. The default development profile uses Python, Node, Docker,
-PostgreSQL and Redis; model and external-provider credentials are optional for the
-credential-free demo paths.
-
-```powershell
-Copy-Item .env.example .env
-docker compose up -d --build
-Invoke-RestMethod http://127.0.0.1:8080/healthz
-```
-
-| Surface | Default URL |
-|---|---|
-| Storefront | `http://127.0.0.1:5173` |
-| Admin workbench | `http://127.0.0.1:3001` |
-| API and integrated merchant surfaces | `http://127.0.0.1:8080` |
-| API documentation | `http://127.0.0.1:8080/docs` |
-
-For targeted development:
+Use Python **3.11** and Node **22**. Profiles are generated from `poetry.lock`; there is no root `requirements.txt`.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-docker compose up -d db redis
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m uvicorn src.app.main:create_app --factory --port 8080
+.\.venv\Scripts\python.exe -m pip install -r requirements/bootstrap-runtime-windows.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/api-runtime-windows.txt -r requirements/test-runtime-windows.txt
+.\.venv\Scripts\python.exe -m pytest tests/services/test_typed_recommendation_stage_coordinator.py tests/services/test_local_model_roles.py tests/services/test_research_policy.py -q
 ```
 
-Run the storefront or admin app from its own package directory with `npm install` and
-`npm run dev`.
-
-## Verification
+On Linux use `requirements/bootstrap-runtime.txt`, `requirements/api-runtime.txt` and `requirements/test-runtime.txt`. These scoped API/test profiles omit optional vision/model/evaluation dependencies. The broader development installation is `poetry install --no-root` from the committed lock.
 
 ```powershell
-# Focused AI/ML and UI portfolio proof
-.\scripts\run_ai_ml_portfolio_proof.ps1 -IncludeUi
-
-# Python tests
-.\.venv\Scripts\python.exe -m pytest -q
-
-# Storefront
-Push-Location frontend
+Set-Location frontend
+npm ci
 npm test
 npm run build
-Pop-Location
-
-# Admin
-Push-Location src/frontend/admin-react
-npm test
-npm run build
-Pop-Location
 ```
 
-The repository includes isolated service-test sharding and a production-shaped browser
-harness. A local green run is reported as local evidence; hosted-runner and live-provider
-claims require retained artifacts from those environments.
+For an owned fictional browser runtime, follow the [reproduction instructions](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md#evidence-and-reproduction). Real commercial effects are disabled. Live model/search/mail/ERP activation has separate prerequisites.
 
-## Integration position
+## What to do next
 
-ShopSquire can use a customer's platform as the authority:
+1. Integrate remaining local work in dependency-complete commits; reproduce one clean installation.
+2. Repair browser actor/fixture contracts and candidate/qualified-result presentation while preserving evidence gates.
+3. Complete case-bound evidence intake, bulk shortage presentation and cited market intelligence.
+4. Close distributed privacy, inventory contention, approval identity, uncertain-delivery recovery and unresolved advisories.
+5. Reduce oversized functions; freeze one source for required Python/browser/security, restore/rollback and endurance checks.
 
-```text
- ERP / OMS / WMS / planning / commerce / CRM
-                    |
-           read facts and constraints
-                    v
-              ShopSquire
- evidence + proposals + governed communication + bounded actions
-                    |
-         write back only when authorized
-```
-
-Where a smaller operator lacks those capabilities, ShopSquire's canonical event model,
-forecasting, procurement casework and operator workbenches provide a useful native base.
-The same contracts allow later replacement by an authoritative enterprise source without
-rewriting the decision layer.
-
-## Current priorities
-
-The highest-value next step is proof, not another broad feature wave:
-
-1. publish reproducible hosted CI and PostgreSQL migration artifacts;
-2. close the remaining general-suite failures as V2, compatibility, characterization,
-   protocol, certification-fixture or current-policy contracts;
-3. run a design-partner shadow pilot using real orders, ATP, receipts, invoices and outcomes;
-4. seal independent human relevance judgments;
-5. deploy one minimal cloud reference environment after the hosted gates are green;
-6. strangle remaining oversized composition surfaces such as `chat.py` and simplify `main.py`
-   only where this reduces duplicate authority or operational risk.
-
-External email and ERP credentials are deliberately outside the credential-free demo claim.
-
-## Documentation
-
-- [Platform architecture](docs/SHOPSQUIRE_PLATFORM_ARCHITECTURE_2026-07-29.md)
-- [AI/ML portfolio and demo guide](docs/SHOPSQUIRE_AI_ML_PORTFOLIO_DEMO_GUIDE_2026-07-29.md)
-- [Agnostic market and procurement roadmap](docs/AGNOSTIC_MARKET_PROCUREMENT_ROADMAP_2026-07-27.md)
-- [Auditable procurement architecture](docs/SHOPSQUIRE_AUDITABLE_PROCUREMENT_DEMO_ARCHITECTURE_2026-06-26.md)
-- [Attribution backbone](docs/SHOPSQUIRE_ATTRIBUTION_BACKBONE_ARCHITECTURE_2026-06-25.md)
-
-## Honest limitations
-
-- The public repo is an engineering portfolio and prototype, not a deployed customer product.
-- Real commercial uplift has not been established.
-- External provider activation and authoritative ERP reconciliation remain environment-specific.
-- Broad codebase size and older surfaces still create maintenance cost despite the V2 cutover.
-- Security and governance controls reduce risk; they do not make prompt injection, data
-  poisoning or operational error impossible.
-
-ShopSquire's defensible claim is not "AI runs the company." It is that AI can participate in
-commerce decisions while facts, uncertainty, authority and outcomes remain inspectable.
+The [current roadmap](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md#remaining-roadmap) gives acceptance evidence and reasons. Older strategy, architecture and demonstration documents remain historical context. No production readiness, real supplier/payment execution or business uplift is claimed.

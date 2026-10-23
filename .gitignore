@@ -150,3 +150,16 @@ data/taxonomy/**/embeddings.npz
 
 # Helm dependency archives are reproducibly restored from Chart.lock.
 /helm/shopsquire/charts/
+
+# Generated test/debug output at the repository root. Curated evidence lives in docs.
+/full_pytest_*.log
+/open_ended_*.log
+/debug_open_ended_*.log
+/late_suite_debug.log
+/remaining6_debug.log
+/trace_unit_hang.log
+/orchestrator_auto_cv_only.log
+/pretest_db_debug.txt
+/pip_install_out.txt
+/pytest_exit_code.txt
+/out.txt

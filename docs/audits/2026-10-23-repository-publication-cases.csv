@@ -1,0 +1,35 @@
+profile,path,case,outcome,actor,attempts
+github-portfolio-core-20261023,tests/services/test_typed_recommendation_stage_coordinator.py,test_coordinator_preserves_order_and_failure_isolation,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_typed_recommendation_stage_coordinator.py,test_coordinator_rejects_phase_regression_before_side_effects,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_typed_recommendation_stage_coordinator.py,test_stage_emits_artifact_lineage_instead_of_reconstructing_it_later,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_local_model_roles.py,test_local_role_uses_gateway_and_fixture_artifact_without_commerce_authority,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_local_model_roles.py,test_unverified_artifact_fails_before_transport,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_local_model_roles.py,test_active_router_is_admitted_before_optional_narration,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_local_model_roles.py,test_queue_time_consumes_total_deadline_and_is_observable,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_research_policy.py,test_demo_policy_auto_authorizes_only_read_only_research,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_research_policy.py,test_unknown_policy_fails_closed,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_research_policy.py,test_demo_safe_policy_can_auto_fetch_only_a_resolved_origin,passed,in-process test fixture,1
+github-portfolio-core-20261023,tests/services/test_research_policy.py,test_resolved_origin_auto_fetch_obeys_global_and_case_kill_switch,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_repository_evidence.py,test_public_links_require_real_targets_and_anchors,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/architecture/test_source_file_size_guard.py,test_no_new_source_file_exceeds_two_thousand_lines,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/architecture/test_source_file_size_guard.py,test_grandfathered_oversized_file_cannot_grow,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/architecture/test_source_file_size_guard.py,test_grandfathered_oversized_file_may_shrink,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_committed_runtime_profiles_match_poetry_lock,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_api_profile_contains_required_transitive_runtime_packages,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_profile_outputs_stay_inside_requirements_directory,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_windows_profile_excludes_linux_only_packages,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_missing_main_marker_is_unconditional_when_main_group_is_present,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_vision_profile_has_one_owner_of_the_cv2_binary_namespace[],passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_vision_profile_has_one_owner_of_the_cv2_binary_namespace[-windows],passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_unrequested_ambiguous_packages_do_not_break_a_cpu_profile,passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_target_architecture_is_independent_of_the_generator_host[linux-x86_64],passed,in-process test fixture,1
+github-publication-script-checks-20261023,tests/scripts/test_generate_runtime_requirements.py,test_target_architecture_is_independent_of_the_generator_host[windows-AMD64],passed,in-process test fixture,1
+publication-browser-final,frontend/e2e/ordinary-chat-shortfall.spec.ts,ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,deadline corrections survive unrelated turns and reload without promising delivery,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,audit real browser retains and amends quantity over five messages and reload,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,recall preserves currency total budget and destination corrections,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,unresolved product fit preserves quantity and asks material budget scope,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,audit consented external research reports unavailable without qualification,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,audit direct authority injection cannot grant commerce authority,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/platform-audit-memory.spec.ts,audit twenty real turns retain amended procurement facts,passed,signed buyer plus operator fixture header,1
+publication-browser-final,frontend/e2e/browser-native-tenant-procurement.spec.ts,ordinary signed-buyer requests retain their selected tenant without harness headers,passed,"signed buyer, zero operator headers",1

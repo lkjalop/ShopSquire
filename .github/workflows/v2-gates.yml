@@ -19,13 +19,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Install dependencies (hard-fail — a broken install must not read as green)
-        run: |
-          python -m pip install --upgrade pip
-          pip install poetry poetry-plugin-export
-          poetry export -f requirements.txt --without-hashes -o requirements.txt
-          pip install -r requirements.txt
-          pip install pytest
+      - name: Install locked backend and test tools
+        uses: ./.github/actions/install-backend
       - name: Ratchets — no-flavour + no-silent-except (the hygiene gates)
         run: pytest -q tests/test_no_flavour_in_core.py tests/test_no_silent_except_in_core.py
       - name: V2 recommendation core — brain / stages / envelope / postflight / worker / facade / quality
