@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from bisect import bisect_right
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -38,6 +39,13 @@ _CANDIDATE_RE = re.compile(
     r"|[0-9]{4}(?:[ -][0-9]{4}){3}"        # 4-4-4-4  (16 digits: Visa/MC/Discover)
     r"|[0-9]{4}[ -][0-9]{6}[ -][0-9]{5}"   # 4-6-5    (15 digits: Amex)
     r")(?![0-9])"
+)
+
+# Standalone SHA-1/SHA-256 tokens are identifiers, not printed card numbers.
+# Restrict this exception to complete tokens of the exact digest lengths;
+# nearby PANs and digit runs inside other identifiers remain candidates.
+_HEX_DIGEST_RE = re.compile(
+    r"(?<![0-9A-Za-z_])(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})(?![0-9A-Za-z_])"
 )
 
 _SKIP_DIRS = {
@@ -69,6 +77,8 @@ def find_pans_in_text(text: str) -> List[str]:
     """Return normalized (digits-only) candidate PANs in ``text`` — major-network BIN, Luhn-valid,
     not an allowlisted test PAN. Empty list = clean."""
     hits: List[str] = []
+    digest_spans = [match.span() for match in _HEX_DIGEST_RE.finditer(text)]
+    digest_starts = [start for start, _ in digest_spans]
     for m in _CANDIDATE_RE.finditer(text):
         # Serialized decimal scores can have a 13-19 digit fractional part
         # that happens to satisfy Luhn. They are numeric values, not PANs.
@@ -82,6 +92,9 @@ def find_pans_in_text(text: str) -> List[str]:
         if raw in _ALLOWLISTED_TEST_PANS:
             continue
         if not _luhn_ok(raw):
+            continue
+        position = bisect_right(digest_starts, m.start()) - 1
+        if position >= 0 and m.end() <= digest_spans[position][1]:
             continue
         hits.append(raw)
     return hits

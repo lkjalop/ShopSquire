@@ -1,0 +1,389 @@
+{
+  "observed_at": "2026-10-23T00:39:21.048576+00:00",
+  "source_head": "a446800d264f5d3ca9426c5b900d53f03e8b52ab",
+  "scope": "Early hosted observation on first publication; running/queued jobs remain incomplete, not passes.",
+  "scoped_runs": [
+    {
+      "id": 39878671209,
+      "name": "Repository evidence (scoped)",
+      "head_branch": "checkpoint/turn-state-consolidation-20260830",
+      "status": "queued",
+      "conclusion": null,
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878671209",
+      "created_at": "2026-10-23T00:31:56Z",
+      "jobs": [
+        {
+          "name": "focused-core",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878671209/job/120170464855",
+          "steps": []
+        },
+        {
+          "name": "frontend (src/frontend/admin-react)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878671209/job/120170465096",
+          "steps": []
+        },
+        {
+          "name": "architecture-ratchets",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878671209/job/120170465135",
+          "steps": [
+            {
+              "name": "Check file growth",
+              "conclusion": "failure"
+            },
+            {
+              "name": "Check function growth (known debt remains blocking)",
+              "conclusion": "failure"
+            }
+          ]
+        },
+        {
+          "name": "frontend (frontend)",
+          "status": "queued",
+          "conclusion": null,
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878671209/job/120170465277",
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 39878665149,
+      "name": "Repository evidence (scoped)",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149",
+      "created_at": "2026-10-23T00:31:53Z",
+      "jobs": [
+        {
+          "name": "architecture-ratchets",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149/job/120170444563",
+          "steps": [
+            {
+              "name": "Check file growth",
+              "conclusion": "failure"
+            },
+            {
+              "name": "Check function growth (known debt remains blocking)",
+              "conclusion": "failure"
+            }
+          ]
+        },
+        {
+          "name": "frontend (frontend)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149/job/120170444620",
+          "steps": []
+        },
+        {
+          "name": "focused-core",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149/job/120170444796",
+          "steps": []
+        },
+        {
+          "name": "frontend (src/frontend/admin-react)",
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149/job/120170444859",
+          "steps": []
+        }
+      ]
+    }
+  ],
+  "failed_stage_observations": [
+    {
+      "run": "Clean Checkout Smoke",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878664854",
+      "jobs": [
+        {
+          "name": "smoke-clean-checkout",
+          "conclusion": "failure",
+          "id": 120170442812,
+          "failed_steps": [
+            "Source size architecture ratchet"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Playwright Tests",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665110",
+      "jobs": [
+        {
+          "name": "playwright",
+          "conclusion": "failure",
+          "id": 120170444394,
+          "failed_steps": [
+            "Run Playwright tests"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "V2 Gates (mandatory)",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878664875",
+      "jobs": [
+        {
+          "name": "v2-gates",
+          "conclusion": "failure",
+          "id": 120170443282,
+          "failed_steps": [
+            "V2 cart lane \u2014 resolver / service / endpoint / idempotency"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Playwright UI + Observability Smoke",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665048",
+      "jobs": [
+        {
+          "name": "ui-smoke",
+          "conclusion": "failure",
+          "id": 120170443635,
+          "failed_steps": [
+            "Run Playwright tests (if configured)"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Container Scan (Trivy)",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665084",
+      "jobs": [
+        {
+          "name": "trivy-scan",
+          "conclusion": "failure",
+          "id": 120170443952,
+          "failed_steps": [
+            "Set up job"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Procurement browser and worker isolation",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878664856",
+      "jobs": [
+        {
+          "name": "browser",
+          "conclusion": "failure",
+          "id": 120170443629,
+          "failed_steps": [
+            "Create isolated database and validate migrations",
+            "Reject transaction-abort signatures"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Security Tests",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665124",
+      "jobs": [
+        {
+          "name": "pytest",
+          "conclusion": "failure",
+          "id": 120170444119,
+          "failed_steps": [
+            "Run tests"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Security Scans (Trivy, SBOM, Snyk)",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665058",
+      "jobs": [
+        {
+          "name": "pip-audit",
+          "conclusion": "failure",
+          "id": 120170444312,
+          "failed_steps": [
+            "Run pip-audit"
+          ]
+        },
+        {
+          "name": "pci-no-pan-scan",
+          "conclusion": "failure",
+          "id": 120170444601,
+          "failed_steps": [
+            "Scan repository for cardholder data (PAN)"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Repository evidence (scoped)",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665149",
+      "jobs": [
+        {
+          "name": "architecture-ratchets",
+          "conclusion": "failure",
+          "id": 120170444563,
+          "failed_steps": [
+            "Check file growth",
+            "Check function growth (known debt remains blocking)"
+          ]
+        }
+      ]
+    },
+    {
+      "run": "Integration contracts (owned services)",
+      "url": "https://github.com/lkjalop/ShopSquire/actions/runs/39878665092",
+      "jobs": [
+        {
+          "name": "integration",
+          "conclusion": "failure",
+          "id": 120170443729,
+          "failed_steps": [
+            "Run integration contracts"
+          ]
+        }
+      ]
+    }
+  ],
+  "setup_diagnoses": [
+    {
+      "job": "trivy",
+      "recognized_lines": [
+        "Unable to resolve action `aquasecurity/trivy-action@0.14.0`, unable to find version `0.14.0`"
+      ]
+    },
+    {
+      "job": "procurement",
+      "recognized_lines": [
+        "Error: 'destination_rev'",
+        "KeyError: 'destination_rev'"
+      ]
+    },
+    {
+      "trivy_action_verified_tag": "refs/tags/v0.36.0",
+      "commit": "a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8"
+    }
+  ],
+  "legacy_python_browser_setup": {
+    "original_result": "Collection aborted: ModuleNotFoundError uvicorn; no browser assertions executed.",
+    "remediation": "Install declared backend/test tools, locked Node22 frontend and retain JUnit/failure artifacts; preserve tests/pw selection.",
+    "local_collection_native_exit_code": 0,
+    "collected_items": 87,
+    "collection_module_skips": 2,
+    "browser_assertions_executed_in_collection_check": 0,
+    "local_collection_elapsed_seconds": 18.922,
+    "hosted_retest_status": "pending_followup_publication"
+  },
+  "container_scanner_setup": {
+    "original_result": "Set up job failed: action tag 0.14.0 does not exist.",
+    "remediation": "Use independently verified immutable v0.36.0 action commit; retain JSON and fail for HIGH/CRITICAL findings including unfixed findings.",
+    "hosted_retest_status": "pending_followup_publication"
+  },
+  "release_green": false,
+  "pan_scan_repair": {
+    "parent": "a446800d264f5d3ca9426c5b900d53f03e8b52ab",
+    "original_candidate_findings": 410,
+    "all_original_findings_inside_complete_sha_tokens": true,
+    "modified_paths": [
+      "scripts/scan_no_pan.py",
+      "tests/security/test_no_pan_scan.py"
+    ],
+    "exception_scope": "Candidates entirely contained in standalone 40- or 64-character hexadecimal tokens; nearby standalone/grouped PANs and other token lengths remain detectable.",
+    "allowlist_and_luhn_rules_unchanged": true,
+    "red_counts": {
+      "tests": 13,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0
+    },
+    "green_counts": {
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "resource_violations": [],
+    "same_test_cases": [
+      {
+        "case": "test_detects_real_luhn_valid_pan",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_fingerprint_does_not_hide_a_pan_in_another_field",
+        "parent": "failed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_ignores_digit_substrings_inside_complete_hex_fingerprints[40]",
+        "parent": "failed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_ignores_digit_substrings_inside_complete_hex_fingerprints[64]",
+        "parent": "failed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_ignores_documented_test_pans",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_ignores_luhn_valid_decimal_fraction",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_ignores_non_pan_digit_runs",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_non_digest_tokens_still_expose_pan_candidates[39]",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_non_digest_tokens_still_expose_pan_candidates[41]",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_non_digest_tokens_still_expose_pan_candidates[63]",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_non_digest_tokens_still_expose_pan_candidates[65]",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_scan_repo_clean_and_dirty",
+        "parent": "passed",
+        "repair": "passed"
+      },
+      {
+        "case": "test_scan_repo_skips_binary_and_vendor_dirs",
+        "parent": "passed",
+        "repair": "passed"
+      }
+    ],
+    "publication_index_scan": {
+      "exit_code": 0,
+      "elapsed_seconds": 4.875,
+      "deadline_seconds": 60,
+      "scope": "Complete publication index exported without ignored local runtimes; scanner and planted scanner-fixture tests excluded by the existing main control.",
+      "tracked_files": 5686
+    },
+    "hosted_retest_status": "pending_followup_publication"
+  }
+}

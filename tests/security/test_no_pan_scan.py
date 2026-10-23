@@ -6,6 +6,8 @@ this test are excluded from the live repo scan (they legitimately contain PAN-sh
 """
 from __future__ import annotations
 
+import pytest
+
 from scripts.scan_no_pan import _luhn_ok, find_pans_in_text, scan_repo
 
 
@@ -38,6 +40,26 @@ def test_ignores_non_pan_digit_runs():
 
 def test_ignores_luhn_valid_decimal_fraction():
     assert find_pans_in_text('"score": 10.506590338991952') == []
+
+
+@pytest.mark.parametrize('length', [40, 64])
+def test_ignores_digit_substrings_inside_complete_hex_fingerprints(length):
+    fake = _luhn_complete('400012345678901')
+    fingerprint = 'a' * (length - len(fake)) + fake
+    assert find_pans_in_text(f'"sha256": "{fingerprint}"') == []
+
+
+def test_fingerprint_does_not_hide_a_pan_in_another_field():
+    fake = _luhn_complete('400012345678901')
+    fingerprint = 'a' * (64 - len(fake)) + fake
+    assert find_pans_in_text(f'digest={fingerprint}, stored_card={fake}') == [fake]
+
+
+@pytest.mark.parametrize('length', [39, 41, 63, 65])
+def test_non_digest_tokens_still_expose_pan_candidates(length):
+    fake = _luhn_complete('400012345678901')
+    token = 'a' * (length - len(fake)) + fake
+    assert find_pans_in_text(token) == [fake]
 
 
 def test_scan_repo_clean_and_dirty(tmp_path):

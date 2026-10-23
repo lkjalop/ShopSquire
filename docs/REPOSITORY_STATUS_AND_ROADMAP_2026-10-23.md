@@ -18,6 +18,7 @@ There is no defensible overall completion percentage. Passing counts overlap, pr
 - Replaced the integration workflow's missing root requirements file, privileged Docker service and fixed sleep with owned PostgreSQL/Redis services and their health checks. Live-stack/provider tests retain their explicit prerequisites and are not silently counted as executed.
 - Added the function-size checker with its authored baseline so the walkthrough's command exists in a clean checkout. Ceilings were not raised. Added public-link validation and a regression for missing targets, invalid anchors and private artifacts.
 - Removed generated root test/debug captures from the Git index while retaining local files; ignore rules prevent accidental re-addition. Historical objects remain in Git history.
+- Followed the hosted run with repairs for missing legacy-browser dependencies and the nonexistent container-scanner action tag. A scanner regression distinguishes complete SHA fingerprints from PAN candidates: the same 13 cases move from 10 passes / 3 failures to 13 passes, retaining positive standalone/grouped-card controls. See the hosted observation for scope and retained results.
 
 The entry state had **333 dirty paths**, including Claude's README, ignore-file and walkthrough changes, and **208 unpublished checkpoint commits**. The scoped publication preserves unrelated authored bytes. The retained [publication receipt](audits/2026-10-23-repository-publication.json) records exact scope and local verification; final GitHub state is independently checked after publishing.
 
@@ -48,6 +49,7 @@ The original assessment recorded **7,836 Python passes / 36 failures / 8 errors*
 | Visible failure evidence | [Attachment-boundary screenshot](audits/2026-10-22-browser-review-artifact-failure.png), [network summary](audits/2026-10-22-browser-review-network-statuses.json): 401 admission failures cannot prove attachment analysis ran. |
 | Complete roadmap context | [22 October reassessment](BROWSER_CLICKTHROUGH_DELTA_AND_NEXT_STEPS_2026-10-22.md), [all W00–W15 packages](audits/2026-10-22-browser-review-roadmap.csv). |
 | Coverage and security context | [Source-scoped assessment](ROADMAP_SECURITY_COVERAGE_AND_DELTA_2026-10-22.md): coverage threshold success did not make its functional tests green. |
+| First hosted publication observation | [Hosted CI observation](audits/2026-10-23-hosted-ci-observation.json): focused-core and both frontend jobs passed; size gates failed. Legacy Python browser collection lacked `uvicorn`, and the container scanner referenced a nonexistent action tag. Both setup blockers have follow-up repairs; neither original failure is counted as a product assertion result or a passing rerun. Other failures include V2 cart assertions and a PostgreSQL migration `KeyError: 'destination_rev'`. |
 
 New focused browser scope: nine original cases across `ordinary-chat-shortfall`, `platform-audit-memory` and `browser-native-tenant-procurement`. Eight are operator-assisted controls; one native buyer workflow explicitly audits zero operator-key requests. Models/search are offline, qualification evidence is fictional and commercial effects are disabled. The earlier seven-case buyer-only replay remains separate evidence. This narrow rerun does not replace the broad matrix.
 
@@ -55,7 +57,7 @@ Install Python 3.11 and Node 22 as in the [README](../README.md#reproduce-a-focu
 
 ```powershell
 python -m scripts.prepare_roadmap_demo --directory .artifacts/portfolio-review
-python -m scripts.run_roadmap_browser --directory .artifacts/portfolio-review --api-port 8087 --ui-port 5173 browser-native-tenant-procurement.spec.ts
+python -m scripts.run_roadmap_browser --directory .artifacts/portfolio-review --api-port 8087 --ui-port 5173 --frontend-mode preview browser-native-tenant-procurement.spec.ts
 ```
 
 Use the installed environment's Python. Install storefront dependencies with `npm ci` and Chromium with `npx playwright install chromium` from `frontend` first. The browser runner prepares/builds its configured frontend and stops its owned servers. Use unused ports and a new fixture directory; do not reuse a personal database. This command is a deterministic fictional workflow; a distributed cache profile additionally needs an owned Redis instance. Inspect receipts and prerequisites rather than assuming a silent fallback is a pass.

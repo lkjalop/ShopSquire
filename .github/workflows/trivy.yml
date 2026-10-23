@@ -5,10 +5,15 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   trivy-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -18,13 +23,20 @@ jobs:
         run: |
           docker build -t shopsquire:ci .
       - name: Run Trivy scan
-        uses: aquasecurity/trivy-action@0.14.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: shopsquire:ci
           format: json
           output: trivy.json
-          ignore-unfixed: true
+          ignore-unfixed: false
+          exit-code: '1'
           severity: CRITICAL,HIGH
+      - name: Retain container scan findings
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: trivy-container
+          path: trivy.json
       - name: Upload artifact to API (optional)
         if: ${{ env.API_BASE_URL != '' }}
         run: |

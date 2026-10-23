@@ -5,12 +5,22 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   playwright:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DISABLE_PLAYWRIGHT_TESTS: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      CUDA_VISIBLE_DEVICES: "-1"
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -20,10 +30,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install locked backend and test tools
+        uses: ./.github/actions/install-backend
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the locked storefront
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify the browser collection toolchain
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest playwright requests
+          python -c "import uvicorn, pytest_playwright, playwright"
 
       - name: Install Playwright browsers
         run: |
@@ -34,16 +57,16 @@ jobs:
           # Ensure tests use sqlite test DB path
           export PLAYWRIGHT_TEST_PORT=8099
           export DATABASE_URL="sqlite:///tests/playwright/smoke.sqlite"
-          pytest -q tests/pw
-
-      - name: Create runs dir if missing
-        run: mkdir -p runs || true
+          mkdir -p test-results
+          python -m pytest -q tests/pw --timeout=120 --timeout-method=thread --junitxml=test-results/legacy-browser.xml
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: playwright-artifacts
           path: |
+            test-results/**
             runs/**
             tests/**/smoke.sqlite
             pytest_full_out.txt
