@@ -10,29 +10,37 @@ services:
       - "127.0.0.1:9090:9090"
 
   grafana-json:
-    image: node:20-alpine
+    image: node:22.23.4-alpine
+    user: "1000:1000"
+    read_only: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     container_name: shopsquire_grafana_json
     working_dir: /srv
     volumes:
-      - ./config/observability/grafana/json-datasource:/srv
+      - ./config/observability/grafana/json-datasource:/srv:ro
     command: ["node", "server.js"]
     environment:
       API_BASE: http://host.docker.internal:8080
-      API_KEY: ${OBS_API_KEY:-merchant-key-replace-me}
+      API_KEY: ${OBS_API_KEY:?Set the analytics API credential}
       PORT: 3333
     ports:
       - "127.0.0.1:3333:3333"
 
   grafana-livefeed:
-    image: node:20-alpine
+    image: node:22.23.4-alpine
+    user: "1000:1000"
+    read_only: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     container_name: shopsquire_grafana_livefeed
     working_dir: /srv
     volumes:
-      - ./config/observability/grafana/json-datasource:/srv
+      - ./config/observability/grafana/json-datasource:/srv:ro
     command: ["node", "livefeed.js"]
     environment:
       API_BASE: http://host.docker.internal:8080
-      API_KEY: ${OBS_OWNER_API_KEY:-owner-key-replace-me}
+      API_KEY: ${OBS_OWNER_API_KEY:?Set the compliance API credential}
       PORT: 3334
     ports:
       - "127.0.0.1:3334:3334"
@@ -52,7 +60,7 @@ services:
       - "127.0.0.1:3005:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set the Grafana admin password}
     volumes:
       - ./config/observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./config/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro

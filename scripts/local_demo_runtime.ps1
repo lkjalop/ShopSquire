@@ -7,6 +7,9 @@ if ($demoProfile.max_loaded_models -ne 1 -or $demoProfile.num_parallel -ne 1 -or
 }
 $env:OLLAMA_HOST = '127.0.0.1:' + [string]$demoProfile.ollama_port
 $env:OLLAMA_URL = 'http://' + $env:OLLAMA_HOST
+# Match the exact configured port; do not allow all loopback destinations.
+$env:INTERNAL_SERVICE_ALLOWLIST = $env:OLLAMA_HOST + ',localhost:' + [string]$demoProfile.ollama_port
+$env:SSRF_ALLOW_PRIVATE = '0'
 foreach ($name in @('ROUTER_MODEL','CLASSIFIER_MODEL','OLLAMA_DEFAULT_MODEL','OLLAMA_SMALL_MODEL',
     'OLLAMA_SUMMARY_MODEL','MULTI_INTENT_LLM_MODEL','LLM_PLANNER_MODEL','OPEN_WORLD_QUERY_MODEL',
     'PORTFOLIO_NARRATION_MODEL')) {

@@ -66,7 +66,6 @@ $env:TOKEN_BUDGET_GUEST_DAILY_TOKENS   = "100000"
 $env:TOKEN_BUDGET_GUEST_DAILY_USD      = "10"
 # URL guard is fail-closed. Explicitly authorize only the local Ollama endpoints used by this demo;
 # without this, a normal launcher restart silently downgrades image identity to the filename fallback.
-$env:INTERNAL_SERVICE_ALLOWLIST        = "127.0.0.1:11434,localhost:11434"
 # Evidence orchestrator (N1): plan-selected legs (market/policy/availability/history/image) feed the
 # Evidence tab + source chips. Legs are bounded (2.5s) and additive — message text is untouched.
 $env:EVIDENCE_ORCHESTRATOR_ENABLED     = "1"

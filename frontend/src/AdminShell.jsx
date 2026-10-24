@@ -5,13 +5,13 @@ import EscalationRoom from './components/EscalationRoom';
 import { apiUrl, safeJson } from './lib/api';
 
 export default function AdminShell() {
-  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-  const OWNER_API_KEY = ((import.meta as any).env?.VITE_OWNER_API_KEY as string | undefined) || API_KEY;
+  const API_KEY = (import.meta.env?.VITE_API_KEY) || '';
+  const OWNER_API_KEY = (import.meta.env?.VITE_OWNER_API_KEY) || API_KEY;
   const [incidentId, setIncidentId] = useState('');
   const [staffToken, setStaffToken] = useState(null);
   const [roomOpen, setRoomOpen] = useState(false);
   const [statusSummary, setStatusSummary] = useState(null);
-  const [incidents, setIncidents] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState([]);
   const [incidentsOpen, setIncidentsOpen] = useState(false);
 
   const fetchStatusSummary = async () => {
@@ -95,7 +95,7 @@ export default function AdminShell() {
                 <h3>Incidents</h3>
                 <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
                   {incidents.length === 0 && <div style={{color: '#6b7280'}}>No incidents loaded.</div>}
-                  {incidents.map((it: any) => (
+                  {incidents.map((it) => (
                     <div key={it.incident_id} style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px'}}>
                       <div>
                         <div><strong>{it.incident_id}</strong></div>
