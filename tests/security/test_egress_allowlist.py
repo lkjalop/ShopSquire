@@ -237,44 +237,31 @@ def test_httpx_patch_blocks_dead_drop():
         httpx.Client.send = original_send
 
 
-def test_httpx_patch_allows_openai(monkeypatch):
+def test_httpx_patch_allows_openai():
     """Patching must not block approved domains."""
     from src.app.security.egress_allowlist import (
         EgressDomainGuard,
         unpatch_httpx_egress_guard,
         patch_httpx_egress_guard,
     )
-    import src.app.security.egress_allowlist as _mod
     import httpx
 
     unpatch_httpx_egress_guard()
-    if hasattr(_mod, "_patched_httpx"):
-        _mod._patched_httpx = False
-    original_send = httpx.Client.send
 
     strict_guard = EgressDomainGuard(strict=True)
     strict_guard._enabled = True
 
     patch_httpx_egress_guard(guard=strict_guard)
 
-    # Mock the actual network call to avoid real I/O
-    response = httpx.Response(200, json={"object": "list"})
-    monkeypatch.setattr(
-        "httpx.Client.send",
-        lambda self, request, *a, **kw: response
-        if "api.openai.com" in str(request.url)
-        else original_send(self, request, *a, **kw),
-    )
-
-    client = httpx.Client()
-    req = httpx.Request("GET", "https://api.openai.com/v1/models")
-    # Should NOT raise — allowed domain
-    # (The monkeypatch returns a fake 200 after the guard check passes)
-    result = client.send(req)
-    assert result.status_code == 200
-
-    unpatch_httpx_egress_guard()
-    httpx.Client.send = original_send
+    # Replace transport, not the guarded method. Restoring a monkeypatch of
+    # Client.send after unpatching the guard used to reinstall the old guard.
+    transport=httpx.MockTransport(lambda _:httpx.Response(200,json={'object':'list'}))
+    try:
+        with httpx.Client(transport=transport) as client:
+            result=client.get('https://api.openai.com/v1/models')
+        assert result.status_code==200
+    finally:
+        unpatch_httpx_egress_guard()
 
 
 def test_requests_patch_blocks_dead_drop():
