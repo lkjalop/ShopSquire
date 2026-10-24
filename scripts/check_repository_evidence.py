@@ -14,6 +14,13 @@ DOCUMENTS = (
     'docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md',
     'docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md',
     'docs/PRICING_ACCEPTANCE_AND_REGIONAL_GROUNDING_2026-10-25.md',
+    'docs/audits/2026-10-25-c22-code-review-findings.md',
+    'docs/audits/2026-10-25-browser-visual-assessment.md',
+    'docs/audits/2026-10-25-deprecated-storefront-retirement.md',
+    'src/frontend/storefront-react/DEPRECATED.md',
+    'docs/audits/2026-10-25-timeout-retry-ownership-evidence.md',
+    'docs/audits/2026-10-25-dependency-context-evidence.md',
+    'docs/audits/2026-10-25-scoped-lint-integration-evidence.md',
 )
 
 

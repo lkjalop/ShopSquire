@@ -6,7 +6,7 @@ ShopSquire is substantially AI-assisted, using Claude Code and Codex. The author
 
 ## 25 October evidence update
 
-The [execution delta and remaining W00-W15 roadmap](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) supersedes the counts below as the current assessment. It distinguishes public main, the draft repair PR and larger frozen local candidates. The repair branch adds grounded AUD/USD/EUR previews, scoped market relevance, immutable supplier-draft review and atomic cache erasure. C15's local full Python profile is green within its declared scope; broad browser, hosted security and completed endurance remain open. See the [updated ASCII architecture](../architecture/CURRENT_ARCHITECTURE_2026-10-25.md). The original tour and historical limitations below remain dated rather than being rewritten as new evidence.
+The [execution delta and remaining W00-W15 roadmap](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) supersedes the historical counts below. It separates public main, the draft repair branch and larger frozen local candidates. The branch adds grounded pricing, scoped cited market context, immutable supplier-draft review, atomic cache erasure, worker-context preservation and timeout retry controls. C23's serial full Python profile reports **8,820 passes, 0 failures, 0 errors and 310 skips**. C23 broad browser remains 97/54/33, with its included 28-case focused subset passing. See the [ASCII architecture](../architecture/CURRENT_ARCHITECTURE_2026-10-25.md), [unmodified screenshots](../audits/2026-10-25-browser-visual-assessment.md) and [code findings](../audits/2026-10-25-c22-code-review-findings.md). Required hosted/security gates and C23 endurance remain open. The original tour remains dated evidence.
 
 ## The engineering problem
 

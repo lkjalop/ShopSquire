@@ -86,10 +86,7 @@
     "owned_network_removed": true
   },
   "pending_at_this_revision": [
-    "C18 full Python",
-    "C18 all 85 browser specs",
-    "C16 separate four-hour diagnostic replay",
-    "latest hosted CI head"
+    "Required hosted checks: current-head status retained separately, no all-green claim"
   ],
   "later_repairs": [
     "Currency/workload acronym and suffix-money boundary: independent 68 passes",
@@ -97,8 +94,8 @@
     "Saved supplier draft chat read-through: independent 129 passes and 15 native controls",
     "Market measurement matching: 15 reproduced failures in 22 new controls, then independent 95 passes"
   ],
-  "public_branch_note": "Published main remains 9da621d1; draft PR 13 has narrower independently integrated cohorts. C15/C16 include additional local WIP.",
-  "updated_at_utc": "2026-10-24T15:54:18.058048+00:00",
+  "public_branch_note": "Published main remains 9da621d1. Draft PR 13 has narrower independent cohorts; C15-C23 include additional local WIP.",
+  "updated_at_utc": "2026-10-24T19:42:19.108978+00:00",
   "browser_c5_c16_matched_delta": {
     "shared_cases": 181,
     "pass_to_pass": 79,
@@ -126,6 +123,2238 @@
       "Three unchanged AU/US/German correction/draft/reload browser controls pass after helper repair",
       "Saved reviewed draft read-through and reload browser control passes"
     ],
-    "full_python_and_all_85_browser_specs": "running, no aggregate result yet"
+    "full_python": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 2258.0,
+      "peaks": {
+        "rss_bytes": 1361960960,
+        "handles": 3876,
+        "threads": 210
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 9080,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 311
+      },
+      "passed": 8767
+    },
+    "broad_browser": {
+      "specs": 85,
+      "cases": 184,
+      "passed": 92,
+      "failed": 59,
+      "skipped": 33,
+      "flaky": 0,
+      "elapsed_seconds": 3755.734,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "ports_closed": true
+    }
+  },
+  "c21": {
+    "verification_commit": "f6c1d4637c7663857465f1c03b4542e426d440d0",
+    "source_tree_sha256": "6210cc53e51da418434f503236a4ed64f6f2596127e21b129e923585bd7c74ee",
+    "broad_browser": {
+      "specs": 85,
+      "cases": 184,
+      "passed": 96,
+      "failed": 55,
+      "skipped": 33,
+      "flaky": 0,
+      "elapsed_seconds": 2758.625,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "ports_closed": true
+    },
+    "initial_triage_not_established_root_cause": {
+      "model_disabled_contract_conflict": 45,
+      "live_profile_precondition": 1,
+      "behaviour_or_contract_requires_review": 4,
+      "specialized_harness_required": 1,
+      "primary_operation_authentication_precondition": 1,
+      "credential_setup": 2,
+      "missing_fixture": 1
+    },
+    "application_equivalence_to_c22": "Application, dependency and Python test bytes identical; documentation and separate-operator browser test differ",
+    "runtime_log_scan": {
+      "source_head": "f6c1d4637c7663857465f1c03b4542e426d440d0",
+      "completed_specs": 85,
+      "logs_scanned": 170,
+      "message_occurrences": {
+        "sqlite_locked": 0,
+        "asgi_unhandled": 0,
+        "unretrieved_task": 0,
+        "shutdown_timeout": 0
+      },
+      "matching_profiles": [],
+      "qualification": "Message occurrences, not deduplicated incidents or established root causes; expected fault-injection needs per-case interpretation. Zero observed messages is not proof of absence."
+    }
+  },
+  "c22": {
+    "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "source_tree_sha256": "cb53396617533c1fe9417080712eef900723bb0f17b490c8a736c3eedab4e427",
+    "full_python": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 2217.969,
+      "peaks": {
+        "rss_bytes": 1359470592,
+        "handles": 3887,
+        "threads": 210
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 9126,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 310
+      },
+      "passed": 8815
+    },
+    "focused_browser": {
+      "specs": 14,
+      "cases": 28,
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "elapsed_seconds": 378.625,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "ports_closed": true
+    },
+    "frontend": {
+      "storefront_passed": 409,
+      "admin_passed": 63,
+      "steps": [
+        {
+          "surface": "storefront",
+          "step": "unit",
+          "exit": 0,
+          "elapsed": 30.641,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        },
+        {
+          "surface": "storefront",
+          "step": "types",
+          "exit": 0,
+          "elapsed": 24.922,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        },
+        {
+          "surface": "storefront",
+          "step": "build",
+          "exit": 0,
+          "elapsed": 0.797,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        },
+        {
+          "surface": "admin",
+          "step": "unit",
+          "exit": 0,
+          "elapsed": 14.735,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        },
+        {
+          "surface": "admin",
+          "step": "types",
+          "exit": 0,
+          "elapsed": 6.234,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        },
+        {
+          "surface": "admin",
+          "step": "build",
+          "exit": 0,
+          "elapsed": 3.672,
+          "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+        }
+      ]
+    },
+    "inventory": {
+      "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "source_tree_sha256": "cb53396617533c1fe9417080712eef900723bb0f17b490c8a736c3eedab4e427",
+      "files": 5921,
+      "text_lines": 1187535,
+      "code_files": 3688,
+      "physical_code_lines": 578070,
+      "python_functions": 20071,
+      "python_parse_errors": [],
+      "session_deltas": {
+        "modified": 128,
+        "added": 63
+      },
+      "added_lines": 16342,
+      "deleted_lines": 4339,
+      "broad_exception_pass_candidates": 2259,
+      "review_scope": "Every repository-snapshot file mechanically inventoried, not every line semantically proved correct"
+    },
+    "typescript_inventory": {
+      "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "source_tree_sha256": "cb53396617533c1fe9417080712eef900723bb0f17b490c8a736c3eedab4e427",
+      "typescript_version": "5.9.3",
+      "files": 400,
+      "functions": 5709,
+      "parse_errors": [
+        {
+          "path": "config/observability/grafana/json-datasource/livefeed.js",
+          "line": 16,
+          "message": "Expression expected."
+        },
+        {
+          "path": "config/observability/grafana/json-datasource/server.js",
+          "line": 17,
+          "message": "Expression expected."
+        },
+        {
+          "path": "frontend/src/AdminShell.jsx",
+          "line": 14,
+          "message": "An element access expression should take an argument."
+        }
+      ],
+      "qualification": "Syntax inventory only; application type/build results and browser scenarios have separate evidence"
+    },
+    "review_metadata": {
+      "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "source_tree_sha256": "cb53396617533c1fe9417080712eef900723bb0f17b490c8a736c3eedab4e427",
+      "mapped_packages": 16,
+      "hotspot_rows": 70,
+      "comparison_repair_head": "f83c072d641a80f597a555d0965e9994b43fda6b",
+      "inventory_ledgers": [
+        {
+          "name": "inventory-v22-files.csv",
+          "bytes": 1109566,
+          "sha256": "664fbd7a3e148d649655794e4e56af80bbab51ee64f8bda647a213f15b8165aa",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v22-symbols.csv",
+          "bytes": 2696167,
+          "sha256": "d28e6d8675c084ab40caeaf1efe7010a2de5d6beced27826511aef8069499423",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v22-review-candidates.csv",
+          "bytes": 315464,
+          "sha256": "28bbb8464524ec8f4ab270f3ae5ffc90aa11c2a402040ddac6f329059c98907e",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v22-session-delta.csv",
+          "bytes": 32022,
+          "sha256": "04b687214e9aeb9f1cbd438fcfce804fb988370d3f2ec650c3aeb30e3309bdbe",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v22-typescript-functions.json",
+          "bytes": 1580855,
+          "sha256": "965fc1185e159426b97674138fb5fe28dced4f843fa6f2aaf58eac28ab7c4b85",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v22-typescript-files.json",
+          "bytes": 65735,
+          "sha256": "c3636bf0c25c2481343ca9de5b647612e62f53c6dc37ef136c42e135a3087854",
+          "retained": "private local evidence"
+        }
+      ],
+      "qualification": "Mechanical file/symbol coverage; no blanket semantic approval"
+    },
+    "static_checks": {
+      "observed_at": "2026-10-24T17:35:46.976448+00:00",
+      "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "checks": [
+        {
+          "check": "source_size",
+          "native_exit_code": 0,
+          "lines": 49,
+          "warnings": 49,
+          "output_sha256": "68a34583d9fdb7bdeeb1aaaa9180a83d69d6d379c0c9b8e3d8114a240a80c11d",
+          "sample": [
+            "WARN_OVERSIZE frontend/src/App.tsx: 4289 lines",
+            "WARN_OVERSIZE frontend/src/components/AdminDashboard.tsx: 1079 lines",
+            "WARN_OVERSIZE frontend/src/components/DecisionTrace.tsx: 4372 lines",
+            "WARN_OVERSIZE src/app/flows/nqe.py: 1090 lines",
+            "WARN_OVERSIZE src/app/main.py: 2409 lines"
+          ]
+        },
+        {
+          "check": "function_size",
+          "native_exit_code": 0,
+          "lines": 0,
+          "warnings": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sample": []
+        },
+        {
+          "check": "grafana_analytics_syntax",
+          "native_exit_code": 1,
+          "lines": 9,
+          "warnings": 0,
+          "output_sha256": "a1fb08d7dcd226b474a955a7c1814e5bee7f9c3992981a09a213008eda26f593",
+          "sample": [
+            "C:\\AI\\ShopSquire\\.artifacts\\implementation-2026-10-24\\candidate-v22\\config\\observability\\grafana\\json-datasource\\server.js:17",
+            "  const url = `${baseUrl.replace(/\\\\/$/, \"\")}/api/v1/admin/analytics?days=${days}`;",
+            "                                 ^",
+            "",
+            "SyntaxError: Invalid regular expression flags"
+          ]
+        },
+        {
+          "check": "grafana_livefeed_syntax",
+          "native_exit_code": 1,
+          "lines": 9,
+          "warnings": 0,
+          "output_sha256": "b0c9943ca2c810277a6a865bb11465d588d861714b59d569cca66a7c55e4aab3",
+          "sample": [
+            "C:\\AI\\ShopSquire\\.artifacts\\implementation-2026-10-24\\candidate-v22\\config\\observability\\grafana\\json-datasource\\livefeed.js:16",
+            "  const url = `${baseUrl.replace(/\\\\/$/, \"\")}/api/v1/admin/compliance/live-feed?limit=50`;",
+            "                                 ^",
+            "",
+            "SyntaxError: Invalid regular expression flags"
+          ]
+        }
+      ],
+      "qualification": "Native checks on the frozen source; known debt is retained, no baseline ceiling raised"
+    },
+    "visual_evidence": [
+      {
+        "path": "docs/assets/2026-10-25-buyer-retained-facts.png",
+        "sha256": "ab0bedd579a0284df8f8f1987b924801336a7626d0f5c3c8d8d0ab890a18852d",
+        "bytes": 86236,
+        "source": "Unmodified C22 focused browser test screenshot",
+        "scenario": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+        "scope": "Fictional tenant/inventory/supplier; sandbox transport; exact C22 source"
+      },
+      {
+        "path": "docs/assets/2026-10-25-reviewed-shortfall-draft.png",
+        "sha256": "14ecbd8ee63599d48963c03275e97010390663de2717f0b31fad9ca701468b77",
+        "bytes": 77625,
+        "source": "Unmodified C22 focused browser test screenshot",
+        "scenario": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+        "scope": "Fictional tenant/inventory/supplier; sandbox transport; exact C22 source"
+      }
+    ],
+    "webhook_unchanged_expectation_followup": {
+      "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "full_run_failure_retained": true,
+      "original_health_limit_seconds": 0.75,
+      "results": [
+        {
+          "repeat": 1,
+          "native_exit_code": 0,
+          "counts": {
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "resource_violation": null,
+          "elapsed_seconds": 42.266,
+          "health_properties": [
+            {
+              "name": "webhook_health_elapsed_seconds",
+              "value": "0.438148"
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "native_exit_code": 0,
+          "counts": {
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "resource_violation": null,
+          "elapsed_seconds": 40.328,
+          "health_properties": [
+            {
+              "name": "webhook_health_elapsed_seconds",
+              "value": "0.421502"
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "native_exit_code": 0,
+          "counts": {
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "resource_violation": null,
+          "elapsed_seconds": 41.453,
+          "health_properties": [
+            {
+              "name": "webhook_health_elapsed_seconds",
+              "value": "0.352867"
+            }
+          ]
+        }
+      ],
+      "qualification": "Separate unchanged expectation repeats; not a replacement for the full-run timing failure or a causal diagnosis"
+    },
+    "webhook_phase_diagnostic": {
+      "phases": {
+        "dispatch_to_worker_entry_seconds": 0.22578340000472963,
+        "health_request_seconds": 0.0014184999745339155,
+        "worker_entry_to_health_start_seconds": 0.00019050005357712507,
+        "original_total_seconds": 0.2273935000412166
+      },
+      "original_threshold_seconds": 0.75,
+      "qualification": "Instrumentation of one original test invocation; no expectation/threshold/source edit and no attribution of the earlier full-run delay"
+    }
+  },
+  "c20": {
+    "full_python": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 1716.125,
+      "peaks": {
+        "rss_bytes": 1378938880,
+        "handles": 3432,
+        "threads": 188
+      },
+      "resource_violation": "host_headroom_under_1GiB",
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "interpretation": "Resource-aborted without complete JUnit counts; partial progress is not a suite total"
+  },
+  "c16_four_hour_replay": {
+    "status": "complete native result retained",
+    "source_head": "2150400801d74c663a3617ecbe2357aa3ef8008a",
+    "elapsed_seconds": 14430.859,
+    "protected_inputs_changed": [],
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "results": [
+      {
+        "native_exit_code": 0,
+        "stats": {
+          "status": "passed",
+          "requested_seconds": 14400,
+          "elapsed_seconds": 14400.0,
+          "successful_cycles": 172,
+          "source_digest": "50c64174a539806b9f444198187b52e3a320e96050d8a4dde431b0cde79d7a5b",
+          "scope": "configured real-API browser replay; no model/image endurance claim",
+          "started_at": "2026-10-24T14:46:33.843701+00:00",
+          "sixty_minute_checkpoint": true,
+          "resource_limits": {
+            "minimum_available_bytes": 1073741824,
+            "maximum_process_rss_bytes": 2147483648,
+            "maximum_process_handles": 5000
+          },
+          "specs": [
+            "e2e/platform-audit-memory.spec.ts"
+          ],
+          "updated_at": "2026-10-24T18:46:33.886209+00:00"
+        },
+        "control_canary_retained": true,
+        "ports_closed": {
+          "8214": true,
+          "5304": true
+        },
+        "resources": {
+          "native_exit_code": 0,
+          "elapsed_seconds": 14411.735,
+          "peaks": {
+            "rss_bytes": 610877440,
+            "handles": 1186,
+            "threads": 78
+          },
+          "resource_violation": null
+        }
+      }
+    ]
+  },
+  "c22_two_hour_attempt_a": {
+    "status": "complete native result retained",
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "elapsed_seconds": 78.344,
+    "protected_inputs_changed": [],
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "results": [
+      {
+        "native_exit_code": 1,
+        "stats": {},
+        "control_canary_retained": true,
+        "ports_closed": {
+          "8236": true,
+          "5326": true
+        },
+        "resources": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 10.125,
+          "peaks": {
+            "rss_bytes": 153067520,
+            "handles": 560,
+            "threads": 78
+          },
+          "resource_violation": "host_headroom_under_1GiB"
+        }
+      }
+    ]
+  },
+  "c22_two_hour_attempt_b": {
+    "status": "complete native result retained",
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "elapsed_seconds": 1383.453,
+    "protected_inputs_changed": [],
+    "owned_container_removed": true,
+    "owned_network_removed": true,
+    "results": [
+      {
+        "native_exit_code": 1,
+        "stats": {
+          "status": "failed",
+          "requested_seconds": 7200,
+          "elapsed_seconds": 1352.938,
+          "successful_cycles": 16,
+          "source_digest": "bc7419e278ee88e6eea97ffea965b612f1c8b5fd6a7a96e8e396ce969b2a471a",
+          "scope": "configured real-API browser replay; no model/image endurance claim",
+          "started_at": "2026-10-24T17:09:53.859670+00:00",
+          "sixty_minute_checkpoint": false,
+          "reason": "browser_cycle_failed",
+          "failed_cycle": 17,
+          "exit_code": 1,
+          "resource_limits": {
+            "minimum_available_bytes": 1073741824,
+            "maximum_process_rss_bytes": 2147483648,
+            "maximum_process_handles": 5000
+          },
+          "specs": [
+            "e2e/platform-audit-memory.spec.ts"
+          ],
+          "updated_at": "2026-10-24T17:32:26.572250+00:00"
+        },
+        "control_canary_retained": true,
+        "ports_closed": {
+          "8236": true,
+          "5326": true
+        },
+        "resources": {
+          "native_exit_code": 1,
+          "elapsed_seconds": 1365.078,
+          "peaks": {
+            "rss_bytes": 364814336,
+            "handles": 1181,
+            "threads": 78
+          },
+          "resource_violation": null
+        }
+      }
+    ]
+  },
+  "browser_c5_c21_matched_delta": {
+    "c5_to_c21": {
+      "matched_cases": 181,
+      "new_cases": 3,
+      "removed_cases": 0,
+      "transitions": {
+        "expected -> expected": 79,
+        "unexpected -> unexpected": 55,
+        "skipped -> skipped": 33,
+        "unexpected -> expected": 14
+      }
+    },
+    "c16_to_c21": {
+      "matched_cases": 181,
+      "new_cases": 3,
+      "removed_cases": 0,
+      "transitions": {
+        "expected -> expected": 89,
+        "unexpected -> unexpected": 55,
+        "skipped -> skipped": 33,
+        "unexpected -> expected": 4
+      }
+    },
+    "c18_to_c21": {
+      "matched_cases": 184,
+      "new_cases": 0,
+      "removed_cases": 0,
+      "transitions": {
+        "expected -> expected": 92,
+        "unexpected -> unexpected": 55,
+        "skipped -> skipped": 33,
+        "unexpected -> expected": 4
+      }
+    },
+    "ledger": "2026-10-25-browser-c5-c21-case-delta.csv"
+  },
+  "analytics_quality_probe": {
+    "observed_at": "2026-10-24T17:17:48.789354+00:00",
+    "source_sha256": "0e215055cfbe98991cb505498243f8b70d99193ef88d5658ab2a46293183cf50",
+    "rows": [
+      {
+        "semantic_provider_attempts": [
+          "BAAI/bge-small-en-v1.5",
+          "all-MiniLM-L6-v2",
+          "BAAI/bge-small-en-v1.5",
+          "all-MiniLM-L6-v2"
+        ],
+        "fallback_vector_sha256": "bf5493e22022dc4202601982c9dc6d81a3aff12ba65c6f81f495add946ae0b92",
+        "vector_dimensions": 16,
+        "input_queries": 4,
+        "output_clusters": 1,
+        "members_accounted_for": 4,
+        "scope": "Owned synthetic inputs, unavailable-provider sentinel, fresh lean environment; no model or network claim",
+        "hash_seed": "1"
+      },
+      {
+        "semantic_provider_attempts": [
+          "BAAI/bge-small-en-v1.5",
+          "all-MiniLM-L6-v2",
+          "BAAI/bge-small-en-v1.5",
+          "all-MiniLM-L6-v2"
+        ],
+        "fallback_vector_sha256": "9fd1ab509b5fc715ae3167eaf2de61e268a756d33fe94d5ecea5d338bc04bd16",
+        "vector_dimensions": 16,
+        "input_queries": 4,
+        "output_clusters": 1,
+        "members_accounted_for": 4,
+        "scope": "Owned synthetic inputs, unavailable-provider sentinel, fresh lean environment; no model or network claim",
+        "hash_seed": "2"
+      }
+    ],
+    "fresh_process_vectors_differ": true,
+    "qualification": "Read-only source assessment with private temporary runtime cache; no application-source edit, no model/network or semantic accuracy claim"
+  },
+  "soak_v22b_transport": {
+    "observed_at": "2026-10-24T17:47:14.273749+00:00",
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "cycle": 17,
+    "successful_prior_cycles": 16,
+    "qualification": "Native Chromium network diagnostics; negative socket errors do not establish application ownership or host-level root cause",
+    "netlog_summaries": [
+      {
+        "file": "network-0017.json-worker-44908.json",
+        "bytes": 2435494,
+        "events": 15614,
+        "client": {},
+        "os_failures": [],
+        "failure_counts": {
+          "ERR_ADDRESS_UNREACHABLE": 26,
+          "ERR_ABORTED": 8
+        }
+      },
+      {
+        "file": "network-0017.json-worker-5788.json",
+        "bytes": 67949,
+        "events": 100,
+        "client": {},
+        "os_failures": [
+          {
+            "type": "TCP_CONNECT_ATTEMPT",
+            "os_error": 10055,
+            "os_error_code": null,
+            "net_error": null
+          }
+        ],
+        "failure_counts": {
+          "ERR_ADDRESS_UNREACHABLE": 2,
+          "ERR_NO_BUFFER_SPACE": 5,
+          "ERR_ABORTED": 3
+        }
+      }
+    ]
+  },
+  "completed_full_source_integrity": [
+    {
+      "candidate": "C15",
+      "verification_commit": "a77fdbd6570cd05e82bc44b410f1b702f4eaf9ff",
+      "protected_files": 5891,
+      "changed_or_missing": []
+    },
+    {
+      "candidate": "C18",
+      "verification_commit": "afdba4a5438b81546e4b4692ff4a5c8998a9549e",
+      "protected_files": 5908,
+      "changed_or_missing": []
+    },
+    {
+      "candidate": "C21",
+      "verification_commit": "f6c1d4637c7663857465f1c03b4542e426d440d0",
+      "protected_files": 5920,
+      "changed_or_missing": []
+    },
+    {
+      "candidate": "C22",
+      "verification_commit": "cf617339b55a7b432535831f5dd29d29dfff9977",
+      "protected_files": 5921,
+      "changed_or_missing": []
+    }
+  ],
+  "python_c18_c22_matched_delta": {
+    "c18_cases": 9080,
+    "c22_cases": 9126,
+    "matched_cases": 9080,
+    "new_cases": 46,
+    "removed_cases": 0,
+    "transitions": {
+      "passed -> passed": 8766,
+      "skipped -> skipped": 310,
+      "failed -> passed": 2,
+      "skipped -> passed": 1,
+      "passed -> failed": 1
+    },
+    "qualification": "Named JUnit outcomes across frozen C18/C22; sources/profiles differ, timing failure retained, no release claim",
+    "ledger": "2026-10-25-python-c18-c22-changes.csv"
+  },
+  "hosted_checks_observation": {
+    "observed_at": "2026-10-24T17:48:00.804633+00:00",
+    "head": "f83c072d641a80f597a555d0965e9994b43fda6b",
+    "draft": true,
+    "url": "https://github.com/lkjalop/ShopSquire/pull/13",
+    "checks": [
+      {
+        "name": "security-focused",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202748/job/120934953186",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "smoke",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202760/job/120934953063",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (0)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934956029",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "build-and-check",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202804/job/120934953203",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "smoke-clean-checkout",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202840/job/120934953295",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "trivy-scan",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202774/job/120934953152",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "integration",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202786/job/120934953142",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "smoke",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202779/job/120934953911",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "playwright",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202746/job/120934952889",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "ui-smoke",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202802/job/120934953222",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "browser",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202780/job/120934956108",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "focused-core",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202735/job/120934955426",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "changed-python",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202785/job/120934953260",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202721/job/120934952837",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115199682/job/120934943824",
+        "startedAt": "2026-10-24T17:14:17Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pytest",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202797/job/120934953132",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (0)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956150",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "v2-gates",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202763/job/120934953178",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (1)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955927",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (1)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956154",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (2)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955882",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (2)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934955925",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (3)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955890",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (3)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956138",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (4)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955839",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (4)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956050",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (5)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955879",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (5)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956047",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (6)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955729",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (6)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956166",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (7)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955877",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "services (7)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202778/job/120934956118",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (8)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955884",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (9)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934956003",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (10)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955847",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (11)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202742/job/120934955934",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "test (3.11)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202748/job/120934952984",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "worker",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202780/job/120934955908",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "frontend (frontend)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202735/job/120934955432",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202721/job/120934953003",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115199682/job/120934943794",
+        "startedAt": "2026-10-24T17:14:17Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "frontend (src/frontend/admin-react)",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202735/job/120934955387",
+        "startedAt": "2026-10-24T17:14:21Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "architecture-ratchets",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202735/job/120934955246",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202721/job/120934953037",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115199682/job/120934943827",
+        "startedAt": "2026-10-24T17:14:17Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202721/job/120934953163",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115199682/job/120934943859",
+        "startedAt": "2026-10-24T17:14:17Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pip-audit",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115202721/job/120934953028",
+        "startedAt": "2026-10-24T17:14:20Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pip-audit",
+        "status": "QUEUED",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40115199682/job/120934943694",
+        "startedAt": "2026-10-24T17:14:17Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "counts": {
+      "QUEUED": 49
+    },
+    "qualification": "Observed check states at this head; pending/queued is not a pass. Required-check policy and prior-head results are separate."
+  },
+  "fresh_public_repair_smoke": {
+    "native_exit_code": 0,
+    "elapsed_seconds": 30.469,
+    "peaks": {
+      "rss_bytes": 251461632,
+      "handles": 1073,
+      "threads": 33
+    },
+    "resource_violation": null,
+    "offline_models": true,
+    "commercial_effects": "sandbox/disabled",
+    "counts": {
+      "tests": 105,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "scope": "105 controls on repair base f83c072d in the exact 127-package clean API/test/bootstrap environment; active source unchanged by later manifest retirement",
+    "selected_tests": [
+      "tests/services/test_typed_recommendation_stage_coordinator.py",
+      "tests/services/test_local_model_roles.py",
+      "tests/services/test_research_policy.py",
+      "tests/services/test_regional_price_grounding.py",
+      "tests/services/test_market_question_relevance.py",
+      "tests/security/test_local_demo_admission_consistency.py"
+    ]
+  },
+  "active_frontend_audits_v4": {
+    "observed_at": "2026-10-24T18:01:18.986477+00:00",
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "results": [
+      {
+        "surface": "storefront",
+        "path": "frontend",
+        "native_exit_code": 0,
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "affected_packages": [],
+        "protected_manifests_unchanged": true,
+        "manifest_sha256": {
+          "package.json": "56e5132123032f688fbb7a03a14f3cacc76855a51691d5bf41de6cd46a81bfd1",
+          "package-lock.json": "270117c285e918cbad29e28f92b378a5c1eca23c49752bc918671d3f58309578"
+        }
+      },
+      {
+        "surface": "admin",
+        "path": "src/frontend/admin-react",
+        "native_exit_code": 0,
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "affected_packages": [],
+        "protected_manifests_unchanged": true,
+        "manifest_sha256": {
+          "package.json": "f1785640f782b8e4db33e0a44870f89cf3ce15622c54e1af154c718175356174",
+          "package-lock.json": "b042b1753f219478a3332c0caa5b5d24d8247a57adc5651c96f6a4d8fdb3ef4d"
+        }
+      }
+    ],
+    "qualification": "Read-only current registry audit of both active locks; no installation, fixes or script execution"
+  },
+  "post_c22_retired_dependency_cohort": {
+    "commit": "3c17fe5401096bffd084b8c15a3ad866a3b5c6c2",
+    "files": [
+      "src/frontend/storefront-react/DEPRECATED.md",
+      "src/frontend/README.md",
+      "src/frontend/admin-react/README.md",
+      "docs/audits/2026-10-25-deprecated-storefront-retirement-evidence.json",
+      "docs/audits/2026-10-25-deprecated-storefront-retirement.md"
+    ],
+    "deleted": [
+      "src/frontend/storefront-react/package.json",
+      "src/frontend/storefront-react/package-lock.json"
+    ],
+    "root_synced": true,
+    "note": "Retires unsupported install manifests; not an active application-source change or a rerun of the C22 full suites"
+  },
+  "c23": {
+    "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+    "source_tree_sha256": "86be5acf6e057229eb9eb901cc4945e3af04f741e73579f51beaa8625cea3b63",
+    "source_tree_sha256_algorithm": "SHA256 of UTF8 JSON files array sorted by git path, sort_keys=True, separators comma/colon",
+    "full_python": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 2069.062,
+      "peaks": {
+        "rss_bytes": 1332604928,
+        "handles": 3853,
+        "threads": 188
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 9130,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 310
+      },
+      "passed": 8820
+    },
+    "broad_browser": {
+      "specs": 85,
+      "cases": 184,
+      "passed": 97,
+      "failed": 54,
+      "skipped": 33,
+      "flaky": 0,
+      "elapsed_seconds": 2647.687,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "ports_closed": true
+    },
+    "inventory": {
+      "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "source_tree_sha256": "86be5acf6e057229eb9eb901cc4945e3af04f741e73579f51beaa8625cea3b63",
+      "files": 5922,
+      "text_lines": 1186048,
+      "code_files": 3689,
+      "physical_code_lines": 578136,
+      "python_functions": 20080,
+      "python_parse_errors": [],
+      "session_deltas": {
+        "line_endings_only": 3162,
+        "modified": 132,
+        "added": 66,
+        "removed": 2
+      },
+      "added_lines": 16583,
+      "deleted_lines": 6067,
+      "broad_exception_pass_candidates": 2259,
+      "review_scope": "Every repository-snapshot file mechanically inventoried, not every line semantically proved correct",
+      "delta_qualification": "Compared to retained 24 October snapshot; line-ending-only changes separate; removed files included; text-line totals include non-production files"
+    },
+    "typescript_inventory": {
+      "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "source_tree_sha256": "86be5acf6e057229eb9eb901cc4945e3af04f741e73579f51beaa8625cea3b63",
+      "typescript_version": "5.9.3",
+      "files": 400,
+      "functions": 5709,
+      "parse_errors": [
+        {
+          "path": "config/observability/grafana/json-datasource/livefeed.js",
+          "line": 16,
+          "message": "Expression expected."
+        },
+        {
+          "path": "config/observability/grafana/json-datasource/server.js",
+          "line": 17,
+          "message": "Expression expected."
+        },
+        {
+          "path": "frontend/src/AdminShell.jsx",
+          "line": 14,
+          "message": "An element access expression should take an argument."
+        }
+      ],
+      "qualification": "Syntax inventory only; application type/build results and browser scenarios have separate evidence"
+    },
+    "frontend_source_equivalence": {
+      "git_blob_changes": [],
+      "raw_snapshot_hash_differences": 327,
+      "qualification": "Frontend Git blobs unchanged; checkout line endings can differ. C23 syntax inventory reruns against its actual bytes."
+    },
+    "test_worktree_isolation": "5922 protected files byte-identical before launch; separate full-Python/browser working trees",
+    "frontend_component_checks": "C22 409/63 tests and type/build results retained for unchanged frontend Git blobs; not rerun as C23 checks",
+    "review_metadata": {
+      "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "source_tree_sha256": "86be5acf6e057229eb9eb901cc4945e3af04f741e73579f51beaa8625cea3b63",
+      "mapped_packages": 16,
+      "hotspot_rows": 70,
+      "comparison_repair_head": "163441e932d22d915e521c58e5a3fd6d560ac2a6",
+      "inventory_ledgers": [
+        {
+          "name": "inventory-v23-files.csv",
+          "bytes": 1135118,
+          "sha256": "868d650d7b2477e2ac326097a0de6bececaa97b8bb15283f0dbd48ecb7c333d5",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v23-symbols.csv",
+          "bytes": 2697584,
+          "sha256": "8f5731bcf5006d4da0bab76301d54bd2d9b577284f5eb76a168f0f7ec3e8e0b4",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v23-review-candidates.csv",
+          "bytes": 315464,
+          "sha256": "9c7ae662ebe8afc8eb6dc74c806f0cdcb3085276eee3cd2656682b2e27d73078",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v23-session-delta.csv",
+          "bytes": 661400,
+          "sha256": "96d2947b2939ddad03fe0754cf8595c6558ddfa28b93a3162774f3772d0a8cdd",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v23-typescript-functions.json",
+          "bytes": 1580855,
+          "sha256": "411ba3b8f3bdd890898c0441b277d2ff6cf3f07387cbc22ddff238237fe86aa2",
+          "retained": "private local evidence"
+        },
+        {
+          "name": "inventory-v23-typescript-files.json",
+          "bytes": 65735,
+          "sha256": "c21b336ca8c7dedcca89e98a761f08ec831f1c2c76ccc4edd222362ef8f2f2de",
+          "retained": "private local evidence"
+        }
+      ],
+      "qualification": "Mechanical file/symbol coverage; no blanket semantic approval"
+    },
+    "runtime_log_scan": {
+      "source_head": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "completed_specs": 85,
+      "logs_scanned": 170,
+      "message_occurrences": {
+        "sqlite_locked": 0,
+        "asgi_unhandled": 0,
+        "unretrieved_task": 0,
+        "shutdown_timeout": 0
+      },
+      "matching_profiles": [],
+      "qualification": "Message occurrences, not deduplicated incidents or established root causes; expected fault-injection needs per-case interpretation. Zero observed messages is not proof of absence."
+    },
+    "full_python_attempt_a": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 787.141,
+      "peaks": {
+        "rss_bytes": 1124446208,
+        "handles": 2891,
+        "threads": 155
+      },
+      "resource_violation": "host_headroom_under_1GiB",
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "full_python_attempt_b": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 2069.062,
+      "peaks": {
+        "rss_bytes": 1332604928,
+        "handles": 3853,
+        "threads": 188
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 9130,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 310
+      },
+      "passed": 8820
+    },
+    "post_abort_source_integrity": {
+      "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "protected_files": 5922,
+      "restored_after_aborted_test_fixture": [],
+      "qualification": "Only the owned frozen worktree may be restored from the byte-verified separate snapshot; root/user work untouched"
+    },
+    "final_source_integrity": {
+      "observed_at": "2026-10-24T19:41:52.706277+00:00",
+      "verification_commit": "eb6386c44c7d427d09083bd67d82a01c52343e23",
+      "source_tree_sha256": "86be5acf6e057229eb9eb901cc4945e3af04f741e73579f51beaa8625cea3b63",
+      "results": [
+        {
+          "worktree": "candidate-v23",
+          "protected_files": 5922,
+          "changed_paths": []
+        },
+        {
+          "worktree": "candidate-v23-browser",
+          "protected_files": 5922,
+          "changed_paths": []
+        }
+      ],
+      "scope": "Read-only hash comparison after both native profiles; no restore or root mutation"
+    },
+    "serial_handoff": {
+      "status": "launched",
+      "observed_at": "2026-10-24T19:06:07.033583+00:00",
+      "available_bytes": 6513512448,
+      "three_stable_samples": true,
+      "other_owned_heavy_jobs_finished": true,
+      "profile_deadline_seconds": 2572.966417,
+      "deadline_note": "Original 3000-second cap may only be shortened to honor user stop time; no resource limit relaxed"
+    }
+  },
+  "controlled_dependency_backlog": {
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "source_sha256": "683f1c269095b312b64e9e016b1cfed6919b1313badcf258ad5a5962a9bf1b3b",
+    "configured_workers": 8,
+    "blocked_workers": 8,
+    "observations": [
+      {
+        "name": "owned-healthy-before",
+        "result": "healthy",
+        "seconds": 0.0004613000201061368
+      },
+      {
+        "name": "owned-blocked-0",
+        "error_type": "TimeoutError",
+        "seconds": 0.021720100077800453
+      },
+      {
+        "name": "owned-blocked-1",
+        "error_type": "TimeoutError",
+        "seconds": 0.03083220007829368
+      },
+      {
+        "name": "owned-blocked-2",
+        "error_type": "TimeoutError",
+        "seconds": 0.03138970001600683
+      },
+      {
+        "name": "owned-blocked-3",
+        "error_type": "TimeoutError",
+        "seconds": 0.03101899998728186
+      },
+      {
+        "name": "owned-blocked-4",
+        "error_type": "TimeoutError",
+        "seconds": 0.031001599971204996
+      },
+      {
+        "name": "owned-blocked-5",
+        "error_type": "TimeoutError",
+        "seconds": 0.030076300026848912
+      },
+      {
+        "name": "owned-blocked-6",
+        "error_type": "TimeoutError",
+        "seconds": 0.03142310003750026
+      },
+      {
+        "name": "owned-blocked-7",
+        "error_type": "TimeoutError",
+        "seconds": 0.037418299936689436
+      },
+      {
+        "name": "owned-healthy-while-saturated",
+        "error_type": "TimeoutError",
+        "seconds": 0.024794299970380962
+      },
+      {
+        "name": "owned-healthy-after-new-generation",
+        "result": "healthy",
+        "seconds": 0.00023120001424103975
+      }
+    ],
+    "queue_depth_after_40_cancelled_submissions": 41,
+    "old_workers_alive_after_nonwaiting_shutdown": 8,
+    "workers_across_generations": 9,
+    "owned_threads_remaining": [],
+    "source_unchanged": true,
+    "qualification": "Controlled blocked functions, not external-provider load or a demonstrated production hang; queue depth is implementation-level diagnostic evidence"
+  },
+  "timeout_retry_cohort": {
+    "commit": "e336fc66a0abc3f9d6c13157f7a280ab2b116142",
+    "base": "3c17fe54",
+    "new_controls_before": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 27.938,
+      "resource_violation": null,
+      "counts": {
+        "tests": 4,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "selected_after": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 19.125,
+      "resource_violation": null,
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "environment": "Fresh exact 127-package API/test/bootstrap environment; owned native thread controls",
+    "scope": "Automatic timeout duplication repaired; running-work cancellation, admission/backlog and executor generations remain separate"
+  },
+  "browser_c5_c23_matched_delta": {
+    "c5_to_c23": {
+      "matched_cases": 181,
+      "new_cases": 3,
+      "removed_cases": 0,
+      "transitions": {
+        "skipped -> skipped": 33,
+        "unexpected -> unexpected": 54,
+        "unexpected -> expected": 15,
+        "expected -> expected": 79
+      }
+    },
+    "c16_to_c23": {
+      "matched_cases": 181,
+      "new_cases": 3,
+      "removed_cases": 0,
+      "transitions": {
+        "skipped -> skipped": 33,
+        "unexpected -> unexpected": 54,
+        "expected -> expected": 89,
+        "unexpected -> expected": 5
+      }
+    },
+    "c18_to_c23": {
+      "matched_cases": 184,
+      "new_cases": 0,
+      "removed_cases": 0,
+      "transitions": {
+        "skipped -> skipped": 33,
+        "unexpected -> unexpected": 54,
+        "expected -> expected": 92,
+        "unexpected -> expected": 5
+      }
+    },
+    "c21_to_c23": {
+      "matched_cases": 184,
+      "new_cases": 0,
+      "removed_cases": 0,
+      "transitions": {
+        "skipped -> skipped": 33,
+        "unexpected -> unexpected": 54,
+        "expected -> expected": 96,
+        "unexpected -> expected": 1
+      }
+    },
+    "c23_focused_subset_of_same_broad_run": {
+      "specs": 14,
+      "expected": 28,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "qualification": "Subset of the 184 broad cases, not an additional run or additive pass total"
+    },
+    "ledger": "2026-10-25-browser-c5-c23-case-delta.csv"
+  },
+  "scoped_lint_cohort": {
+    "base": "6a232287ca9a22296db4f8cfc423d9488452c2d5",
+    "ruff_version": "ruff 0.3.7",
+    "before_native_exit_code": 1,
+    "after_native_exit_code": 0,
+    "changed_python_scope": 98,
+    "before_reported_errors": 22,
+    "harness_ast_identical": true,
+    "security_module_changes": "Only unused UUID assignment removed and three comprehension names clarified; normalized AST identical; trace/security calls unchanged",
+    "test_change": "Unused standard-library os import removed; no fixture import or assertion removed",
+    "qualification": "Scoped CI ratchet only; no waiver, threshold/baseline change or repository-wide clean claim",
+    "commit": "163441e932d22d915e521c58e5a3fd6d560ac2a6",
+    "selected_controls": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 31.891,
+      "resource_violation": null,
+      "counts": {
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "hosted_followup": "98-file changed-source step passes; accumulated checkpoint step reports 776 errors over 1382 files. No waiver or full-job green claim."
+  },
+  "superseded_queued_ci_cleanup": {
+    "observed_at": "2026-10-24T19:02:49.314879+00:00",
+    "current_head_preserved": "6a232287ca9a22296db4f8cfc423d9488452c2d5",
+    "cancel_requests": [
+      {
+        "run": 40115202721,
+        "head": "f83c072d641a80f597a555d0965e9994b43fda6b",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      },
+      {
+        "run": 40115199682,
+        "head": "f83c072d641a80f597a555d0965e9994b43fda6b",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      },
+      {
+        "run": 40112330414,
+        "head": "32a39bbddad2a4acda32fd9e8f0fcbe35bae7eb0",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      },
+      {
+        "run": 40112327002,
+        "head": "32a39bbddad2a4acda32fd9e8f0fcbe35bae7eb0",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      },
+      {
+        "run": 40109519756,
+        "head": "531a043f5189cb235582d026627637d033990e27",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      },
+      {
+        "run": 40109515753,
+        "head": "531a043f5189cb235582d026627637d033990e27",
+        "workflow": "Security Scans (Trivy, SBOM, Snyk)",
+        "prior_status": "queued",
+        "cancel_request_exit_code": 0
+      }
+    ],
+    "qualification": "Only explicitly identified superseded queued runs on this repair branch; no completed/in-progress/current-head run cancelled; cancellation is not a pass"
+  },
+  "hosted_checks_latest_code_observation": {
+    "observed_at": "2026-10-24T19:38:26.627362+00:00",
+    "head": "163441e932d22d915e521c58e5a3fd6d560ac2a6",
+    "draft": true,
+    "url": "https://github.com/lkjalop/ShopSquire/pull/13",
+    "checks": [
+      {
+        "name": "trivy-scan",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186769/job/120961968911",
+        "startedAt": "2026-10-24T19:12:37Z",
+        "completedAt": "2026-10-24T19:19:16Z"
+      },
+      {
+        "name": "integration",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186836/job/120961969238",
+        "startedAt": "2026-10-24T19:12:54Z",
+        "completedAt": "2026-10-24T19:18:22Z"
+      },
+      {
+        "name": "playwright",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186751/job/120961968736",
+        "startedAt": "2026-10-24T19:12:17Z",
+        "completedAt": "2026-10-24T19:19:18Z"
+      },
+      {
+        "name": "ui-smoke",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186798/job/120961968927",
+        "startedAt": "2026-10-24T19:13:38Z",
+        "completedAt": "2026-10-24T19:21:36Z"
+      },
+      {
+        "name": "changed-python",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186763/job/120961968962",
+        "startedAt": "2026-10-24T19:12:26Z",
+        "completedAt": "2026-10-24T19:12:34Z"
+      },
+      {
+        "name": "smoke",
+        "status": "IN_PROGRESS",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186835/job/120961969047",
+        "startedAt": "2026-10-24T19:18:24Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "browser",
+        "status": "IN_PROGRESS",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186791/job/120962090723",
+        "startedAt": "2026-10-24T19:18:47Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "pytest",
+        "status": "IN_PROGRESS",
+        "conclusion": "",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186759/job/120961969028",
+        "startedAt": "2026-10-24T19:15:00Z",
+        "completedAt": "0001-01-01T00:00:00Z"
+      },
+      {
+        "name": "security-focused",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186790/job/120961968906",
+        "startedAt": "2026-10-24T19:12:44Z",
+        "completedAt": "2026-10-24T19:14:58Z"
+      },
+      {
+        "name": "test (0)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136115",
+        "startedAt": "2026-10-24T19:19:16Z",
+        "completedAt": "2026-10-24T19:29:28Z"
+      },
+      {
+        "name": "build-and-check",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186876/job/120961969468",
+        "startedAt": "2026-10-24T19:15:10Z",
+        "completedAt": "2026-10-24T19:17:35Z"
+      },
+      {
+        "name": "smoke-clean-checkout",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186760/job/120961968827",
+        "startedAt": "2026-10-24T19:12:20Z",
+        "completedAt": "2026-10-24T19:13:35Z"
+      },
+      {
+        "name": "smoke",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186793/job/120961969066",
+        "startedAt": "2026-10-24T19:12:48Z",
+        "completedAt": "2026-10-24T19:14:37Z"
+      },
+      {
+        "name": "focused-core",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186827/job/120961969280",
+        "startedAt": "2026-10-24T19:13:41Z",
+        "completedAt": "2026-10-24T19:14:27Z"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120961969123",
+        "startedAt": "2026-10-24T19:21:39Z",
+        "completedAt": "2026-10-24T19:21:54Z"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120961955595",
+        "startedAt": "2026-10-24T19:18:33Z",
+        "completedAt": "2026-10-24T19:18:45Z"
+      },
+      {
+        "name": "services (0)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962286945",
+        "startedAt": "2026-10-24T19:21:42Z",
+        "completedAt": "2026-10-24T19:24:41Z"
+      },
+      {
+        "name": "v2-gates",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186863/job/120961969386",
+        "startedAt": "2026-10-24T19:14:53Z",
+        "completedAt": "2026-10-24T19:18:00Z"
+      },
+      {
+        "name": "test (1)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136095",
+        "startedAt": "2026-10-24T19:12:59Z",
+        "completedAt": "2026-10-24T19:20:56Z"
+      },
+      {
+        "name": "services (1)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962286749",
+        "startedAt": "2026-10-24T19:18:05Z",
+        "completedAt": "2026-10-24T19:21:20Z"
+      },
+      {
+        "name": "test (2)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136136",
+        "startedAt": "2026-10-24T19:22:07Z",
+        "completedAt": "2026-10-24T19:31:17Z"
+      },
+      {
+        "name": "services (2)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962287058",
+        "startedAt": "2026-10-24T19:22:12Z",
+        "completedAt": "2026-10-24T19:25:07Z"
+      },
+      {
+        "name": "test (3)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136058",
+        "startedAt": "2026-10-24T19:13:48Z",
+        "completedAt": "2026-10-24T19:23:31Z"
+      },
+      {
+        "name": "services (3)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962287142",
+        "startedAt": "2026-10-24T19:22:52Z",
+        "completedAt": "2026-10-24T19:25:44Z"
+      },
+      {
+        "name": "test (4)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136124",
+        "startedAt": "2026-10-24T19:21:56Z",
+        "completedAt": "2026-10-24T19:29:35Z"
+      },
+      {
+        "name": "services (4)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962286995",
+        "startedAt": "2026-10-24T19:22:01Z",
+        "completedAt": "2026-10-24T19:25:23Z"
+      },
+      {
+        "name": "test (5)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136168",
+        "startedAt": "2026-10-24T19:19:34Z",
+        "completedAt": "2026-10-24T19:29:37Z"
+      },
+      {
+        "name": "services (5)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962287030",
+        "startedAt": "2026-10-24T19:23:07Z",
+        "completedAt": "2026-10-24T19:26:06Z"
+      },
+      {
+        "name": "test (6)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136229",
+        "startedAt": "2026-10-24T19:14:29Z",
+        "completedAt": "2026-10-24T19:22:10Z"
+      },
+      {
+        "name": "services (6)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962286978",
+        "startedAt": "2026-10-24T19:22:35Z",
+        "completedAt": "2026-10-24T19:25:32Z"
+      },
+      {
+        "name": "test (7)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136068",
+        "startedAt": "2026-10-24T19:13:19Z",
+        "completedAt": "2026-10-24T19:21:58Z"
+      },
+      {
+        "name": "services (7)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186857/job/120962286896",
+        "startedAt": "2026-10-24T19:18:34Z",
+        "completedAt": "2026-10-24T19:21:48Z"
+      },
+      {
+        "name": "test (8)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962135915",
+        "startedAt": "2026-10-24T19:18:03Z",
+        "completedAt": "2026-10-24T19:29:14Z"
+      },
+      {
+        "name": "test (9)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136100",
+        "startedAt": "2026-10-24T19:14:58Z",
+        "completedAt": "2026-10-24T19:22:04Z"
+      },
+      {
+        "name": "test (10)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136126",
+        "startedAt": "2026-10-24T19:21:39Z",
+        "completedAt": "2026-10-24T19:31:07Z"
+      },
+      {
+        "name": "test (11)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186752/job/120962136119",
+        "startedAt": "2026-10-24T19:19:34Z",
+        "completedAt": "2026-10-24T19:30:19Z"
+      },
+      {
+        "name": "test (3.11)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186790/job/120961969243",
+        "startedAt": "2026-10-24T19:19:18Z",
+        "completedAt": "2026-10-24T19:23:05Z"
+      },
+      {
+        "name": "worker",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186791/job/120962090910",
+        "startedAt": "2026-10-24T19:21:35Z",
+        "completedAt": "2026-10-24T19:22:49Z"
+      },
+      {
+        "name": "frontend (frontend)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186827/job/120961969473",
+        "startedAt": "2026-10-24T19:17:12Z",
+        "completedAt": "2026-10-24T19:18:11Z"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120961969035",
+        "startedAt": "2026-10-24T19:21:23Z",
+        "completedAt": "2026-10-24T19:21:40Z"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120961955620",
+        "startedAt": "2026-10-24T19:18:13Z",
+        "completedAt": "2026-10-24T19:18:32Z"
+      },
+      {
+        "name": "frontend (src/frontend/admin-react)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186827/job/120961969494",
+        "startedAt": "2026-10-24T19:18:50Z",
+        "completedAt": "2026-10-24T19:19:31Z"
+      },
+      {
+        "name": "architecture-ratchets",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186827/job/120961969488",
+        "startedAt": "2026-10-24T19:19:21Z",
+        "completedAt": "2026-10-24T19:19:31Z"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120961968861",
+        "startedAt": "2026-10-24T19:12:38Z",
+        "completedAt": "2026-10-24T19:12:51Z"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120961955444",
+        "startedAt": "2026-10-24T19:14:40Z",
+        "completedAt": "2026-10-24T19:14:51Z"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120961968998",
+        "startedAt": "2026-10-24T19:21:17Z",
+        "completedAt": "2026-10-24T19:21:33Z"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120961955615",
+        "startedAt": "2026-10-24T19:17:37Z",
+        "completedAt": "2026-10-24T19:18:03Z"
+      },
+      {
+        "name": "pip-audit",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120961969060",
+        "startedAt": "2026-10-24T19:21:51Z",
+        "completedAt": "2026-10-24T19:22:33Z"
+      },
+      {
+        "name": "pip-audit",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120961955596",
+        "startedAt": "2026-10-24T19:18:04Z",
+        "completedAt": "2026-10-24T19:18:47Z"
+      },
+      {
+        "name": "slsa-provenance",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124186773/job/120964428984",
+        "startedAt": "2026-10-24T19:23:34Z",
+        "completedAt": "2026-10-24T19:23:52Z"
+      },
+      {
+        "name": "slsa-provenance",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/lkjalop/ShopSquire/actions/runs/40124182332/job/120963575447",
+        "startedAt": "2026-10-24T19:20:59Z",
+        "completedAt": "2026-10-24T19:21:15Z"
+      }
+    ],
+    "counts": {
+      "FAILURE": 11,
+      "IN_PROGRESS": 3,
+      "SUCCESS": 37
+    },
+    "qualification": "Observed check states at this head; pending/queued is not a pass. Required-check policy and prior-head results are separate."
+  },
+  "context_propagation_cohort": {
+    "commit": "6a232287",
+    "base": "e336fc66",
+    "new_controls_before": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 32.953,
+      "resource_violation": null,
+      "counts": {
+        "tests": 3,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "first_integration_selection": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 23.796,
+      "resource_violation": null,
+      "counts": {
+        "tests": 9,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "complete_selection": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 16.172,
+      "resource_violation": null,
+      "counts": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "scope": "Existing local ContextVar implementation plus real-executor mock signature dependency integrated; original assertions retained; mutable Session/thread ownership not thereby solved"
+  },
+  "hosted_canonical_image_scan": {
+    "head": "163441e932d22d915e521c58e5a3fd6d560ac2a6",
+    "run": 40124186769,
+    "artifact_id": 12572935260,
+    "artifact_sha256": "00cf0be718e1d5ccf6370d4b90bdff99fcafc13870954f32b5d0c4a5ee37c0c3",
+    "scanner": 2,
+    "target": "shopsquire:ci",
+    "matches": 79,
+    "severity": {
+      "HIGH": 77,
+      "CRITICAL": 2
+    },
+    "fixable_matches": 5,
+    "targets": [
+      {
+        "target": "shopsquire:ci (debian 13.7)",
+        "class": "os-pkgs",
+        "type": "debian",
+        "matches": 74,
+        "severity": {
+          "HIGH": 73,
+          "CRITICAL": 1
+        }
+      },
+      {
+        "target": "Node.js",
+        "class": "lang-pkgs",
+        "type": "node-pkg",
+        "matches": 0,
+        "severity": {}
+      },
+      {
+        "target": "Python",
+        "class": "lang-pkgs",
+        "type": "python-pkg",
+        "matches": 5,
+        "severity": {
+          "CRITICAL": 1,
+          "HIGH": 4
+        }
+      }
+    ],
+    "scope": "Native hosted canonical Dockerfile scan, not the separately tested lean runtime image; failure retained",
+    "interpretation": "79 native matches: 74 OS and five Python advisory matches; affected Python versions are SBOM-analyzed records without FilePath alongside newer METADATA records. Confirm artifact provenance/actual installed or vendored exposure before disposition; original gate remains failed."
+  },
+  "latest_all_lock_audit": {
+    "recorded_at": "2026-10-24T19:33:03.326452+00:00",
+    "lock_sha256": "5a13f34581ad8603c7fa1d28c63861ba79ceea758f5f3b8ce43cbb88ca17147b",
+    "service": "pip-audit PyPIService; all distinct lock versions; no host marker filtering",
+    "locked_package_versions": 217,
+    "package_advisory_matches": 0,
+    "affected": [],
+    "errors_or_skips": []
+  },
+  "python_c18_c23_matched_delta": {
+    "c18_to_c23b": {
+      "matched_cases": 9080,
+      "new_cases": 50,
+      "removed_cases": 0,
+      "transitions": {
+        "passed -> passed": 8767,
+        "skipped -> skipped": 310,
+        "failed -> passed": 2,
+        "skipped -> passed": 1
+      }
+    },
+    "c22_to_c23b": {
+      "matched_cases": 9126,
+      "new_cases": 4,
+      "removed_cases": 0,
+      "transitions": {
+        "passed -> passed": 8815,
+        "skipped -> skipped": 310,
+        "failed -> passed": 1
+      }
+    }
+  },
+  "socket_connection_diagnostic": {
+    "started_at": "2026-10-24T19:41:23.696Z",
+    "purpose": "Investigate loopback connection failures independently of ShopSquire",
+    "source": "C22 application remains frozen; this experiment does not exercise commerce or replace endurance",
+    "profile": "Interleaved feature on/off diagnostics plus unchanged-default arm; 1000 fresh HTTP connections per arm",
+    "arms": [
+      {
+        "index": 1,
+        "setting": "enabled",
+        "requests": 1000,
+        "successes": 1000,
+        "failures": 0,
+        "errors": [],
+        "browser_version": "149.0.7827.55",
+        "elapsed_seconds": 1.248,
+        "server_connections": 1001
+      },
+      {
+        "index": 2,
+        "setting": "disabled",
+        "requests": 1000,
+        "successes": 1000,
+        "failures": 0,
+        "errors": [],
+        "browser_version": "149.0.7827.55",
+        "elapsed_seconds": 1.131,
+        "server_connections": 1001
+      },
+      {
+        "index": 3,
+        "setting": "disabled",
+        "requests": 1000,
+        "successes": 1000,
+        "failures": 0,
+        "errors": [],
+        "browser_version": "149.0.7827.55",
+        "elapsed_seconds": 1.054,
+        "server_connections": 1001
+      },
+      {
+        "index": 4,
+        "setting": "enabled",
+        "requests": 1000,
+        "successes": 1000,
+        "failures": 0,
+        "errors": [],
+        "browser_version": "149.0.7827.55",
+        "elapsed_seconds": 1.129,
+        "server_connections": 1001
+      },
+      {
+        "index": 5,
+        "setting": "default",
+        "requests": 1000,
+        "successes": 1000,
+        "failures": 0,
+        "errors": [],
+        "browser_version": "149.0.7827.55",
+        "elapsed_seconds": 1.191,
+        "server_connections": 1001
+      }
+    ],
+    "completed": true,
+    "owned_server_closed": true,
+    "elapsed_seconds": 5.759,
+    "qualification": "Observed counts under distinct diagnostic feature profiles; not an application repair, causal proof, default-profile endurance pass, or permission to alter release settings",
+    "native_resource_profile": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 7.281,
+      "peaks": {
+        "rss_bytes": 142999552,
+        "handles": 716,
+        "threads": 41
+      },
+      "resource_violation": null
+    }
   }
 }

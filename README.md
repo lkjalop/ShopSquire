@@ -4,7 +4,7 @@ An evidence-governed commerce prototype: conversational buying, inventory and pr
 
 **Start with the [engineering walkthrough](docs/portfolio/ENGINEERING_WALKTHROUGH.md), [current ASCII architecture](docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md), and [25 October execution delta and roadmap](docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md).** Implementation is substantially AI-assisted. This is an engineering portfolio and an unfinished product; release readiness has not been established.
 
-The [draft repair PR](https://github.com/lkjalop/ShopSquire/pull/13) adds scoped market evidence, versioned supplier-draft review and grounded pricing previews. The latest larger local C15 Python run passed 8,701 tests with zero failures/errors and 309 skips; its 23 focused browser cases passed. Those local sources include additional WIP and do not certify the PR or published main. The later C16 broad browser profile reports 89 passes, 59 failures and 33 skips. Hosted security and endurance gates remain open.
+The [draft repair PR](https://github.com/lkjalop/ShopSquire/pull/13) adds scoped market evidence, versioned supplier-draft review and grounded AUD/USD/EUR pricing previews. C23's serial full Python profile reports **8,820 passes, 0 failures, 0 errors and 310 skips**. C23 broad browser reports **97 passes, 54 failures and 33 skips**; its included 28-case focused subset passes. Larger local sources include additional WIP and do not certify this PR or published main. [Named-case deltas, screenshots, source maps and remaining gates](docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) retain failures and narrower scopes; required hosted/security gates and C23 endurance remain open.
 
 ## What it can demonstrate now
 
@@ -83,6 +83,7 @@ On Linux use `requirements/bootstrap-runtime.txt`, `requirements/api-runtime.txt
 Set-Location frontend
 npm ci
 npm test
+npx tsc --noEmit
 npm run build
 ```
 
@@ -90,10 +91,10 @@ For an owned fictional browser runtime, follow the [reproduction instructions](d
 
 ## What to do next
 
-1. Integrate remaining local work in dependency-complete commits; reproduce one clean installation.
-2. Repair browser actor/fixture contracts and candidate/qualified-result presentation while preserving evidence gates.
-3. Complete case-bound evidence intake, bulk shortage presentation and cited market intelligence.
-4. Close distributed privacy, inventory contention, approval identity, uncertain-delivery recovery and unresolved advisories.
-5. Reduce oversized functions; freeze one source for required Python/browser/security, restore/rollback and endurance checks.
+1. Integrate remaining local cohorts and qualify one clean candidate with its required hosted checks and canonical runtime image.
+2. Separate buyer explanations from privileged operator audit calls; resolve remaining browser actor, stock-fixture and semantic/provider failures.
+3. Extend the demonstrated shortage/draft/quoted-intelligence slice to natural-language disclosure edits, full pack/landed pricing and real provider recovery.
+4. Close all-plane privacy and legacy analytics isolation, inventory/provider contention and unresolved OS/security findings.
+5. Reduce oversized ownership boundaries; qualify the same candidate for required recovery, rollback, latency and endurance.
 
-The [current roadmap](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md#remaining-roadmap) gives acceptance evidence and reasons. Older strategy, architecture and demonstration documents remain historical context. No production readiness, real supplier/payment execution or business uplift is claimed.
+The [current W00–W15 roadmap](docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md#remaining-roadmap-and-exit-evidence) gives acceptance evidence and reasons. The obsolete storefront install manifests are [retired](docs/audits/2026-10-25-deprecated-storefront-retirement.md); its historical source remains for reference. Older strategy, architecture and demonstration documents remain historical context. No production readiness, real supplier/payment execution or business uplift is claimed.

@@ -5,6 +5,7 @@ Reviewed 25 October 2026. This describes implemented components across the draft
 ```text
  BUYER                                  OPERATOR / ADMIN
  chat, uploads, shelves, reload          inventory, evidence, reviewed draft
+ scoped explanation [gap]              raw audit / privileged trace
            | native signed session             | person + tenant role
            +-------------------+---------------+
                                v
@@ -68,6 +69,29 @@ Reviewed 25 October 2026. This describes implemented components across the draft
  | Hippograph: advisory relationships|  | held-out eval: unmeasured if|
  | and recall, not fact authority    |  | required evidence is absent |
  +------------------------------------+  +-------------------------------+
+
+ LEGACY / UNQUALIFIED PATHS
+ query clustering -> invocation-time model attempts / hash fallback
+                  -> embedding_cache.json [tenant/model/retention gap]
+                  -> query_clusters SQL [tenant/job scope gap]
+ Grafana JSON adapters [syntax/dependency failures; separate from Prometheus]
+
+ OTHER IMPLEMENTED SURFACES [qualification varies by profile]
+
+ uploads -> file/URL admission -> OCR / QR / basic CV -> scoped evidence
+                                      |
+                                      +-> optional vision model
+                                          [readiness != accuracy]
+
+ email/webhooks -> source/auth/security checks -> normalized observations
+                                              -> proposals / review / outbox
+
+ support / warranty / complaints -> escalation / returns / refund proposals
+                                 -> role / person / policy checks
+                                 -> provider / ERP adapters [not fully qualified]
+
+ task queue / replay / durable outbox -> owned workers -> terminal receipts
+                                       [admission/draining gaps remain]
 ```
 
 ## Source entry points
@@ -83,5 +107,11 @@ Reviewed 25 October 2026. This describes implemented components across the draft
 | Person-bound authority | [person approval](../../src/app/services/fulfillment/person_approval.py) |
 | Memory/cache | [memory](../../src/app/services/memory.py), [semantic cache](../../src/app/services/semantic_cache.py) |
 | Privacy boundary | [privacy API](../../src/app/routers/privacy.py), [separate-process controls](../../tests/integration/test_privacy_multi_instance_http.py) |
+| Buyer/operator explanation boundary | [buyer API calls](../../frontend/src/lib/api.ts), [trace UI](../../frontend/src/components/DecisionTrace.tsx); native buyer calls still cross into operator-only endpoints |
+| Legacy analytics requiring isolation | [clustering](../../src/app/services/nlp_query_clustering.py), [persistence/read API](../../src/app/routers/query_clusters.py) |
+| Multimodal and email security | [vision API](../../src/app/routers/vision.py), [CV API](../../src/app/routers/cv.py), [email security](../../src/app/security/email_security.py) |
+| Post-purchase and effects | [complaints](../../src/app/routers/support_complaints.py), [payments/refunds](../../src/app/routers/payments.py), [task runner](../../src/app/workers/task_runner.py) |
 
 The all-plane privacy cascade, product-agnostic unit/pack normalization, complete landed quote, production independent-person deployment, provider reconciliation and final-candidate endurance are open. SQL compatibility bootstrap is not a replacement for migration/restore qualification. SQLite evidence does not establish PostgreSQL contention correctness. Fixture citations are not live supplier confirmation. The larger local coordinator/source changes remain separately scoped until integrated and independently tested.
+
+The buyer and operator remain different actors. A separate operator browser context can read the internal audit; an ordinary buyer must not receive those credentials. Current buyer UI calls to privileged telemetry/raw trace remain a demonstrated gap. The legacy embedding cache and query-cluster table are not covered by the indexed Redis erasure contract. See the [C22 findings with C23 follow-up](../audits/2026-10-25-c22-code-review-findings.md) and [latest C23 roadmap source map](../audits/2026-10-25-c23-roadmap-source-map.csv) for scope and exit tests.
