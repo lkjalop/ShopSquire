@@ -5,6 +5,13 @@ from src.app.services.bulk_intent import (
 )
 
 
+def test_whole_order_counts_share_the_numeric_and_word_quantity_contract():
+    assert extract_quantity_span('budget for all 8 laptops', unit_nouns=('laptop',)) == (8, '8')
+    assert extract_quantity_span('budget for all eight laptops', unit_nouns=('laptop',)) == (8, 'eight')
+    assert extract_quantity_span('all 20 valves', unit_nouns=('valve',)) == (20, '20')
+    assert extract_quantity_span('all 15 inch laptops', unit_nouns=('laptop',)) is None
+
+
 def test_catalog_command_quantity_and_total_budget_are_both_recognized():
     query = (
         "Suggest 10 suitable laptops under a $25,000 total budget for Unreal Engine "
