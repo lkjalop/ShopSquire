@@ -1,0 +1,42 @@
+name: Evaluation release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: Tenant owning the approved baseline and measured evaluation dataset
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tenant:
+        required: true
+        type: string
+    secrets:
+      EVALUATION_DATABASE_URL:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  measured-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.EVALUATION_DATABASE_URL }}
+      EVALUATION_TENANT: ${{ inputs.tenant }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Require the evaluation database
+        run: test -n "$DATABASE_URL"
+      - name: Install locked dependencies
+        run: |
+          python -m pip install poetry
+          poetry config virtualenvs.create false
+          poetry install --only main --no-root --no-interaction
+      - name: Require fresh measurements against the approved baseline
+        run: python scripts/check_evaluation_release.py --tenant "$EVALUATION_TENANT"

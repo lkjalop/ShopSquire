@@ -9,6 +9,8 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      OWNER_API_KEY: ci-smoke-owner
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -53,15 +55,19 @@ jobs:
           curl -s -X POST -H "Content-Type: application/json" -u admin:admin http://127.0.0.1:3000/api/dashboards/db -d "{\"dashboard\": $DASH, \"overwrite\": true}"
       - name: Health check
         run: |
-          curl -sS http://127.0.0.1:8081/health
+          curl --fail-with-body -sS http://127.0.0.1:8081/healthz | jq -e '.status == "ok"'
       - name: Metrics sanity
         run: |
           curl -sS http://127.0.0.1:8081/metrics | egrep 'shopsquire_geoip_lookups_total|shopsquire_geo_asn_risk_total|shopsquire_query_cluster_volume_total' || (echo "Metrics missing" && exit 1)
       - name: Query clustering smoke
         run: |
-          curl -s -X POST http://127.0.0.1:8081/api/v1/analytics/query_clusters \
+          curl --fail-with-body -sS -X POST http://127.0.0.1:8081/api/v1/analytics/query_clusters \
+            -H "x-api-key: $OWNER_API_KEY" \
             -H 'Content-Type: application/json' \
-            -d '{"queries":["Where is my order?","Track shipment","Refund policy"],"min_cluster_size":1,"persist":false}' | jq .
+            -d '{"queries":["Where is my order?","Track shipment","Refund policy"],"min_cluster_size":1,"persist":false}' | jq -e 'has("error") | not'
       - name: RAGAS sampling endpoint
         run: |
-          curl -s -X POST 'http://127.0.0.1:8081/api/v1/analytics/ragas/run_sampling?sample_rate=0.01&limit=10' | jq .
+          curl --fail-with-body -sS -X POST 'http://127.0.0.1:8081/api/v1/analytics/ragas/run_sampling?sample_rate=0.01&limit=10' \
+            -H "x-api-key: $OWNER_API_KEY" | jq -e '.result | has("evaluated") and has("unavailable") and has("error")'
+      - name: Evaluation release-contract regressions
+        run: pytest -q tests/api/test_ragas_baseline.py tests/api/test_ragas_alerting.py tests/services/test_release_integrity.py

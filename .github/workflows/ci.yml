@@ -24,8 +24,16 @@ jobs:
       - name: Install locked backend and test tools
         uses: ./.github/actions/install-backend
       - name: Run focused security suite
+        env:
+          APP_ENV: test
         run: |
           python -m pytest -q \
+            tests/security/test_publication_security.py \
+            tests/security/test_dmarc_boundaries.py \
+            tests/services/test_terminal_qualification_security.py \
+            tests/services/test_market_pipeline.py \
+            tests/services/fulfillment/test_transport.py \
+            tests/services/fulfillment/test_transport_health.py \
             tests/security/test_url_guard.py \
             tests/security/test_model_theft_guard.py \
             tests/security/test_cv_qr_redirect_chain.py \
@@ -94,7 +102,7 @@ jobs:
           python -m alembic -c alembic.ini upgrade head
       - name: Check for sync db_session() in async routes
         run: |
-          python scripts/check_async_db.py src/app/routers || true
+          python scripts/check_async_db.py src/app/routers
       - name: Shadow migration check
         run: |
           python scripts/shadow_migration_check.py --db-url "${{ env.DATABASE_URL }}"
@@ -111,6 +119,7 @@ jobs:
             python -m pytest -vv --timeout=120 --timeout-method=thread \
               --junitxml=test-results/postgres-${{ matrix.python-version }}.xml \
               tests/chaos/test_money_concurrency_postgres.py \
+              tests/chaos/test_release_integrity_postgres.py \
               tests/chaos/test_money_concurrency_http.py \
               tests/chaos/test_demand_allocation_concurrency_postgres.py \
               tests/architecture/test_postgres_security_boundaries.py \
