@@ -1,11 +1,11 @@
-FROM node:22-alpine AS storefront
+FROM node:25-alpine AS storefront
 WORKDIR /build/storefront
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM node:22-alpine AS admin
+FROM node:25-alpine AS admin
 WORKDIR /build/admin
 COPY src/frontend/admin-react/package.json src/frontend/admin-react/package-lock.json ./
 RUN npm ci
