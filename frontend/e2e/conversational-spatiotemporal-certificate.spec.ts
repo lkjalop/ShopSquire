@@ -2,7 +2,17 @@ import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fixtureMerchantHeaders } from './helpers/fixtureMerchant';
 
+test.beforeEach(async ({ context }) => {
+  await context.setExtraHTTPHeaders(fixtureMerchantHeaders());
+});
+
+test('procurement certificate requires an enrolled actor', async ({ request }) => {
+  const response = await request.post(
+    '/api/v1/certification/procurement/conversational-spatiotemporal/evaluate', { data: {} });
+  expect(response.status()).toBe(401);
+});
 
 test('two-turn procurement decision lab renders and seals the canonical certificate', async ({ page }, testInfo) => {
   test.setTimeout(150_000);
@@ -21,7 +31,7 @@ test('two-turn procurement decision lab renders and seals the canonical certific
   const api = await page.request.post(
     '/api/v1/certification/procurement/conversational-spatiotemporal/evaluate',
     {
-      headers: { 'x-api-key': process.env.MERCHANT_API_KEY || 'local-merchant-key' },
+      headers: fixtureMerchantHeaders(),
       data: {},
     },
   );

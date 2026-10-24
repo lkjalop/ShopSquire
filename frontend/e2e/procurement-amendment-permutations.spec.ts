@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
-const API_KEY = process.env.VITE_API_KEY?.trim() || 'local-merchant-key';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -17,10 +17,8 @@ async function send(page: Page, text: string) {
 }
 
 test('relative bulk amendment preserves the cart line and exposes one confirmation authority', async ({ page }) => {
-  const uid = `e2e-relative-amend-${Date.now()}`;
-  await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
+  const uid = await registerBuyer(page.context());
   const seeded = await page.request.post('/api/v1/cart/items', {
-    headers: { 'x-api-key': API_KEY },
     data: { uid, sku: 'RGAM-0007', quantity: 20 },
   });
   expect(seeded.ok(), await seeded.text()).toBeTruthy();
@@ -49,8 +47,7 @@ test('relative bulk amendment preserves the cart line and exposes one confirmati
 });
 
 test('read-only follow-up preserves exact identity without granting unverified fit authority', async ({ page }) => {
-  const uid = `e2e-status-preserve-${Date.now()}`;
-  await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
+  const uid = await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 

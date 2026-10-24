@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 async function send(page: import('@playwright/test').Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -10,12 +11,8 @@ async function send(page: import('@playwright/test').Page, text: string) {
 
 test('unfamiliar capability request plans research before buyer-specific clarification', async ({ page }) => {
   test.setTimeout(300_000);
-  // A fresh enterprise-scoped identity gives this real-backend journey an isolated,
-  // deterministic allowance. Shared guest quota state must not turn a semantic
-  // contract test into an intermittent quota test.
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  const uid = `enterprise-e2e-semantic-${suffix}`;
-  await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
+  // Native registration owns the buyer identity and its normal quota.
+  const uid = await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 

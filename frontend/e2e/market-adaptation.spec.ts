@@ -1,7 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import { fixtureMerchantHeaders } from './helpers/fixtureMerchant';
 
 /**
  * Recorded PHASE-3 adaptive-storefront beat (video: on) — David's "detect a demand signal → re-emphasize
@@ -15,18 +13,16 @@ import { dirname, resolve } from 'path';
  * (a market_finding the live gate then judges) — nothing here sends or mutates customer-facing state.
  */
 
-const here = dirname(fileURLToPath(import.meta.url));
+test.beforeEach(async ({ context }) => {
+  await context.setExtraHTTPHeaders(fixtureMerchantHeaders());
+});
 
-function devApiKey(): string {
-  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
-  for (const rel of ['../.env.local', '../.env.development.local']) {
-    try {
-      const m = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
-      if (m && m[1].trim()) return m[1].trim();
-    } catch { /* next */ }
-  }
-  return '';
-}
+test('demo demand injection requires an enrolled actor', async ({ request }) => {
+  const response = await request.post('/api/v1/fulfillment/market/demo-demand-signal', {
+    data: { direction: 'spike', confidence: 0.85, severity: 'critical' },
+  });
+  expect(response.status()).toBe(401);
+});
 
 // inject / clear the demand signal via the demo script (runs at the repo root so the module import resolves)
 async function seedDemand(
@@ -36,7 +32,7 @@ async function seedDemand(
   severity: 'info' | 'warn' | 'critical' = 'warn',
 ): Promise<any> {
   const response = await page.request.post('/api/v1/fulfillment/market/demo-demand-signal', {
-    headers: { 'x-api-key': devApiKey() },
+    headers: fixtureMerchantHeaders(),
     data: { direction, confidence, severity },
   });
   expect(response.ok(), `demo signal failed (${response.status()})`).toBeTruthy();
@@ -46,7 +42,7 @@ async function seedDemand(
 async function storefrontEmphasis(page: Page, inventoryPosition = 'balanced'): Promise<any> {
   const r = await page.request.get(
     `/api/v1/fulfillment/market/storefront-emphasis?inventory_position=${encodeURIComponent(inventoryPosition)}`,
-    { headers: { 'x-api-key': devApiKey() } });
+    { headers: fixtureMerchantHeaders() });
   expect(r.ok(), `storefront emphasis failed (${r.status()})`).toBeTruthy();
   return r.json();
 }

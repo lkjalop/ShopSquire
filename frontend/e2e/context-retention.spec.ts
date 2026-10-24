@@ -1,7 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import {fixtureMerchantHeaders} from './helpers/fixtureMerchant';
 
 /**
  * Context-retention regression net — the "budget across turns" class that broke the live demo:
@@ -16,21 +14,9 @@ import { dirname, resolve } from 'path';
  * product prices + band text, not free prose.
  */
 
-function devApiKey(): string {
-  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
-  const here = dirname(fileURLToPath(import.meta.url));
-  for (const rel of ['../.env.local', '../.env.development.local']) {
-    try {
-      const m = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
-      if (m && m[1].trim()) return m[1].trim();
-    } catch { /* next */ }
-  }
-  return '';
-}
-
 async function chat(page: Page, uid: string, query: string): Promise<any> {
   const r = await page.request.post('/api/v1/chat/query', {
-    headers: { 'x-api-key': devApiKey(), 'Content-Type': 'application/json' },
+    headers: { ...fixtureMerchantHeaders(), 'Content-Type': 'application/json' },
     data: { uid, query },
     timeout: 90_000,
   });

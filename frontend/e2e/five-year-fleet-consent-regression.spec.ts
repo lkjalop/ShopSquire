@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
+import {registerBuyer} from './helpers/registeredBuyer';
+import {turn} from './helpers/chatTurn';
 
 const exact = 'I want this to last five years as a company laptop fleet. We use Linux sometimes, Windows management, docks and two 4K monitors. Are there any support, compatibility or security reasons not to buy 40 of them?';
 
@@ -28,37 +30,21 @@ const journeys = [
   },
 ];
 
-async function openAssistant(page: Page, uid: string) {
-  await page.addInitScript((value) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', value);
-  }, uid);
+async function openAssistant(page: Page) {
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 }
 
-async function createCase(page: Page, prompt: string) {
-  const responsePromise = page.waitForResponse(
-    response => /\/api\/v1\/shopping-cases\/interpretations$/.test(response.url()),
-    { timeout: 30_000 },
-  );
-  const input = page.getByPlaceholder('Type your message...');
-  await input.fill(prompt);
-  await input.press('Enter');
-  const response = await responsePromise;
-  expect(response.status()).toBe(200);
-  return response.json();
-}
 
 for (const journey of journeys) {
   test(`five-year fleet consent is consequential and bounded: ${journey.id}`, async ({ page }) => {
     test.setTimeout(90_000);
-    await openAssistant(page, `fleet-consent-${journey.id}-${Date.now()}-${Math.random()}`);
-    const created = await createCase(page, journey.prompt);
+    await openAssistant(page);
+    const created = await turn(page, journey.prompt);
     expect(created.ambiguity_exploration.status).toBe('provisional');
-    expect(created.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
-    expect(created.catalog_candidate_set.configuration_ids.length).toBeGreaterThan(0);
+    expect(created.ambiguity_exploration.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+    expect(created.ambiguity_exploration.catalog_candidate_set.configuration_ids.length).toBeGreaterThan(0);
     await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
 
     const panel = page.getByTestId('ambiguity-exploration');

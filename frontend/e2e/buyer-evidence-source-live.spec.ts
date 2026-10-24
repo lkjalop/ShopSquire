@@ -1,17 +1,19 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './helpers/authenticatedTest';
 
 test.skip(
   process.env.RUN_LIVE_BUYER_SOURCE_CERTIFICATION !== '1',
   'Set RUN_LIVE_BUYER_SOURCE_CERTIFICATION=1 against the governed local stack.',
 );
 
-test('buyer checks an official URL locally then explicitly authorizes canonical research', async ({ page }) => {
+test('buyer checks an official URL locally then explicitly authorizes canonical research', async ({ page, context }) => {
   test.setTimeout(120_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
-  await page.addInitScript(
-    (uid) => sessionStorage.setItem('uid', uid),
-    `buyer-source-live-${suffix}`,
-  );
+  await context.setExtraHTTPHeaders({});
+  const privileged: string[] = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/v1/') && request.headers()['x-api-key']) {
+      privileged.push(request.url());
+    }
+  });
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
   const input = page.getByPlaceholder('Type your message...');
@@ -45,6 +47,7 @@ test('buyer checks an official URL locally then explicitly authorizes canonical 
   await expect(trace).not.toContainText(/No governed workload research record was produced/i);
   await expect(trace.getByTestId('governed-evidence-ladder')).toBeVisible();
   await expect(trace.getByTestId('governed-evidence-ladder')).toContainText(/canonical origin/i);
+  expect(privileged, 'Buyer research must not carry an operator API key').toEqual([]);
   if (process.env.PORTFOLIO_SCREENSHOT_PATH) {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.screenshot({ path: process.env.PORTFOLIO_SCREENSHOT_PATH });

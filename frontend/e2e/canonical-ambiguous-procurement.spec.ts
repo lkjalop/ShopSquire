@@ -1,26 +1,12 @@
-import { test, expect } from '@playwright/test';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
-
-function devApiKey(): string {
-  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
-  const here = dirname(fileURLToPath(import.meta.url));
-  for (const rel of ['../.env.local', '../.env.development.local']) {
-    try {
-      const match = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
-      if (match?.[1]?.trim()) return match[1].trim();
-    } catch { /* try next */ }
-  }
-  return '';
-}
+import { test, expect, buyerUid } from './helpers/authenticatedTest';
+import { readChatResponse } from './helpers/chatTurn';
 
 async function send(page: import('@playwright/test').Page, text: string, captureChatResponse = false) {
   const input = page.getByPlaceholder('Type your message...');
   const responsePromise = captureChatResponse
     ? page.waitForResponse((response) => (
       response.request().method() === 'POST'
-        && /\/api\/v1\/shopping-cases\/interpretations(?:\?|$)/.test(response.url())
+        && /\/api\/v1\/(?:shopping-cases\/interpretations|chat\/(?:query|stream))(?:\?|$)/.test(response.url())
     ), { timeout: 20_000 })
     : null;
   await input.fill(text);
@@ -29,7 +15,7 @@ async function send(page: import('@playwright/test').Page, text: string, capture
   if (response) expect(response.ok(), `chat request failed: ${response.status()}`).toBeTruthy();
   await expect(page.getByTestId('stream-acknowledgement')).toBeHidden({ timeout: 20_000 });
   if (!response) return null;
-  return response.json();
+  return readChatResponse(response);
 }
 
 async function expectTraceEvent(
@@ -48,15 +34,16 @@ async function expectTraceEvent(
 
 test('ambiguous workload explores locally before optional research without cart authority', async ({ page }) => {
   test.setTimeout(240_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
-  const uid = `enterprise-e2e-ambiguous-${suffix}`;
-  await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
-  const key = devApiKey();
-  expect(key).not.toEqual('');
-  for (const [sku, quantity] of [['LAP-0003', 30], ['LAP-0004', 30]] as const) {
+  const uid = buyerUid;
+  const catalog = await page.request.get('/api/v1/products/list?per_page=100');
+  expect(catalog.ok(), 'load the current shop instead of assuming historical demo SKUs').toBeTruthy();
+  const skus = (await catalog.json()).products.map((product: {sku: string}) => product.sku)
+    .filter((sku: string) => sku.startsWith('LAP-')).slice(0, 2);
+  expect(skus).toHaveLength(2);
+  for (const sku of skus) {
     const seeded = await page.request.put(`/api/v1/cart/items/${sku}`, {
-      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
-      data: { uid, sku, quantity, allow_sourcing: true },
+      headers: { 'Content-Type': 'application/json' },
+      data: { uid, sku, quantity: 30, allow_sourcing: true },
     });
     expect(seeded.ok(), `cart seed failed for ${sku}`).toBeTruthy();
   }

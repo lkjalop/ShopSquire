@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -9,8 +10,7 @@ async function send(page: Page, text: string) {
 
 test('ambiguous research continues into an explicit synthetic supplier decision', async ({ page }) => {
   test.setTimeout(300_000);
-  const uid = `enterprise-e2e-${Date.now()}-${Math.random()}`;
-  await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
+  const uid = await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 

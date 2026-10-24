@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 function responseEvents(response: Response): Promise<any[]> {
   return response.text().then((body) => {
@@ -47,7 +48,7 @@ async function sendToChat(page: Page, query: string): Promise<Response> {
 
 test('prospective arrival request reaches fulfilment instead of post-purchase refusal', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `arrival-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
 
@@ -62,7 +63,7 @@ test('prospective arrival request reaches fulfilment instead of post-purchase re
 
 test('ordinary gaming catalog exploration renders products without requiring research', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `ordinary-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
 
@@ -75,7 +76,7 @@ test('ordinary gaming catalog exploration renders products without requiring res
 
 test('commercial turns remain bound to an ambiguous case and preserve its purpose', async ({ page }) => {
   test.setTimeout(240_000);
-  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `interrupt-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
   const initialResponse = await sendToChat(page, 'I need laptops for a factory rollout.');
@@ -115,7 +116,7 @@ test('commercial turns remain bound to an ambiguous case and preserve its purpos
 
 test('a product swap preserves the CAD purpose and quantity', async ({ page }) => {
   test.setTimeout(240_000);
-  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `swap-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
 

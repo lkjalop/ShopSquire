@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import {registerBuyer} from './helpers/registeredBuyer';
 
 const prompts = [
   'I need a portable workstation for the fictional HelioSpec Tandem 9 protein-identification suite; only its publisher requirements may qualify hardware.',
@@ -8,12 +9,8 @@ const prompts = [
   'I need to run the fictional DentVoxel Segmenter Enterprise locally; only its software-publisher hardware requirements are acceptable.',
 ];
 
-async function openAssistant(page: import('@playwright/test').Page, suffix: string) {
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `open-world-unseen-${suffix}`);
+async function openAssistant(page: import('@playwright/test').Page) {
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 }
@@ -21,7 +18,7 @@ async function openAssistant(page: import('@playwright/test').Page, suffix: stri
 for (const [index, prompt] of prompts.entries()) {
   test(`unseen ${index + 1}: consent dispatches free discovery without granting authority`, async ({ page }) => {
     test.setTimeout(180_000);
-    await openAssistant(page, `${index}-${Date.now()}`);
+    await openAssistant(page);
     const input = page.getByPlaceholder('Type your message...');
     await input.fill(prompt);
     await input.press('Enter');
