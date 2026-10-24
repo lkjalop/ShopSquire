@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
 from threading import Lock
@@ -69,7 +70,9 @@ def call_with_resilience(
     last_exc: Exception | None = None
     for i in range(max(1, retries + 1)):
         timed_out = False
-        fut = _executor().submit(fn)
+        # ContextVars do not propagate automatically into ThreadPoolExecutor.
+        # Each attempt gets its own copy so tenant/profile identity survives retries.
+        fut = _executor().submit(copy_context().run, fn)
         try:
             out = fut.result(timeout=timeout_s)
             st.failures = 0

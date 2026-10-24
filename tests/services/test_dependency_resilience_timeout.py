@@ -15,7 +15,7 @@ def test_timeout_cancels_queued_future(monkeypatch):
             return True
 
     future = _Future()
-    executor = type("_Executor", (), {"submit": lambda self, _fn: future})()
+    executor = type("_Executor", (), {"submit": lambda self, _fn, *args: future})()
     monkeypatch.setattr(resilience, "_executor", lambda: executor)
     monkeypatch.setitem(resilience._CIRCUITS, "test.cancel", resilience.CircuitState())
 
