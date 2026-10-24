@@ -56,6 +56,11 @@ def call_with_resilience(
     breaker_failures: int = 5,
     breaker_open_s: float = 20.0,
 ) -> Any:
+    """Bound caller waiting; a timeout is terminal for automatic retries.
+
+    Running work may survive a timeout. Its transport must enforce its own
+    deadline, and uncertain effects need explicit reconciliation/idempotency.
+    """
     st = _state(dep)
     now = time.time()
     if st.open_until > now:
@@ -63,6 +68,7 @@ def call_with_resilience(
 
     last_exc: Exception | None = None
     for i in range(max(1, retries + 1)):
+        timed_out = False
         fut = _executor().submit(fn)
         try:
             out = fut.result(timeout=timeout_s)
@@ -72,11 +78,14 @@ def call_with_resilience(
         except FuturesTimeout:
             fut.cancel()
             last_exc = TimeoutError(f"timeout:{dep}")
+            timed_out = True
         except Exception as e:
             last_exc = e
         st.failures += 1
         if st.failures >= breaker_failures:
             st.open_until = time.time() + breaker_open_s
+            break
+        if timed_out:
             break
         if i < retries:
             try:
