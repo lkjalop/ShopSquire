@@ -22,6 +22,16 @@ class _Redis:
     def expire(self, key, seconds):
         return True
 
+    def eval(self, script, count, key, index, *arguments):
+        # Model the shared atomic publication protocol, not independent writes.
+        if not arguments:
+            return self.values.get(key) if key in self.sets.get(index, set()) else None
+        payload, ttl, index_ttl = arguments
+        self.sadd(index, key)
+        self.expire(index, index_ttl)
+        self.set(key, payload, ttl)
+        return 'OK'
+
 
 def _job():
     contract = CacheContract.resolve(

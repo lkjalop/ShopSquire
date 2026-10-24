@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from threading import RLock
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -27,6 +28,29 @@ except Exception:
 
 _LOCAL_CACHE_MAXSIZE = 500
 CACHE_CONTRACT_VERSION = "2"
+
+# Register before publishing: Redis script errors do not roll back commands.
+# Retaining a harmless index member is safe; retaining an unindexed value is not.
+_WRITE_VERSIONED = """
+local remaining = redis.call('TTL', KEYS[2])
+redis.call('SADD', KEYS[2], KEYS[1])
+if remaining == -2 or (remaining >= 0 and remaining < tonumber(ARGV[3])) then
+    redis.call('EXPIRE', KEYS[2], ARGV[3])
+end
+return redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+"""
+_ERASE_VERSIONED = """
+local members = redis.call('SMEMBERS', KEYS[1])
+for _, member in ipairs(members) do
+    redis.call('DEL', member)
+end
+redis.call('DEL', KEYS[1])
+return #members
+"""
+_READ_VERSIONED = """
+if redis.call('SISMEMBER', KEYS[2], KEYS[1]) == 0 then return false end
+return redis.call('GET', KEYS[1])
+"""
 
 
 def _canonical_json(value: Any) -> str:
@@ -119,6 +143,8 @@ class SemanticCache:
         self._local: dict[str, Any] = {}
         self._local_expiry: dict[str, float] = {}
         self._local_scope_index: dict[str, set[str]] = {}
+        self._local_key_scope: dict[str, str] = {}
+        self._scope_lock = RLock()
         self._redis = redis_client
         if self._redis is None and redis_url and _has_redis:
             try:
@@ -127,7 +153,7 @@ class SemanticCache:
             except Exception:
                 self._redis = None
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str, *, allow_local_fallback: bool = True) -> Optional[Any]:
         if not key:
             return None
         # Try Redis first
@@ -141,13 +167,13 @@ class SemanticCache:
                 except Exception:
                     return v
         except Exception:
-            pass
+            if not allow_local_fallback:
+                return None
 
         # Fallback to local dict
         exp = self._local_expiry.get(key)
         if exp is not None and exp < time.time():
-            self._local.pop(key, None)
-            self._local_expiry.pop(key, None)
+            self._drop_local(key)
             return None
         v = self._local.get(key)
         return v
@@ -156,6 +182,17 @@ class SemanticCache:
     def is_shared_backend(self) -> bool:
         """Whether writes are visible across API and worker processes."""
         return self._redis is not None
+
+    def _drop_local(self, key: str) -> None:
+        self._local.pop(key, None)
+        self._local_expiry.pop(key, None)
+        index = self._local_key_scope.pop(key, None)
+        if index is not None:
+            members = self._local_scope_index.get(index)
+            if members is not None:
+                members.discard(key)
+                if not members:
+                    self._local_scope_index.pop(index, None)
 
     def set(self, key: str, value: Any, ex: Optional[int] = None) -> None:
         if not key:
@@ -180,13 +217,11 @@ class SemanticCache:
                 now = time.time()
                 expired_keys = [k for k, exp in list(self._local_expiry.items()) if exp < now]
                 for k in expired_keys:
-                    self._local.pop(k, None)
-                    self._local_expiry.pop(k, None)
+                    self._drop_local(k)
             if len(self._local) >= self._maxsize:
                 oldest = sorted(self._local_expiry.items(), key=lambda x: x[1])[:max(1, self._maxsize // 10)]
                 for k, _ in oldest:
-                    self._local.pop(k, None)
-                    self._local_expiry.pop(k, None)
+                    self._drop_local(k)
             self._local[key] = value
             self._local_expiry[key] = time.time() + max(1, int(ex))
         except Exception:
@@ -200,8 +235,7 @@ class SemanticCache:
                 self._redis.delete(key)
         except Exception:
             pass
-        self._local.pop(key, None)
-        self._local_expiry.pop(key, None)
+        self._drop_local(key)
 
     def delete_strict(self, key: str) -> None:
         """Delete an entry without concealing shared-cache failures.
@@ -215,8 +249,7 @@ class SemanticCache:
             return
         if self._redis is not None:
             self._redis.delete(key)
-        self._local.pop(key, None)
-        self._local_expiry.pop(key, None)
+        self._drop_local(key)
 
     def set_safe(self, key: str, value: Any, *, source_id: str, trust_score: float, ex: Optional[int] = None) -> None:
         ts = int(time.time())
@@ -281,17 +314,23 @@ class SemanticCache:
             },
             "value": value,
         }
-        self.set(key, wrapped, ex=ttl)
         index_key = contract.erasure_index_key
-        self._local_scope_index.setdefault(index_key, set()).add(key)
-        try:
-            if self._redis:
-                self._redis.sadd(index_key, key)
-                # Keep the erasure index at least as long as any supported
-                # cache entry; later short writes must not orphan older keys.
-                self._redis.expire(index_key, max(ttl, 90 * 86400))
-        except Exception:
-            pass
+        if self._redis is not None:
+            try:
+                # Shared versioned publication requires the atomic protocol.
+                # An unavailable/unsupported backend is a cache miss, never a
+                # process-local copy that a replacement worker cannot erase.
+                self._redis.eval(_WRITE_VERSIONED, 2, key, index_key,
+                                 json.dumps(wrapped, ensure_ascii=False), ttl,
+                                 ttl + 1)
+            except Exception:
+                return key
+        else:
+            with self._scope_lock:
+                self.set(key, wrapped, ex=ttl)
+                if key in self._local:
+                    self._local_scope_index.setdefault(index_key, set()).add(key)
+                    self._local_key_scope[key] = index_key
         return key
 
     def get_versioned(
@@ -303,7 +342,17 @@ class SemanticCache:
         min_trust: float = 0.3,
     ) -> Optional[Any]:
         key = contract.cache_key(namespace, request)
-        wrapped = self.get(key)
+        # A disconnected shared-cache client cannot establish whether another
+        # worker revoked or erased this scope. Never resurrect its local copy.
+        # Explicitly local-only caches continue using their local storage.
+        if self._redis is not None:
+            try:
+                raw = self._redis.eval(_READ_VERSIONED, 2, key, contract.erasure_index_key)
+                wrapped = json.loads(raw) if raw else None
+            except Exception:
+                return None
+        else:
+            wrapped = self.get(key, allow_local_fallback=False)
         if not isinstance(wrapped, dict):
             return None
         meta = wrapped.get("_meta") if isinstance(wrapped.get("_meta"), dict) else {}
@@ -317,7 +366,21 @@ class SemanticCache:
 
     def erase_scope(self, contract: CacheContract) -> int:
         """Erase cached material for one tenant/subject privacy scope."""
+        with self._scope_lock:
+            return self._erase_scope(contract)
+
+    def _erase_scope(self, contract: CacheContract) -> int:
         index_key = contract.erasure_index_key
+        try:
+            atomic_backend = self._redis is not None and callable(getattr(self._redis, 'eval', None))
+        except Exception as exc:
+            raise RuntimeError('cache_erasure_incomplete:index_unavailable') from exc
+        if atomic_backend:
+            try:
+                # Serialize discovery and deletion against shared publication.
+                return int(self._redis.eval(_ERASE_VERSIONED, 1, index_key))
+            except Exception as exc:
+                raise RuntimeError('cache_erasure_incomplete:atomic_delete_failed') from exc
         keys = set(self._local_scope_index.get(index_key, set()))
         try:
             if self._redis:
@@ -326,14 +389,23 @@ class SemanticCache:
                     item.decode("utf-8") if isinstance(item, bytes) else str(item)
                     for item in raw
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError('cache_erasure_incomplete:index_unavailable') from exc
+        failed = False
         for key in keys:
-            self.delete(key)
+            self._local.pop(key, None)
+            self._local_expiry.pop(key, None)
+            try:
+                self.delete_strict(key)
+            except Exception:
+                failed = True
+        if failed:
+            # Retain the subject index so the caller can retry incomplete work.
+            raise RuntimeError('cache_erasure_incomplete:delete_failed')
         try:
-            if self._redis:
+            if self._redis is not None:
                 self._redis.delete(index_key)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError('cache_erasure_incomplete:index_delete_failed') from exc
         self._local_scope_index.pop(index_key, None)
         return len(keys)
