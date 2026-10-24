@@ -3,8 +3,8 @@
 Froze after two mute failures this project: the 7 code layers (bb4cd0a) and the 8th operational
 layer (DummyRedis silently dropped async jobs → poll pending forever, 07c98f4). This asserts the
 brain is ON end-to-end: hard queries produce a narration job whose async result SWAPS IN with
-guarded prose, and the correct-by-design no-job queries stay deterministic. Skips when :8080 is
-down. Requires the model warm (a cold load times out the first swap)."""
+guarded prose, and the correct-by-design no-job queries stay deterministic. Requires explicit
+SHOPSQUIRE_ACCEPTANCE_LIVE=1 and SHOPSQUIRE_ACCEPTANCE_BASE_URL plus a warm model."""
 from __future__ import annotations
 
 import time
@@ -12,23 +12,22 @@ import time
 import pytest
 
 
-def _backend_up() -> bool:
-    try:
-        import httpx
-        return httpx.get("http://127.0.0.1:8080/healthz", timeout=3).status_code == 200
-    except Exception:
-        return False
+from tests.acceptance.live_runtime import live_base_url
 
 
-live = pytest.mark.skipif(not _backend_up(), reason="backend :8080 not running")
+BASE_URL = live_base_url()
+live = pytest.mark.skipif(BASE_URL is None, reason="live model acceptance not explicitly enabled")
 
 
 def _chat(q: str, uid: str) -> dict:
     import httpx
     from tests.utils import default_headers
     H = {**default_headers(), "Content-Type": "application/json"}
-    return httpx.Client(timeout=90).post("http://127.0.0.1:8080/api/v1/chat/query",
-                                         headers=H, json={"uid": uid, "query": q}).json()
+    with httpx.Client(timeout=90) as client:
+        response = client.post(f"{BASE_URL}/api/v1/chat/query", headers=H,
+                               json={"uid": uid, "query": q})
+        response.raise_for_status()
+        return response.json()
 
 
 def _swap_outcome(b: dict) -> tuple:
@@ -42,7 +41,7 @@ def _swap_outcome(b: dict) -> tuple:
     c = httpx.Client(timeout=90)
     for _ in range(28):
         time.sleep(1.25)
-        nd = c.get(f"http://127.0.0.1:8080/api/v1/recommend/narration/{job}", headers=H).json()
+        nd = c.get(f"{BASE_URL}/api/v1/recommend/narration/{job}", headers=H).json()
         if nd.get("status") in ("done", "error"):
             if nd.get("assistant_message"):
                 return "prose_swap", nd.get("storage_backend"), nd.get("assistant_message") or ""

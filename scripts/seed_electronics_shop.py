@@ -58,6 +58,20 @@ def main():
                 continue
             add_product(db, row)
             seed_scenario(db,tenant_id='synthetic-electronics',sku=row['sku'],retail_cents=row['price_cents'])
+            # Enrol the source's declared laptop category for this fictional
+            # tenant. Without this, the later single workload fixture became
+            # the entire taxonomy shelf and its AUD 3,699 price hid the source's
+            # AUD 629 laptop. Classification grants no workload-fit evidence.
+            if row['category'] == 'laptop':
+                from src.app.services.taxonomy_registry import upsert_classification, add_sold_node
+                for function, kwargs in (
+                    (upsert_classification, dict(sku=row['sku'], node_handle='el-6-6',
+                                                status='approved', confidence=1)),
+                    (add_sold_node, dict(node_handle='el-6-6')),
+                ):
+                    if not function(db, tenant_id='synthetic-electronics',
+                                    source='simulation:source-category', approved_by='synthetic-fixture-only', **kwargs):
+                        raise RuntimeError('source_category_enrolment_failed')
         db.flush()
         from src.app.services.portfolio_qualification import seed_configuration
         seed_configuration(db)

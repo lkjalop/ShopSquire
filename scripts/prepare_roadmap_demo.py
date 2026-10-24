@@ -40,6 +40,7 @@ def main():
         'SEMANTIC_RESEARCH_FIXTURE_ID':'fictional-memory-runtime-v1',
         'SEMANTIC_RESEARCH_FIXTURE_PATH':str(directory/'research.json'),
         'VITE_STOREFRONT_TENANT_ID':'synthetic-electronics','VITE_ENABLE_SIMULATED_STOCK':'1',
+        'PORTFOLIO_CERTIFICATION_ENABLED':'1',
         'RECOMMEND_PROCUREMENT_ADVICE_MODE':'on','CV_PROVIDER':'basic','CV_VISION_ENABLED':'0',
         'FULFILLMENT_SUPPLIER_TRANSPORT':'sandbox','EXTERNAL_RESEARCH_ENABLED':'0',
         'BUYER_IDENTITY_MODE':'strict','OPERATOR_TENANT_MEMBERSHIP_MODE':'strict',

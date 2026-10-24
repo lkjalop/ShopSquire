@@ -104,21 +104,25 @@ def apply_repairs(
         for repair in repairs:
             old_sku = repair["old_sku"]
             new_sku = repair["new_sku"]
+            if old_sku==new_sku or not connection.execute('SELECT 1 FROM products WHERE sku=?',(old_sku,)).fetchone():
+                continue
             conflict = connection.execute(
                 "SELECT 1 FROM products WHERE sku = ? AND sku <> ?",
                 (new_sku, old_sku),
             ).fetchone()
-            if not conflict:
-                row = connection.execute(
-                    "SELECT specs FROM products WHERE sku = ?", (old_sku,)
-                ).fetchone()
-                specs = json.loads((row or ["{}"])[0] or "{}")
-                specs["category"] = repair["new_category"]
-                connection.execute(
-                    "UPDATE products SET sku = ?, specs = ? WHERE sku = ?",
-                    (new_sku, json.dumps(specs, sort_keys=True), old_sku),
-                )
-                counts["products"] = counts.get("products", 0) + 1
+            if conflict:
+                raise ValueError('catalog_identity_conflict_requires_review')
+            for table in tables:
+                columns={row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
+                if columns & {'payload_digest','effect_digest','provenance_json'} and connection.execute(
+                    f'SELECT 1 FROM "{table}" WHERE sku=? LIMIT 1',(old_sku,)).fetchone():
+                    raise ValueError('bound_identity_requires_explicit_migration')
+            row = connection.execute("SELECT specs FROM products WHERE sku = ?", (old_sku,)).fetchone()
+            specs = json.loads((row or ["{}"])[0] or "{}")
+            specs["category"] = repair["new_category"]
+            connection.execute("UPDATE products SET sku = ?, specs = ? WHERE sku = ?",
+                (new_sku, json.dumps(specs, sort_keys=True), old_sku))
+            counts["products"] = counts.get("products", 0) + 1
 
             for table in tables:
                 if table == "products":
@@ -131,18 +135,7 @@ def apply_repairs(
                     if cursor.rowcount:
                         counts[table] = counts.get(table, 0) + int(cursor.rowcount)
                 except sqlite3.IntegrityError:
-                    # A canonical row already owns a unique business key (for
-                    # example supplier_id + sku). Keep it and remove only the
-                    # duplicate identity's row.
-                    cursor = connection.execute(
-                        f'DELETE FROM "{table}" WHERE sku = ?', (old_sku,)
-                    )
-                    if cursor.rowcount:
-                        key = f"{table}_merged"
-                        counts[key] = counts.get(key, 0) + int(cursor.rowcount)
-            if conflict:
-                connection.execute("DELETE FROM products WHERE sku = ?", (old_sku,))
-                counts["products_merged"] = counts.get("products_merged", 0) + 1
+                    raise ValueError('dependent_identity_conflict_requires_review') from None
     return counts
 
 
@@ -158,7 +151,12 @@ def main() -> int:
         repairs = plan_repairs(connection, source=args.source)
         output: dict[str, Any] = {"mode": "apply" if args.apply else "dry_run", "repairs": repairs}
         if args.apply:
-            output["updated_rows"] = apply_repairs(connection, repairs)
+            try:
+                output["updated_rows"] = apply_repairs(connection, repairs)
+            except ValueError as exc:
+                output.update(status='requires_review',error_code=str(exc),updated_rows={})
+                print(json.dumps(output,indent=2,sort_keys=True))
+                return 2
         print(json.dumps(output, indent=2, sort_keys=True))
     finally:
         connection.close()

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "ollama_port": 11435,
+  "text_model": "qwen3.5:9b-q4_K_M",
+  "vision_model": "qwen3-vl:8b",
+  "context_length": 4096,
+  "max_loaded_models": 1,
+  "num_parallel": 1,
+  "vision_timeout_seconds": 60,
+  "vision_max_output_tokens": 384,
+  "research_profile": "buyer-consent-v1",
+  "search_url": "http://127.0.0.1:8888/search?q={query}&format=json",
+  "database": ".artifacts/local-demo.sqlite3",
+  "research_tenants": [
+    "default"
+  ]
+}

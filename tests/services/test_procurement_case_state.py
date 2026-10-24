@@ -327,6 +327,15 @@ def test_case_patch_grounding_accepts_number_word_move_and_receipts_rejection() 
     },)
 
 
+@pytest.mark.parametrize('query', ['dell 15 laptop', '15 inch laptops', 'pump 15 units', 'need 15 kg'])
+def test_quantity_patch_cannot_promote_a_dimension_or_model_number(query):
+    result = _evaluate_bounded_case_patches({'case_patches': [
+        {'operation': 'set', 'path': 'requested_quantity', 'value': 15},
+    ]}, query)
+    assert result.accepted == ()
+    assert result.rejections[0]['rejecting_predicate'] == 'canonical_quantity_grammar'
+
+
 def test_canonical_parsers_complete_model_omissions_at_case_intake() -> None:
     query = (
         "We need 60 engineering laptops for Unreal Engine, large CAD models and simulation. "

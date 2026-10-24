@@ -1,0 +1,12 @@
+{
+  "version": "observed-policy-benchmark-v1",
+  "scenarios": ["electronics_memory_allocation", "packaging_resin_freight", "perishable_cold_chain"],
+  "seeds": [7, 23, 41],
+  "days": 300,
+  "train_days": 240,
+  "start_date": "2025-12-05",
+  "signal_available_at": "2026-07-01T00:00:00+00:00",
+  "signal_expires_at": "2026-10-01T00:00:00+00:00",
+  "signal_assumption": "An attributable synthetic supplier alert correctly announces the configured lead-time shock; this is not evidence of live external-signal quality.",
+  "quality_winner": null
+}

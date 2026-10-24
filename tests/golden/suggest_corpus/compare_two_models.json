@@ -102,7 +102,7 @@
       "score_norm": 100.0,
       "rank_delta": 0.0,
       "why_not": [],
-      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
       "delta_vs_anchor": {},
       "baseline_rank": 0,
       "rerank_delta": 0,
@@ -240,7 +240,7 @@
       "score_norm": 99.48,
       "rank_delta": 0.17,
       "why_not": [],
-      "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+      "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
       "delta_vs_anchor": {
        "price": "29% cheaper ($1,199 vs $1,699)"
       },
@@ -366,7 +366,7 @@
       "score_norm": 99.44,
       "rank_delta": 0.18,
       "why_not": [],
-      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
       "delta_vs_anchor": {
        "price": "253% more expensive ($5,999 vs $1,699)"
       },
@@ -497,7 +497,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick — 13% more expensive ($1,919 vs $1,699).",
+      "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick â€” 13% more expensive ($1,919 vs $1,699).",
       "delta_vs_anchor": {
        "price": "13% more expensive ($1,919 vs $1,699)"
       },
@@ -642,7 +642,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick â€” 12% cheaper ($1,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "12% cheaper ($1,499 vs $1,699)"
       },
@@ -736,7 +736,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060): vs the top pick — 24% cheaper ($1,299 vs $1,699).",
+      "contrastive_why": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060): vs the top pick â€” 24% cheaper ($1,299 vs $1,699).",
       "delta_vs_anchor": {
        "price": "24% cheaper ($1,299 vs $1,699)"
       },
@@ -817,7 +817,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick â€” 71% more expensive ($2,899 vs $1,699).",
       "delta_vs_anchor": {
        "price": "71% more expensive ($2,899 vs $1,699)"
       },
@@ -896,7 +896,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick — 129% more expensive ($3,899 vs $1,699).",
+      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick â€” 129% more expensive ($3,899 vs $1,699).",
       "delta_vs_anchor": {
        "price": "129% more expensive ($3,899 vs $1,699)"
       },
@@ -977,7 +977,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick — 165% more expensive ($4,499 vs $1,699).",
+      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick â€” 165% more expensive ($4,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "165% more expensive ($4,499 vs $1,699)"
       },
@@ -1072,7 +1072,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 26% cheaper ($1,249 vs $1,699).",
+      "contrastive_why": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 26% cheaper ($1,249 vs $1,699).",
       "delta_vs_anchor": {
        "price": "26% cheaper ($1,249 vs $1,699)"
       },
@@ -1166,7 +1166,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 18% cheaper ($1,399 vs $1,699).",
+      "contrastive_why": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick â€” 18% cheaper ($1,399 vs $1,699).",
       "delta_vs_anchor": {
        "price": "18% cheaper ($1,399 vs $1,699)"
       },
@@ -1236,7 +1236,7 @@
        "+in_stock",
        "+ram_gb_min:8",
        "+refresh_hz_min:60",
-       "market-intel (demand-aware) ↑"
+       "market-intel (demand-aware) â†‘"
       ],
       "score": 19.79,
       "score_norm": 80.63,
@@ -1244,7 +1244,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick — 106% more expensive ($3,499 vs $1,699).",
+      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick â€” 106% more expensive ($3,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "106% more expensive ($3,499 vs $1,699)"
       },
@@ -1316,7 +1316,7 @@
        "+in_stock",
        "+ram_gb_min:8",
        "+refresh_hz_min:60",
-       "market-intel (demand-aware) ↑"
+       "market-intel (demand-aware) â†‘"
       ],
       "score": 19.706666666666663,
       "score_norm": 80.37,
@@ -1570,7 +1570,7 @@
       "score_norm": 100.0,
       "rank_delta": 0.0,
       "why_not": [],
-      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
       "delta_vs_anchor": {},
       "baseline_rank": 0,
       "rerank_delta": 0,
@@ -1708,7 +1708,7 @@
       "score_norm": 99.48,
       "rank_delta": 0.17,
       "why_not": [],
-      "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+      "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
       "delta_vs_anchor": {
        "price": "29% cheaper ($1,199 vs $1,699)"
       },
@@ -1834,7 +1834,7 @@
       "score_norm": 99.44,
       "rank_delta": 0.18,
       "why_not": [],
-      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
       "delta_vs_anchor": {
        "price": "253% more expensive ($5,999 vs $1,699)"
       },
@@ -1965,7 +1965,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick — 13% more expensive ($1,919 vs $1,699).",
+      "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick â€” 13% more expensive ($1,919 vs $1,699).",
       "delta_vs_anchor": {
        "price": "13% more expensive ($1,919 vs $1,699)"
       },
@@ -2110,7 +2110,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick â€” 12% cheaper ($1,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "12% cheaper ($1,499 vs $1,699)"
       },
@@ -2204,7 +2204,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060): vs the top pick — 24% cheaper ($1,299 vs $1,699).",
+      "contrastive_why": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060): vs the top pick â€” 24% cheaper ($1,299 vs $1,699).",
       "delta_vs_anchor": {
        "price": "24% cheaper ($1,299 vs $1,699)"
       },
@@ -2285,7 +2285,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick â€” 71% more expensive ($2,899 vs $1,699).",
       "delta_vs_anchor": {
        "price": "71% more expensive ($2,899 vs $1,699)"
       },
@@ -2364,7 +2364,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick — 129% more expensive ($3,899 vs $1,699).",
+      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick â€” 129% more expensive ($3,899 vs $1,699).",
       "delta_vs_anchor": {
        "price": "129% more expensive ($3,899 vs $1,699)"
       },
@@ -2445,7 +2445,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick — 165% more expensive ($4,499 vs $1,699).",
+      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick â€” 165% more expensive ($4,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "165% more expensive ($4,499 vs $1,699)"
       },
@@ -2540,7 +2540,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 26% cheaper ($1,249 vs $1,699).",
+      "contrastive_why": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 26% cheaper ($1,249 vs $1,699).",
       "delta_vs_anchor": {
        "price": "26% cheaper ($1,249 vs $1,699)"
       },
@@ -2634,7 +2634,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 18% cheaper ($1,399 vs $1,699).",
+      "contrastive_why": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick â€” 18% cheaper ($1,399 vs $1,699).",
       "delta_vs_anchor": {
        "price": "18% cheaper ($1,399 vs $1,699)"
       },
@@ -2704,7 +2704,7 @@
        "+in_stock",
        "+ram_gb_min:8",
        "+refresh_hz_min:60",
-       "market-intel (demand-aware) ↑"
+       "market-intel (demand-aware) â†‘"
       ],
       "score": 19.79,
       "score_norm": 80.63,
@@ -2712,7 +2712,7 @@
       "why_not": [
        "-brand_mismatch"
       ],
-      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick — 106% more expensive ($3,499 vs $1,699).",
+      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick â€” 106% more expensive ($3,499 vs $1,699).",
       "delta_vs_anchor": {
        "price": "106% more expensive ($3,499 vs $1,699)"
       },
@@ -2784,7 +2784,7 @@
        "+in_stock",
        "+ram_gb_min:8",
        "+refresh_hz_min:60",
-       "market-intel (demand-aware) ↑"
+       "market-intel (demand-aware) â†‘"
       ],
       "score": 19.706666666666663,
       "score_norm": 80.37,
@@ -3844,7 +3844,7 @@
      "approval_required": false,
      "chat_with_admin": true,
      "incident_id": "f7a10898-906f-49bd-986a-c82f4cb2ca49",
-     "buyer_token": "089ca13e-e278-4f5b-ba0e-32d622d4484b"
+     "buyer_token": "fixture-token-not-valid"
     },
     "decision_trace_id": "9bcda4f5-419a-4bff-82a2-a900c270de15",
     "_trace_recommendation_persisted": true,
@@ -3984,7 +3984,7 @@
       "question_slot": "unknown"
      }
     ],
-    "assistant_message": "Great news for your gaming setup — I've found 15 options that match your criteria.\n\nBest fits for gaming: Dell G16 7630 ($1,699) and Lenovo LOQ 15IRH8 ($1,199).\n\nWant a detailed list or comparison?\n\n💰 Price range: $1,199 – $5,999 (median $1,899) across 15 results.",
+    "assistant_message": "Great news for your gaming setup â€” I've found 15 options that match your criteria.\n\nBest fits for gaming: Dell G16 7630 ($1,699) and Lenovo LOQ 15IRH8 ($1,199).\n\nWant a detailed list or comparison?\n\nðŸ’° Price range: $1,199 â€“ $5,999 (median $1,899) across 15 results.",
     "needs_disambiguation": true,
     "budget_viability": {
      "status": "unknown"
@@ -4075,7 +4075,7 @@
        "score_norm": 100.0,
        "rank_delta": 0.0,
        "why_not": [],
-       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
        "delta_vs_anchor": {},
        "baseline_rank": 0,
        "rerank_delta": 0,
@@ -4212,7 +4212,7 @@
        "score_norm": 99.48,
        "rank_delta": 0.17,
        "why_not": [],
-       "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+       "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
        "delta_vs_anchor": {
         "price": "29% cheaper ($1,199 vs $1,699)"
        },
@@ -4337,7 +4337,7 @@
        "score_norm": 99.44,
        "rank_delta": 0.18,
        "why_not": [],
-       "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+       "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
        "delta_vs_anchor": {
         "price": "253% more expensive ($5,999 vs $1,699)"
        },
@@ -4479,7 +4479,7 @@
        "score_norm": 100.0,
        "rank_delta": 0.0,
        "why_not": [],
-       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
        "delta_vs_anchor": {},
        "baseline_rank": 0,
        "rerank_delta": 0,
@@ -4616,7 +4616,7 @@
        "score_norm": 99.48,
        "rank_delta": 0.17,
        "why_not": [],
-       "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+       "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
        "delta_vs_anchor": {
         "price": "29% cheaper ($1,199 vs $1,699)"
        },
@@ -4741,7 +4741,7 @@
        "score_norm": 99.44,
        "rank_delta": 0.18,
        "why_not": [],
-       "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+       "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
        "delta_vs_anchor": {
         "price": "253% more expensive ($5,999 vs $1,699)"
        },
@@ -4841,7 +4841,7 @@
     },
     "needs_human_review": true,
     "incident_id": "f7a10898-906f-49bd-986a-c82f4cb2ca49",
-    "buyer_token": "089ca13e-e278-4f5b-ba0e-32d622d4484b",
+    "buyer_token": "fixture-token-not-valid",
     "human_review": {
      "status": "pending",
      "incident_id": "f7a10898-906f-49bd-986a-c82f4cb2ca49",
@@ -4938,7 +4938,7 @@
         "score_norm": 100.0,
         "rank_delta": 0.0,
         "why_not": [],
-        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
         "delta_vs_anchor": {},
         "baseline_rank": 0,
         "rerank_delta": 0,
@@ -5075,7 +5075,7 @@
         "score_norm": 99.48,
         "rank_delta": 0.17,
         "why_not": [],
-        "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+        "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
         "delta_vs_anchor": {
          "price": "29% cheaper ($1,199 vs $1,699)"
         },
@@ -5200,7 +5200,7 @@
         "score_norm": 99.44,
         "rank_delta": 0.18,
         "why_not": [],
-        "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+        "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
         "delta_vs_anchor": {
          "price": "253% more expensive ($5,999 vs $1,699)"
         },
@@ -5346,7 +5346,7 @@
         "score_norm": 100.0,
         "rank_delta": 0.0,
         "why_not": [],
-        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria.",
         "delta_vs_anchor": {},
         "baseline_rank": 0,
         "rerank_delta": 0,
@@ -5483,7 +5483,7 @@
         "score_norm": 99.48,
         "rank_delta": 0.17,
         "why_not": [],
-        "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699).",
+        "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699).",
         "delta_vs_anchor": {
          "price": "29% cheaper ($1,199 vs $1,699)"
         },
@@ -5608,7 +5608,7 @@
         "score_norm": 99.44,
         "rank_delta": 0.18,
         "why_not": [],
-        "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+        "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699).",
         "delta_vs_anchor": {
          "price": "253% more expensive ($5,999 vs $1,699)"
         },
@@ -5676,7 +5676,7 @@
       {
        "key": "high_performance_gpu",
        "title": "High-performance (discrete GPU)",
-       "explanation": "Powerful discrete-GPU laptops — the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
+       "explanation": "Powerful discrete-GPU laptops â€” the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
        "metrics": [
         "gpu",
         "performance",
@@ -5782,7 +5782,7 @@
           "+brand_match",
           "+ram_gb_min:8"
          ],
-         "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria."
+         "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick â€” the strongest overall score across your criteria."
         },
         {
          "sku": "GAM-0003",
@@ -5795,7 +5795,7 @@
           "+brand_match",
           "+ram_gb_min:8"
          ],
-         "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick — 29% cheaper ($1,199 vs $1,699)."
+         "contrastive_why": "Lenovo LOQ 15IRH8 15.6\" FHD 144Hz Gaming Laptop (RTX 4060): vs the top pick â€” 29% cheaper ($1,199 vs $1,699)."
         },
         {
          "sku": "LAP-858DC749",
@@ -5808,7 +5808,7 @@
           "+brand_match",
           "+ram_gb_min:8"
          ],
-         "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699)."
+         "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick â€” 253% more expensive ($5,999 vs $1,699)."
         },
         {
          "sku": "LAP-69763798",
@@ -5821,7 +5821,7 @@
           "+ram_gb_min:8",
           "+refresh_hz_min:60"
          ],
-         "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick — 13% more expensive ($1,919 vs $1,699)."
+         "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: vs the top pick â€” 13% more expensive ($1,919 vs $1,699)."
         },
         {
          "sku": "GAM-0002",
@@ -5834,7 +5834,7 @@
           "+ram_gb_min:8",
           "+refresh_hz_min:60"
          ],
-         "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699)."
+         "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick â€” 12% cheaper ($1,499 vs $1,699)."
         }
        ]
       }
