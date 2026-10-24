@@ -108,7 +108,7 @@ jobs:
               tests/test_verify_db_migrations.py
       - name: Upload PostgreSQL diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: postgres-contracts-${{ matrix.python-version }}
           path: test-results/**

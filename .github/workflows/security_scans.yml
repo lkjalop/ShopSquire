@@ -43,7 +43,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM'
       - name: Upload artifact (Trivy FS)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-fs
           path: trivy-fs.json
@@ -69,7 +69,7 @@ jobs:
           output-file: sbom.spdx.json
           upload-artifact: false
       - name: Upload artifact (SBOM)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-spdx
           path: sbom.spdx.json
@@ -90,7 +90,7 @@ jobs:
           fi
       - name: Upload signature (optional)
         if: ${{ hashFiles('sbom.spdx.sig') != '' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-signature
           path: sbom.spdx.sig
@@ -127,7 +127,7 @@ jobs:
           snyk test --file=poetry.lock --package-manager=poetry --json > snyk-python.json
       - name: Upload artifact (Snyk Python)
         if: ${{ always() && hashFiles('snyk-python.json') != '' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: snyk-python
           path: snyk-python.json
@@ -160,7 +160,7 @@ jobs:
           pip-audit -r audit-requirements.txt -f json -o pip-audit.json
       - name: Upload artifact (pip-audit)
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pip-audit
           path: pip-audit.json
@@ -204,7 +204,7 @@ jobs:
           subject-path: dist/shopsquire-source.tar.gz
 
       - name: Upload attested source archive
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: shopsquire-attested-source
           path: dist/shopsquire-source.tar.gz

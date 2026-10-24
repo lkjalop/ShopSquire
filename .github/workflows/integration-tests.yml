@@ -57,7 +57,7 @@ jobs:
             --junitxml=test-results/integration.xml
       - name: Retain results including failures and skips
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: integration-contract-results
           path: test-results/**

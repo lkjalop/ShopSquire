@@ -313,7 +313,7 @@ jobs:
             sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload browser and runtime evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: procurement-browser-evidence
           path: |
@@ -427,7 +427,7 @@ jobs:
             sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload worker evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: procurement-worker-evidence
           path: |
