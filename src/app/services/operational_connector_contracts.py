@@ -7,7 +7,7 @@ credentials are referenced by secret identifier rather than carried in data.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlparse
 

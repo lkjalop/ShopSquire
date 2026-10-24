@@ -5,7 +5,7 @@ Selection is deterministic and emits a complete receipt for Decision Trace.
 """
 from __future__ import annotations
 
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
