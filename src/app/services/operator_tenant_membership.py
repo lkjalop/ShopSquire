@@ -24,8 +24,8 @@ def membership_mode() -> str:
     configured = str(os.getenv("OPERATOR_TENANT_MEMBERSHIP_MODE") or "").strip().lower()
     if configured in {"strict", "audit"}:
         return configured
-    env = str(os.getenv("APP_ENV") or "dev").strip().lower()
-    return "strict" if env in {"prod", "production", "staging"} else "audit"
+    env = str(os.getenv("APP_ENV") or "production").strip().lower()
+    return "audit" if env in {"local", "dev", "development", "test"} else "strict"
 
 
 def principal_hash_for_api_key(api_key: str) -> str:

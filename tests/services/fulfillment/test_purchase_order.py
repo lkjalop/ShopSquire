@@ -100,6 +100,21 @@ def test_execute_requires_proposed_first(db):
     assert wf.current_state(db, cid) == S.SELECTED
 
 
+def test_legacy_role_alone_cannot_dispatch_to_real_erp(db):
+    from src.app.services.fulfillment.po_transport import HttpErpTransport
+    from unittest.mock import Mock
+    cid=_to_selected(db)
+    assert PO.propose(db,case_id=cid,actor=AG()).ok
+    provider=Mock()
+    provider.post.return_value.status_code=201
+    provider.post.return_value.json.return_value={'po_ref':'provider-reference'}
+    result=PO.execute(db,case_id=cid,actor=HU(),today='2026-06-26',
+        po_transport=HttpErpTransport(url='https://erp.invalid/po',client=provider))
+    assert not result.ok and result.reason=='independent_po_approval_unavailable'
+    provider.post.assert_not_called()
+    assert wf.current_state(db,cid)==S.PROCUREMENT_APPROVAL_REQUIRED
+
+
 # ── idempotency + guards ─────────────────────────────────────────────────────
 def test_execute_is_idempotent(db):
     cid = _to_selected(db)
@@ -119,6 +134,13 @@ def test_execute_refuses_expired_quote(db):
     PO.propose(db, case_id=cid, actor=AG(), now_iso="2026-06-26 10:05:00")
     r = PO.execute(db, case_id=cid, actor=HU(), idempotency_key="k1", today="2026-06-26")
     assert r.ok is False and r.reason == "quote_expired"
+
+
+def test_execute_uses_server_clock_when_no_asof_is_supplied(db):
+    cid=_to_selected(db,expires='2000-01-01')
+    PO.propose(db,case_id=cid,actor=AG())
+    result=PO.execute(db,case_id=cid,actor=HU())
+    assert not result.ok and result.reason=='quote_expired'
     assert wf.current_state(db, cid) == S.PROCUREMENT_APPROVAL_REQUIRED  # not advanced
 
 

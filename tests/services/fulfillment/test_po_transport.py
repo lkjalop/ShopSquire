@@ -28,7 +28,7 @@ def test_get_po_transport_default_and_erp(monkeypatch):
 
 
 class _FakeResp:
-    def __init__(self, data): self._d = data
+    def __init__(self, data, status_code=201): self._d = data; self.status_code=status_code
     def json(self): return self._d
 
 
@@ -55,11 +55,27 @@ def test_erp_no_url_fails():
     assert PT.HttpErpTransport(url="").create(item_ref="x").status == "failed"
 
 
-def test_erp_client_error_is_status_failed():
+def test_erp_client_error_has_unknown_outcome():
     class _Boom:
         def post(self, *a, **k): raise OSError("erp down")
-    r = PT.HttpErpTransport(url="https://erp.example/po", client=_Boom()).create(item_ref="x")
-    assert r.status == "failed" and "erp down" in r.detail
+    r = PT.HttpErpTransport(url="https://erp.example/po", client=_Boom()).create(item_ref="x",idempotency_key='key')
+    assert r.status == "unknown" and r.detail=='transport_outcome_unknown'
+
+
+@pytest.mark.parametrize('status,data',[(200,{}),(201,{}),(202,{'id':'queued'}),(400,{'id':'error'}),(500,{'id':'error'})])
+def test_erp_does_not_invent_completion_from_error_or_missing_receipt(status,data):
+    class Client:
+        def post(self,*args,**kwargs):return _FakeResp(data,status)
+    result=PT.HttpErpTransport(url='https://erp.example/po',client=Client()).create(idempotency_key='bounded')
+    assert result.status!='created'
+    assert result.po_ref==''
+
+
+def test_erp_requires_idempotency_before_transport():
+    client=_FakeClient()
+    result=PT.HttpErpTransport(url='https://erp.example/po',client=client).create()
+    assert result.status=='failed' and result.detail=='idempotency_key_required'
+    assert client.calls==[]
 
 
 # ── execute routes through the transport ─────────────────────────────────────
@@ -133,3 +149,28 @@ def test_execute_is_idempotent_one_po_even_via_erp(db):
     PO.execute(db, case_id=cid, actor=HU, idempotency_key="same", today="2026-06-27", po_transport=_CountTx())
     assert _CountTx.n == 1  # the replay guard skipped the second ERP create
     assert wf.current_state(db, cid) == S.READY_TO_SHIP
+
+
+@pytest.mark.parametrize('crash',[False,True])
+def test_uncertain_or_crashed_po_requires_reconciliation_before_retry(db,crash):
+    cid,human=_to_selected(db)
+    PO.propose(db,case_id=cid,actor=Actor(A.AGENT,'Procurement_Agent'))
+    class Unknown:
+        calls=0
+        def create(self,**kwargs):
+            self.calls+=1
+            if crash:raise SystemExit('simulated_crash_after_provider_acceptance')
+            return PT.PoResult(po_ref='',status='unknown',detail='timeout')
+    provider=Unknown()
+    if crash:
+        with pytest.raises(SystemExit):PO.execute(db,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
+    else:
+        result=PO.execute(db,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
+        assert not result.ok
+    # A new Session observes the committed dispatch intent after process loss.
+    from sqlalchemy.orm import Session
+    with Session(db.bind) as restarted:
+        retry=PO.execute(restarted,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
+        assert not retry.ok and retry.reason=='po_reconciliation_required'
+    assert provider.calls==1
+    assert wf.current_state(db,cid)==S.PROCUREMENT_IN_PROGRESS

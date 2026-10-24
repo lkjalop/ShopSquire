@@ -155,6 +155,27 @@ def test_unknown_case_is_not_found(db):
     assert r.ok is False and r.reason == "not_found" and r.http_status == 404
 
 
+def test_transition_cannot_apply_a_decision_to_a_newer_version(db, monkeypatch):
+    cid = _open(db)
+    append = repo.append_version
+    advanced = False
+
+    def intervening_write(*args, **kwargs):
+        nonlocal advanced
+        if not advanced:
+            advanced = True
+            result = wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                                   state_patch={"winner": "current"})
+            assert result.ok
+        return append(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "append_version", intervening_write)
+    stale = wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                          state_patch={"winner": "stale"})
+    assert not stale.ok
+    assert repo.current_version(db, cid).state_json["winner"] == "current"
+
+
 def test_list_cases_enriches_sku_and_qty_from_open_version(db):
     # the queue columns: list_cases LEFT JOINs the OPEN version's state_json and surfaces SKU + qty.
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="recommend",

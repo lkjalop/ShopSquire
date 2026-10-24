@@ -1,31 +1,27 @@
-"""PO → ERP transport seam (agnostic CORE) — Phase-8 production transports.
+"""Purchase-order provider adapter, using fake transport by default.
 
-purchase_order.execute creates a SANDBOX PO ref by default (records, transmits nothing). This is the
-provider interface that lets a REAL ERP be wired at DEPLOY time without touching the workflow or the
-gates — execute still fires the human-approved purchase_order_created transition; only the
-system-of-record write differs.
+The HTTP adapter requires an idempotency key and a confirmed provider reference.
+Missing receipts, transport exceptions and ambiguous responses return unknown;
+provider rejection returns failed. Neither result proves that no effect occurred.
+The workflow must reconcile before another dispatch. A provider's idempotency
+implementation is external and has not been certified against a real ERP here.
 
-  • SandboxPoTransport (default) — returns a PO- ref, creates nothing real (behaviour-identical).
-  • HttpErpTransport (flag-gated, FULFILLMENT_PO_TRANSPORT=erp) — POSTs the PO to an ERP endpoint via an
-    injected httpx-like client, idempotency-keyed so a retry can't double-create. status='failed' on any
-    error — never raises into the workflow. UNEXERCISED vs a real ERP here; the build/post/failure path
-    is tested with a fake client. Wire ERP_PO_URL / ERP_API_KEY at deploy to go live.
-
-Vertical-blind (opaque refs · cents). The idempotency_key flows to the ERP so even a double-execute
-maps to one PO.
+These adapters do not authenticate people or grant commerce approval. Callers own
+those boundaries; legacy PO distinct-person approval remains incomplete.
 """
 from __future__ import annotations
 
 import os
 import uuid
 from dataclasses import dataclass
+from contextlib import ExitStack
 from typing import Any, Optional, Protocol
 
 
 @dataclass(frozen=True)
 class PoResult:
     po_ref: str
-    status: str            # created | failed
+    status: str            # created | failed (known rejection) | unknown (reconcile)
     detail: str = ""       # transport label / error summary
 
 
@@ -57,6 +53,8 @@ class HttpErpTransport:
                idempotency_key: str = "") -> PoResult:
         if not self.url:
             return PoResult(po_ref="", status="failed", detail="no_erp_url")
+        if not idempotency_key:
+            return PoResult(po_ref='',status='failed',detail='idempotency_key_required')
         try:
             payload = {"supplier_ref": supplier_ref, "item_ref": item_ref, "quantity": quantity,
                        "unit_amount_cents": unit_amount_cents, "total_amount_cents": total_amount_cents,
@@ -64,17 +62,24 @@ class HttpErpTransport:
             headers = {"X-Idempotency-Key": idempotency_key}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
-            client = self._client
-            if client is None:
-                import httpx
-                client = httpx.Client(timeout=10)
-            resp = client.post(self.url, json=payload, headers=headers)
-            data = resp.json() if hasattr(resp, "json") else {}
+            with ExitStack() as owned:
+                client = self._client
+                if client is None:
+                    import httpx
+                    client = owned.enter_context(httpx.Client(timeout=10,follow_redirects=False))
+                resp = client.post(self.url, json=payload, headers=headers)
+                status=getattr(resp,'status_code',None)
+                if status not in (200,201):
+                    return PoResult(po_ref='',status='failed' if isinstance(status,int) and 400<=status<500 else 'unknown',
+                        detail='provider_rejected' if isinstance(status,int) and 400<=status<500 else 'provider_outcome_unknown')
+                data = resp.json() if hasattr(resp, "json") else {}
             data = data if isinstance(data, dict) else {}
-            ref = str(data.get("po_ref") or data.get("id") or f"ERP-{(idempotency_key or uuid.uuid4().hex)[:12].upper()}")
+            ref = data.get('po_ref') or data.get('id')
+            if not isinstance(ref,str) or not ref.strip() or len(ref)>200:
+                return PoResult(po_ref='',status='unknown',detail='provider_receipt_missing')
             return PoResult(po_ref=ref, status="created", detail="erp")
-        except Exception as exc:
-            return PoResult(po_ref="", status="failed", detail=str(exc)[:200])
+        except Exception:
+            return PoResult(po_ref="", status="unknown", detail='transport_outcome_unknown')
 
 
 def get_po_transport() -> PoTransport:

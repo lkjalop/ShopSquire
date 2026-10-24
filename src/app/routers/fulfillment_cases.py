@@ -17,6 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, OperatorSubject, operator_subject, require_role
 from src.app.services.fulfillment import draft as fdraft
 from src.app.services.fulfillment import economics as feco
@@ -27,12 +28,9 @@ from src.app.services.fulfillment import purchase_order as fpo
 from src.app.services.fulfillment import sandbox_supplier as fsb
 from src.app.services.fulfillment import workflow as fwf
 from src.app.services.fulfillment.domain import Actor, ActorType
-
-
-def _operator_actor(role: str, subj: "OperatorSubject") -> Actor:
-    """Resolve human authority while retaining the authenticated audit identity."""
-    uid = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
-    return Actor(ActorType.HUMAN_OPERATOR, role, user_id=uid)
+from src.app.routers.fulfillment_http_helpers import (
+    _operator_actor, _agent, _raise_if_failed, _operator_case_tenant, _buyer_procurement_trace,
+)
 
 
 router = APIRouter(prefix="/api/v1/fulfillment", tags=["fulfillment"])
@@ -65,43 +63,8 @@ def _auto_draft_on_commit_enabled() -> bool:
         return False
 
 
-def _agent() -> Actor:
-    return Actor(ActorType.AGENT, "Procurement_Agent")
-
-
-def _raise_if_failed(res: "fwf.TransitionResult") -> None:
-    if not res.ok:
-        raise HTTPException(status_code=res.http_status, detail=res.reason)
-
-
 # buyer never sees these supplier-private fields
 _BUYER_REDACT = ("draft", "inbound", "quarantine")
-
-
-def _buyer_procurement_trace(draft: Any) -> Optional[Dict[str, Any]]:
-    """Expose workflow proof without leaking supplier-private message content or economics."""
-    if not isinstance(draft, dict):
-        return None
-    scope = draft.get("commercial_scope") if isinstance(draft.get("commercial_scope"), dict) else {}
-    channel = draft.get("channel_plan") if isinstance(draft.get("channel_plan"), dict) else {}
-    gate = draft.get("send_gate") or draft.get("gate")
-    gate = gate if isinstance(gate, dict) else {}
-    reasons = gate.get("blocking") or gate.get("reasons") or []
-    if not isinstance(reasons, list):
-        reasons = [reasons]
-    return {
-        "drafted": True,
-        "status": "human_gated_not_sent",
-        "item_ref": scope.get("item_ref"),
-        "quantity": scope.get("quantity"),
-        "currency": scope.get("currency"),
-        "channel": channel.get("channel"),
-        "requires_human": bool(channel.get("requires_human")),
-        "integration_kind": channel.get("integration_kind"),
-        "gate_decision": gate.get("decision"),
-        "gate_reasons": [str(reason) for reason in reasons if reason],
-        "content_hash": draft.get("content_hash"),
-    }
 
 
 def _case_view(
@@ -186,9 +149,9 @@ def _case_view(
             # query failure must not suppress margin analysis on PostgreSQL.
             db.rollback()
             from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
-            adv = _margin_assess(db, case_id)
+            adv = _margin_assess(db, case_id, tenant_id=tenant_id)
             if adv.get("available"):
-                out["margin_advice"] = _attach_sales_response(db, case_id, adv)  # M4→M5 demand-aware overlay
+                out["margin_advice"] = _attach_sales_response(db, case_id, adv, tenant_id=tenant_id)  # M4→M5 demand-aware overlay
                 if adv.get("verdict") == "below_floor" and _margin_gate_mode() != "off":
                     out["margin_warning"] = {
                         "mode": _margin_gate_mode(),
@@ -213,7 +176,7 @@ def _margin_gate_mode() -> str:
 @router.get("/cases")
 def list_cases(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        return {"cases": fwf.repository.list_cases(db)}
+        return {"cases": fwf.repository.list_cases(db,tenant_id=current_tenant_id())}
 
 
 @router.get("/autonomous/audit")
@@ -254,7 +217,7 @@ def get_case(case_id: str, request: Request) -> Dict[str, Any]:
 @router.get("/cases/{case_id}/operator-view")
 def get_case_operator(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True,tenant_id=_operator_case_tenant(db,case_id))
 
 
 @router.get("/cases/by-trace/{trace_id}")
@@ -279,10 +242,11 @@ def get_case_by_trace(trace_id: str, request: Request) -> Dict[str, Any]:
 def get_case_by_trace_operator(trace_id: str,
                                role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        cid = fwf.repository.case_id_by_trace(db, trace_id)
+        tenant_id=current_tenant_id()
+        cid = fwf.repository.case_id_by_trace(db, trace_id,tenant_id)
         if not cid:
             raise HTTPException(status_code=404, detail="no case for trace")
-        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=True)}
+        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=True,tenant_id=tenant_id)}
 
 
 def _cases_by_trace_view(
@@ -431,14 +395,15 @@ def supplier_candidates(case_id: str, role: str = Depends(require_role(_OPERATOR
     are resolved server-side from the allowlist/KYV (never buyer text); this never sends."""
     from src.app.services.fulfillment.supplier_contacts import supplier_contact_candidates
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         if cur is None:
             raise HTTPException(status_code=404, detail="case not found")
         sj = cur.state_json if isinstance(cur.state_json, dict) else {}
         avail = sj.get("availability") if isinstance(sj.get("availability"), dict) else {}
         scope = (sj.get("draft") or {}).get("commercial_scope") if isinstance(sj.get("draft"), dict) else {}
         item_ref = str(avail.get("item_ref") or (scope or {}).get("item_ref") or "").strip()
-        cands = supplier_contact_candidates(db, item_ref=item_ref) if item_ref else []
+        cands = supplier_contact_candidates(db, item_ref=item_ref, tenant_id=tenant_id) if item_ref else []
         return {"case_id": case_id, "item_ref": item_ref, "candidates": cands}
 
 
@@ -450,7 +415,8 @@ def rfq_fanout(case_id: str, top_n: int = Query(default=3, ge=1, le=8),
     sends; the operator still approves each send through GATE 2. Recipients come from the allowlist."""
     from src.app.services.fulfillment.rfq_fanout import build_rfq_fanout, fanout_preview
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         if cur is None:
             raise HTTPException(status_code=404, detail="case not found")
         sj = cur.state_json if isinstance(cur.state_json, dict) else {}
@@ -460,7 +426,7 @@ def rfq_fanout(case_id: str, top_n: int = Query(default=3, ge=1, le=8),
         qty = int((scope or {}).get("quantity") or avail.get("shortfall") or avail.get("requested_qty") or 0)
         if not item_ref:
             return {"case_id": case_id, "item_ref": "", "top_n": top_n, "quantity": qty, "drafts": []}
-        drafts = build_rfq_fanout(db, item_ref=item_ref, quantity=qty, case_ref=case_id, top_n=int(top_n))
+        drafts = build_rfq_fanout(db, item_ref=item_ref, quantity=qty, case_ref=case_id, top_n=int(top_n), tenant_id=tenant_id)
         return {"case_id": case_id, "item_ref": item_ref, "top_n": int(top_n), "quantity": qty,
                 "count": len(drafts), "drafts": fanout_preview(drafts)}
 
@@ -477,7 +443,8 @@ def compare_quotes_endpoint(case_id: str, body: CompareQuotesBody,
     recommend the best. Operator decision-support only; selecting + sending still go through the gates."""
     from src.app.services.fulfillment.rfq_fanout import compare_quotes
     with db_session() as db:
-        if fwf.repository.current_version(db, case_id) is None:
+        tenant_id = _operator_case_tenant(db, case_id)
+        if fwf.repository.current_version(db, case_id, tenant_id=tenant_id) is None:
             raise HTTPException(status_code=404, detail="case not found")
     result = compare_quotes(body.quotes or [], weights=body.weights)
     return {"case_id": case_id, **result}
@@ -594,10 +561,11 @@ def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict
     "why-the-agent-decided-this" artifact (markdown + YAML frontmatter) any agent/auditor can read."""
     from src.app.services.fulfillment import okf_export
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id=_operator_case_tenant(db,case_id)
+        cur = fwf.repository.current_version(db, case_id,tenant_id)
         if cur is None:
             raise HTTPException(status_code=404, detail="case not found")
-        jr = fwf.journey(db, case_id)
+        jr = fwf.journey(db, case_id,tenant_id)
         ts = str(jr[-1].get("valid_from")) if jr else ""
         md = okf_export.case_to_okf(case_id=case_id, state=cur.state, state_json=cur.state_json,
                                     journey=jr, timestamp=ts)
@@ -606,9 +574,11 @@ def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict
 
 
 @router.get("/cases/{case_id}/as-of")
-def get_as_of(case_id: str, t: str = Query(...)) -> Dict[str, Any]:
+def get_as_of(case_id: str, t: str = Query(...),
+              role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        v = fwf.as_of(db, case_id, t)
+        tenant_id=_operator_case_tenant(db,case_id)
+        v = fwf.as_of(db, case_id, t,tenant_id)
         if v is None:
             raise HTTPException(status_code=404, detail="no version at that time")
         return {"case_id": case_id, "as_of": t, "state": v.state, "state_json": v.state_json}
@@ -621,12 +591,13 @@ def get_economics(case_id: str, retail_unit_cents: Optional[int] = Query(None),
     """OPERATOR-only deal economics: what the supplier charges us, our margin, how much discount we can
     hand the buyer while still clearing the floor, and the resulting profit. NEVER buyer-facing."""
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         econ = feco.from_case(db, case_id, retail_unit_cents=retail_unit_cents,
-                              floor_margin_pct=floor_margin_pct)
+                              floor_margin_pct=floor_margin_pct, tenant_id=tenant_id)
         return {"case_id": case_id, "economics": econ}
 
 
-def _attach_sales_response(db, case_id: str, advice: Dict[str, Any]) -> Dict[str, Any]:
+def _attach_sales_response(db, case_id: str, advice: Dict[str, Any], *, tenant_id: str = "default") -> Dict[str, Any]:
     """M4→M5 demand-aware overlay on the margin advice: given demand trend + stock position, HOW to use the
     discount headroom (increase to clear surplus / reduce to protect a rising line). Recommends, never
     applies; the recommended discount is margin-clamped by the policy. Best-effort — never breaks the
@@ -636,9 +607,9 @@ def _attach_sales_response(db, case_id: str, advice: Dict[str, Any]) -> Dict[str
     try:
         from src.app.services.sales_response_policy import assess_sales_response
         from src.app.services.market_analysis import load_recent_findings
-        cur = fwf.repository.current_version(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id)
         avail = (cur.state_json.get("availability") if cur and isinstance(cur.state_json, dict) else {}) or {}
-        sr = assess_sales_response(demand_findings=load_recent_findings(db, limit=50),
+        sr = assess_sales_response(demand_findings=load_recent_findings(db, limit=50, tenant_id=tenant_id),
                                    availability=avail, economics=advice.get("economics"))
         advice["sales_response"] = sr.as_dict()
     except Exception as _srx:
@@ -657,8 +628,9 @@ def get_margin_advice(case_id: str, retail_unit_cents: Optional[int] = Query(Non
     supplier send to judge whether the reorder is worth it."""
     from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
     with db_session() as db:
-        advice = _margin_assess(db, case_id, retail_unit_cents=retail_unit_cents, floor_margin_pct=floor_margin_pct)
-        return {"case_id": case_id, **_attach_sales_response(db, case_id, advice)}
+        tenant_id = _operator_case_tenant(db, case_id)
+        advice = _margin_assess(db, case_id, retail_unit_cents=retail_unit_cents, floor_margin_pct=floor_margin_pct, tenant_id=tenant_id)
+        return {"case_id": case_id, **_attach_sales_response(db, case_id, advice, tenant_id=tenant_id)}
 
 
 # ── commands ──────────────────────────────────────────────────────────────────
@@ -670,7 +642,8 @@ class OpenBody(BaseModel):
 @router.post("/cases")
 def open_case(body: OpenBody = Body(default=OpenBody()), role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        cid = fwf.open_case(db, buyer_uid_hash=body.uid, source_trace_id=body.trace_id, requested_by=role)
+        tenant_id = current_tenant_id()
+        cid = fwf.open_case(db, buyer_uid_hash=body.uid, source_trace_id=body.trace_id, requested_by=role, tenant_id=tenant_id)
         db.commit()
         if not cid:
             raise HTTPException(status_code=500, detail="could not open case")
@@ -687,13 +660,14 @@ class AssessBody(BaseModel):
 def assess(case_id: str, body: AssessBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Agent records availability + asks the buyer to commit (the case waits at GATE 1)."""
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         avail = {"requested_qty": body.requested_qty, "in_stock": body.in_stock,
                  "shortfall": max(0, body.requested_qty - body.in_stock), "item_ref": body.item_ref}
         _raise_if_failed(fwf.transition(db, case_id=case_id, event="availability_assessed", actor=_agent(),
-                                        state_patch={"availability": avail}, reason_code="inventory_truth"))
-        res = fwf.transition(db, case_id=case_id, event="request_buyer_commitment", actor=_agent())
+                                        state_patch={"availability": avail}, reason_code="inventory_truth", tenant_id=tenant_id))
+        res = fwf.transition(db, case_id=case_id, event="request_buyer_commitment", actor=_agent(), tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class SplitLineBody(BaseModel):
@@ -1133,8 +1107,9 @@ def get_notifications(unseen_only: bool = Query(default=False), limit: int = Que
     """The operator notification feed (newest first) + the unseen badge count — polled by the admin queue."""
     from src.app.services.fulfillment.notifications import list_notifications, unseen_count
     with db_session() as db:
-        return {"notifications": list_notifications(db, unseen_only=unseen_only, limit=limit),
-                "unseen": unseen_count(db)}
+        tenant_id = current_tenant_id()
+        return {"notifications": list_notifications(db, unseen_only=unseen_only, limit=limit, tenant_id=tenant_id),
+                "unseen": unseen_count(db, tenant_id=tenant_id)}
 
 
 @router.post("/notifications/seen")
@@ -1143,7 +1118,8 @@ def mark_notifications_seen(body: NotificationsSeenBody,
     """Mark notifications seen (given ids, or ALL unseen when ids omitted)."""
     from src.app.services.fulfillment.notifications import mark_seen
     with db_session() as db:
-        return {"marked": mark_seen(db, ids=body.ids)}
+        tenant_id = current_tenant_id()
+        return {"marked": mark_seen(db, ids=body.ids, tenant_id=tenant_id)}
 
 
 class SupersedeCaseBody(BaseModel):
@@ -1159,13 +1135,14 @@ def supersede_case(case_id: str, body: SupersedeCaseBody,
     from src.app.services.fulfillment.cart_commitment import operator_supersede_case
     from src.app.services.fulfillment.notifications import notify
     with db_session() as db:
-        out = operator_supersede_case(db, case_id=case_id, actor_id=str(role or "operator"), reason=body.reason)
+        tenant_id = _operator_case_tenant(db, case_id)
+        out = operator_supersede_case(db, case_id=case_id, actor_id=str(role or "operator"), reason=body.reason, tenant_id=tenant_id)
         if not out.get("ok"):
             raise HTTPException(status_code=409, detail=out.get("reason") or "supersede_failed")
         try:
             notify(db, kind="case_superseded", ref=case_id,
                    summary=f"Case {case_id[:8]} superseded"
-                           + (" — notify the supplier of the cancellation." if out.get("cancellation_advised") else "."))
+                           + (" — notify the supplier of the cancellation." if out.get("cancellation_advised") else "."), tenant_id=tenant_id)
         except Exception:
             pass
         return out
@@ -1186,13 +1163,14 @@ def supplier_event(body: SupplierEventBody, role: str = Depends(require_role(_OP
     from src.app.services.fulfillment.notifications import notify
     from src.app.services.fulfillment.supplier_events import record_supplier_event
     with db_session() as db:
+        tenant_id = current_tenant_id()
         out = record_supplier_event(db, supplier_domain=body.supplier_domain, kind=body.kind,
-                                    note=body.note, actor_id=str(role or "operator"))
+                                    note=body.note, actor_id=str(role or "operator"), tenant_id=tenant_id)
         if out.get("event_id"):
             try:
                 notify(db, kind="supplier_oob", ref=out.get("domain"),
                        summary=f"Supplier {out.get('domain')} reported {out.get('kind')} — "
-                               f"{len(out.get('affected_cases') or [])} open case(s) affected.")
+                               f"{len(out.get('affected_cases') or [])} open case(s) affected.", tenant_id=tenant_id)
             except Exception:
                 pass
         return out
@@ -1319,14 +1297,15 @@ def notify_buyer(case_id: str, body: NotifyBuyerBody,
     even if the auto-reply flag is off — an explicit human action."""
     from src.app.services.fulfillment.buyer_reply import send_buyer_status
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         result = send_buyer_status(
             db,
             case_id,
             to_email=body.to_email,
             force=True,
             party_ref=body.party_ref,
-        )
-        return {**_case_view(db, case_id, for_operator=True), "buyer_notification": result}
+         tenant_id=tenant_id)
+        return {**_case_view(db, case_id, for_operator=True, tenant_id=tenant_id), "buyer_notification": result}
 
 
 class DraftBody(BaseModel):
@@ -1338,10 +1317,11 @@ class DraftBody(BaseModel):
 @router.post("/cases/{case_id}/draft-quote")
 def draft_quote(case_id: str, body: DraftBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res, draft = fdraft.draft_and_record(db, case_id=case_id, actor=_agent(), item_ref=body.item_ref,
-                                             quantity=body.quantity, estimated_value_cents=body.estimated_value_cents)
+                                             quantity=body.quantity, estimated_value_cents=body.estimated_value_cents, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class EditDraftBody(BaseModel):
@@ -1355,25 +1335,26 @@ def edit_draft(case_id: str, body: EditDraftBody, role: str = Depends(require_ro
     re-runs the claim-safety guard. Rejects an unsafe edit (price/commitment leak)."""
     human = Actor(ActorType.HUMAN_OPERATOR, role)
     with db_session() as db:
-        res, _draft = fdraft.edit_draft(db, case_id=case_id, actor=human, subject=body.subject, body=body.body)
+        tenant_id = _operator_case_tenant(db, case_id)
+        res, _draft = fdraft.edit_draft(db, case_id=case_id, actor=human, subject=body.subject, body=body.body, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
-def _attempt_autonomous_send(db, case_id: str):
+def _attempt_autonomous_send(db, case_id: str, *, tenant_id: str = "default"):
     """WS-C: once a case reaches AWAITING_APPROVAL, attempt a flag-gated autonomous RFQ send. SAFE-FIRST —
     any failing guard (or autonomy OFF, the default) leaves the case at AWAITING_APPROVAL for the human.
     Read the send parameters off the persisted draft; never raises into the endpoint."""
     from src.app.services.fulfillment import autonomous_send as fauto
     try:
-        cur = fwf.repository.current_version(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id)
         draft = (cur.state_json.get("draft") if cur else None) or {}
         scope = draft.get("commercial_scope") or {}
         return fauto.maybe_autonomous_send(
             db, case_id=case_id, actor=_agent(), confidence=float(draft.get("confidence") or 0.0),
             estimated_value_cents=int(scope.get("estimated_value_cents") or 0),
             quantity=int(scope.get("quantity") or 0), recipient_domain=str(draft.get("recipient_domain") or ""),
-            allowlist_fn=fdraft._default_allowlist)
+            allowlist_fn=fdraft._default_allowlist, tenant_id=tenant_id)
     except Exception:
         return fauto.SendDecision("escalated", "error_fail_closed")
 
@@ -1388,8 +1369,9 @@ def _budget_gate_enabled() -> bool:
 
 def _case_category(db, case_id: str) -> str:
     """The budget category for a case — the buyer's use_case (from requirements), else 'default'."""
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        cur = fwf.repository.current_version(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, current_tenant_id())
         reqs = (cur.state_json.get("requirements") or {}) if cur and isinstance(cur.state_json, dict) else {}
         return str(reqs.get("use_case") or "default").strip().lower() or "default"
     except Exception:
@@ -1400,22 +1382,22 @@ def _case_spend_cents(db, case_id: str) -> Optional[int]:
     """The spend this case commits to a supplier (the approval-gate value): the wholesale cost from economics,
     else the draft's estimated value. Returns None when the spend is UNKNOWN (no economics + no estimate) — the
     caller must fail CLOSED, never treat unknown as $0 (which would slip a high-value send past a low tier)."""
+    from src.app.platform.tenant_context import current_tenant_id
     try:
         from src.app.services.fulfillment import economics as _feco
-        econ = _feco.from_case(db, case_id) or {}
-        sc = int(econ.get("supplier_cost_cents") or 0)
-        if sc > 0:
+        econ = _feco.from_case(db, case_id, tenant_id=current_tenant_id()) or {}
+        sc = econ.get("supplier_cost_cents")
+        if type(sc) is int and sc > 0:
             return sc
     except Exception:
         pass
     try:
-        cur = fwf.repository.current_version(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, current_tenant_id())
         scope = ((cur.state_json.get("draft") or {}).get("commercial_scope") or {}) if cur and isinstance(cur.state_json, dict) else {}
         est = scope.get("estimated_value_cents")
         if est is not None:
-            v = int(est)
-            if v > 0:
-                return v
+            if type(est) is int and est > 0:
+                return est
     except Exception:
         pass
     return None
@@ -1434,11 +1416,12 @@ def _category_committed_cents(db, category: str, *, exclude_case_id: str) -> int
     """Spend already COMMITTED this period for a budget category — the sum over OTHER cases in that category
     that have passed the approval gate (APPROVED_TO_SEND and beyond, excluding superseded/rejected). Makes the
     budget gate CUMULATIVE: two separate cases can't each slip under the cap while together breaching it."""
+    from sqlalchemy import text
+    from src.app.platform.tenant_context import current_tenant_id
     total = 0
-    try:
-        rows = fwf.repository.list_cases(db) or []
-    except Exception:
-        return 0
+    rows = [dict(row) for row in db.execute(text(
+        "SELECT id AS case_id, status FROM fulfillment_case WHERE tenant_id = :tenant"),
+        {'tenant': current_tenant_id()}).mappings().all()]
     for c in rows:
         if not isinstance(c, dict):
             continue
@@ -1450,7 +1433,9 @@ def _category_committed_cents(db, category: str, *, exclude_case_id: str) -> int
         if _case_category(db, cid) != str(category):
             continue
         spend = _case_spend_cents(db, cid)
-        if spend and spend > 0:
+        if spend is None:
+            raise HTTPException(status_code=409, detail='committed_spend_unknown')
+        if spend > 0:
             total += int(spend)
     return total
 
@@ -1460,8 +1445,7 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
     from src.app.services.fulfillment.approval_policy import required_approval_tier
     from src.app.services.fulfillment.budget_gate import budget_status
     with db_session() as db:
-        res, approval_id = fdraft.request_supplier_approval(db, case_id=case_id, actor=_agent())
-        _raise_if_failed(res)
+        tenant_id = _operator_case_tenant(db, case_id)
         # enterprise gates: WHICH approver tier this spend requires + whether it fits the category budget.
         # Both recorded for audit + surfaced so the operator routes correctly; enforced at the send gate
         # when their flags are on (default OFF preserves behaviour).
@@ -1475,21 +1459,25 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
             committed = _category_committed_cents(db, category, exclude_case_id=case_id)
             tier = required_approval_tier(spend)
             budget = budget_status(spend, category=category, committed_cents=committed)
+        # Validate projections that can reject the request before the workflow
+        # commits. Dispatch still revalidates current spend and authorization.
+        res, approval_id = fdraft.request_supplier_approval(db, case_id=case_id, actor=_agent(), tenant_id=tenant_id)
+        _raise_if_failed(res)
         try:
             from src.app.services.decision_log import log_trace_event
-            cur = fwf.repository.current_version(db, case_id)
+            cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
             log_trace_event(trace_id=(cur.source_trace_id if cur else None), event_type="approval_gates",
                             source_type="agent", source_id="Approval_Policy_Agent", target_type="fulfillment_case",
                             target_id=case_id, payload={"tier": tier, "budget": budget}, durable=True)
         except Exception:
             pass
-        auto = _attempt_autonomous_send(db, case_id)
+        auto = _attempt_autonomous_send(db, case_id, tenant_id=tenant_id)
         # Approval and workflow writes commit internally; optional spend,
         # budget, trace, or autonomy projections are read-only/best-effort.
         # Reset before the authoritative response projection so a caught
         # PostgreSQL error cannot become a misleading 404.
         db.rollback()
-        return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id,
+        return {**_case_view(db, case_id, for_operator=True, tenant_id=tenant_id), "approval_id": approval_id,
                 "approval_required_tier": tier, "budget_status": budget,
                 "autonomous_send": {"action": auto.action, "reason": auto.reason,
                                     "provider_ref": auto.provider_ref}}
@@ -1503,7 +1491,8 @@ def start_qualification(case_id: str, role: str = Depends(require_role(_OPERATOR
     from src.app.routers.escalation_room import create_incident_record
     from src.app.services.fulfillment import buyer_qualification as fbq
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         if cur is None:
             raise HTTPException(status_code=404, detail="case not found")
         av = (cur.state_json.get("availability") or {}) if isinstance(cur.state_json, dict) else {}
@@ -1513,9 +1502,9 @@ def start_qualification(case_id: str, role: str = Depends(require_role(_OPERATOR
                      "requested_qty": av.get("requested_qty"), "shortfall": av.get("shortfall")},
             created_by=role, title="Buyer qualification: confirm bulk intent")
         res = fbq.request_qualification(db, case_id=case_id, actor=_agent(),
-                                        room_ref=(room or {}).get("incident_id"))
+                                        room_ref=(room or {}).get("incident_id"), tenant_id=tenant_id)
         _raise_if_failed(res)
-        return {**_case_view(db, case_id, for_operator=True), "qualification_room": room}
+        return {**_case_view(db, case_id, for_operator=True, tenant_id=tenant_id), "qualification_room": room}
 
 
 class QualifyBody(BaseModel):
@@ -1530,12 +1519,13 @@ def qualify(case_id: str, body: QualifyBody, role: str = Depends(require_role(_O
     human = Actor(ActorType.HUMAN_OPERATOR, role)
     from src.app.services.fulfillment import buyer_qualification as fbq
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         room_ref = ((cur.state_json.get("qualification") if cur else None) or {}).get("room_ref")
         res = fbq.record_qualification(db, case_id=case_id, actor=human, qualified=body.qualified,
-                                       notes=body.notes, room_ref=room_ref)
+                                       notes=body.notes, room_ref=room_ref, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class RfiBody(BaseModel):
@@ -1548,9 +1538,10 @@ def request_info(case_id: str, body: RfiBody, role: str = Depends(require_role(_
     recoverable path for a needs_info send-gate. Same cage (allowlisted recipient, claim-safe, hash-pinned)."""
     human = Actor(ActorType.HUMAN_OPERATOR, role)
     with db_session() as db:
-        res, _rfi = fdraft.request_supplier_info(db, case_id=case_id, actor=human, question=body.question)
+        tenant_id = _operator_case_tenant(db, case_id)
+        res, _rfi = fdraft.request_supplier_info(db, case_id=case_id, actor=human, question=body.question, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class RfiReplyBody(BaseModel):
@@ -1563,11 +1554,12 @@ def supplier_info(case_id: str, body: RfiReplyBody, role: str = Depends(require_
     trust-verified against the case's resolved supplier domain (an untrusted sender → 409), so the demo
     reply is attributed exactly as a real inbound poller would attribute it — not operator manual entry."""
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         sender_domain = str(((cur.state_json.get("rfi") if cur else None) or {}).get("recipient_domain") or "")
-        res = fec.receive_supplier_info(db, case_id=case_id, raw_body=body.answer, sender_domain=sender_domain)
+        res = fec.receive_supplier_info(db, case_id=case_id, raw_body=body.answer, sender_domain=sender_domain, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class DispatchBody(BaseModel):
@@ -1579,8 +1571,17 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
              subj: OperatorSubject = Depends(operator_subject)) -> Dict[str, Any]:
     """GATE 2: the HUMAN approves + sends. approval_granted then the hash-checked send. When approval tiers
     are enabled, an approver below the spend's required tier is REJECTED (escalate to the right authority)."""
+    from contextlib import ExitStack
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.fulfillment.category_budget_lock import category_budget_lock
+    tenant = current_tenant_id()
     human = _operator_actor(role, subj)
-    with db_session() as db:
+    with db_session() as db, ExitStack() as locks:
+        if _budget_gate_enabled():
+            try:
+                locks.enter_context(category_budget_lock(db, tenant_id=tenant, category=_case_category(db, case_id)))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
         if _approval_tiers_enabled() or _budget_gate_enabled():
             _spend = _case_spend_cents(db, case_id)
             if _spend is None:
@@ -1596,25 +1597,17 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
                 if not verdict["ok"]:
                     raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
             if _budget_gate_enabled():
-                # KNOWN RACE (P0-1g, budget gate is flag-off by default): committed-spend is a SUM
-                # over OTHER cases and the commit is a transition on THIS case, so two concurrent
-                # same-category approvals each exclude the other, each pass the cap, and cumulative
-                # spend can breach it. The correct fix is a CATEGORY-level lock spanning this
-                # check + the approval_granted transition (SELECT ... FOR UPDATE on a per-category
-                # budget row, or a Postgres advisory lock) — deliberately NOT the permanent
-                # slot-reservation used for refunds, which would block the category forever. Left as
-                # a documented limitation until the gate is enabled + real category locking lands;
-                # human-paced approvals make live occurrence unlikely in the meantime.
+                # Category lock above survives workflow-internal commits.
                 from src.app.services.fulfillment.budget_gate import budget_status
                 committed = _category_committed_cents(db, _category, exclude_case_id=case_id)
                 b = budget_status(_spend, category=_category, committed_cents=committed)
                 if not b["within_budget"]:
                     raise HTTPException(status_code=403, detail={"error": "over_budget", **b})
         _raise_if_failed(fwf.transition(db, case_id=case_id, event="approval_granted", actor=human,
-                                        reason_code="human_approved"))
-        res = fec.send_approved(db, case_id=case_id, actor=human, approval_content_hash=body.content_hash)
+                                        reason_code="human_approved", tenant_id=tenant))
+        res = fec.send_approved(db, case_id=case_id, actor=human, approval_content_hash=body.content_hash, tenant_id=tenant)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant)
 
 
 class DemoReplyBody(BaseModel):
@@ -1652,9 +1645,9 @@ def read_inbound_evidence(
     with db_session() as db:
         row = db.execute(
             __import__("sqlalchemy").text(
-                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id"
+                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id AND tenant_id=:tenant"
             ),
-            {"id": inbox_id},
+            {"id": inbox_id, "tenant": current_tenant_id()},
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="inbound_email_not_found")
@@ -1687,9 +1680,9 @@ def legal_hold_inbound_evidence(
     with db_session() as db:
         row = db.execute(
             __import__("sqlalchemy").text(
-                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id"
+                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id AND tenant_id=:tenant"
             ),
-            {"id": inbox_id},
+            {"id": inbox_id, "tenant": current_tenant_id()},
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="inbound_email_not_found")
@@ -1714,14 +1707,14 @@ def email_enrichment_jobs(
     role: str = Depends(require_role([ROLE_OWNER])),
 ) -> Dict[str, Any]:
     with db_session() as db:
-        where = "WHERE enrichment_status=:status" if status else ""
+        where = "WHERE tenant_id=:tenant" + (" AND enrichment_status=:status" if status else "")
         rows = db.execute(
             __import__("sqlalchemy").text(
                 "SELECT id, tenant_id, provider, provider_message_id, enrichment_status, "
                 "enrichment_attempts, enrichment_error, updated_at FROM inbound_email_inbox "
                 f"{where} ORDER BY updated_at DESC LIMIT :limit"
             ),
-            {"status": status, "limit": limit},
+            {"status": status, "limit": limit, "tenant": current_tenant_id()},
         ).fetchall()
         return {
             "jobs": [
@@ -1749,9 +1742,9 @@ def replay_email_enrichment(
         row = db.execute(
             __import__("sqlalchemy").text(
                 "SELECT tenant_id, enrichment_status, raw_evidence_ref "
-                "FROM inbound_email_inbox WHERE id=:id"
+                "FROM inbound_email_inbox WHERE id=:id AND tenant_id=:tenant"
             ),
-            {"id": inbox_id},
+            {"id": inbox_id, "tenant": current_tenant_id()},
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="inbound_email_not_found")
@@ -1772,9 +1765,9 @@ def replay_email_enrichment(
         db.execute(
             __import__("sqlalchemy").text(
                 "UPDATE inbound_email_inbox SET enrichment_status='queued', "
-                "enrichment_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=:id"
+                "enrichment_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=:id AND tenant_id=:tenant"
             ),
-            {"id": inbox_id},
+            {"id": inbox_id, "tenant": current_tenant_id()},
         )
         try:
             enrich_inbound_email.apply_async(args=[inbox_id, str(row[0])], countdown=2)
@@ -1801,7 +1794,8 @@ def quarantine_disposition(
     if body.action in {"discard", "open_fresh_rfq"} and not str(body.note or "").strip():
         raise HTTPException(status_code=400, detail="disposition_note_required")
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         if cur is None:
             raise HTTPException(status_code=404, detail="case not found")
         if cur.state != "SUPPLIER_RESPONSE_QUARANTINED":
@@ -1817,7 +1811,7 @@ def quarantine_disposition(
                 buyer_uid_hash=None,
                 source_trace_id=cur.source_trace_id,
                 requested_by=role,
-                tenant_id="default",
+                tenant_id=tenant_id,
                 state_json={
                     "reopened_from_quarantine": {
                         "case_id": case_id,
@@ -1830,7 +1824,7 @@ def quarantine_disposition(
         try:
             disposition = record_disposition(
                 db,
-                tenant_id="default",
+                tenant_id=tenant_id,
                 inbox_id=inbox_id,
                 action=body.action,
                 actor_id=actor_id,
@@ -1840,7 +1834,7 @@ def quarantine_disposition(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {
-            **_case_view(db, case_id, for_operator=True),
+            **_case_view(db, case_id, for_operator=True, tenant_id=tenant_id),
             "quarantine_disposition": disposition,
         }
 
@@ -1853,7 +1847,8 @@ def demo_reply(case_id: str, body: DemoReplyBody, role: str = Depends(require_ro
     if body.scenario not in fsb.SCENARIOS:
         raise HTTPException(status_code=400, detail=f"unknown scenario; choose from {sorted(fsb.SCENARIOS)}")
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         draft = (cur.state_json.get("draft") if cur and isinstance(cur.state_json, dict) else None) or {}
         reply = fsb.generate_reply(
             case_ref=case_id,
@@ -1880,19 +1875,20 @@ def demo_reply(case_id: str, body: DemoReplyBody, role: str = Depends(require_ro
             },
             sender_domain=reply["sender_domain"],
             provider_ref=reply["provider_ref"],
-        )
+         tenant_id=tenant_id)
         _raise_if_failed(res)
         if res.state == "QUOTE_RECEIVED":
-            fec.record_parsed(db, case_id=case_id, actor=_agent())
-        return _case_view(db, case_id, for_operator=True)
+            fec.record_parsed(db, case_id=case_id, actor=_agent(), tenant_id=tenant_id)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 @router.post("/cases/{case_id}/validate-quote")
 def validate_quote(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
-        res = fec.validate_quote(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role))
+        tenant_id = _operator_case_tenant(db, case_id)
+        res = fec.validate_quote(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role), tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class OptionsBody(BaseModel):
@@ -1905,10 +1901,11 @@ class OptionsBody(BaseModel):
 def generate_options(case_id: str, body: OptionsBody = Body(default=OptionsBody()),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res, _opts = fopt.generate_and_record(db, case_id=case_id, actor=_agent(), deadline=body.deadline,
-                                              local_delivery_at=body.local_delivery_at, substitute=body.substitute)
+                                              local_delivery_at=body.local_delivery_at, substitute=body.substitute, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=False)  # buyer-facing
+        return _case_view(db, case_id, for_operator=False, tenant_id=tenant_id)  # buyer-facing
 
 
 # ── market replay (DEMO-only, operator) ──────────────────────────────────────
@@ -2259,8 +2256,9 @@ def propose_po(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Di
     """AGENT drafts the PO from the buyer's selection (SELECTED → PROCUREMENT_APPROVAL_REQUIRED).
     No value is committed — this only stages the PO for the human's approval."""
     with db_session() as db:
-        _raise_if_failed(fpo.propose(db, case_id=case_id, actor=_agent()))
-        return _case_view(db, case_id, for_operator=True)
+        tenant_id = _operator_case_tenant(db, case_id)
+        _raise_if_failed(fpo.propose(db, case_id=case_id, actor=_agent(), tenant_id=tenant_id))
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class ExecutePOBody(BaseModel):
@@ -2276,10 +2274,11 @@ def execute_po(case_id: str, body: ExecutePOBody = Body(default=ExecutePOBody())
     the quote expired or the PO exceeds the approved scope. SANDBOX: records a PO ref, transmits nothing."""
     human = _operator_actor(role, subj)
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res = fpo.execute(db, case_id=case_id, actor=human, idempotency_key=body.idempotency_key,
-                          today=body.today)
+                          today=None, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 class GoodsReceiptBody(BaseModel):
@@ -2301,12 +2300,13 @@ def record_receipt(case_id: str, body: GoodsReceiptBody,
     """Record goods receipt (received quantity) — the second leg of the 3-way match. SYSTEM (ASN/EDI 856)
     or operator. A self-loop: no state change, just the document the AP control reconciles."""
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res = fwf.transition(db, case_id=case_id, event="goods_receipt_recorded",
                              actor=Actor(ActorType.HUMAN_OPERATOR, role), reason_code="goods_receipt",
                              evidence={"quantity": int(body.quantity)},
-                             state_patch={"goods_receipt": {"quantity": int(body.quantity)}})
+                             state_patch={"goods_receipt": {"quantity": int(body.quantity)}},tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 @router.post("/cases/{case_id}/record-invoice")
@@ -2315,13 +2315,14 @@ def record_invoice(case_id: str, body: InvoiceBody,
     """Record the supplier invoice (quantity + amount) — the third leg of the 3-way match. SYSTEM (EDI 810)
     or operator. Self-loop; reconciled against the PO + goods receipt at completion."""
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res = fwf.transition(db, case_id=case_id, event="invoice_recorded",
                              actor=Actor(ActorType.HUMAN_OPERATOR, role), reason_code="invoice",
                              evidence={"quantity": int(body.quantity), "amount_cents": int(body.amount_cents)},
                              state_patch={"invoice": {"quantity": int(body.quantity),
-                                                      "amount_cents": int(body.amount_cents)}})
+                                                      "amount_cents": int(body.amount_cents)}},tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 @router.post("/cases/{case_id}/complete")
@@ -2330,15 +2331,16 @@ def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR)),
     """HUMAN marks the order COMPLETED (READY_TO_SHIP → COMPLETED) — the journey's final act. When
     FULFILLMENT_THREE_WAY_MATCH_ENABLED, completion (payment) is GATED on PO = goods-receipt = invoice."""
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         if _three_way_match_enabled():
             from src.app.services.fulfillment.three_way_match import match_for_case
-            cur = fwf.repository.current_version(db, case_id)
+            cur = fwf.repository.current_version(db, case_id, tenant_id)
             twm = match_for_case(cur.state_json if cur and isinstance(cur.state_json, dict) else {})
             if not twm["matched"]:
                 raise HTTPException(status_code=409, detail={"error": "three_way_match_failed", **twm})
-        res = fpo.complete(db, case_id=case_id, actor=_operator_actor(role, subj))
+        res = fpo.complete(db, case_id=case_id, actor=_operator_actor(role, subj),tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 # ── GATE 3: post-commitment change-order / cancellation (the irreversibility ladder) ────────────────
@@ -2364,7 +2366,8 @@ def change_economics(case_id: str, refundable_to_buyer_cents: int = Query(0),
     restock fee, supplier penalty, net cancellation cost. Read-only; moves nothing."""
     from src.app.services.fulfillment import change_order as fco
     with db_session() as db:
-        return fco.assess_for_case(db, case_id, refundable_to_buyer_cents=refundable_to_buyer_cents)
+        tenant_id = _operator_case_tenant(db, case_id)
+        return fco.assess_for_case(db, case_id, refundable_to_buyer_cents=refundable_to_buyer_cents, tenant_id=tenant_id)
 
 
 @router.post("/cases/{case_id}/propose-change")
@@ -2376,12 +2379,13 @@ def propose_change(case_id: str, body: ProposeChangeBody,
         raise HTTPException(status_code=403, detail={"error": "change_order_disabled"})
     from src.app.services.fulfillment import change_order as fco
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res = fco.propose_change(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role),
                                  kind=body.kind, reason=body.reason, derived_pr_id=body.derived_pr_id,
                                  assessment=fco.assess_for_case(db, case_id,
-                                                                refundable_to_buyer_cents=body.refundable_to_buyer_cents))
+                                                                refundable_to_buyer_cents=body.refundable_to_buyer_cents, tenant_id=tenant_id), tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 @router.post("/cases/{case_id}/cancel")
@@ -2395,10 +2399,11 @@ def cancel_order(case_id: str, body: CancelBody = Body(default=CancelBody()),
         raise HTTPException(status_code=403, detail={"error": "change_order_disabled"})
     from src.app.services.fulfillment import change_order as fco
     with db_session() as db:
+        tenant_id = _operator_case_tenant(db, case_id)
         res = fco.authorize_cancellation(db, case_id=case_id, actor=_operator_actor(role, subj),
-                                         reason=body.reason)
+                                         reason=body.reason, tenant_id=tenant_id)
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=True)
+        return _case_view(db, case_id, for_operator=True, tenant_id=tenant_id)
 
 
 # ── Reliable outbound queue (Tier-1 #5): retry/dead-letter/855-ack operability ────────────────────
@@ -2420,7 +2425,8 @@ def outbound_record_ack(case_id: str, body: AckBody,
     from src.app.platform.tenant_context import current_tenant_id
     tenant_id = str(current_tenant_id() or "")
     with db_session() as db:
-        cur = fwf.repository.current_version(db, case_id)
+        tenant_id = _operator_case_tenant(db, case_id)
+        cur = fwf.repository.current_version(db, case_id, tenant_id=tenant_id)
         sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
         content_hash = str((sj.get("outbound") or {}).get("content_hash") or "")
         if not content_hash:
