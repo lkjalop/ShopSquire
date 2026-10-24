@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import base64
 import html
 import json
 import os
 from typing import Any
-
-from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-
-from src.app.security.auth import ROLE_MERCHANT, require_role, _env_role_key
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, require_role, _env_role_key
 from src.app.security.csrf_middleware import CSRF_COOKIE_NAME, generate_csrf_token, set_csrf_cookie
-from src.app.services.nlp_query_clustering import QueryClusterer
+from src.app.services.demo_hunt_report import (  # extracted: pure deterministic demo report builder
+    build_demo_hunt_report as _build_demo_hunt_report,
+    decode_demo_hunt_context as _decode_demo_hunt_context,
+)
+
+
+
+
 
 router = APIRouter(prefix="/merchant", tags=["merchant"])
 
@@ -49,38 +53,22 @@ def _merchant_html_response(request: Request, html: str) -> HTMLResponse:
 
 
 def _is_loopback(req: Request) -> bool:
-    try:
-        host = getattr(getattr(req, "client", None), "host", None)
-        return str(host) in ("127.0.0.1", "::1", "localhost")
-    except Exception:
-        return False
+    from src.app.security.local_demo import is_loopback_peer
+
+    return is_loopback_peer(req)
 
 
 def _is_local_demo_host(req: Request) -> bool:
-    # When running behind Docker port-mapping, client.host may be a bridge IP.
-    # Use Host header as the primary signal for "opened on localhost in a browser".
-    try:
-        host = str((req.headers.get("host") or "")).lower()
-        return host.startswith("127.0.0.1") or host.startswith("localhost")
-    except Exception:
-        return False
+    # Host and forwarded headers are caller-controlled, not peer identity.
+    return _is_loopback(req)
 
 
 def _allow_unauth_dashboard(req: Request) -> bool:
-    # Make local demos easy: allow loopback access without headers when running in local env.
-    env = str(os.getenv("APP_ENV", "") or "").lower()
-    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return _is_loopback(req) or _is_local_demo_host(req)
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    return env in ("local", "dev", "development") and (_is_loopback(req) or _is_local_demo_host(req))
+    from src.app.security.local_demo import allow_local_demo_request
+
+    return allow_local_demo_request(req)
 
 
-from src.app.services.demo_hunt_report import (  # extracted: pure deterministic demo report builder
-    build_demo_hunt_report as _build_demo_hunt_report,
-    decode_demo_hunt_context as _decode_demo_hunt_context,
-)
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -869,17 +857,15 @@ Agentic defense ethos:
 
 
 @router.get("/email-lab", response_class=HTMLResponse)
-def merchant_email_lab(request: Request):
+def merchant_email_lab(request: Request, role: str = Depends(require_role([ROLE_OWNER]))):
     """Email Security Triage Lab (local demo).
 
     Compose emails with attachments, run analysis via /api/v1/email_security/evaluate,
     and stream the decision trace (SSE) on the right-side panel.
     """
-    if not (_is_loopback(request) or _is_local_demo_host(request)):
+    if (os.getenv('APP_ENV', '').strip().lower() not in {'local', 'dev', 'development', 'test'}
+            or not _is_loopback(request)):
         raise HTTPException(status_code=403, detail="email_lab_local_only")
-
-    import os as _os
-    _owner_key = _os.getenv("OWNER_API_KEY", "local-owner-key")
 
     html = """
     <!doctype html>
@@ -1340,8 +1326,8 @@ def merchant_email_lab(request: Request):
               if(admin) return admin;
               const general = getCookie('shopsquire_api_key') || '';
               if(general && general.startsWith('sk_')) return general;
-              return 'local-owner-key';
-            } catch(e){ return 'local-owner-key'; }
+              return '';
+            } catch(e){ return ''; }
           }
           function setApiHealthBadge(label, palette, titleText){
             const textEl = document.getElementById('api_health');
@@ -3198,6 +3184,5 @@ def merchant_email_lab(request: Request):
     </html>
     """
     resp = _merchant_html_response(request, html)
-    resp.set_cookie("shopsquire_api_key", _owner_key, httponly=False, samesite="strict", secure=_is_https_request(request))
     return resp
 

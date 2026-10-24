@@ -16,6 +16,11 @@ jobs:
     timeout-minutes: 30
     env:
       DISABLE_PLAYWRIGHT_TESTS: "0"
+      APP_ENV: test
+      MERCHANT_API_KEY: local-merchant-key
+      OWNER_API_KEY: local-owner-key
+      CV_PROVIDER: basic
+      CV_OCR_PROVIDER: tesseract
       MODEL_WARMUP_ON_STARTUP: "0"
       CUDA_VISIBLE_DEVICES: "-1"
       PAYMENT_EXECUTION_ENABLED: "0"
@@ -32,6 +37,8 @@ jobs:
 
       - name: Install locked backend and test tools
         uses: ./.github/actions/install-backend
+        with:
+          profile: api-test
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -43,6 +50,12 @@ jobs:
       - name: Install the locked storefront
         working-directory: frontend
         run: npm ci
+
+      - name: Install the locked admin frontend and native OCR
+        run: |
+          npm ci --prefix src/frontend/admin-react
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr libzbar0
 
       - name: Verify the browser collection toolchain
         run: |

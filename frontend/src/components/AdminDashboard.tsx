@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
 import { apiFetch } from '../lib/csrf';
 import { getOwnerApiKey } from '../lib/browserSession';
+import SupplierEnquiryPanel from './SupplierEnquiryPanel';
 
 type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona' | 'security_scorecard' | 'integration_health';
 
@@ -964,7 +965,7 @@ export default function AdminDashboard() {
       case 'nqe': return <NQEAnalyticsTab />;
       case 'recommendations': return <RecommendationTab />;
       case 'fraud': return <FraudSecurityTab />;
-      case 'supply_chain': return <SupplyChainTab />;
+      case 'supply_chain': return <><SupplierEnquiryPanel /><SupplyChainTab /></>;
       case 'intelligence': return <IntelligenceTab />;
       case 'persona': return <PersonaIntelligenceTab />;
       case 'security_scorecard': return <SecurityScorecardTab />;

@@ -3,11 +3,9 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
-
 from src.app.models.db import db_session
 from src.app.platform.tenant_context import current_tenant_id
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role_or_oidc
@@ -24,9 +22,29 @@ from src.app.services.inventory_projection_read_model import (
     inventory_projection_status,
     rebuild_inventory_projection,
 )
+from src.app.routers.operator_supplier_enquiries import router as supplier_enquiry_router
 
 
 router = APIRouter(prefix="/api/v1/admin/inventory", tags=["admin-inventory"])
+router.include_router(supplier_enquiry_router)
+
+
+def _inventory_operator(request: Request):
+    identity = getattr(request.state, "operator_identity", None)
+    if not identity or not identity.principal_hash:
+        raise HTTPException(status_code=403, detail="authenticated_operator_required")
+    if not identity.tenant_id.startswith("synthetic-") or os.getenv(
+        "ENABLE_DEMO_ROUTES", "0"
+    ).lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=403, detail="synthetic_inventory_demo_only")
+    from src.app.services.fulfillment.person_approval import _person
+
+    with db_session() as db:
+        try:
+            _person(db, identity.tenant_id, identity.principal_hash)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return identity
 
 
 class ProjectionRebuildBody(BaseModel):
@@ -71,7 +89,9 @@ def _invalidate_catalog_profile_after_product_write(tenant_id: str | None) -> No
     # Keep this close to the write endpoints so future product CRUD additions
     # invalidate the merchant catalog profile cache by default.
     try:
-        invalidate_catalog_profile_cache(tenant_id=str(tenant_id) if tenant_id is not None else None)
+        invalidate_catalog_profile_cache(
+            tenant_id=str(tenant_id) if tenant_id is not None else None
+        )
     except Exception:
         pass
 
@@ -80,6 +100,7 @@ def _load_csv_connector(path: str | None = None):
     from src.app.erp.connectors.csv_inventory import CSVInventoryConnector
 
     return CSVInventoryConnector(path=path)
+
 
 def _load_shopify_connector():
     from src.app.erp.connectors.shopify_inventory import ShopifyInventoryConnector
@@ -90,7 +111,16 @@ def _load_shopify_connector():
 def _load_external_connector(connector_id: str):
     cid = str(connector_id or "").strip().lower()
     # Deep provider connectors (delta cursors + outbound maps).
-    if cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
+    if cid in (
+        "netsuite",
+        "sap",
+        "dynamics",
+        "quickbooks",
+        "coupa",
+        "ariba",
+        "salesforce",
+        "hubspot",
+    ):
         from src.app.erp.provider_registry import load_provider
 
         return load_provider(cid)
@@ -109,18 +139,33 @@ def _json_load(raw: Any, default: Any):
 
 
 @router.get("/connectors")
-def connectors(role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, Any]:
+def connectors(
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
     csv_path = os.getenv("CSV_INVENTORY_PATH") or ""
     c = _load_csv_connector(csv_path if csv_path else None)
     s = _load_shopify_connector()
-    items = [{"id": "csv", "name": c.name(), "health": c.health()}, {"id": "shopify", "name": s.name(), "health": s.health()}]
-    for cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
+    items = [
+        {"id": "csv", "name": c.name(), "health": c.health()},
+        {"id": "shopify", "name": s.name(), "health": s.health()},
+    ]
+    for cid in (
+        "netsuite",
+        "sap",
+        "dynamics",
+        "quickbooks",
+        "coupa",
+        "ariba",
+        "salesforce",
+        "hubspot",
+    ):
         try:
             ec = _load_external_connector(cid)
             items.append({"id": cid, "name": ec.name(), "health": ec.health()})
         except Exception as exc:
             items.append({"id": cid, "name": cid, "health": {"ok": False, "error": str(exc)}})
     return {"items": items}
+
 
 @router.get("/connectors/summary")
 def connectors_summary(
@@ -135,7 +180,16 @@ def connectors_summary(
         {"id": "csv", "connector": _load_csv_connector(csv_path if csv_path else None)},
         {"id": "shopify", "connector": _load_shopify_connector()},
     ]
-    for cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
+    for cid in (
+        "netsuite",
+        "sap",
+        "dynamics",
+        "quickbooks",
+        "coupa",
+        "ariba",
+        "salesforce",
+        "hubspot",
+    ):
         try:
             connectors.append({"id": cid, "connector": _load_external_connector(cid)})
         except Exception:
@@ -216,7 +270,9 @@ def connectors_summary(
         delta_applied = None
         try:
             if last_run and prev_run:
-                delta_applied = (int(last_run.get("records_applied") or 0) - int(prev_run.get("records_applied") or 0))
+                delta_applied = int(last_run.get("records_applied") or 0) - int(
+                    prev_run.get("records_applied") or 0
+                )
             elif last_run:
                 delta_applied = int(last_run.get("records_applied") or 0)
         except Exception:
@@ -229,7 +285,10 @@ def connectors_summary(
                 "health": health,
                 "last_run": last_run,
                 "delta_applied": delta_applied,
-                "sample": [{"sku": r[0], "warehouse": r[1], "stock": r[2], "observed_at": r[3]} for r in (sample or [])],
+                "sample": [
+                    {"sku": r[0], "warehouse": r[1], "stock": r[2], "observed_at": r[3]}
+                    for r in (sample or [])
+                ],
             }
         )
 
@@ -297,7 +356,16 @@ def sync(
         c = _load_csv_connector(path=str(csv_path) if csv_path else None)
     elif connector_id == "shopify":
         c = _load_shopify_connector()
-    elif connector_id in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
+    elif connector_id in (
+        "netsuite",
+        "sap",
+        "dynamics",
+        "quickbooks",
+        "coupa",
+        "ariba",
+        "salesforce",
+        "hubspot",
+    ):
         c = _load_external_connector(connector_id)
     else:
         raise HTTPException(status_code=400, detail="unsupported connector")
@@ -308,15 +376,26 @@ def sync(
     from src.app.erp.sync import sync_inventory
     from src.app.observability.metrics import record_inventory_sync
 
-    out = sync_inventory(connector=c, tenant_id=str(tenant_id) if tenant_id is not None else None, dry_run=dry_run, upsert_products=upsert_products)
+    out = sync_inventory(
+        connector=c,
+        tenant_id=str(tenant_id) if tenant_id is not None else None,
+        dry_run=dry_run,
+        upsert_products=upsert_products,
+    )
     if not dry_run and upsert_products and not out.get("error"):
-        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
+        _invalidate_catalog_profile_after_product_write(
+            str(tenant_id) if tenant_id is not None else None
+        )
     try:
         record_inventory_sync(
             str(out.get("source") or connector_id),
             str(out.get("status") or "unknown"),
-            records_seen=int(out.get("records_seen") or 0) if out.get("records_seen") is not None else None,
-            records_applied=int(out.get("records_applied") or 0) if out.get("records_applied") is not None else None,
+            records_seen=int(out.get("records_seen") or 0)
+            if out.get("records_seen") is not None
+            else None,
+            records_applied=int(out.get("records_applied") or 0)
+            if out.get("records_applied") is not None
+            else None,
         )
     except Exception:
         pass
@@ -366,7 +445,9 @@ def run_netsuite_outbound(
 ) -> Dict[str, Any]:
     tenant_id = body.get("tenant_id")
     limit = int(body.get("limit", 100) or 100)
-    return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
+    return run_netsuite_outbound_sync(
+        tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
+    )
 
 
 @router.post("/sync/erp/delta")
@@ -398,10 +479,13 @@ def sync_erp_delta(
     next_cursor = None
     rows = []
     try:
-        rows, next_cursor = getattr(c, "fetch_inventory_delta")(cursor=prev_cursor, tenant_id=tenant_scope, limit=limit)
+        rows, next_cursor = getattr(c, "fetch_inventory_delta")(
+            cursor=prev_cursor, tenant_id=tenant_scope, limit=limit
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"delta_fetch_failed:{exc}")
     from src.app.erp.jobs import _SnapshotConnector  # local helper
+
     out = sync_inventory(
         connector=_SnapshotConnector(rows=rows, name=provider),
         tenant_id=str(tenant_id) if tenant_id is not None else None,
@@ -409,8 +493,15 @@ def sync_erp_delta(
         upsert_products=upsert_products,
     )
     if not dry_run and upsert_products and not out.get("error"):
-        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
-    if not dry_run and not out.get("error") and next_cursor is not None and prev_cursor != next_cursor:
+        _invalidate_catalog_profile_after_product_write(
+            str(tenant_id) if tenant_id is not None else None
+        )
+    if (
+        not dry_run
+        and not out.get("error")
+        and next_cursor is not None
+        and prev_cursor != next_cursor
+    ):
         getattr(c, "set_cursor")(
             tenant_id=tenant_scope,
             entity_type="inventory",
@@ -441,7 +532,14 @@ def enqueue_erp_outbound(
             max_attempts=max_attempts,
         )
     from src.app.erp.jobs_generic import enqueue_outbound
-    return enqueue_outbound(provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, entity_type=entity_type, payload=payload, max_attempts=max_attempts)
+
+    return enqueue_outbound(
+        provider=provider,
+        tenant_id=str(tenant_id) if tenant_id is not None else None,
+        entity_type=entity_type,
+        payload=payload,
+        max_attempts=max_attempts,
+    )
 
 
 @router.post("/sync/erp/outbound/run")
@@ -453,9 +551,14 @@ def run_erp_outbound(
     tenant_id = body.get("tenant_id")
     limit = int(body.get("limit", 100) or 100)
     if provider == "netsuite":
-        return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
+        return run_netsuite_outbound_sync(
+            tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
+        )
     from src.app.erp.jobs_generic import run_outbound
-    return run_outbound(provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
+
+    return run_outbound(
+        provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
+    )
 
 
 @router.get("/external_stock/recent")
@@ -524,7 +627,9 @@ def analysis_summary(
 
         readiness = compute_inventory_readiness()
         agent = InventoryAgent()
-        transfers = agent.suggest_rebalancing_transfers(max_suggestions=max(1, min(int(max_transfers or 10), 50)))
+        transfers = agent.suggest_rebalancing_transfers(
+            max_suggestions=max(1, min(int(max_transfers or 10), 50))
+        )
         return {
             "readiness": {
                 "score": readiness.score,
@@ -623,7 +728,9 @@ def ops_readiness(
                     except Exception:
                         pass
             metrics["forecast_mape_count"] = len(mape_vals)
-            metrics["forecast_mape_avg"] = round(sum(mape_vals) / len(mape_vals), 4) if mape_vals else 0.0
+            metrics["forecast_mape_avg"] = (
+                round(sum(mape_vals) / len(mape_vals), 4) if mape_vals else 0.0
+            )
 
             try:
                 t_rows = db.execute(
@@ -678,7 +785,9 @@ def ops_readiness(
     req = int(metrics["reorder_approvals_required"] or 0)
     done = int(metrics["reorder_approvals_completed"] or 0)
     metrics["approval_completion_rate"] = round(float(done) / float(max(1, req)), 4)
-    metrics["po_creation_rate_per_day"] = round(float(metrics["po_created_count"] or 0) * 24.0 / float(window_h), 4)
+    metrics["po_creation_rate_per_day"] = round(
+        float(metrics["po_created_count"] or 0) * 24.0 / float(window_h), 4
+    )
 
     alerts = {
         "approval_backlog_high": req > 0 and (done / float(max(1, req))) < 0.6,
@@ -728,7 +837,9 @@ def supplier_risk_summary(
                 sid = str(r[1] or "unknown")
                 risk = float(r[5] or 0.0)
                 scores.append(risk)
-                bucket = src_acc.setdefault(sid, {"source": sid, "quarantined": 0, "risk_sum": 0.0, "risk_avg": 0.0})
+                bucket = src_acc.setdefault(
+                    sid, {"source": sid, "quarantined": 0, "risk_sum": 0.0, "risk_avg": 0.0}
+                )
                 bucket["quarantined"] = int(bucket["quarantined"]) + 1
                 bucket["risk_sum"] = float(bucket["risk_sum"]) + risk
                 if len(out["recent_quarantines"]) < 20:
@@ -759,7 +870,9 @@ def supplier_risk_summary(
                         "trust_score": round(max(0.0, 1.0 - (float(v["risk_sum"]) / float(q))), 4),
                     }
                 )
-            out["source_risk"] = sorted(source_risk, key=lambda x: (x["quarantined"], x["risk_avg"]), reverse=True)
+            out["source_risk"] = sorted(
+                source_risk, key=lambda x: (x["quarantined"], x["risk_avg"]), reverse=True
+            )
     except Exception:
         pass
     out["avg_risk_score"] = round(sum(scores) / len(scores), 4) if scores else 0.0
@@ -818,7 +931,11 @@ def inventory_drift_check(
             except Exception:
                 pass
             try:
-                rows = db.execute(text("SELECT line_items, tenant_id FROM draft_orders ORDER BY created_at DESC LIMIT 800")).fetchall()
+                rows = db.execute(
+                    text(
+                        "SELECT line_items, tenant_id FROM draft_orders ORDER BY created_at DESC LIMIT 800"
+                    )
+                ).fetchall()
                 unknown = 0
                 for r in rows or []:
                     raw = r[0] if isinstance(r, (list, tuple)) else r[0]
@@ -831,7 +948,9 @@ def inventory_drift_check(
                         sku = str(it.get("sku") or "").strip()
                         if not sku:
                             continue
-                        exists = db.execute(text("SELECT 1 FROM products WHERE sku = :sku LIMIT 1"), {"sku": sku}).fetchone()
+                        exists = db.execute(
+                            text("SELECT 1 FROM products WHERE sku = :sku LIMIT 1"), {"sku": sku}
+                        ).fetchone()
                         if not exists:
                             unknown += 1
                 out["unknown_order_line_skus"] = int(unknown)
@@ -839,6 +958,14 @@ def inventory_drift_check(
                 pass
     except Exception:
         pass
-    if any(int(out.get(k) or 0) > 0 for k in ("missing_inventory_products", "orphan_inventory_rows", "unknown_order_line_skus", "negative_stock_rows")):
+    if any(
+        int(out.get(k) or 0) > 0
+        for k in (
+            "missing_inventory_products",
+            "orphan_inventory_rows",
+            "unknown_order_line_skus",
+            "negative_stock_rows",
+        )
+    ):
         out["status"] = "attention"
     return out

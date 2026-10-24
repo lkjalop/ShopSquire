@@ -1,4 +1,3 @@
-import os
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -11,7 +10,7 @@ from src.app.schemas.ui_contracts import (
     IncidentMessageResponse,
     TransactionTimeseriesResponse,
 )
-from tests.utils import default_headers
+from tests.utils import default_headers, with_client_address
 
 
 def test_bi_timeseries_contract_shape():
@@ -53,10 +52,10 @@ def test_decision_trace_query_contract_shape():
     assert parsed.decision_id == trace_id
 
 
-def test_incident_room_public_contracts():
-    os.environ["ALLOW_UNAUTH_MERCHANT_DASHBOARD"] = "1"
+def test_incident_room_public_contracts(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "1")
     app = create_app()
-    client = TestClient(app, headers=default_headers())
+    client = TestClient(with_client_address(app, "127.0.0.1"), headers=default_headers())
 
     esc = client.post(
         "/api/v1/incidents/escalate",
@@ -95,10 +94,10 @@ def test_status_summary_frontend_contract_for_overview_panel():
     assert alias.json() == body
 
 
-def test_admin_incident_detail_frontend_contract_for_summary_panel():
-    os.environ["ALLOW_UNAUTH_MERCHANT_DASHBOARD"] = "1"
+def test_admin_incident_detail_frontend_contract_for_summary_panel(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "1")
     app = create_app()
-    client = TestClient(app, headers=default_headers())
+    client = TestClient(with_client_address(app, "127.0.0.1"), headers=default_headers())
 
     esc = client.post(
         "/api/v1/incidents/escalate",

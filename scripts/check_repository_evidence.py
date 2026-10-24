@@ -11,6 +11,16 @@ DOCUMENTS = (
     'docs/portfolio/ENGINEERING_WALKTHROUGH.md',
     'docs/architecture/CURRENT_ARCHITECTURE_2026-10-23.md',
     'docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md',
+    'docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md',
+    'docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md',
+    'docs/PRICING_ACCEPTANCE_AND_REGIONAL_GROUNDING_2026-10-25.md',
+    'docs/audits/2026-10-25-c22-code-review-findings.md',
+    'docs/audits/2026-10-25-browser-visual-assessment.md',
+    'docs/audits/2026-10-25-deprecated-storefront-retirement.md',
+    'src/frontend/storefront-react/DEPRECATED.md',
+    'docs/audits/2026-10-25-timeout-retry-ownership-evidence.md',
+    'docs/audits/2026-10-25-dependency-context-evidence.md',
+    'docs/audits/2026-10-25-scoped-lint-integration-evidence.md',
 )
 
 
@@ -40,7 +50,8 @@ def check_links(root: Path = ROOT) -> tuple[int, list[str]]:
             if parts.scheme or parts.netloc:
                 continue
             target = (source.parent / unquote(parts.path)).resolve() if parts.path else source
-            if not target.is_relative_to(root.resolve()) or '.artifacts' in target.parts:
+            if (not target.is_relative_to(root.resolve())
+                    or '.artifacts' in target.relative_to(root.resolve()).parts):
                 failures.append(f'{name}: non-public target {href}')
                 continue
             if not target.is_file():

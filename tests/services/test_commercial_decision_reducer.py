@@ -6,7 +6,7 @@ from src.app.services.commercial_decision_reducer import (
 
 def candidate(**overrides):
     values = {
-        "sku": "PREFERRED", "exact_identity": True,
+        "sku": "PREFERRED", "exact_identity": True, "budget_currency": "AUD",
         "actual_form_factor": "laptop", "mandatory_form_factor": "laptop",
         "specification_freshness": "fresh", "unit_price_cents": 590_000,
         "budget_per_unit_cents": 600_000, "requested_quantity": 30,

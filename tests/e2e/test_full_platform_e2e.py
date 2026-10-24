@@ -20,6 +20,8 @@ import os
 import re
 import sys
 import time
+import http.server
+import threading
 from pathlib import Path
 
 import pytest
@@ -38,8 +40,8 @@ _PW_SKIP = (
 )
 
 FRONTEND_URL = os.getenv("FRONTEND_SMOKE_URL", "http://127.0.0.1:5173")
-BACKEND_URL = os.getenv("BACKEND_SMOKE_URL", "http://127.0.0.1:8080")
-_API_KEY = "local-merchant-key"
+BACKEND_URL = os.getenv("BACKEND_SMOKE_URL") or os.getenv("E2E_BASE_URL") or "http://127.0.0.1:8080"
+_API_KEY = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
 _REPORT: dict = {}
 
 
@@ -60,8 +62,6 @@ def _url_reachable(url: str, timeout_s: float = 5.0) -> bool:
 # ---------------------------------------------------------------------------
 # Lightweight static file server for the built frontend
 # ---------------------------------------------------------------------------
-import http.server
-import threading
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -745,12 +745,9 @@ def test_platform_latency_budget():
     # Budgets: suggest is slow on dev hardware (6-13s); 15s is the P99 target.
     # cv_analyze is fast when CV is disabled (stub response). healthz and maestro are near-instant.
     thresholds = {"healthz": 1.0, "suggest": 15.0, "cv_analyze": 12.0, "maestro_boundaries": 3.0}
-    all_ok = True
     for endpoint, elapsed in budgets.items():
         threshold = thresholds[endpoint]
         status = "OK" if elapsed < threshold else "EXCEEDED"
-        if status == "EXCEEDED":
-            all_ok = False
         print(f"  {endpoint}: {elapsed:.2f}s (budget={threshold:.1f}s) [{status}]")
     print("=" * 60)
 

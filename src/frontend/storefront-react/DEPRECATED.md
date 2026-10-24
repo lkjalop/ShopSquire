@@ -1,10 +1,7 @@
-This storefront is deprecated.
+# Archived storefront source
 
-Use `frontend/` as the single supported storefront codepath.
+Use `frontend/` as the single supported storefront and `src/frontend/admin-react/` for administration.
 
-Migration notes:
-- Supported app: `frontend/src/App.tsx`
-- Active admin app: `src/frontend/admin-react/`
-- Legacy app here is archived for reference only.
-- Package scripts in this folder are intentionally locked and exit with an error.
-- Do not add new features, bug fixes, or CI wiring under `src/frontend/storefront-react/`.
+This directory retains historical source only. Its obsolete `package.json` and `package-lock.json` were retired on 25 October 2026, removing the unsupported install/build dependency tree. Do not reinstall it, add features or wire it into CI/release flows.
+
+The prior manifests remain in Git history at repair commit `f83c072d`; their removal does not claim that the archived source was modernized or production-qualified. The active [storefront package](../../../frontend/package.json) and [admin package](../admin-react/package.json) own current dependencies.

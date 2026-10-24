@@ -64,11 +64,9 @@ def _incident_cookie_name(incident_id: str) -> str:
 
 
 def _is_local_demo_host(req: Request) -> bool:
-    try:
-        host = str((req.headers.get("host") or "")).lower()
-        return host.startswith("127.0.0.1") or host.startswith("localhost")
-    except Exception:
-        return False
+    from src.app.security.local_demo import is_loopback_peer
+
+    return is_loopback_peer(req)
 
 
 def _utc_now() -> datetime:
@@ -145,16 +143,9 @@ def _ensure_incident_runtime_tables() -> None:
 
 
 def _allow_public_escalation(req: Request) -> bool:
-    env = str(os.getenv("APP_ENV", "") or "").lower()
-    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return _is_local_demo_host(req)
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    # If APP_ENV is unset, default to loopback-only allowance for local demos.
-    if not env:
-        return _is_local_demo_host(req)
-    return env in ("local", "dev", "development") and _is_local_demo_host(req)
+    from src.app.security.local_demo import allow_local_demo_request
+
+    return allow_local_demo_request(req)
 
 
 def _token_key(kind: str, incident_id: str) -> str:
@@ -869,7 +860,6 @@ def collect_security_matrix(
     severity, risk_raw, risk_adj, details = compute_risk(payload)
 
     # Store as a security_scan trace event
-    scan_event_id = str(uuid.uuid4())
     from datetime import datetime as _dt
 
     now_iso = _dt.utcnow().isoformat()
@@ -962,7 +952,7 @@ async def ws_room(incident_id: str, websocket: WebSocket):
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-20:]
-                await websocket.send_text(json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False))
+                await websocket.send_text(json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False))
         except Exception:
             pass
         while True:
@@ -998,7 +988,7 @@ async def sse_room(
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-50:]
-                yield "data: " + json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False) + "\n\n"
         except Exception:
             pass
         try:
@@ -2068,7 +2058,7 @@ async def public_sse_room(
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-50:]
-                yield "data: " + json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False) + "\n\n"
         except Exception:
             pass
         try:

@@ -1010,50 +1010,7 @@ def log_trace_event(
                     pass
                 pass
 
-        # Publish trace event to in-process broker for realtime UIs (best-effort)
-        try:
-            try:
-                    loop = asyncio.get_event_loop()
-                    redis_stream_enabled = _redis_stream_enabled_by_env()
-                    # Fast path in high-throughput local/test mode: synchronous publish
-                    # avoids scheduling thousands of tiny asyncio tasks.
-                    if _publish_sync is not None and not redis_stream_enabled:
-                        _publish_sync(trace_id, broker_payload)
-                    elif loop.is_running():
-                        loop.create_task(_publish_trace(trace_id, broker_payload))
-                    else:
-                        if _publish_sync is not None and not redis_stream_enabled:
-                            try:
-                                _publish_sync(trace_id, broker_payload)
-                            except Exception:
-                                pass
-                        else:
-                            # Fallback: spawn a single background thread for async run
-                            def _run():
-                                try:
-                                    asyncio.run(_publish_trace(trace_id, broker_payload))
-                                except Exception:
-                                    logging.exception("_publish_trace failed in background thread (inner)")
-
-                            t = threading.Thread(target=_run, daemon=True)
-                            t.start()
-            except Exception:
-                # fallback: try cached sync publish helper
-                if _publish_sync is not None:
-                    try:
-                        _publish_sync(trace_id, broker_payload)
-                    except Exception:
-                        pass
-                else:
-                    def _run2():
-                        try:
-                            asyncio.run(_publish_trace(trace_id, broker_payload))
-                        except Exception:
-                            logging.exception("_publish_trace final fallback failed (inner)")
-
-                    threading.Thread(target=_run2, daemon=True).start()
-        except Exception:
-            logging.exception("Failed to publish trace event to broker")
+        _publish_broker_trace(trace_id, broker_payload)
         # Non-fatal: return even if DB insert failed
         return
     except Exception:
@@ -1129,3 +1086,50 @@ def record_commerce_outcome(
     except Exception:
         logging.exception("record_commerce_outcome failed for decision_id=%s", decision_id)
         return None
+
+
+def _publish_broker_trace(trace_id, broker_payload):
+    # Publish trace event to in-process broker for realtime UIs (best-effort)
+    try:
+        try:
+                loop = asyncio.get_event_loop()
+                redis_stream_enabled = _redis_stream_enabled_by_env()
+                # Fast path in high-throughput local/test mode: synchronous publish
+                # avoids scheduling thousands of tiny asyncio tasks.
+                if _publish_sync is not None and not redis_stream_enabled:
+                    _publish_sync(trace_id, broker_payload)
+                elif loop.is_running():
+                    loop.create_task(_publish_trace(trace_id, broker_payload))
+                else:
+                    if _publish_sync is not None and not redis_stream_enabled:
+                        try:
+                            _publish_sync(trace_id, broker_payload)
+                        except Exception:
+                            pass
+                    else:
+                        # Fallback: spawn a single background thread for async run
+                        def _run():
+                            try:
+                                asyncio.run(_publish_trace(trace_id, broker_payload))
+                            except Exception:
+                                logging.exception("_publish_trace failed in background thread (inner)")
+
+                        t = threading.Thread(target=_run, daemon=True)
+                        t.start()
+        except Exception:
+            # fallback: try cached sync publish helper
+            if _publish_sync is not None:
+                try:
+                    _publish_sync(trace_id, broker_payload)
+                except Exception:
+                    pass
+            else:
+                def _run2():
+                    try:
+                        asyncio.run(_publish_trace(trace_id, broker_payload))
+                    except Exception:
+                        logging.exception("_publish_trace final fallback failed (inner)")
+
+                threading.Thread(target=_run2, daemon=True).start()
+    except Exception:
+        logging.exception("Failed to publish trace event to broker")

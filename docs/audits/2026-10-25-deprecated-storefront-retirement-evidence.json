@@ -1,0 +1,147 @@
+{
+  "base": "f83c072d641a80f597a555d0965e9994b43fda6b",
+  "reason": "Retire the already-deprecated unsupported dependency tree; preserve historical source references",
+  "deleted_manifests_sha256": {
+    "src/frontend/storefront-react/package.json": "b4b97a629c9925e3fefaa25a2fd78fdc1aeb9f7561682b4b12b4e386eb3cc25f",
+    "src/frontend/storefront-react/package-lock.json": "fb71e3b6647b274dc4e2d1e710ed5d5208ae420696b58476485654a415b375da"
+  },
+  "deprecated_before_audit": {
+    "observed_at": "2026-10-24T17:59:38.809940+00:00",
+    "path": "src/frontend/storefront-react",
+    "native_exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 1,
+      "moderate": 2,
+      "high": 6,
+      "critical": 0,
+      "total": 9
+    },
+    "dependencies": {
+      "prod": 7,
+      "dev": 104,
+      "optional": 49,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 110
+    },
+    "affected_packages": [
+      {
+        "name": "@babel/core",
+        "severity": "low",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "baseline-browser-mapping",
+        "severity": "moderate",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "browserslist",
+        "severity": "high",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "esbuild",
+        "severity": "moderate",
+        "direct": false,
+        "fix_available": {
+          "name": "vite",
+          "version": "8.3.5",
+          "isSemVerMajor": true
+        }
+      },
+      {
+        "name": "nanoid",
+        "severity": "high",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "postcss",
+        "severity": "high",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "rollup",
+        "severity": "high",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "source-map-js",
+        "severity": "high",
+        "direct": false,
+        "fix_available": true
+      },
+      {
+        "name": "vite",
+        "severity": "high",
+        "direct": true,
+        "fix_available": {
+          "name": "vite",
+          "version": "8.3.5",
+          "isSemVerMajor": true
+        }
+      }
+    ],
+    "protected_manifests_unchanged": true,
+    "manifest_sha256": {
+      "package.json": "62b83d4f745d4e281206ab0dcf75bda863fc56788e7c9feb87b87ee820bab51c",
+      "package-lock.json": "37da75f3215e9245633b463a7e5899123ba7e8f17f96ef2ad4bd590b3d737d7b"
+    },
+    "qualification": "Separate deprecated script-locked frontend; active storefront/admin audits are different scopes. No install, fix or script execution."
+  },
+  "active_frontend_audits": {
+    "observed_at": "2026-10-24T18:01:18.986477+00:00",
+    "source_head": "cf617339b55a7b432535831f5dd29d29dfff9977",
+    "results": [
+      {
+        "surface": "storefront",
+        "path": "frontend",
+        "native_exit_code": 0,
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "affected_packages": [],
+        "protected_manifests_unchanged": true,
+        "manifest_sha256": {
+          "package.json": "56e5132123032f688fbb7a03a14f3cacc76855a51691d5bf41de6cd46a81bfd1",
+          "package-lock.json": "270117c285e918cbad29e28f92b378a5c1eca23c49752bc918671d3f58309578"
+        }
+      },
+      {
+        "surface": "admin",
+        "path": "src/frontend/admin-react",
+        "native_exit_code": 0,
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "affected_packages": [],
+        "protected_manifests_unchanged": true,
+        "manifest_sha256": {
+          "package.json": "f1785640f782b8e4db33e0a44870f89cf3ce15622c54e1af154c718175356174",
+          "package-lock.json": "b042b1753f219478a3332c0caa5b5d24d8247a57adc5651c96f6a4d8fdb3ef4d"
+        }
+      }
+    ],
+    "qualification": "Read-only current registry audit of both active locks; no installation, fixes or script execution"
+  },
+  "active_manifests_unchanged": true,
+  "runtime_or_ci_references_to_legacy_package": "None found in repository search; historical documentation/source retained",
+  "qualification": "Dependency retirement, not an upgrade or a claim of zero repository/container vulnerabilities. C22 full/browser results predate this manifest-only retirement."
+}

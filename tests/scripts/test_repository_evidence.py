@@ -1,7 +1,11 @@
+import pytest
+
 from scripts.check_repository_evidence import DOCUMENTS, check_links
 
 
-def test_public_links_require_real_targets_and_anchors(tmp_path):
+@pytest.mark.parametrize("relative_root", ["source", ".artifacts/clean-checkout"])
+def test_public_links_require_real_targets_and_anchors(tmp_path, relative_root):
+    tmp_path = tmp_path / relative_root
     for name in DOCUMENTS:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)

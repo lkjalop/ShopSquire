@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
+from tests.utils import with_client_address
 
 
-def test_merchant_email_lab_sets_inline_csp_and_csrf_cookie():
-    client = TestClient(create_app())
+def test_merchant_email_lab_sets_inline_csp_and_csrf_cookie(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    client = TestClient(with_client_address(create_app(), "127.0.0.1"), headers={"x-api-key": "local-owner-key"})
 
     resp = client.get("/merchant/email-lab", headers={"host": "127.0.0.1:8080"})
 

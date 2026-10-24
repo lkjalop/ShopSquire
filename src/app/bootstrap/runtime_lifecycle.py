@@ -55,14 +55,18 @@ class RuntimeLifecycle:
         ).strip()
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(
+                response = await client.post(
                     f"{base}/api/generate",
                     json={"model": model, "prompt": "hi", "stream": False,
                           "options": {"num_predict": 1}},
                 )
+                response.raise_for_status()
+                result = response.json()
+                if (not isinstance(result, dict) or result.get("error")
+                        or result.get("done") is not True):
+                    raise RuntimeError("vlm_warmup_incomplete_response")
             log.info("VLM warm-up complete: model=%s url=%s", model, base)
             if self._app is not None:
-                from src.app.bootstrap.startup_readiness import run_startup_step
                 run_startup_step(
                     self._app, name="vlm_warmup", criticality="optional",
                     operation=lambda: None,

@@ -37,7 +37,6 @@ import LoginModal from './components/LoginModal';
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
-import { postShoppingCaseAction, shoppingCaseActionPath } from './lib/shoppingCaseActions';
 import { detectPII } from './lib/pii';
 import StorefrontTrustBanner, {
   trustEvidenceFromPayload,
@@ -59,7 +58,6 @@ import {
   detectCVIssueType,
   detectPanelMode,
   hasDamageSignal,
-  hasNamedGameWorkload,
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
@@ -1838,98 +1836,8 @@ export default function App() {
 
     // Call backend
     try {
-      // Open-vocabulary ambiguous requests take a fast, deterministic lane first. This creates
-      // the durable shopping case, provisional shelves, high-information question, and zero-call
-      // trace without waiting for an LLM/provider. A 204 means the request belongs to the normal
-      // local catalogue/chat path below. The browser supplies only the buyer's words; research
-      // hypotheses and publisher scope are server-owned.
-      // The interpretation endpoint remains an explicit case-creation API for
-      // governed workflows, but it must not independently terminate a normal
-      // storefront message. Every chat composer turn now reaches the canonical
-      // chat terminal reducer exactly once; this prevents a provisional
-      // interpretation shelf from replacing the final research outcome.
-      const useInterpretationShortcut = false;
-      if (
-        useInterpretationShortcut
-        && !activeShoppingCase?.case_id
-        && !hasImages
-        && !complaintIntent
-        && !hasNamedGameWorkload(q)
-        // URL-bearing turns must reach governed source intake. The fast
-        // interpretation shortcut cannot issue the mandatory security receipt.
-        && !pastedOfficialUrl
-      ) {
-        const interpretationAction = await postShoppingCaseAction(
-          shoppingCaseActionPath.interpretation(), {
-            uid,
-            retained_purpose: q,
-            session_epoch: conversationEpoch,
-            // The current storefront is the pinned laptop category. The backend
-            // clamps buyer-named categories against it before exposing any shelf.
-            storefront_taxonomy_handle: 'el-6-6',
-          },
-        );
-        if (interpretationAction.status !== 204) {
-          const interpretation = interpretationAction.payload;
-          if (!interpretationAction.ok || !interpretation) {
-            throw new Error(String(
-              interpretation?.detail?.message
-              || interpretation?.detail?.code
-              || interpretation?.detail
-              || `case_interpretation_failed (${interpretationAction.status})`,
-              ));
-          }
-          const terminal = interpretation?.terminal_outcome;
-          if (terminal?.schema_version !== 'turn-terminal-outcome-v1') {
-            throw new Error('case_interpretation_missing_terminal_outcome');
-          }
-          if (!terminalInstallation.current.accept(installationToken, terminal)) return;
-          if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
-            // A new case owns the right panel. Do not leave the prior turn's
-            // catalog cards actionable underneath provisional case shelves.
-            setDisplayProducts([]);
-            setRecommendationShelf(null);
-            setSourcingIntent(null);
-            setFulfilmentCase(null);
-            setSourcingTraceId(null);
-            setPendingBulkQty(null);
-            setPendingBulkBudget(null);
-            setAmbiguityExploration(interpretation.ambiguity_exploration as AmbiguityExploration);
-            setActiveShoppingCase({
-              case_id: String(interpretation.ambiguity_exploration.case_id),
-              retained_purpose: String(interpretation.ambiguity_exploration.retained_purpose || q),
-              uid,
-              revision: Number(interpretation?.interpretation_job?.case_revision || 1),
-              interpretation_job_id: String(interpretation?.interpretation_job?.job_id || ''),
-            });
-          }
-          if (interpretation?.catalog_boundary?.schema_version === 'catalog-candidate-set-v1') {
-            // A buyer-named category outside this storefront is a terminal local
-            // boundary for this turn. Clear every prior actionable product surface.
-            setDisplayProducts([]);
-            setRecommendationShelf(null);
-            setProductShelves(null);
-            setAmbiguityExploration(null);
-            setActiveShoppingCase(null);
-          }
-          setProductShelves(terminalShelves(terminal));
-          if (Number.isInteger(interpretation?.requested_quantity)) {
-            setConfirmedSlots((previous) => ({
-              ...(previous || {}),
-              order_quantity: Number(interpretation.requested_quantity),
-            }));
-          }
-          setTraceId(normalizeTraceId(terminal.decision_trace_id || null));
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: String(terminal.assistant_message || 'I opened a provisional research case.'),
-            timestamp: new Date(),
-          }]);
-          switchRightPanelMode('grid');
-          return;
-        }
-      }
-
+      // Every composer turn reaches the canonical chat terminal reducer. Explicit
+      // case-creation actions use their own governed API outside the composer.
       // If images are attached, triage them first
       let imageTriageResults: any[] = [];
       if (hasImages) {

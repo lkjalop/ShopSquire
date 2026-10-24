@@ -1,5 +1,4 @@
 import json
-import os
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -7,7 +6,7 @@ from tests.utils import default_headers
 
 # Test will create app after configuring test engine and dependencies
 from src.app.config import get_settings
-from src.app.models.orm import Base, Product, DraftOrder
+from src.app.models.orm import Product, DraftOrder
 
 
 def test_decision_logs_include_retrieved_context_and_policy(monkeypatch, tmp_path):
@@ -113,6 +112,9 @@ def test_decision_logs_include_retrieved_context_and_policy(monkeypatch, tmp_pat
     # call pricing suggest to create a decision_log
     resp = client.get("/api/v1/pricing/suggest", params={"uid": "uid_decision", "cart_total_cents": 500})
     assert resp.status_code == 200
+    assert resp.json()["schema_version"] == "pricing-preview-v2"
+    assert resp.json()["executed"] is False
+    assert resp.json()["action_authority"] == "none"
 
     # query decision_logs table for last insert
     with engine.connect() as conn:
@@ -127,4 +129,10 @@ def test_decision_logs_include_retrieved_context_and_policy(monkeypatch, tmp_pat
         assert json.loads(retrieved)  # valid JSON
         assert policy_version == "v-test-1"
         assert approval_required in (0, 1, True, False)
-        assert execution_status in ("executed", "pending")
+        # Deliberate pricing-preview-v2 acceptance migration: a suggestion for
+        # an unverified cart/policy has no commercial execution receipt. Keep
+        # the strict verifier; do not register v-test-1 merely to make it pass.
+        assert execution_status == "review_required"
+        context = json.loads(retrieved)
+        assert context["verifier_chain_enforced"] is True
+        assert {v["name"]: v["status"] for v in context["verifier_chain"]}["policy_verifier"] == "fail"

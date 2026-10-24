@@ -15,10 +15,13 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install "ruff>=0.3,<0.4"
       - name: Check changed Python files only
-        # This publication PR intentionally establishes the accumulated V2
-        # checkpoint as the legacy lint baseline. Every Python file changed
-        # after that reviewed checkpoint must be clean; repository-wide debt
-        # remains reported separately and is not represented as green here.
-        run: >-
-          python scripts/ci_ruff_changed.py
-          --base "c76351e450ef0c080ef76c30ef880b4963e22ff5"
+        # The actual reviewed PR base defines incremental scope. Repository-wide
+        # legacy findings remain separate; the gate must cover every changed file.
+        env:
+          RUFF_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python scripts/ci_ruff_changed.py --base "$RUFF_BASE_SHA"
+      - name: Preserve the accumulated checkpoint ratchet
+        # The PR change check above does not waive existing accumulated debt.
+        # Keep the original declared-checkpoint requirement as a failing gate
+        # until those older findings have been reviewed and repaired.
+        run: python scripts/ci_ruff_changed.py --base "c76351e450ef0c080ef76c30ef880b4963e22ff5"

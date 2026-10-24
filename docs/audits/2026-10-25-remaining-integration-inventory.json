@@ -1,0 +1,132 @@
+{
+  "remaining_root_inventory": {
+    "observed_at": "2026-10-24T19:45:43.274492+00:00",
+    "head": "5a5c07c4da9e7c5bb8013fbf18d6498e71ff462c",
+    "all_dirty_paths": 339,
+    "default_collapsed_paths": 333,
+    "states": {
+      " M": 166,
+      "??": 173
+    },
+    "areas": {
+      "CI": 4,
+      "Root/deployment": 3,
+      "Migrations": 1,
+      "Configuration": 11,
+      "Data": 1,
+      "Documentation": 59,
+      "Browser tests": 44,
+      "Storefront": 19,
+      "Scripts": 31,
+      "Application other": 5,
+      "API routes": 21,
+      "Security": 1,
+      "Services": 51,
+      "Admin UI": 3,
+      "Python tests": 85
+    },
+    "python_files": 185,
+    "python_syntax_findings": [],
+    "staged_paths": [],
+    "ledger_sha256": "61804c6d862438583aad0963be5bbe2c2f68089c8b5382ac09db45df17df39f2",
+    "scope": "Read-only remaining-root inventory; grouping/imports identify review cohorts, not dependency completeness or authorization to bulk commit"
+  },
+  "selected_absolute_import_boundary": {
+    "head": "5a5c07c4da9e7c5bb8013fbf18d6498e71ff462c",
+    "missing_public_module_edges": [
+      {
+        "importer": "src/app/routers/admin_inventory.py",
+        "module": "src.app.services.operator_inventory_requests",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/routers/demo.py",
+        "module": "src.app.routers.portfolio_qualification",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/routers/fulfillment_cases.py",
+        "module": "src.app.routers.fulfillment_http_helpers",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/evidence_measurements.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/hippograph_journey_edges.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/hippograph_view_selector.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/official_workload_research.py",
+        "module": "src.app.services.blender_requirement_parser",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/operational_connector_contracts.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/procurement_decision_run.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/recommendation_core/core.py",
+        "module": "src.app.services.recommendation_core.budget_subject",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/recommendation_core/typed_stage_coordinator.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/services/tool_capability_selector.py",
+        "module": "src.app.compat",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "scripts/report_blender_qualification_gaps.py",
+        "module": "src.app.services.blender_requirement_parser",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "scripts/run_heldout_inventory_benchmark.py",
+        "module": "src.app.services.heldout_inventory_benchmark",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "scripts/run_rolling_inventory_benchmark.py",
+        "module": "src.app.services.heldout_inventory_benchmark",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "src/app/routers/portfolio_qualification.py",
+        "module": "src.app.routers.product_offer_demo",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      },
+      {
+        "importer": "tests/api/test_product_offer_identity.py",
+        "module": "src.app.routers.product_offer_demo",
+        "scope": "Static full-module import not present at public head; verify conditionality and complete cohort before integration"
+      }
+    ],
+    "scope": "Selected absolute from-imports in remaining dirty Python files; not complete dependency or symbol resolution"
+  },
+  "owned_resource_observation": {
+    "observed_at": "2026-10-24T19:46:10.503406+00:00",
+    "matching_owned_application_processes": [],
+    "declared_final_browser_ports_still_listening": [],
+    "scope": "Read-only exact artifact/path ownership filter and four declared browser ports; no global process cleanup or unrelated service mutation"
+  },
+  "integration_warning": "These are remaining local cohorts, not defects introduced into the passing public selected smoke. AST parsing and absolute import edges do not resolve symbols, relative/dynamic imports or complete dependencies. No root work was bulk staged."
+}

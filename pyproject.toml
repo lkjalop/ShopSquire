@@ -52,8 +52,6 @@ celery = "^5.3.0"
 flower = "^1.0.0"
 sentence-transformers = ">=2.2.0"
 faiss-cpu = ">=1.7.4"
-ragas = ">=0.1.0"
-datasets = ">=2.14.0"
 neo4j = "^5.18.0"
 networkx = "^3.2"
 argon2-cffi = "^23.1.0"
@@ -62,15 +60,10 @@ azure-identity = {version = "^1.17.0", optional = true}
 azure-keyvault-secrets = {version = "^4.8.0", optional = true}
 azure-storage-blob = {version = "^12.22.0", optional = true}
 
-# Security minima for existing evaluator/dashboard transitives; runtime profiles
-# still install only their explicitly declared dependency closures.
-langchain = ">=1.3.9,<2.0.0"
-langchain-community = ">=0.4.2,<0.5.0"
-langchain-core = ">=1.2.22,<2.0.0"
-langchain-openai = ">=1.1.14,<2.0.0"
-langchain-text-splitters = ">=1.1.2,<2.0.0"
-langsmith = ">=0.8.18,<1.0.0"
-langgraph-sdk = ">=0.4.4,<0.5.0"
+# Unpatched Ragas/DiskCache and their unused framework chain are not shipped.
+# The compatibility evaluation API reports unavailable metrics until an approved
+# evaluator is deployed. Filelock remains a vision/retrieval transitive.
+filelock = ">=4.2.1,<5.0.0"
 tornado = ">=6.5.9,<7.0.0"
 
 [tool.poetry.extras]
@@ -92,6 +85,9 @@ types-redis = "^4.6.0.20240106"
 requests = "^2.31.0"
 reportlab = "^5.0.1"
 qrcode = "^8.2"
+psutil = ">=7.2.2,<8.0.0"
+pyzbar = "^0.1.9"
+pytesseract = "^0.3.10"
 
 [tool.coverage.run]
 source = ["src"]

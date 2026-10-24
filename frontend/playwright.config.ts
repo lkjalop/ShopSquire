@@ -19,8 +19,10 @@ export default defineConfig({
       // Live Ollama certification already exercises the discrete GPU heavily.
       // Allow the browser to use software compositing so a UI trace cannot
       // contend with model inference in the display driver's DPC path.
-      args: process.env.PLAYWRIGHT_DISABLE_GPU === '1'
-        ? ['--disable-gpu', '--disable-gpu-compositing'] : [],
+      args: [
+        ...(process.env.PLAYWRIGHT_DISABLE_GPU === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : []),
+        ...(process.env.PLAYWRIGHT_NET_LOG_PATH ? [`--log-net-log=${process.env.PLAYWRIGHT_NET_LOG_PATH}-worker-${process.pid}.json`] : []),
+      ],
     },
     actionTimeout: 20_000,
     trace: 'on',            // full Playwright trace (npx playwright show-trace ...) for every run

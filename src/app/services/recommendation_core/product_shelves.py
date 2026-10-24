@@ -260,18 +260,19 @@ def _ordered(
 ) -> list[ShelfProduct]:
     fit_priority = {"qualified": 0, "conditional": 1, "unverified": 2, "failed": 3}
     quantity_priority = {"complete_by_deadline": 0, "partial": 1, "late": 2, "unknown": 3}
+    comparable_prices = len({item.currency.upper() for item in products}) <= 1
     if decision_view == "available_by_deadline":
         return sorted(products, key=lambda item: (
             quantity_priority[item.commercial_decision.quantity_outcome],
             fit_priority[item.commercial_decision.fit_tier],
             -item.relevance_score,
-            item.price_cents,
+            item.price_cents if comparable_prices else 0,
             item.identity_key,
         ))
     return sorted(products, key=lambda item: (
         fit_priority[item.commercial_decision.fit_tier],
         -item.relevance_score,
-        item.price_cents,
+        item.price_cents if comparable_prices else 0,
         item.identity_key,
     ))
 
@@ -377,12 +378,59 @@ def _page(
     )
 
 
+def _shelf_commercial_decision(
+    candidate: ShelfCandidateInput, decision: WorkloadDecision | None, *,
+    requested_quantity: int | None, available_now: int | None,
+    budget_cents: int | None, budget_currency: str | None,
+) -> CommercialDecision:
+    """Project this exact configuration with separately scoped price and budget."""
+    ledger = list(decision.fit_ledger) if decision else []
+    freshness_values = {row.freshness_status for row in ledger}
+    specification_freshness: Literal["fresh", "stale", "unknown"] = (
+        "unknown" if not ledger or "unknown" in freshness_values
+        else "stale" if "stale" in freshness_values
+        else "fresh"
+    )
+    mandatory_form_factor = None
+    if decision:
+        raw_form = decision.workload.constraints.get("form_factor")
+        mandatory_form_factor = str(raw_form) if isinstance(raw_form, str) and raw_form else None
+    return reduce_commercial_candidate(CommercialCandidate(
+        sku=candidate.product.sku,
+        exact_identity=candidate.product.exact,
+        actual_form_factor=candidate.product.form_factor,
+        mandatory_form_factor=mandatory_form_factor,
+        verified_minimum_misses=[
+            row.attribute_label for row in ledger
+            if row.verdict == "below_minimum"
+            and row.requirement_class == "minimum"
+            and row.verification_status == "verified"
+        ],
+        recommendation_compromises=[
+            row.attribute_label for row in ledger
+            if row.verdict == "below_minimum" and row.requirement_class != "minimum"
+        ],
+        material_unknowns=[
+            row.attribute_label for row in ledger
+            if row_has_unresolved_evidence(row)
+        ] + ([] if decision else ["fit ledger not recorded"]),
+        specification_freshness=specification_freshness,
+        unit_price_cents=candidate.price_cents,
+        currency=candidate.currency, budget_currency=budget_currency,
+        budget_per_unit_cents=budget_cents,
+        requested_quantity=requested_quantity or 1,
+        local_available_now=available_now,
+        deadline_days=decision.workload.deadline_days if decision else None,
+    ))
+
+
 def build_product_shelves(
     candidates: Sequence[ShelfCandidateInput],
     *,
     hypothesis_ids: Sequence[str] = (),
     scope_labels: Mapping[str, str] | None = None,
     budget_cents: int | None = None,
+    budget_currency: str | None = "AUD",
     requested_quantity: int | None = None,
     stretch_budget_cents: int | None = None,
     suppress_zero_relevance: bool = False,
@@ -473,44 +521,11 @@ def build_product_shelves(
                     "enough_now" if available_now >= requested_quantity else
                     "partial" if available_now > 0 else "unavailable"
                 )
-            ledger = list(decision.fit_ledger) if decision else []
-            freshness_values = {row.freshness_status for row in ledger}
-            specification_freshness: Literal["fresh", "stale", "unknown"] = (
-                "unknown" if not ledger or "unknown" in freshness_values
-                else "stale" if "stale" in freshness_values
-                else "fresh"
+            commercial_decision = _shelf_commercial_decision(
+                candidate, decision, requested_quantity=requested_quantity,
+                available_now=available_now, budget_cents=budget_cents,
+                budget_currency=budget_currency,
             )
-            mandatory_form_factor = None
-            if decision:
-                raw_form = decision.workload.constraints.get("form_factor")
-                mandatory_form_factor = str(raw_form) if isinstance(raw_form, str) and raw_form else None
-            commercial_decision = reduce_commercial_candidate(CommercialCandidate(
-                sku=candidate.product.sku,
-                exact_identity=candidate.product.exact,
-                actual_form_factor=candidate.product.form_factor,
-                mandatory_form_factor=mandatory_form_factor,
-                verified_minimum_misses=[
-                    row.attribute_label for row in ledger
-                    if row.verdict == "below_minimum"
-                    and row.requirement_class == "minimum"
-                    and row.verification_status == "verified"
-                ],
-                recommendation_compromises=[
-                    row.attribute_label for row in ledger
-                    if row.verdict == "below_minimum" and row.requirement_class != "minimum"
-                ],
-                material_unknowns=[
-                    row.attribute_label for row in ledger
-                    if row_has_unresolved_evidence(row)
-                ] + ([] if decision else ["fit ledger not recorded"]),
-                specification_freshness=specification_freshness,
-                unit_price_cents=candidate.price_cents,
-                currency=candidate.currency,
-                budget_per_unit_cents=budget_cents,
-                requested_quantity=requested_quantity or 1,
-                local_available_now=available_now,
-                deadline_days=decision.workload.deadline_days if decision else None,
-            ))
             eligible.append(
                 ShelfProduct(
                     identity_key=identity_key,
@@ -593,7 +608,9 @@ def build_product_shelves(
         # commercial alternatives, not only the primary budget shelf.
         allowance = stretch_budget_cents if stretch_budget_cents is not None else budget_cents
         if allowance is not None:
-            eligible = [item for item in eligible if item.price_cents <= allowance]
+            eligible = [item for item in eligible
+                        if item.commercial_decision.budget_outcome == "unknown"
+                        or item.price_cents <= allowance]
         scope_label = labels.get(
             scope_id, "Best across shared needs" if scope_id == "shared" else scope_id
         )
@@ -634,6 +651,13 @@ def build_product_shelves(
                         products=stretch,
                     )
                 )
+            unverified = [item for item in eligible if item.commercial_decision.budget_outcome == "unknown"]
+            if unverified:
+                shelves.append(_page(
+                    shelf_id=f"{scope_id}:budget_unverified", scope_id=scope_id,
+                    scope_label=f"Budget comparison needs review — {scope_label}",
+                    budget_band="best", budget_cents=budget_cents, products=unverified,
+                ))
 
         # Availability is a separate buyer decision, never a hidden tie-breaker
         # inside technical fit. This projection exists only when quantity is known.
@@ -655,16 +679,20 @@ def build_product_shelves(
         if technical:
             preferred = technical[0]
             commercial_review = (
-                preferred.price_cents * (requested_quantity or 1) >= 3_000_000
-                or (
+                # These existing portfolio thresholds are denominated in AUD.
+                # Another currency requires a separately reviewed tenant policy.
+                preferred.currency.upper() == "AUD" and (
+                    preferred.price_cents * (requested_quantity or 1) >= 3_000_000 or (
                     (requested_quantity or 1) > 10
                     and preferred.price_cents >= 400_000
+                    )
                 )
             )
             max_alternative_price = preferred.price_cents * 80 // 100
             alternatives = [
                 item for item in eligible
                 if item.identity_key != preferred.identity_key
+                and item.currency.upper() == preferred.currency.upper()
                 and item.price_cents <= max_alternative_price
             ]
             if commercial_review and alternatives:

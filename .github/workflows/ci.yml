@@ -53,6 +53,18 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
     env:
+      APP_ENV: test
+      MERCHANT_API_KEY: local-merchant-key
+      OWNER_API_KEY: local-owner-key
+      DEVELOPER_API_KEY: local-developer-key
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      VLM_WARMUP_ON_START: "0"
+      CV_WARMUP_ON_START: "0"
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
@@ -63,8 +75,6 @@ jobs:
       # SQLite cannot model (it skips without this). Uses its own throwaway schemas on the same PG.
       TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
       ENABLE_DB_MATRIX: "1"
-      SPLUNK_HEC_URL: ${{ secrets.SPLUNK_HEC_URL }}
-      SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Set up Python
@@ -113,11 +123,3 @@ jobs:
           name: postgres-contracts-${{ matrix.python-version }}
           path: test-results/**
           retention-days: 14
-      - name: Emit Splunk test event (optional)
-        if: env.SPLUNK_HEC_URL != '' && env.SPLUNK_HEC_TOKEN != ''
-        run: |
-          set -e
-          echo "Posting Splunk HEC test event to $SPLUNK_HEC_URL"
-          body=$(jq -cn --arg msg "ci-test-event" --arg comp "ci" --arg sev "info" '{time:(now|floor), sourcetype:"shopsquire:security", event:{message:$msg, component:$comp, severity:$sev}}')
-          resp=$(curl -sS -X POST "$SPLUNK_HEC_URL" -H "Authorization: Splunk $SPLUNK_HEC_TOKEN" -H "Content-Type: application/json" -d "$body" || true)
-          echo "Splunk HEC response: $resp"

@@ -4,19 +4,22 @@ Minimal scaffold mirroring Overview/Decisions/Security/Approvals.
 
 ## Setup
 
+From the repository root:
+
 ```powershell
-cd C:\AI\ShopSquire\src\frontend\admin-react
-npm install
-set VITE_API_BASE=http://localhost:8080
+Set-Location src/frontend/admin-react
+npm ci
+$env:VITE_API_BASE = 'http://127.0.0.1:8080'
 npm run dev
 ```
 
-Open http://localhost:3001 (the app will call FastAPI at `%VITE_API_BASE%`)
+Open http://127.0.0.1:3001. This configures an API origin; authenticated operator access still requires the declared deployment/session setup. Do not place owner secrets in a buyer bundle.
 
 Ownership:
-- Supported storefront: `C:\AI\ShopSquire\frontend`
-- Supported admin app: `C:\AI\ShopSquire\src\frontend\admin-react`
-- Deprecated storefront: `C:\AI\ShopSquire\src\frontend\storefront-react`
+
+- Supported storefront: `frontend/`.
+- Supported admin: `src/frontend/admin-react/`.
+- Historical source only: `src/frontend/storefront-react/`; its obsolete install manifests are retired.
 
 ## Notes
 - Decisions and Approvals are wired to FastAPI endpoints.

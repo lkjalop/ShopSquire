@@ -1,0 +1,90 @@
+{
+  "scope": "Independently assembled public baseline 02e3421e plus this bounded maintainability/security cohort; not the entire local working tree",
+  "validation": [
+    {
+      "profile": "architecture-independent-v2",
+      "passed": 79,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "profile": "worktree-evidence-green",
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "check": "function size ratchet",
+      "exit_code": 0,
+      "ceiling_increases": 0
+    },
+    {
+      "check": "source size ratchet",
+      "exit_code": 0,
+      "oversize_warnings": 48
+    },
+    {
+      "check": "current public entrypoint links",
+      "checked": 50,
+      "failures": 0
+    }
+  ],
+  "sqlite_equivalence": [
+    {
+      "scenario": "empty",
+      "equivalent": true,
+      "outcomes": [
+        true,
+        true
+      ],
+      "statement_count": 254,
+      "schema_objects": 107,
+      "observation_sha256": "7e72f151f0f3eaf1630e262f19c99e8f30d51bc602c6ce23ebbe57456ebc5983"
+    },
+    {
+      "scenario": "legacy_sparse",
+      "equivalent": true,
+      "outcomes": [
+        true,
+        true
+      ],
+      "statement_count": 254,
+      "schema_objects": 106,
+      "observation_sha256": "e147b8cdf35ef5d4adb4fcf22e5755e14a1b617e8d576adae8a1c907ea364e86"
+    },
+    {
+      "scenario": "optional_failure",
+      "equivalent": true,
+      "outcomes": [
+        false,
+        false
+      ],
+      "statement_count": 254,
+      "schema_objects": 105,
+      "observation_sha256": "cc538e1c4e708d01a776266fbc22c5d83a6b6c45d3235e3353d8327cb6ff7e20"
+    },
+    {
+      "scenario": "fatal_failure",
+      "equivalent": true,
+      "outcomes": [
+        false,
+        false
+      ],
+      "statement_count": 2,
+      "schema_objects": 0,
+      "observation_sha256": "c7ee63dbe94884fa1c7f20f5d5ca2440f87ef60cf21abe4ccc39686859f5e0dc"
+    }
+  ],
+  "security_scope": [
+    "Real owner-authenticated loopback test positive; unauthenticated and merchant rejection; spoofed host/forwarded headers cannot establish a local peer.",
+    "Production HTTP API-key rejection is an authentication control only; the independent route-level production guard is tested separately. No claim of a live production OIDC integration.",
+    "Configured owner credentials are absent from the positive HTML and response headers; the lab no longer mints a browser owner-key cookie."
+  ],
+  "limits": [
+    "Size checks are growth ratchets, not proof that legacy long functions are easy to maintain.",
+    "The accumulated historical Ruff checkpoint remains required and has outstanding debt.",
+    "The code inventory is mechanical; no blanket semantic approval of every source line."
+  ]
+}

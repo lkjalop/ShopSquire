@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = '20260874_post_purchase_satisfaction'
-HEAD = '20260893_security_tenant_policy'
+HEAD = '20260894_supplier_enquiry_drafts'
 
 
 def migrate(database, target, *, direction='upgrade', check=True):
@@ -122,7 +122,7 @@ def test_preupgrade_backup_restores_to_a_separate_database_and_can_upgrade_again
 def test_empty_reversible_tail_can_downgrade_and_upgrade_again(baseline):
     migrate(baseline, 'head')
     before = retained_rows(baseline)
-    migrate(baseline, '-2', direction='downgrade')
+    migrate(baseline, '20260891_governed_product_offers', direction='downgrade')
     with sqlite3.connect(baseline) as db:
         assert db.execute('SELECT version_num FROM alembic_version').fetchone() == ('20260891_governed_product_offers',)
     migrate(baseline, 'head')
@@ -137,3 +137,16 @@ def test_forward_repair_handles_an_existing_92_without_the_ownership_column(base
     with sqlite3.connect(baseline) as db:
         assert db.execute('SELECT version_num FROM alembic_version').fetchone() == (HEAD,)
         assert db.execute("SELECT tenant_id FROM security_events WHERE id='legacy-security-event'").fetchone() == (None,)
+
+
+def test_draft_version_history_blocks_downgrade_before_any_schema_change(baseline):
+    migrate(baseline, 'head')
+    with sqlite3.connect(baseline) as db:
+        db.execute("INSERT INTO supplier_enquiry_draft VALUES "
+                   "('owned-tenant','owned-enquiry',1,'hash','{\"reviewed\":true}','2026-10-24')")
+    response = migrate(baseline, '20260893_security_tenant_policy', direction='downgrade', check=False)
+    assert response.returncode != 0
+    assert 'no downgrade steps started' in response.stdout + response.stderr
+    with sqlite3.connect(baseline) as db:
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone() == (HEAD,)
+        assert db.execute('SELECT draft_json FROM supplier_enquiry_draft').fetchone() == ('{"reviewed":true}',)

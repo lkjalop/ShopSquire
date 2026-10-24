@@ -20,6 +20,15 @@ def test_api_profile_contains_required_transitive_runtime_packages() -> None:
         assert package in requirements
 
 
+@pytest.mark.parametrize('suffix', ['', '-windows'])
+def test_browser_fixture_imports_are_present_in_the_lean_test_profile(suffix):
+    # Hosted image/performance positives reached missing imports after a
+    # successful install. These bindings were locked only in the main closure.
+    requirements = (ROOT / f'requirements/test-runtime{suffix}.txt').read_text(encoding='utf-8')
+    for package in ('psutil==', 'pyzbar==', 'pytesseract=='):
+        assert f'\n{package}' in requirements
+
+
 def test_profile_outputs_stay_inside_requirements_directory() -> None:
     import json
 

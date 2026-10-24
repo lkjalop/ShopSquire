@@ -48,11 +48,32 @@ _UNITS = {'seat': 'seat', 'seats': 'seat', 'user': 'user', 'users': 'user', 'dev
 
 
 def stated_currency(text: str, *, money_only: bool = False) -> str | None:
-    """An explicit unambiguous currency; a bare dollar sign has no ISO identity."""
-    pattern=r"\b(aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b"+(r"(?=\s*[$€£¥]?\s*\d)" if money_only else '')
-    currencies={_CURRENCY[m] for m in re.findall(pattern,str(text).lower())}
-    if '€' in text:currencies.add('EUR')
-    if '£' in text:currencies.add('GBP')
+    """An amount-bound currency or explicit declaration, never a workload acronym.
+
+    ``money_only`` excludes declarations without an amount. Prefix and suffix
+    amounts share this boundary; a bare dollar sign has no ISO identity.
+    """
+    query = str(text).lower()
+    pattern = r"\b(" + "|".join(_CURRENCY) + r")\b"
+    currencies = set()
+    for match in re.finditer(pattern, query):
+        before, after = query[:match.start()], query[match.end():]
+        amount_bound = bool(
+            re.match(r"\s*[$€£¥]?\s*\d", after)
+            or re.search(r"(?<![\w.])\d[\d,.]*\s*$", before)
+        )
+        declaration = not money_only and bool(
+            re.fullmatch(r"\s*" + pattern + r"\s*[.!?]?\s*", query)
+            or re.search(
+                r"\b(?:currency|quote|price|priced|budget|payment|invoice|cost|pay)"
+                r"(?:\s+[a-z]+){0,4}\s*[:=]?\s*$", before,
+            )
+        )
+        if amount_bound or declaration:
+            currencies.add(_CURRENCY[match.group(1)])
+    for symbol, code in (("€", "EUR"), ("£", "GBP")):
+        if symbol in query and (not money_only or re.search(re.escape(symbol) + r"\s*\d", query)):
+            currencies.add(code)
     return next(iter(currencies)) if len(currencies)==1 else None
 
 

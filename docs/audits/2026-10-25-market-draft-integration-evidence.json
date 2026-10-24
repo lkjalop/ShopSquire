@@ -1,0 +1,134 @@
+{
+  "base": "7311a91d",
+  "scope": "Independently assembled market relevance, shared supplier draft, operator UI and dead-branch removal cohort; excludes the remaining local integration work",
+  "files": [
+    {
+      "path": "src/app/services/case_task_delivery.py",
+      "sha256": "493c112013da263a97d539ae0aac729c84bd3c71a6d54db05d9448797df28a2a"
+    },
+    {
+      "path": "src/app/services/market_intelligence_agent.py",
+      "sha256": "a3b9a3a0d76f51bd65e2d9630e2bfe06ac90777c65cc727ff7aeb56bef03c3e0"
+    },
+    {
+      "path": "src/app/services/market_question_relevance.py",
+      "sha256": "607f68cd19c4bdc4e40980e0ac4d5d155a04b34196777bae0c72d5eaca69ab39"
+    },
+    {
+      "path": "src/app/services/supplier_market_evidence.py",
+      "sha256": "a26c9fe2c315036481d0282ad06a1917ca5c95dcdf294e40cdbeaed2fdff5ff8"
+    },
+    {
+      "path": "src/app/services/shortfall_enquiry_preview.py",
+      "sha256": "7ad16060acb61e7a4d8c90747e7c1a52ce070f89920ff5439a13866252922ba5"
+    },
+    {
+      "path": "src/app/services/supplier_enquiry_journey.py",
+      "sha256": "50792e9d4aed690c7323afb92111f6e128cdc3ca954fc92e0ed180ee6abc39b1"
+    },
+    {
+      "path": "src/app/services/supplier_enquiry_drafts.py",
+      "sha256": "7008da6ed774eebbc47424824ead45a54c7d3268ab230ac262d577bf4fe0b5cc"
+    },
+    {
+      "path": "src/app/services/fulfillment/person_approval.py",
+      "sha256": "0adfe75765e6bbd70946d4b81f427331bc8bdeeddc8545d181cda33927f4ad3a"
+    },
+    {
+      "path": "src/app/routers/operator_supplier_enquiries.py",
+      "sha256": "bb792d6a91c29dcdc891e3942fd76352cde6f76bbf6d07e9ed774d9576936b3c"
+    },
+    {
+      "path": "src/app/services/synthetic_supplier_directory.py",
+      "sha256": "a549d78a53bae0e8c228f82b4707c8d888d50eede205b7b080222d10a0ec622d"
+    },
+    {
+      "path": "alembic/versions/20260894_supplier_enquiry_drafts.py",
+      "sha256": "ea58c1a11d36fd766082d7afb676883505a0d12ff5f657fd751b8f433c8a3e3c"
+    },
+    {
+      "path": "tests/services/test_market_question_relevance.py",
+      "sha256": "6dd98d9cd5a52f0b817b23c3b0d5dd17db2b926dcc70438ceb3eaebbf64fe939"
+    },
+    {
+      "path": "tests/services/test_case_supplier_market_evidence.py",
+      "sha256": "56beaae4258ef3bb000cf05e2ae09ab498edbe8d1ab87e6c4505977554d02389"
+    },
+    {
+      "path": "tests/services/test_case_task_permutations.py",
+      "sha256": "ecd28e8dfaf7cb1ff962f618a3f28e8e9dbb6c19838550ea56197bf85d709e0f"
+    },
+    {
+      "path": "tests/services/test_supplier_draft_continuity.py",
+      "sha256": "db3fd644f8886198fa7fc172aa0f76774894cc58a3c33ac35a2018e79288f550"
+    },
+    {
+      "path": "tests/services/test_supplier_enquiry_journey.py",
+      "sha256": "101f9cf725150ec367f82d5c6df342835649aab6ef9b9d19776208e81b8836b6"
+    },
+    {
+      "path": "frontend/src/components/SupplierEnquiryPanel.tsx",
+      "sha256": "d162b7b5cb5a427eb94c1b9309991dc8c049c80fcb944e88f545894d01a2a9be"
+    },
+    {
+      "path": "frontend/src/components/__tests__/SupplierEnquiryPanel.test.tsx",
+      "sha256": "5091758e740fa517611affe5116bb21271f94894e052844e4392311c1a5cfe57"
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "sha256": "3378f80943efcf1e3cf7c2d4863c51edeb4beefc02f34c26f7898ca9b3849d5f"
+    },
+    {
+      "path": "src/app/routers/admin_inventory.py",
+      "sha256": "627235d97b2e3fa09848559f68d91fe5cde9be47ed42ce1c997a067cb032dfe0"
+    },
+    {
+      "path": "frontend/src/components/AdminDashboard.tsx",
+      "sha256": "58b63477a33cfd10d100c1e8e92366a670e4127aade19436f1698a821db9d04a"
+    },
+    {
+      "path": "tests/chaos/test_enquiry_recovery_postgres.py",
+      "sha256": "be2bd317d44e31159c38c58ca7b92be54c6c4e4a35c92b1eac8bebeac1a52f97"
+    }
+  ],
+  "checks": [
+    {
+      "name": "market/case/draft and existing recovery/API contracts",
+      "passed": 118,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "native PostgreSQL review/edit, supplier recovery and draft controls",
+      "passed": 11,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "storefront unit tests",
+      "passed": 389
+    },
+    {
+      "name": "admin unit tests",
+      "passed": 63
+    },
+    {
+      "name": "both frontend types and builds",
+      "exit_code": 0
+    },
+    {
+      "name": "changed Python Ruff and unchanged function/source size ratchets",
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "Counts overlap; they are not an overall completion percentage.",
+    "Backend controls use owned SQL/Redis and synthetic case evidence. Provider transport is fake/sandboxed; frontend rendering controls mock their API responses.",
+    "Quoted lead time is a current reviewed case estimate, not verified physical stock or observed delivery performance.",
+    "Question-facet filtering is not a held-out semantic-entailment or forecasting benchmark.",
+    "The accompanying native run also passed two multi-process memory/cache privacy controls; those are separate from this cohort and do not certify all business-record/attachment/backup erasure.",
+    "Broad browser/release/security/provider/endurance gates remain required on one frozen candidate."
+  ]
+}

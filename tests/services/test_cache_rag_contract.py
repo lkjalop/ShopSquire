@@ -83,7 +83,10 @@ def test_citation_identity_is_stable_and_revision_sensitive():
     assert first != stable_citation_id(**{**args, "revision": "2026-08"})
 
 
-def test_agentic_rag_exposes_version_contract_and_stable_citations():
+def test_agentic_rag_exposes_version_contract_and_stable_citations(monkeypatch):
+    # This test promises a functioning local cache, not a disconnected Redis server.
+    from src.app.services import agentic_rag_pipeline
+    monkeypatch.setattr(agentic_rag_pipeline, '_RAG_CACHE', SemanticCache(redis_url=None))
     kwargs = {
         "question": "How do I do a warranty return for broken screen?",
         "tenant_id": "tenant-a",

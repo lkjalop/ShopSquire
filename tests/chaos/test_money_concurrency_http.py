@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-MERCHANT = {"x-api-key": "local-merchant-key"}
+from tests.utils import default_headers
 
 
 def _fire(n, work):
@@ -45,12 +45,12 @@ def _client_on(engine):
     return TestClient(app, raise_server_exceptions=False), db_module, original
 
 
-def test_concurrent_webhook_same_event_processed_once(tmp_path):
+def test_concurrent_webhook_same_event_processed_once(tmp_path, monkeypatch):
     """M4 dedup under concurrent delivery through the REAL webhook handler (atomic on SQLite)."""
     import src.app.routers.payments as payments
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'m5.sqlite'}", future=True)
     client, db_module, original = _client_on(engine)
-    payments._is_non_dev_env = lambda _e: False
+    monkeypatch.setattr(payments, "_is_non_dev_env", lambda _e: False)
     try:
         with db_module.db_session() as db:
             db.execute(text("INSERT INTO orders (id, status, total_cents, currency, stripe_intent_id) "
@@ -73,7 +73,7 @@ def test_claimed_event_failure_is_retryable(monkeypatch, tmp_path):
     import src.app.routers.payments as payments
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'claim-retry.sqlite'}", future=True)
     client, db_module, original = _client_on(engine)
-    payments._is_non_dev_env = lambda _e: False
+    monkeypatch.setattr(payments, "_is_non_dev_env", lambda _e: False)
     real_apply = payments._apply_payment_webhook_event
     calls = {"n": 0}
 
@@ -103,7 +103,7 @@ def test_failed_inventory_release_rolls_back_and_retries(monkeypatch, tmp_path):
     import src.app.services.inventory_guard as inventory_guard
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'release-retry.sqlite'}", future=True)
     client, db_module, original = _client_on(engine)
-    payments._is_non_dev_env = lambda _e: False
+    monkeypatch.setattr(payments, "_is_non_dev_env", lambda _e: False)
     real_release = inventory_guard.release_inventory_for_order
     calls = {"n": 0}
 
@@ -143,7 +143,7 @@ def test_outbox_failure_survives_provider_state_commit(monkeypatch, tmp_path):
     import src.app.routers.payments as payments
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'outbox-retry.sqlite'}", future=True)
     client, db_module, original = _client_on(engine)
-    payments._is_non_dev_env = lambda _e: False
+    monkeypatch.setattr(payments, "_is_non_dev_env", lambda _e: False)
     seen = []
     monkeypatch.setattr(payments, "_handle_payment_outbox_job",
                         lambda *_args: (_ for _ in ()).throw(RuntimeError("worker down")))
@@ -186,8 +186,8 @@ def test_concurrent_order_transitions_one_winner_postgres():
         def work(i):
             t = targets[i % len(targets)]
             if t == "cancel":
-                return client.post("/api/v1/orders/ORD-M5/cancel", headers=MERCHANT).status_code
-            return client.post("/api/v1/orders/ORD-M5/status", headers=MERCHANT,
+                return client.post("/api/v1/orders/ORD-M5/cancel", headers=default_headers()).status_code
+            return client.post("/api/v1/orders/ORD-M5/status", headers=default_headers(),
                                json={"status": "paid"}).status_code
 
         codes = _fire(4, work)
@@ -200,3 +200,16 @@ def test_concurrent_order_transitions_one_winner_postgres():
         with admin.begin() as c:
             c.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin.dispose()
+
+
+def test_order_transition_still_rejects_an_unenrolled_key(tmp_path):
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'untrusted.sqlite'}", future=True)
+    client, db_module, original = _client_on(engine)
+    try:
+        response = client.post('/api/v1/orders/UNKNOWN/status',
+            headers={'x-api-key': 'unenrolled-http-race-key'}, json={'status': 'paid'})
+        assert response.status_code == 401
+    finally:
+        client.close()
+        db_module.set_engine(original)
+        engine.dispose()

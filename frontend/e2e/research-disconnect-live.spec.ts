@@ -1,14 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 const BACKEND_URL = (process.env.BACKEND_SMOKE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 
 test('buyer disconnect during live discovery does not strand backend responsiveness', async ({ page, request }) => {
   test.setTimeout(150_000);
-  await page.addInitScript(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', `disconnect-${Date.now()}`);
-  });
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
   const input = page.getByPlaceholder('Type your message...');
@@ -39,11 +36,7 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
   test.skip(process.env.LIVE_DISCONNECT_CERTIFICATION !== '1',
     'Requires the deliberately slow multi-query SearXNG certification profile.');
   test.setTimeout(150_000);
-  await page.addInitScript(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', `forced-disconnect-${Date.now()}`);
-  });
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
   const input = page.getByPlaceholder('Type your message...');

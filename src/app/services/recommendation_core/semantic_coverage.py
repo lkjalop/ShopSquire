@@ -192,8 +192,19 @@ def unresolved_purpose_proposal(
     # vocabulary from two different profiles must not jointly authorize an
     # unfamiliar purpose.
     node_tokens = _tokens(node_path)
+    from src.app.services.recommendation_core.post_catalog_adjudicator import (
+        explicit_evidence_constraints,
+    )
+
     unresolved: list[str] = []
     for span in spans:
+        if _is_budget_allocation(span, query=query, node_tokens=node_tokens):
+            continue
+        # Reuse the shared positive-evidence contract. Familiar category/use-case
+        # words cannot establish a certification or support-matrix requirement.
+        if explicit_evidence_constraints(span):
+            unresolved.append(span)
+            continue
         try:
             from src.app.services.connectors.workload_evidence import default_registry
 
@@ -247,6 +258,29 @@ def unresolved_purpose_proposal(
         "confidence": 0.25,
         "proposal_origin": "coverage_abstention",
     }
+
+
+def _is_budget_allocation(span: str, *, query: str, node_tokens: set[str]) -> bool:
+    """Recognize only an explicit money allocation to the current category.
+
+    The complete remaining subject must be covered by the selected taxonomy.
+    Trailing software, certification or performance requirements remain material.
+    """
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+    from src.app.services.bulk_intent import extract_quantity_span
+
+    if not node_tokens or parse_budget(query) is None or classify_budget_scope(query) != "total":
+        return False
+    quantity = extract_quantity_span(span, unit_nouns=node_tokens)
+    if quantity is None:
+        return False
+    allocation = re.fullmatch(
+        rf"(?:for\s+)?(?:all\s+)?{re.escape(quantity[1])}\s+(?P<category>[a-z][a-z\s-]*)", span, re.I,
+    )
+    if allocation is None:
+        return False
+    category = _tokens(allocation.group("category"))
+    return bool(category and category <= node_tokens)
 
 
 def discard_covered_model_workload_echo(

@@ -1,0 +1,85 @@
+{
+  "schema_version": "regional-price-observations-v1",
+  "purpose": "Fixed observed examples for AU/US/Germany monetary-basis rejection and arithmetic controls; not tenant quotes or checkout authority",
+  "observations": [
+    {
+      "country": "AU",
+      "currency": "AUD",
+      "product_family": "Apple AirTag, next generation",
+      "identity_scope": "manufacturer_family_and_pack; exact regional SKU equivalence not certified",
+      "offers": [
+        {
+          "pack_quantity": 1,
+          "pack_price_minor": 4900
+        },
+        {
+          "pack_quantity": 4,
+          "pack_price_minor": 16500
+        }
+      ],
+      "source_url": "https://www.apple.com/au/shop/buy-airtag/airtag/1-pack",
+      "retrieved_at": "2026-10-24T13:02:15.628094+00:00",
+      "source_sha256": "93638528d6ead914edc153e00524cb6df79907d8c9142baee777a17eb492ad3d",
+      "source_type": "public_manufacturer_observation",
+      "stock_status": "not_verified",
+      "delivery_amount_minor": null,
+      "transaction_authority": "none"
+    },
+    {
+      "country": "US",
+      "currency": "USD",
+      "product_family": "Apple AirTag, next generation",
+      "identity_scope": "manufacturer_family_and_pack; exact regional SKU equivalence not certified",
+      "offers": [
+        {
+          "pack_quantity": 1,
+          "pack_price_minor": 2900
+        },
+        {
+          "pack_quantity": 4,
+          "pack_price_minor": 9900
+        }
+      ],
+      "source_url": "https://www.apple.com/shop/buy-airtag/airtag/1-pack",
+      "retrieved_at": "2026-10-24T13:02:16.249080+00:00",
+      "source_sha256": "1b3c2abde9143176f5c6cd99a5a5a901abf27eeb468c5a304539b1ddc4243a65",
+      "source_type": "public_manufacturer_observation",
+      "stock_status": "not_verified",
+      "delivery_amount_minor": null,
+      "transaction_authority": "none"
+    },
+    {
+      "country": "DE",
+      "currency": "EUR",
+      "product_family": "Apple AirTag, next generation",
+      "identity_scope": "manufacturer_family_and_pack; exact regional SKU equivalence not certified",
+      "offers": [
+        {
+          "pack_quantity": 1,
+          "pack_price_minor": 3500
+        },
+        {
+          "pack_quantity": 4,
+          "pack_price_minor": 11900
+        }
+      ],
+      "source_url": "https://www.apple.com/de/shop/buy-airtag/airtag/1er-pack",
+      "retrieved_at": "2026-10-24T13:02:16.947932+00:00",
+      "source_sha256": "60305d0ded2cf66b35e9ede013b51b8bc701544142f180f1f708090066a073a7",
+      "source_type": "public_manufacturer_observation",
+      "stock_status": "not_verified",
+      "delivery_amount_minor": null,
+      "transaction_authority": "none"
+    }
+  ],
+  "fx_reference": {
+    "source_url": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+    "as_of": "2026-10-23",
+    "base_currency": "EUR",
+    "rates": {
+      "USD": "1.1193",
+      "AUD": "1.5939"
+    },
+    "use": "reference_comparison_only; not a transaction or approved tenant FX rate"
+  }
+}

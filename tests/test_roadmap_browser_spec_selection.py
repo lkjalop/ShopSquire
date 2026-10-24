@@ -1,7 +1,16 @@
 """A browser receipt must cover every explicitly requested scenario file."""
 import pytest
 
-from scripts.run_roadmap_browser import validate_specs
+from scripts.run_roadmap_browser import validate_specs, soak_buyers
+
+
+def test_persistent_runtime_replays_enroll_distinct_buyers_without_changing_security_limits():
+    prefix, bindings = soak_buyers(28800, 'owned-tenant', 'abc12345-rest')
+    assert prefix == 'ss-abc12345'
+    assert len(bindings) == 481
+    assert bindings['ss-abc12345-1'] == ['owned-tenant']
+    assert bindings['ss-abc12345-481'] == ['owned-tenant']
+    assert soak_buyers(0, 'owned-tenant', 'abc') == ('', {})
 
 
 def test_missing_spec_is_rejected_even_beside_valid_spec(tmp_path):

@@ -55,7 +55,7 @@ for import_path in (
         continue
 
 
-def assert_preserving_downgrade(current_heads):
+def assert_preserving_downgrade(current_heads, connection):
     """Reject protected plans before SQLite can commit any destructive DDL."""
     from alembic.script import ScriptDirectory
     from alembic.script.revision import RangeNotAncestorError
@@ -63,10 +63,16 @@ def assert_preserving_downgrade(current_heads):
 
     if not current_heads:
         return
+    try:
+        destination = context.get_revision_argument()
+    except KeyError:
+        # Read-only commands such as current/check do not supply a destination.
+        # They must inspect populated history without inventing a downgrade.
+        return
     script = ScriptDirectory.from_config(config)
     try:
         planned = list(script.iterate_revisions(
-            current_heads, context.get_revision_argument(), select_for_downgrade=True,
+            current_heads, destination, select_for_downgrade=True,
         ))
     except RangeNotAncestorError:
         # The destination is newer than the database: this is an upgrade.
@@ -76,6 +82,22 @@ def assert_preserving_downgrade(current_heads):
     if protected:
         raise CommandError('Downgrade requires a reviewed data-preserving recovery plan; '
                            'no downgrade steps started. Protected revisions: ' + ', '.join(protected))
+    # Applied revisions remain frozen. Protect populated reversible tails here,
+    # before SQLite can commit any earlier DROP TABLE in a multi-step plan.
+    from sqlalchemy import inspect, text
+    history = {
+        '20260894_supplier_enquiry_drafts': ('supplier_enquiry_draft',),
+        '20260892_buyer_supplier_selection': ('buyer_supplier_quote_selection',),
+        '20260891_governed_product_offers': ('governed_product_offer',),
+        '20260890_supplier_enquiry_journey': ('supplier_enquiry_request', 'supplier_enquiry_reply',
+                                             'person_effect_case_binding'),
+    }
+    schema = inspect(connection)
+    for revision in planned:
+        for table in history.get(revision.revision, ()):
+            if schema.has_table(table) and connection.execute(text(f'SELECT 1 FROM {table} LIMIT 1')).first():
+                raise CommandError('Downgrade would remove communication or approval history; '
+                                   'no downgrade steps started. Restore a reviewed backup. Table: ' + table)
 
 
 def run_migrations_offline():
@@ -136,7 +158,7 @@ def run_migrations_online():
         )
 
         with context.begin_transaction():
-            assert_preserving_downgrade(context.get_context().get_current_heads())
+            assert_preserving_downgrade(context.get_context().get_current_heads(), connection)
             context.run_migrations()
         # Run post-migration hook if present
         try:

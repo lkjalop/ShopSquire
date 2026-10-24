@@ -27,7 +27,7 @@ MAX_SOURCEABLE_QTY = 1000
 _QTY_PRECEDING_OK = frozenset({
     "with", "need", "needs", "want", "wants", "get", "buy", "order", "purchase", "about", "around",
     "roughly", "approx", "approximately", "so", "for", "of", "the", "some", "extra", "another", "me",
-    "us", "like", "say", "grab", "source", "and", "plus", "have", "getting", "buying", "ordering",
+    "us", "like", "say", "grab", "source", "and", "plus", "have", "getting", "buying", "ordering", "all",
     # Catalog commands before a count: "suggest 10 suitable laptops" is a quantity request,
     # while the existing name-token guard still rejects product names such as "Dell 15 laptops".
     "suggest", "recommend", "show", "find", "list", "compare",

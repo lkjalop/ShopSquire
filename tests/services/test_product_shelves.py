@@ -191,6 +191,52 @@ def test_no_budget_uses_relevance_before_price():
     ]
 
 
+@pytest.mark.parametrize("currency", ["AUD", "USD", "EUR"])
+def test_budget_shelf_requires_the_same_explicit_currency(currency):
+    candidate = _candidate(1, price=10_000).model_copy(update={"currency": currency})
+    projection = build_product_shelves(
+        [candidate], budget_cents=20_000, budget_currency=currency,
+    )
+    assert _shelf(projection, "shared:within_budget").initial[0].commercial_decision.budget_outcome == "within"
+
+
+@pytest.mark.parametrize("budget_currency", ["AUD", "USD", "EUR", None])
+def test_unconverted_price_remains_useful_without_a_false_budget_shelf(budget_currency):
+    currency = "EUR" if budget_currency != "EUR" else "USD"
+    # Neither a nominally low nor high foreign-currency amount can be compared
+    # to this ceiling. Preserve both for review, outside within/stretch claims.
+    candidates = [_candidate(1, price=1_000), _candidate(2, price=90_000)]
+    candidates = [item.model_copy(update={"currency": currency}) for item in candidates]
+    projection = build_product_shelves(
+        candidates, budget_cents=20_000, budget_currency=budget_currency,
+        requested_quantity=1,
+    )
+    pending = _shelf(projection, "shared:budget_unverified")
+    assert {item.product.sku for item in pending.initial} == {"SKU-1", "SKU-2"}
+    assert all(item.commercial_decision.budget_outcome == "unknown" for item in pending.initial)
+    assert all(shelf.budget_band == "best" for shelf in projection.shelves)
+
+
+def test_a_foreign_price_is_not_a_commercially_cheaper_alternative():
+    preferred = _candidate(1, price=600_000, score=1, available_now=15)
+    foreign = _candidate(2, price=100_000, score=.8, available_now=15).model_copy(update={"currency": "USD"})
+    projection = build_product_shelves([preferred, foreign], requested_quantity=15)
+    assert all(shelf.decision_view != "commercially_proportionate" for shelf in projection.shelves)
+
+
+def test_cross_currency_ties_are_not_ranked_by_nominal_price():
+    first = _candidate(1, price=90_000, score=.8).model_copy(update={"currency": "AUD"})
+    second = _candidate(2, price=1_000, score=.8).model_copy(update={"currency": "EUR"})
+    original = build_product_shelves([first, second])
+    reversed_prices = build_product_shelves([
+        first.model_copy(update={"price_cents": 1_000}),
+        second.model_copy(update={"price_cents": 90_000}),
+    ])
+    assert [p.identity_key for p in _shelf(original, "shared").initial] == [
+        p.identity_key for p in _shelf(reversed_prices, "shared").initial
+    ]
+
+
 def test_quantity_fit_is_visible_without_displacing_the_better_workload_fit():
     projection = build_product_shelves(
         [
