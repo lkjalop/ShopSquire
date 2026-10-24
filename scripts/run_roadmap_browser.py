@@ -90,6 +90,8 @@ def main():
         'ROADMAP_BUNDLE_BUYER':offer_buyers['bundle'],'ROADMAP_UPGRADE_BUYER':offer_buyers['upgrade'],
         'ROADMAP_TEST_ROOT':str(ROOT),'ROADMAP_TEST_PYTHON':sys.executable,
         'PLAYWRIGHT_BASE_URL':f'http://127.0.0.1:{args.ui_port}', 'PLAYWRIGHT_DISABLE_GPU':'1',
+        'PLAYWRIGHT_API_URL':f'http://127.0.0.1:{args.api_port}',
+        'BACKEND_SMOKE_URL':f'http://127.0.0.1:{args.api_port}',
         'VITE_API_PROXY_TARGET':f'http://127.0.0.1:{args.api_port}',
         'VITE_CACHE_DIR':str(run/'vite-cache'),
         'VITE_API_BASE_URL':'','VITE_API_KEY':'','VITE_OWNER_API_KEY':''}
