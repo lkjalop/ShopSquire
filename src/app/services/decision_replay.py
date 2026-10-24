@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.services.policy_gate import PolicyGate
 
 
@@ -22,11 +24,22 @@ def _json_obj(v: Any) -> Dict[str, Any]:
     return {}
 
 
-def decisions_as_of(*, timestamp: str, decision_id: str | None = None, limit: int = 100) -> List[Dict[str, Any]]:
-    params: Dict[str, Any] = {"ts": timestamp, "limit": max(1, min(int(limit or 100), 500))}
+def _cutoff(value: str) -> str:
+    instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return instant.replace(tzinfo=instant.tzinfo or timezone.utc).astimezone(
+        timezone.utc).replace(tzinfo=None).isoformat()
+
+
+def decisions_as_of(*, timestamp: str, known_at: str | None = None,
+                    decision_id: str | None = None, limit: int = 100) -> List[Dict[str, Any]]:
+    params: Dict[str, Any] = {"ts": _cutoff(timestamp), "known": _cutoff(known_at or timestamp),
+                             "tenant": current_tenant_id(),
+                             "limit": max(1, min(int(limit or 100), 500))}
     where = """
-        WHERE valid_from <= :ts
+        WHERE tenant_id = :tenant AND valid_from <= :ts
           AND (valid_to IS NULL OR valid_to = 'infinity' OR valid_to > :ts)
+          AND system_from <= :known
+          AND (system_to IS NULL OR system_to = 'infinity' OR system_to > :known)
     """
     if decision_id:
         where += " AND id = :id"
@@ -105,12 +118,13 @@ def replay_decision(decision_id: str, *, as_of: str | None = None) -> Dict[str, 
                 """
                 SELECT id, agent_name, input_data, retrieved_context, proposed_action, policy_version, execution_status, valid_from
                 FROM decision_logs
-                WHERE id = :id
+                WHERE id = :id AND tenant_id = :tenant
+                  AND (system_to IS NULL OR system_to = 'infinity')
                 ORDER BY valid_from DESC
                 LIMIT 1
                 """
             ),
-            {"id": decision_id},
+            {"id": decision_id, "tenant": current_tenant_id()},
         ).fetchone()
     if not row:
         return {"available": False, "decision_id": decision_id}
@@ -151,11 +165,11 @@ def build_causal_graph(trace_id: str) -> Dict[str, Any]:
                 """
                 SELECT id, event_type, source_type, source_id, target_type, target_id, payload, created_at
                 FROM decision_trace_events
-                WHERE trace_id = :tid
+                WHERE trace_id = :tid AND tenant_id = :tenant
                 ORDER BY created_at ASC
                 """
             ),
-            {"tid": trace_id},
+            {"tid": trace_id, "tenant": current_tenant_id()},
         ).fetchall()
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []

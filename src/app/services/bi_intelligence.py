@@ -13,6 +13,17 @@ from src.app.models.db import db_session
 logger = logging.getLogger("shopsquire.bi_intelligence")
 
 
+def slo_state(value: float | None, warn: float, crit: float) -> str:
+    """Classify an observed service metric without inventing missing evidence."""
+    if value is None:
+        return 'unknown'
+    if value >= crit:
+        return 'critical'
+    if value >= warn:
+        return 'warn'
+    return 'ok'
+
+
 def _safe_num(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)

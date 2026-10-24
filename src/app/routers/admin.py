@@ -3581,7 +3581,7 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
                     {"since": since},
                 ).scalar()
                 data["critical_events_24h"] = int(critical or 0)
-                data["security_status"] = "secure" if data["critical_events_24h"] == 0 else "attention"
+                data["security_status"] = "no critical events observed" if data["critical_events_24h"] == 0 else "attention"
             except Exception:
                 pass
             try:

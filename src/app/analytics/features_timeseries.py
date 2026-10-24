@@ -8,7 +8,9 @@ from sqlalchemy import text
 from src.app.analytics.anomaly import adaptive_ewma, isolation_forest_score
 
 
-def security_timeseries(db, days: int = 14) -> Dict[str, Any]:
+def security_timeseries(db, days: int = 14, *, tenant_id: str) -> Dict[str, Any]:
+    if not tenant_id:
+        raise ValueError('analytics_tenant_required')
     since = datetime.utcnow() - timedelta(days=days)
     rows = []
     try:
@@ -17,26 +19,26 @@ def security_timeseries(db, days: int = 14) -> Dict[str, Any]:
         dialect = ""
     if "postgres" in dialect:
         sql = """
-            SELECT time_bucket('1 day', time) AS bucket,
+            SELECT date_trunc('day', time) AS bucket,
                    COUNT(*) AS count,
                    AVG(risk_adj) AS risk_avg
             FROM security_observer_timeseries
-            WHERE time >= :since
+            WHERE time >= :since AND tenant_id = :tenant
             GROUP BY bucket
             ORDER BY bucket ASC
         """
-        rows = db.execute(text(sql), {"since": since}).fetchall()
+        rows = db.execute(text(sql), {"since": since, "tenant": tenant_id}).fetchall()
     else:
         sql = """
             SELECT DATE(time) AS bucket,
                    COUNT(*) AS count,
                    AVG(risk_adj) AS risk_avg
             FROM security_observer_timeseries
-            WHERE time >= :since
+            WHERE time >= :since AND tenant_id = :tenant
             GROUP BY bucket
             ORDER BY bucket ASC
         """
-        rows = db.execute(text(sql), {"since": since.isoformat()}).fetchall()
+        rows = db.execute(text(sql), {"since": since.isoformat(), "tenant": tenant_id}).fetchall()
 
     points: List[Dict[str, Any]] = []
     counts: List[float] = []

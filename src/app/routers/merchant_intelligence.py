@@ -15,6 +15,28 @@ from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_
 router = APIRouter(prefix="/api/v1/merchant/intelligence", tags=["merchant", "intelligence"])
 
 
+from src.app.models.db import get_db
+
+
+@router.get('/replenishment/{sku}')
+def replenishment_decision(sku: str, query: str='supplier delivery capacity and replenishment', db=Depends(get_db),
+        role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
+    from datetime import datetime, timezone
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.merchant_decision_dataset import latest_snapshot, reorder_baseline
+    snapshot = latest_snapshot(db, tenant_id=current_tenant_id(), sku=sku)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail='merchant_dataset_not_found')
+    decision = reorder_baseline(snapshot['dataset'], quote=snapshot['quote'], now=datetime.now(timezone.utc))
+    from src.app.services.merchant_evidence_retrieval import retrieve
+    try:
+        evidence=retrieve(query=query,documents=snapshot.get('evidence_documents',[]),
+            tenant_id=current_tenant_id(),sku=sku,now=datetime.now(timezone.utc))
+    except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc)) from exc
+    return dict(snapshot_id=snapshot['id'], as_of=snapshot['dataset']['as_of'],
+                covered_days=len(snapshot['dataset']['daily']), quote=snapshot['quote'], decision=decision,evidence=evidence)
+
+
 @router.get("/user_profiles/{user_id}")
 def get_user_profile(
     user_id: str,

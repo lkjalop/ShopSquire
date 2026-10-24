@@ -4,15 +4,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def test_email_security_replay_lab_runs_and_returns_metrics():
+def test_email_security_replay_lab_runs_and_returns_metrics(monkeypatch):
     from src.app.main import create_app
     from src.app.models.db import db_session
+    from src.app.services.operator_tenant_membership import grant_membership, principal_hash_for_api_key
+
+    monkeypatch.setenv('OWNER_API_KEY','local-owner-key')
+    monkeypatch.setenv('OPERATOR_TENANT_MEMBERSHIP_MODE','strict')
 
     client = TestClient(create_app())
     incident_id = "esi-replay-lab-1"
     decision_id = "dec-replay-lab-1"
 
     with db_session() as db:
+        grant_membership(db,principal_hash=principal_hash_for_api_key('local-owner-key'),tenant_id='tenant-r1',
+            role='owner',auth_method='api_key',created_by='fixture')
         db.execute(
             text(
                 """
@@ -33,9 +39,9 @@ def test_email_security_replay_lab_runs_and_returns_metrics():
             text(
                 """
                 INSERT OR REPLACE INTO decision_logs
-                (id, agent_name, input_data, retrieved_context, proposed_action, policy_version, execution_status, valid_from)
+                (id, tenant_id, agent_name, input_data, retrieved_context, proposed_action, policy_version, execution_status, valid_from)
                 VALUES
-                (:id, 'email_security_agent', :input_data, :retrieved_context, :proposed_action, 'email_security_v1', 'review_required', CURRENT_TIMESTAMP)
+                (:id, 'tenant-r1', 'email_security_agent', :input_data, :retrieved_context, :proposed_action, 'email_security_v1', 'review_required', CURRENT_TIMESTAMP)
                 """
             ),
             {
@@ -88,7 +94,7 @@ def test_email_security_replay_lab_runs_and_returns_metrics():
 
     r = client.post(
         "/api/v1/admin/email_security/replay_lab/run",
-        headers={"x-api-key": "local-owner-key"},
+        headers={"x-api-key": "local-owner-key", "x-tenant-id":"tenant-r1"},
         json={"incident_ids": [incident_id]},
     )
     assert r.status_code == 200
@@ -97,3 +103,7 @@ def test_email_security_replay_lab_runs_and_returns_metrics():
     assert "policy_verdict_counts" in body
     assert isinstance(body.get("results"), list)
     assert (body.get("results") or [])[0].get("decision_id") == decision_id
+    forged=client.post('/api/v1/admin/email_security/replay_lab/run',
+        headers={'x-api-key':'local-owner-key','x-tenant-id':'tenant-r1'},
+        json={'tenant_id':'foreign-tenant','decision_ids':[decision_id]})
+    assert forged.status_code==403
