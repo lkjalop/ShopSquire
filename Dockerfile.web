@@ -12,7 +12,7 @@ RUN npm ci
 COPY src/frontend/admin-react/ ./
 RUN npm run build -- --base=/admin/
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 ENV NGINX_ENVSUBST_FILTER=API_UPSTREAM
 COPY deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=storefront /build/storefront/dist /usr/share/nginx/html
