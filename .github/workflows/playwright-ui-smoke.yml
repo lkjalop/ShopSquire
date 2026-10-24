@@ -27,6 +27,7 @@ jobs:
       DISABLE_UI_ROUTES: '0'
       DATABASE_URL: ${{ github.workspace }}/tmp/e2e.sqlite
       DISABLE_PLAYWRIGHT_TESTS: '0'
+      PYTEST_STEG_CORPUS_DIRECTORY: ${{ github.workspace }}/.artifacts/ui-smoke-owned-steg-corpus
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -116,6 +117,15 @@ jobs:
           npm test -- --run
           npx tsc --noEmit
           npm run build
+
+      - name: Generate owned inert security carriers
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from tests.image_security_fixtures import generate_steg_corpus
+          generate_steg_corpus(Path(os.environ['PYTEST_STEG_CORPUS_DIRECTORY']))
+          PY
 
       - name: Run pytest PW suite
         run: |

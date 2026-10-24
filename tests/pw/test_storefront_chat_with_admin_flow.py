@@ -176,7 +176,9 @@ def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server)
     assert captured["rejected_plan"] is not None
 
 
-def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, frontend_server, test_server):
+def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, frontend_server, test_server, monkeypatch):
+    # This explicitly local demonstration surface stays disabled by default.
+    monkeypatch.setenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "1")
     create = requests.post(
         f"{test_server['base_url']}/api/v1/incidents/escalate",
         json={"case_id": "two-browser-case", "trace_id": "two-browser-trace", "reason": "buyer_requested_human"},
@@ -291,6 +293,7 @@ def test_rotated_staff_token_is_rejected_and_new_token_uses_sse(browser, fronten
 
 
 def test_revoked_and_expired_staff_tokens_are_rejected(test_server, monkeypatch, tmp_path):
+    monkeypatch.setenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "1")
     create = requests.post(
         f"{test_server['base_url']}/api/v1/incidents/escalate",
         json={"case_id": "revoke-case", "trace_id": "revoke-trace", "reason": "buyer_requested_human"},
