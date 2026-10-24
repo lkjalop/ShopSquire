@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 const leaves = [
   'summary', 'events', 'execution',
@@ -18,15 +19,13 @@ const sectionForLeaf: Record<(typeof leaves)[number], string> = {
   audit: 'Advanced technical details', raw: 'Advanced technical details',
 };
 
-test('live Decision Trace is durable, factual, and honest across all leaves', async ({ page }) => {
+test('live Decision Trace is durable, factual, and honest across all leaves', async ({ page: buyerPage, browser }) => {
   test.setTimeout(180_000);
-  const uid = `e2e-live-trace-${Date.now()}`;
+  const uid = await registerBuyer(buyerPage.context());
   const query = 'show gaming laptops between 1500 and 1900, exclude Apple';
 
-  const apiKey = process.env.E2E_API_KEY || process.env.VITE_API_KEY || 'local-merchant-key';
-  const seeded = await page.request.get('/api/v1/recommend/suggest', {
-    headers: { 'x-api-key': apiKey },
-    params: { uid, query },
+  const seeded = await buyerPage.request.post('/api/v1/chat/query', {
+    data: { uid, query },
     timeout: 60_000,
   });
   expect(seeded.ok(), `seed failed (${seeded.status()})`).toBeTruthy();
@@ -34,15 +33,17 @@ test('live Decision Trace is durable, factual, and honest across all leaves', as
   const traceId = String(recommendation.trace_id || recommendation.decision_trace_id || '');
   expect(traceId).not.toBe('');
 
-  await page.addInitScript((key) => {
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const headers = new Headers(init.headers || {});
-      headers.set('x-api-key', key);
-      return originalFetch(input, { ...init, headers });
-    };
-  }, apiKey);
-
+  const key = process.env.OWNER_API_KEY;
+  if (!key) throw new Error('The owned audit profile requires its explicit operator key');
+  const operator = await browser.newContext({extraHTTPHeaders: {
+    'x-api-key': key, 'x-tenant-id': process.env.VITE_STOREFRONT_TENANT_ID!,
+  }});
+  const page = await operator.newPage();
+  await page.addInitScript(value => {
+    sessionStorage.setItem('role', 'owner');
+    sessionStorage.setItem('ss_owner_key', value);
+  }, key);
+  try {
   await page.goto(`/?trace=${encodeURIComponent(traceId)}&tracetab=summary`);
   const modal = page.getByTestId('decision-trace-modal');
   await expect(modal).toBeVisible();
@@ -73,4 +74,5 @@ test('live Decision Trace is durable, factual, and honest across all leaves', as
   expect(rawText.toLowerCase()).toContain('gaming');
   expect(rawText).toContain('1500');
   expect(rawText).toContain('1900');
+  } finally { await operator.close(); }
 });

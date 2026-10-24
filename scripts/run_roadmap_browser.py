@@ -116,6 +116,10 @@ def main():
     env.update(local_backend_isolation())
     if any(Path(spec).name == 'inventory-scheduler.spec.ts' for spec in args.specs):
         env.update(INVENTORY_EXPIRY_SCHEDULER_ENABLED='1', INVENTORY_EXPIRY_INTERVAL_SECONDS='5')
+    if any(Path(spec).name == 'shopping-case-sse-revision-supersession.spec.ts' for spec in args.specs):
+        # This scenario observes a persisted advisory job across revisions.
+        # Provider/network and commercial-effect controls remain independent.
+        env['OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED'] = '1'
     if args.restart_stage:
         state=directory/'restart-state.json'
         if args.restart_stage=='before' and state.exists():parser.error('Restart state already exists')

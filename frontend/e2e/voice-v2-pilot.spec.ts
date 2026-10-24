@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
-const UID = `e2e-voice-v2-${Date.now()}`;
 const SPOKEN_QUERY = 'gaming laptop under 2000';
 
 test('spoken input shares the canonical V2 fail-closed recommendation path', async ({ context, page }) => {
   test.setTimeout(180_000);
-  await context.grantPermissions(['microphone'], { origin: 'http://localhost:5173' });
+  const uid = await registerBuyer(context);
+  await context.grantPermissions(['microphone'], { origin: new URL(process.env.PLAYWRIGHT_BASE_URL!).origin });
   await page.addInitScript(({ uid, transcript }) => {
     sessionStorage.setItem('uid', uid);
 
@@ -70,7 +71,7 @@ test('spoken input shares the canonical V2 fail-closed recommendation path', asy
         }),
       },
     });
-  }, { uid: UID, transcript: SPOKEN_QUERY });
+  }, { uid, transcript: SPOKEN_QUERY });
 
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();

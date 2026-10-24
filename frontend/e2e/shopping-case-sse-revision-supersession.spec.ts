@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -26,9 +27,9 @@ async function readTraceSnapshot(page: any, traceId: string): Promise<any[]> {
 
 
 test('SSE reconnect observes canonical shopping-case revision supersession', async ({ page }, testInfo) => {
+  const uid = await registerBuyer(page.context());
+  const tenant = process.env.VITE_STOREFRONT_TENANT_ID!;
   await page.goto('/');
-  const tenant = `portfolio-sse-${Date.now()}`;
-  const uid = `buyer-sse-${Date.now()}`;
   const headers = { 'x-tenant-id': tenant };
   const created = await page.request.post('/api/v1/shopping-cases/interpretations', {
     headers,
@@ -81,11 +82,13 @@ test('SSE reconnect observes canonical shopping-case revision supersession', asy
   );
   expect(latestJob.ok()).toBeTruthy();
   expect((await latestJob.json()).case_revision).toBe(1);
+  expect((await latestJob.json()).commercial_authority).toBe(false);
 
   const certificate: any = {
     schema_version: 'shopping-case-sse-revision-certificate-v1',
     observed_at: new Date().toISOString(),
-    execution: 'live_playwright_browser', fixture: false,
+    execution: 'real_api_playwright_browser', fixture: true,
+    model_execution: 'not_asserted',
     case_id: initial.case_id, trace_id: initial.trace_id,
     disconnected_after_revision: 1, reconnected_at_revision: 2,
     initial_event_count: firstSnapshot.length,

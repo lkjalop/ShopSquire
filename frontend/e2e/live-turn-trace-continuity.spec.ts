@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 import { turnViolations } from './helpers/turnOracle';
 
 const sections = {
@@ -44,9 +45,7 @@ test('live category and quantity turns retain their own trace and recorded histo
   page.on('response', response => {
     if (response.url().includes('/api/') && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`);
   });
-  await page.addInitScript(uid => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `trace-continuity-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', {name:/Ask Me/i}).click({force:true});
   const operations = new Set<string>();
