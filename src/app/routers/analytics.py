@@ -69,7 +69,7 @@ def ragas_run_sampling(sample_rate: float = 0.1, limit: int = 200, role: str = D
     try:
         from src.app.services.ragas_eval import run_sampling
         res = run_sampling(sample_rate=sample_rate, limit=limit)
-        return {"ok": True, "result": res}
+        return {"ok": bool(res.get('ok')), "result": res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -79,7 +79,7 @@ def ragas_ci_guard(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, 
     try:
         from src.app.services.ragas_eval import ci_guard_check
         res = ci_guard_check()
-        return {"ok": True, "result": res}
+        return {"ok": bool(res.get('ok')), "result": res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -88,23 +88,12 @@ def ragas_ci_guard(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, 
 def ragas_summary(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
     """Return a human-friendly recent RAGAS quality summary for operators."""
     try:
-        with read_session(read_class="analytics") as db:
-            rows = call_with_resilience(
-                "db.analytics.ragas_summary",
-                lambda: db.execute(
-                    sql_text(
-                        "SELECT faithfulness, answer_relevance, context_precision, context_recall, created_at FROM ragas_eval_results ORDER BY created_at DESC LIMIT 200"
-                    )
-                ).fetchall(),
-                timeout_s=4.0,
-                retries=1,
-            )
-            if not rows:
-                return {"ok": True, "summary": {"count": 0}}
-            vals = [(float(r[0] or 0), float(r[1] or 0), float(r[2] or 0), float(r[3] or 0)) for r in rows]
-            avg = {"faithfulness": sum(v[0] for v in vals)/len(vals), "answer_relevance": sum(v[1] for v in vals)/len(vals), "context_precision": sum(v[2] for v in vals)/len(vals), "context_recall": sum(v[3] for v in vals)/len(vals)}
-            recent = vals[:20]
-            return {"ok": True, "summary": {"count": len(vals), "averages": avg, "recent_sample_count": len(recent)}}
+        from src.app.services.ragas_eval import evaluation_summary
+        def load_summary():
+            with read_session(read_class="analytics") as db:
+                return evaluation_summary(db)
+        return {"ok": True, "summary": call_with_resilience(
+            "db.analytics.ragas_summary", load_summary, timeout_s=4.0, retries=1)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
