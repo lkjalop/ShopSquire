@@ -150,3 +150,15 @@ def test_materializes_reconciled_history_idempotently():
     assert len(rows) == 1
     assert rows[0][1] == "shadow_evaluation_only"
     assert json.loads(rows[0][0])["can_increase_autonomy"] is False
+
+
+def test_absent_history_cannot_create_perfect_forecast_calibration():
+    from datetime import date
+    from src.app.services.forecast_intelligence import _daily_series, compare_forecast_models
+    history, sources = _daily_series([], lookback_days=180, as_of=date(2026,9,24))
+    assert history == [] and sources == []
+    result = compare_forecast_models(history, lead_time_days=14)
+    assert result["selected_model"] is None and result["history_points"] == 0
+    for model in result["models"].values():
+        assert model["daily_units"] is None and model["origins"] == 0
+        assert model["prediction_interval"]["empirical_coverage"] is None

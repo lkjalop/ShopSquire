@@ -38,17 +38,6 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
         findings = run_analysis(db, limit=limit, anomaly_fn=anomaly_fn, forecast_fn=forecast_fn,
                                 tenant_id=tenant_id)
         persisted = persist_findings(db, findings, tenant_id=tenant_id, expire_unobserved=expire_unobserved)
-        # Module-2 HISTORICAL entities (deck): mirror the findings into trend_indicator / competitor_snapshot
-        # so the market store accrues durable history (M3→M2 write path). Own session so its per-row commits
-        # never touch this pipeline's transaction; operates on the in-memory findings, not uncommitted DB rows.
-        try:
-            from src.app.models.db import db_session as _store_db
-            from src.app.services.market_store import persist_history as _store_history
-            with _store_db() as _sdb:
-                _store_history(_sdb, findings, tenant_id=tenant_id)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("market_pipeline M2 store sink failed: %s", exc)
         # Module-2 warehouse sink: roll raw signals into the durable depth aggregate (cheap, writes a
         # SEPARATE rollup table — never touches signals/findings) + optional retention pruning, env-gated
         # (MARKET_SIGNAL_RETENTION_DAYS, default 0 = never prune; we never silently delete in test/demo).
@@ -64,14 +53,28 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
         result = {"ingested": int(sum(int(v or 0) for v in ingested.values())),
                   "ingested_by_source": ingested, "findings": len(findings), "persisted": int(persisted or 0),
                   "rolled_up": int(warehouse.get("rolled_up", 0)), "pruned": int(warehouse.get("pruned", 0))}
-        if commit:
-            try:
-                db.commit()
-            except Exception as exc:  # keep the counts; a commit failure is logged, not swallowed silently
-                import logging
-                logging.getLogger(__name__).warning("market_pipeline commit failed: %s", exc)
+        if not commit:
+            return {**result, 'status': 'pending_commit', 'pending_findings': result['persisted'],
+                    'persisted': 0, 'rolled_up': 0, 'pruned': 0}
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            return {**result, 'status': 'commit_failed', 'error_type': type(exc).__name__,
+                    'persisted': 0, 'rolled_up': 0, 'pruned': 0}
+        result['status'] = 'committed'
+        # A separate secondary sink may run only after canonical findings commit.
+        # Its own receipt remains separate; a secondary failure is not core success.
+        try:
+            from src.app.models.db import db_session as _store_db
+            from src.app.services.market_store import persist_history as _store_history
+            with _store_db() as _sdb:
+                result['history_receipt'] = _store_history(_sdb, findings, tenant_id=tenant_id)
+        except Exception as exc:
+            result['history_receipt'] = {'status': 'failed', 'error_type': type(exc).__name__}
         return result
     except Exception as exc:
+        db.rollback()
         # Step 10: a pipeline failure must reach a governed disposition, not vanish. enqueue_exception is
         # non-raising (best-effort), so this stays a safe fallback that still returns the zero-result shape.
         from src.app.services.exception_resolver import enqueue_exception
