@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Any, Callable, Iterable
 
 from src.app.services.recommendation_core.stage_runner import run_guarded_stage
@@ -25,6 +25,7 @@ class CoordinatedStage:
     input_artifact_refs: tuple[str, ...] = ()
     output_artifact_refs: tuple[str, ...] = ()
     dependency_stage_ids: tuple[str, ...] = ()
+    isolated: bool = False
 
 
 _PHASE_ORDER = {
@@ -44,6 +45,14 @@ def validate_stage_order(stages: Iterable[CoordinatedStage]) -> tuple[Coordinate
     positions = [_PHASE_ORDER[stage.phase] for stage in frozen]
     if positions != sorted(positions):
         raise ValueError("recommendation_stage_order_invalid")
+    seen = set()
+    for stage in frozen:
+        identity = stage.stage_id or stage.name
+        if identity in seen:
+            raise ValueError('recommendation_stage_id_duplicate')
+        if any(dependency not in seen for dependency in stage.dependency_stage_ids):
+            raise ValueError('recommendation_stage_dependency_missing_or_forward')
+        seen.add(identity)
     return frozen
 
 
@@ -55,8 +64,15 @@ def run_coordinated_stages(
     logger: Any = None,
 ) -> None:
     """Run ordered typed stages through the canonical failure/cancellation guard."""
+    statuses = {}
     for stage in validate_stage_order(stages):
-        run_guarded_stage(
+        identity = stage.stage_id or stage.name
+        if any(statuses[dependency] != 'ok' for dependency in stage.dependency_stage_ids):
+            statuses[identity] = 'blocked'
+            response.record_stage(stage.name, status='blocked', stage_id=stage.stage_id,
+                                  dependency_stage_ids=stage.dependency_stage_ids)
+            continue
+        statuses[identity] = run_guarded_stage(
             response,
             stage.name,
             stage.operation,
@@ -66,6 +82,7 @@ def run_coordinated_stages(
             output_artifact_refs=stage.output_artifact_refs,
             dependency_stage_ids=stage.dependency_stage_ids,
             stage_id=stage.stage_id,
+            isolated=stage.isolated,
         )
 
 

@@ -43,6 +43,7 @@ class WorkloadEvidence:
     release_state: Optional[str] = None
     release_date: Optional[str] = None
     requirements_completeness: Optional[str] = None
+    fetch_receipt: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         result = asdict(self)
@@ -59,7 +60,8 @@ def _literal_observations(evidence: WorkloadEvidence) -> list[dict[str, Any]]:
         receipts = requirements.get("source_fields") or {}
         if not isinstance(receipts, dict):
             continue
-        for field, attribute in (("cpu", "cpu_model"), ("gpu", "gpu_model"), ("os", "os")):
+        for field, attribute in (("cpu", "cpu_model"), ("gpu", "gpu_model"), ("os", "os"),
+                                 ("additional_notes", "additional_notes"), ("storage_type", "storage_type")):
             receipt = receipts.get(field)
             if not isinstance(receipt, dict):
                 continue
@@ -137,6 +139,7 @@ class SteamWorkloadProvider:
             release_state=str(raw.get("release_state") or "") or None,
             release_date=str(raw.get("release_date") or "") or None,
             requirements_completeness=str(raw.get("requirements_completeness") or "") or None,
+            fetch_receipt=dict(raw.get("fetch_receipt") or {}),
         )
 
 

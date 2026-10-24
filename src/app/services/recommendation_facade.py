@@ -1007,14 +1007,6 @@ def dispatch_recommendation_core_typed(
     def outcome(status: FacadeStatus, *, payload: Optional[Dict[str, Any]] = None,
                 reason: str = "", lane: Optional[str] = None) -> FacadeOutcome:
         nonlocal quota_recorded
-        if status == "served" and quota_budget is not None and not quota_recorded:
-            try:
-                from src.app.services.token_budget import estimate_cost
-                quota_budget.record_usage(uid or "anonymous", quota_estimated,
-                                          estimate_cost(quota_estimated))
-                quota_recorded = True
-            except Exception as exc:
-                record_failure("recommend_facade_quota_record", exc, trace_id=trace_id)
         from src.app.services.recommendation_core.turn_outcome import TurnFacts
         facts = TurnFacts.from_envelope(active_envelope).to_dict()
         extras = getattr(active_core, "extras", {}) if active_core is not None else {}
@@ -1022,6 +1014,12 @@ def dispatch_recommendation_core_typed(
         decision = extras.get("decision") if isinstance(extras.get("decision"), dict) else {}
         router = extras.get("router_outcome") if isinstance(extras.get("router_outcome"), dict) else {}
         model = extras.get("model_invocation") if isinstance(extras.get("model_invocation"), dict) else {}
+        if status == "served" and quota_budget is not None and not quota_recorded:
+            try:
+                quota_budget.record_router_reservation(uid or "anonymous", quota_estimated, model)
+                quota_recorded = True
+            except Exception as exc:
+                record_failure("recommend_facade_quota_record", exc, trace_id=trace_id)
         budgets = extras.get("execution_budgets") if isinstance(extras.get("execution_budgets"), dict) else {}
         router_budget = budgets.get("router") if isinstance(budgets.get("router"), dict) else {}
         router_status = str(router.get("status") or "").strip().lower()
@@ -1399,12 +1397,10 @@ def dispatch_recommendation_core_typed(
             and semantic_resolution.get("catalog_authority") == "blocked"
             and core.extras.get("slate_disposition") == "clear"
         )
-        if not authoritative_hold and (core.grounding in ("error", "empty") or (
-            not compatibility_cutover
-            and core.degraded
-            and not core.products
-            and not core.off_catalog
-        )):
+        # The legacy implementation has been retired for both transports.
+        # Optional model degradation cannot invalidate a grounded deterministic
+        # result, including an honestly empty, under-budget slate.
+        if not authoritative_hold and core.grounding in ("error", "empty"):
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
             _fallback_metric(f"grounding:{core.grounding}")

@@ -68,6 +68,50 @@ def test_uncited_hardware_alternative_is_rejected():
     assert result.rejections[0]["reason"] == "alternative_span_invalid"
 
 
+def test_empty_fit_manifest_does_not_reopen_every_vertical():
+    from src.app.services.catalog_read_model import VariantView
+    from src.app.services.recommendation_core.fit import (
+        build_cards, variant_attributes, relaxation_options, assess_intent_fit,
+    )
+    variant = VariantView(sku='scoped-out', specs={'ram_gb': 32})
+    cards, summary = build_cards([variant],
+        {'ram_gb': ('>=', 16)}, defs={})
+    assert summary['meets'] == 0
+    assert cards[0].fit['overall'] == 'unknown'
+    assert variant_attributes(variant, defs={}) == {}
+    assert assess_intent_fit(variant, {'ram_gb': ('>=', 16)}, defs={})['verdict'] == 'unknown'
+    assert relaxation_options([variant], {'ram_gb': ('>=', 16), 'storage_gb': ('>=', 512)}, defs={}) == []
+
+
+def test_complete_cited_exact_requirements_reach_product_card_fit():
+    from src.app.services.attribute_registry import load_defs
+    from src.app.services.catalog_read_model import VariantView
+    from src.app.services.recommendation_core.fit import build_cards
+    claims = [_claim(), _claim(attribute_key='storage_gb', value=150)]
+    specs = {'ram_gb': 32, 'storage_gb': 512}
+    for key, alternatives in {
+        'cpu_model': ['Example CPU A', 'Example CPU B'],
+        'gpu_model': ['Example GPU A', 'Example GPU B'],
+        'os': ['Windows 11'], 'storage_type': ['SSD'],
+    }.items():
+        excerpt = ' or '.join(alternatives)
+        spans = [[excerpt.index(value), excerpt.index(value) + len(value)] for value in alternatives]
+        claims.append(_claim(attribute_key=key, operator='in', value=alternatives,
+            unit=None, source_excerpt=excerpt, value_spans=spans))
+        specs[key] = alternatives[-1]
+    compiled = compile_authoritative_requirements(claims)
+    assert not compiled.rejections
+    assert len(compiled.requirements) == 6
+    predicates = {row.attribute_key: (row.operator, row.value) for row in compiled.requirements}
+    variants = [VariantView(sku='exact', specs=specs, price_cents=100000),
+        VariantView(sku='unreviewed-mobile', specs={**specs, 'gpu_model': 'Example GPU B Mobile'}),
+        VariantView(sku='missing', specs={'ram_gb': 32})]
+    cards, summary = build_cards(variants, predicates, defs=load_defs('electronics'))
+    verdicts = {card.sku: card.fit['overall'] for card in cards}
+    assert verdicts == {'exact': 'meets', 'unreviewed-mobile': 'fails', 'missing': 'unknown'}
+    assert summary['capability_floor_cents'] == 100000
+
+
 @pytest.mark.parametrize("changes,reason", [
     ({"unit": "mg"}, "unit_not_registry_valid"),
     ({"operator": "contains"}, "operator_not_authorized"),

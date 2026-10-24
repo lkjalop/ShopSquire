@@ -172,25 +172,10 @@ def _context_claims(
 def _workstation_application_claims(
     source_id: str, folded: str, observed_at: str, citation_url: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Conservative parser for reviewed Blender/Autodesk/Epic requirement pages."""
+    """Conservative parser for reviewed Autodesk/Epic requirement pages."""
 
     rows: list[dict[str, Any]] = []
-    if source_id == "blender_official_requirements":
-        if "32 gb ram" in folded:
-            rows.append(_claim(
-                source_id, "ram_gb", ">=", 32, unit="GB",
-                claim_type="recommended_requirements", requirement_class="recommended",
-                statement="Blender publishes 32 GB RAM in its recommended tier.",
-                observed_at=observed_at, citation_url=citation_url,
-            ))
-        if "8 gb vram" in folded:
-            rows.append(_claim(
-                source_id, "gpu_vram_gb", ">=", 8, unit="GB",
-                claim_type="recommended_requirements", requirement_class="recommended",
-                statement="Blender publishes 8 GB VRAM in its recommended tier.",
-                observed_at=observed_at, citation_url=citation_url,
-            ))
-    elif source_id in {"autodesk_autocad_requirements", "autodesk_revit_requirements"}:
+    if source_id in {"autodesk_autocad_requirements", "autodesk_revit_requirements"}:
         if "32 gb" in folded and ("ram" in folded or "memory" in folded):
             rows.append(_claim(
                 source_id, "ram_gb", ">=", 32, unit="GB",
@@ -379,7 +364,6 @@ _SOURCE_PARSERS = {
     "nist_digital_twin_cybersecurity": _context_claims,
     "nist_manufacturing_digital_twins": _context_claims,
     "mitre_attack_ics": _context_claims,
-    "blender_official_requirements": _workstation_application_claims,
     "autodesk_autocad_requirements": _workstation_application_claims,
     "autodesk_revit_requirements": _workstation_application_claims,
     "epic_unreal_engine_requirements": _workstation_application_claims,
@@ -409,6 +393,9 @@ def compile_source_claims(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Compile claims through a source parser or the conservative generic fallback."""
 
+    if source_id == "blender_official_requirements":
+        from src.app.services.blender_requirement_parser import blender_claims
+        return blender_claims(content, observed_at=observed_at, citation_url=citation_url), []
     parser = _SOURCE_PARSERS.get(source_id)
     source_text = _html_text(content)
     if parser is not None:
@@ -667,6 +654,8 @@ def _policy_version(source: dict[str, Any]) -> str:
 
 
 def _parser_version(source_id: str) -> str:
+    if source_id == "blender_official_requirements":
+        return f"blender-platform-table-v1:{source_id}"
     return f"{_PARSER_VERSION}:{source_id}"
 
 

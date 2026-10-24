@@ -18,7 +18,7 @@ class CasePatchEvaluation:
 
 
 def _evaluate_bounded_case_patches(
-    data: Dict[str, Any], query: str | None = None,
+    data: Dict[str, Any], query: str | None = None, *, unit_nouns=(),
 ) -> CasePatchEvaluation:
     """Validate model-proposed case operations without applying them.
 
@@ -86,7 +86,13 @@ def _evaluate_bounded_case_patches(
                 "canonical_budget_scope_grammar",
             )
         if patch.path == "requested_quantity" and isinstance(patch.value, int):
-            return numeric_value_grounded(patch.value), "canonical_quantity_grammar"
+            from src.app.services.bulk_intent import extract_quantity_span
+
+            # A literal number alone also matches model identifiers, dimensions
+            # and prices. Use the same count boundary as the routed decision.
+            count_query = _re.sub(r"(?<=\d),(?=\d)", "", query or "")
+            count = extract_quantity_span(count_query, unit_nouns=unit_nouns, max_qty=100_000)
+            return bool(count and count[0] == patch.value), "canonical_quantity_grammar"
         values: list[Any]
         if patch.path == "destinations" and isinstance(patch.value, list):
             values = [

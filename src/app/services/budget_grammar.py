@@ -37,6 +37,16 @@ class BudgetParse:
     mode: str               # range | ceiling | floor | around | revision_down | per_unit
     source_span: Optional[Tuple[int, int]] = None
 
+    def describes_single_item(self, text: str) -> bool:
+        """Whether the parsed price itself has a singular buyer-authored article.
+
+        This does not override an independently stated bulk count. Callers must
+        resolve that conflict before replacing retained quantity.
+        """
+        if self.source_span is None:
+            return False
+        start, end = self.source_span
+        return bool(re.match(r"(?:a|an|one)\s+", str(text)[start:end], re.I))
 
     @property
     def found(self) -> bool:

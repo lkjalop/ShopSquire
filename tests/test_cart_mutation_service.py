@@ -432,3 +432,33 @@ def test_clear_previous_without_stamps_rejects_not_wipes(wired):
     out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
     assert out["status"] == "rejected" and out["error"]["error"] == "carried_set_unknown"
     assert _skus(uid) == {"SKU-A": 1, "SKU-B": 2}   # never guess-then-wipe
+
+
+@pytest.mark.parametrize("expiry", [None, "not-a-date"])
+def test_invalid_permit_expiry_cannot_mutate_cart(wired, expiry):
+    from src.app.services import cart_mutation_service as svc
+    items = _cart("expiry-proof", ("SKU-A", 2))
+    plan = svc.propose_plan(tenant_id="default", uid="expiry-proof",
+        plan=CartMutationPlan(ops=(CartOp("clear_all"),)), cart_items=items)
+    with wired.begin() as db:
+        db.execute(text("UPDATE cart_mutation_plans SET expires_at=:e WHERE id=:i"),
+                   {"e":expiry, "i":plan["plan_id"]})
+    assert svc.apply_plan(plan["plan_id"], tenant_id="default", uid="expiry-proof")["status"] == "expired"
+    assert _skus("expiry-proof") == {"SKU-A":2}
+
+
+def test_plan_changed_between_read_and_claim_is_not_applied(wired, monkeypatch):
+    from src.app.services import cart_mutation_service as svc
+    items = _cart("binding-proof", ("SKU-A", 2), ("SKU-B", 1))
+    proposal = svc.propose_plan(tenant_id="default", uid="binding-proof",
+        plan=CartMutationPlan(ops=(CartOp("remove_items", ("SKU-A",)),)), cart_items=items)
+    read = svc.get_plan
+    def changed(plan_id):
+        snapshot = read(plan_id)
+        with wired.begin() as db:
+            db.execute(text("UPDATE cart_mutation_plans SET plan=:p WHERE id=:i"),
+                       {"p":json.dumps(CartMutationPlan(ops=(CartOp("clear_all"),)).as_dict()), "i":plan_id})
+        return snapshot
+    monkeypatch.setattr(svc, "get_plan", changed)
+    assert svc.apply_plan(proposal["plan_id"], tenant_id="default", uid="binding-proof")["status"] == "conflict"
+    assert _skus("binding-proof") == {"SKU-A":2, "SKU-B":1}

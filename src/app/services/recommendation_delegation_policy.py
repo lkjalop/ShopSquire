@@ -40,6 +40,7 @@ def v2_only_unavailable_response(
         if evidence_failure.startswith("model_execution_")
         else normalized_reason
         if normalized_reason.startswith("model_execution_")
+        else normalized_reason if normalized_reason == "lane_not_enrolled"
         else "recommendation_core_unavailable"
     )
     if terminal_failure == "model_execution_timeout":
@@ -73,6 +74,9 @@ def v2_only_unavailable_response(
         if "timeout" in lowered_reason or "deadline" in lowered_reason
         else "failed"
     )
+    if normalized_reason == 'lane_not_enrolled':
+        model_status = ('completed' if evidence.get('component') == 'recommendation_turn_router'
+            and evidence.get('status') in {'completed','ok'} else 'not_attempted')
     case_ref = str(trace_id or "unavailable-turn")[:200]
     control = ExecutionStateEnvelope(
         case_id=case_ref,
@@ -95,14 +99,17 @@ def v2_only_unavailable_response(
                 component="model",
                 status=model_status,
                 authority="proposes",
-                reason="Recommendation interpretation did not complete within the governed turn.",
+                reason=("Interpretation completed; this workflow is not enabled." if model_status == 'completed'
+                    else "No completed interpretation receipt is available." if model_status == 'not_attempted'
+                    else "Recommendation interpretation did not complete within the governed turn."),
             ),
             ControlReceipt(
                 sequence=2,
                 component="checker",
                 status="blocked",
                 authority="authorizes",
-                reason="No completed interpretation or accepted requirements authorize catalog fit.",
+                reason=("The requested workflow is not enabled." if normalized_reason == 'lane_not_enrolled'
+                    else "No completed interpretation or accepted requirements authorize catalog fit."),
             ),
             ControlReceipt(
                 sequence=3,

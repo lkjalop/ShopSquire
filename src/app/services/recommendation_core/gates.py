@@ -125,3 +125,12 @@ def material_pre_retrieval_clarify(*, quantity: Optional[int], budget_known: boo
             ],
         }
     return None
+def catalog_browse_resolution(decision, *, has_semantic_alignment):
+    """Permit category/price browsing without claiming workload suitability."""
+    if (has_semantic_alignment or decision.semantic_proposal or not decision.node_handle
+            or decision.requirements or decision.workload_entities or decision.relationship != 'buy'
+            or decision.request_scope in {'service_or_place', 'informational'}):
+        return None
+    return {'outcome': 'catalog_browse', 'catalog_authority': 'permitted',
+            'scope': 'category_and_price', 'qualification_authority': 'none',
+            'requirements_status': 'not_requested', 'commerce_authority': 'none'}

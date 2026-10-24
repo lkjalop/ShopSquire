@@ -159,7 +159,7 @@ def create_order_core(db, *, uid: str, items: list, customer_id: str | None = No
     with tracer.start_as_current_span("orders.create"):
         if not req.items:
             raise HTTPException(status_code=400, detail="Items required")
-        repo = CatalogRepository()
+        repo = CatalogRepository(db)
         line_items = []
         total_cents = 0
         def _fallback_product_price_cents(sku: str) -> int | None:

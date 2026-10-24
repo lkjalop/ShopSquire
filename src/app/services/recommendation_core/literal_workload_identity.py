@@ -5,6 +5,26 @@ import re
 from typing import Sequence, Tuple
 
 
+def clamp_literal_workload_entities(query, proposed):
+    """A model may name only entities literally present in this buyer turn."""
+    query_tokens = set(re.sub(r'[^a-z0-9]+', ' ', query.lower()).strip().split())
+    entities = []
+    for item in list(proposed if isinstance(proposed, (list, tuple)) else [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get('kind') or '').strip().lower()
+        name = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(item.get('name') or ''))
+        name = re.sub(r'\s+', ' ', name).strip()[:80]
+        normalized = re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip()
+        tokens = set(normalized.split())
+        if kind not in ('game', 'software') or len(normalized) < 2 or not tokens or not tokens <= query_tokens:
+            continue
+        entity = (kind, name)
+        if entity not in entities:
+            entities.append(entity)
+    return restore_literal_edition_qualifiers(entities, query_tokens)
+
+
 _LITERAL_GAME_PATTERNS = (
     re.compile(
         r"\breplace\s+(?:(?:that|this|the|my)\s+)?"
@@ -166,9 +186,8 @@ def deterministic_additive_workload_continuation(query: str) -> bool:
 def deterministic_named_workload_switch(query: str) -> bool:
     """Recognize a literal new workload without relying on model continuity output."""
     text = str(query or "").strip()
-    if not literal_workload_identity_candidate(text):
-        return False
-    return bool(re.search(
+    text = re.sub(r"\b(?:do\s+not|don't|does\s+not|doesn't)\b[^.!?;]*", "", text, flags=re.I)
+    replacement_grammar = bool(re.search(
         r"\b(?:replace\s+(?:(?:that|this|the|my)\s+)?(?:workload|software|game|application)\s+with|"
         r"what\s+about|i\s+(?:want|process|render|simulate|model|analyse|analyze)|"
         r"(?:i\s+need\s+)?hardware\s+for|"
@@ -177,6 +196,17 @@ def deterministic_named_workload_switch(query: str) -> bool:
         text,
         re.IGNORECASE,
     ))
+    if not replacement_grammar:
+        return False
+    if literal_workload_identity_candidate(text):
+        return True
+    # Single-word software names can be governed identities without satisfying
+    # the stricter multiword game-title heuristic. This recognizes a new scope;
+    # it grants neither research consent nor product qualification.
+    from src.app.services.case_research_plan import build_case_research_plan
+    plan = build_case_research_plan(text)
+    return bool(plan and plan.publisher_status == 'resolved_enrolled'
+                and plan.source_candidate_ids)
 
 
 def restore_literal_edition_qualifiers(
@@ -237,24 +267,4 @@ def recover_literal_workload_identity(
             for kind, name in entities
         ):
             entities.append(candidate)
-    return restore_literal_edition_qualifiers(entities, query_tokens)
-
-
-def clamp_literal_workload_entities(query, proposed):
-    """A model may name only entities literally present in this buyer turn."""
-    query_tokens = set(re.sub(r'[^a-z0-9]+', ' ', query.lower()).strip().split())
-    entities = []
-    for item in list(proposed if isinstance(proposed, (list, tuple)) else [])[:3]:
-        if not isinstance(item, dict):
-            continue
-        kind = str(item.get('kind') or '').strip().lower()
-        name = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(item.get('name') or ''))
-        name = re.sub(r'\s+', ' ', name).strip()[:80]
-        normalized = re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip()
-        tokens = set(normalized.split())
-        if kind not in ('game', 'software') or len(normalized) < 2 or not tokens or not tokens <= query_tokens:
-            continue
-        entity = (kind, name)
-        if entity not in entities:
-            entities.append(entity)
     return restore_literal_edition_qualifiers(entities, query_tokens)

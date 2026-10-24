@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from src.app.services.recommendation_core.typed_stage_coordinator import (
     CoordinatedStage,
@@ -10,7 +11,7 @@ from src.app.services.recommendation_core.typed_stage_coordinator import (
 
 
 def build_post_retrieval_stage_plan(
-    operations: Mapping[str, Callable[[], None]],
+    operations: Mapping[str, Callable], *, isolated: bool = False,
 ) -> tuple[CoordinatedStage, ...]:
     required = {
         "capability_budget", "shelf", "variant_clarify", "complement_offer",
@@ -19,7 +20,7 @@ def build_post_retrieval_stage_plan(
     missing = required.difference(operations)
     if missing:
         raise ValueError(f"post_retrieval_stage_operation_missing:{','.join(sorted(missing))}")
-    return (
+    stages = (
         CoordinatedStage(
             RecommendationPhase.FIT, "capability_budget", operations["capability_budget"],
             stage_id="fit-capability-budget",
@@ -68,6 +69,7 @@ def build_post_retrieval_stage_plan(
             dependency_stage_ids=("fit-shelf", "fulfilment-preview"),
         ),
     )
+    return tuple(replace(stage, isolated=isolated) for stage in stages)
 
 
 __all__ = ["build_post_retrieval_stage_plan"]

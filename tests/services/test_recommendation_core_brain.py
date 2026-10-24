@@ -16,6 +16,20 @@ from src.app.services.recommendation_core.plan import derive_plan, validate_plan
 from src.app.services.recommendation_core.turn_router import TurnDecision, route_turn
 
 
+def test_singular_price_correction_replaces_erroneous_retained_bulk_count(db):
+    env = _env('i mean a $2000 laptop?', session={
+        'prior_node': 'el-6-6', 'active_workflow_lane': 'PROCUREMENT',
+        'accepted_constraints': {'quantity': 2000, 'use_cases': ['engineering']},
+        'pending_clarification': {'question_id': 'budget_scope'},
+    })
+    response = recommend_turn(db, env, llm_fn=lambda *_: json.dumps({
+        'lane': 'PROCUREMENT', 'handle': 'el-6-6', 'subject_action': 'continue',
+        'quantity': 2000, 'budget_scope': 'unknown', 'clarification_relation': 'answer',
+    }))
+    assert response.extras['decision']['quantity'] == 1
+    assert not any(row.get('id') == 'budget_scope' for row in response.clarify)
+
+
 @pytest.fixture()
 def db():
     """Demo-shaped world: laptops sold (incl. 120Hz gaming stock), servers NOT sold."""
@@ -655,7 +669,8 @@ def test_resolved_concept_shows_only_evidence_qualified_catalog_alternative(db, 
     assert "qualified alternatives" in response.message.lower()
 
 
-def test_authoritative_semantic_claims_compile_before_catalog_fit(db, monkeypatch):
+@pytest.mark.parametrize('contract_state', [None, 'current', 'expired'])
+def test_authoritative_semantic_claims_compile_before_catalog_fit(db, monkeypatch, contract_state):
     model = {
         "lane": "SEARCH",
         "handle": "el-6-6",
@@ -726,15 +741,43 @@ def test_authoritative_semantic_claims_compile_before_catalog_fit(db, monkeypatc
         lambda *_args, **_kwargs: evidence,
     )
 
+    session = {}
+    if contract_state:
+        from datetime import datetime, timezone, timedelta
+        from src.app.models.orm import Base, ShoppingCase
+        from src.app.services import case_contract_binding as bindings
+        from src.app.services.requirement_contract import ContractContext, RequirementContract
+        context = ContractContext(subject='Fictional simulation',version='1',platform='test',workload='RAM-only fixture')
+        contract = RequirementContract(id='test-only-memory',context=context,obligations=[dict(
+            id='memory',attribute='ram_gb',tier='minimum',source_ids=['official-requirements-provider'],max_age_hours=24)])
+        monkeypatch.setattr(bindings,'available_contracts',lambda:[contract])
+        Base.metadata.create_all(db.get_bind())
+        db.add(ShoppingCase(case_id='qualified-fixture',tenant_id='default',uid='u1',revision=1))
+        db.commit()
+        bindings.select_case_contract(db,tenant_id='default',case_id='qualified-fixture',uid='u1',
+                                      expected_revision=1,contract_id=contract.id,context=context)
+        db.commit()
+        session={'case_anchor':{'case_id':'qualified-fixture','revision':2}}
+        claim=evidence['legs']['concept_resolution']['data']['claims'][0]
+        stamp=datetime.now(timezone.utc)-timedelta(hours=48 if contract_state=='expired' else 1)
+        claim.update(claim_id='fixture-memory',artefact_name=context.subject,artefact_version=context.version,
+                     applicability=context.model_dump(),requirement_class='minimum',source_revision='fixture-v1',
+                     source_excerpt='At least 32 GB RAM',observed_at=stamp.isoformat())
     response = recommend_turn(
         db,
-        _env(
-            "Find a laptop for an unfamiliar simulation workload.",
-            external_research_consent=True,
-        ),
+        _env('Find a laptop for an unfamiliar simulation workload.',external_research_consent=True,session=session),
         llm_fn=lambda _prompt, _timeout: json.dumps(model),
     )
 
+    if contract_state=='expired':
+        assert response.products==[]
+        assert response.extras['requirement_contract']['failure_code']=='selected_contract_not_compiled'
+        return
+    if contract_state=='current':
+        payload=to_legacy(response)
+        assert payload['requirement_contract']['contract_revision']==contract.revision
+        assert payload['semantic_requirement_compilation']['contract_coverage']['compiled_complete']
+        assert payload['requirement_contract']['commerce_authority']=='none'
     assert [item.sku for item in response.products] == ["LAP-2"]
     assert response.products[0].fit["overall"] == "meets"
     assert response.extras["decision"]["requirements"]["ram_gb"] == [[">=", 32.0]]
@@ -3237,6 +3280,23 @@ def test_budget_only_revision_overrides_incorrect_model_switch(db):
     decision = resp.extras["decision"]
     assert decision["node_handle"] == "el-6-6"
     assert decision["subject_from_session"] is True
+
+
+def test_explicit_bulk_purchase_is_not_replaced_by_prior_off_catalog_subject(db):
+    env = dataclasses.replace(
+        _env("Now I need 10 laptops with a total budget of AUD 30,000."),
+        session={"prior_node": "fr-12-2", "active_workflow_lane": "PROCUREMENT",
+                 "accepted_constraints": {}},
+    )
+    response = recommend_turn(db, env, llm_fn=lambda *_: json.dumps({
+        "lane": "PROCUREMENT", "handle": "el-6-6", "quantity": 10,
+        "total_budget": 30000, "budget_scope": "total",
+    }))
+    decision = response.extras["decision"]
+    assert decision["node_handle"] == "el-6-6"
+    assert decision["requested_product_node"] == "el-6-6"
+    assert decision["subject_from_session"] is False
+    assert response.products, "A stocked, affordable named category must reach retrieval"
 
 
 def test_budget_only_revision_preserves_answered_scope_when_model_is_unavailable(db):

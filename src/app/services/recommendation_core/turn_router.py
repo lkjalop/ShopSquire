@@ -55,6 +55,7 @@ from src.app.services.recommendation_core.case_patch_grounding import (
     _evaluate_bounded_case_patches,
     _bounded_case_patches, _complete_canonical_case_patches,
 )
+from .case_read_operations import CASE_READ_OPERATION as _CASE_READ_OPERATION
 
 
 
@@ -224,7 +225,7 @@ def _execute_default_router_role(
     if metrics.get("outcome") not in {"ok", "disabled", "mock_disabled", "queue_timeout"}:
         logger.warning(
             "router model call failed: outcome=%s model=%s error=%s",
-            metrics.get("outcome"), model, metrics.get("error_type"),
+            metrics.get("outcome"), model, metrics.get("failure_code") or metrics.get("error_type"),
         )
     return rendered
 
@@ -618,6 +619,7 @@ def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
         return False
 
 
+
 def _prior_sold_node(db, envelope):
     prior = get_node(str((envelope.session or {}).get('prior_node') or ''))
     if prior is not None and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True:
@@ -635,7 +637,6 @@ def _fallback_budget(envelope, *, inherit_scope=False):
     parsed = parse_budget(envelope.query) if scope == 'total' else None
     total = int(parsed.budget_max) * 100 if parsed is not None and parsed.budget_max is not None else None
     return scope, total
-
 
 
 def _literal_off_catalog_fallback(db, envelope, *, reason, quantity, quantity_explicit):
@@ -792,9 +793,10 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         ):
             subject_action = "continue"
     from src.app.services.recommendation_core.case_binding import continues_selected_scope_research
-    if continues_selected_scope_research(db, envelope):
-        subject_action = "continue"
-        prior = get_node(str(session.get("prior_node") or ""))
+    selected_scope_research = continues_selected_scope_research(db, envelope)
+    if selected_scope_research:
+        subject_action = 'continue'
+        prior = get_node(str(session.get('prior_node') or ''))
         if prior is not None and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True:
             node = prior
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
@@ -849,6 +851,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         {}, query=envelope.query, requirements={}, persisted_context=pending_semantic,
     )
     from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
+
     if not explicit_requirements:
         semantic = unresolved_purpose_proposal(
             query=envelope.query,
@@ -1002,22 +1005,21 @@ _CASE_CONTEXT_OPERATION = _re.compile(
     _re.IGNORECASE,
 )
 
-_CASE_READ_OPERATION = _re.compile(
-    r"\b(?:status|progress|where\s+(?:are|is)|what(?:'s|\s+is)\s+happening|"
-    r"summari[sz]e|recap)\b",
-    _re.IGNORECASE,
-)
 
 
 def _is_active_case_context_operation(query: str, session: Dict[str, Any]) -> bool:
     """True only for a bounded amendment/status operation on an existing procurement case."""
     active = str(session.get("active_workflow_lane") or session.get("prior_lane") or "").upper()
-    if active != "PROCUREMENT" or not session.get("prior_node"):
+    if active != "PROCUREMENT":
+        return False
+    canonical = session.get('procurement_case_state') or {}
+    if not session.get('prior_node') and not (
+            canonical.get('case_id') and _CASE_READ_OPERATION.search(query or '')):
         return False
     if _re.search(r"\b(?:start over|new search|different product|forget (?:that|this))\b", query,
                   _re.IGNORECASE):
         return False
-    return bool(_CASE_CONTEXT_OPERATION.search(query or ""))
+    return bool(_CASE_CONTEXT_OPERATION.search(query or "") or _CASE_READ_OPERATION.search(query or ''))
 
 
 def _active_case_read_decision(envelope: TurnEnvelope) -> Optional[TurnDecision]:
@@ -1028,7 +1030,7 @@ def _active_case_read_decision(envelope: TurnEnvelope) -> Optional[TurnDecision]
     if not _CASE_READ_OPERATION.search(envelope.query or ""):
         return None
     prior_node = get_node(str(session.get("prior_node") or ""))
-    if prior_node is None:
+    if prior_node is None and not (session.get('procurement_case_state') or {}).get('case_id'):
         return None
     accepted = session.get("accepted_constraints") if isinstance(
         session.get("accepted_constraints"), dict
@@ -1042,13 +1044,13 @@ def _active_case_read_decision(envelope: TurnEnvelope) -> Optional[TurnDecision]
         session.get("prior_shortlist") or session.get("shortlist_skus") or []
     ) if value)
     operation = "summary" if _re.search(
-        r"\b(?:summari[sz]e|recap)\b", envelope.query, _re.I
+        r"\b(?:summari[sz]e|recap|remind)\b", envelope.query, _re.I
     ) else "status"
     return _decision(
         lane="PROCUREMENT",
-        node_handle=prior_node.handle,
-        node_path=prior_node.full_path,
-        requested_product_node=prior_node.handle,
+        node_handle=prior_node.handle if prior_node else None,
+        node_path=prior_node.full_path if prior_node else None,
+        requested_product_node=prior_node.handle if prior_node else None,
         exact_product_sku=(
             str(accepted.get("exact_product_sku"))
             if accepted.get("exact_product_sku")
@@ -1832,7 +1834,7 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     context_operation = _is_active_case_context_operation(envelope.query, session)
     from src.app.services.recommendation_core.case_binding import continues_selected_scope_research
     if continues_selected_scope_research(db, envelope):
-        subject_action = "continue"
+        subject_action = 'continue'
     if context_operation:
         lane = "PROCUREMENT"
         subject_action = "continue"
@@ -1862,6 +1864,16 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
             and procurement_context == "current_order"
             and subject_action != "switch"):
         lane = "PROCUREMENT"
+    prior_subject = get_node(str(session.get("prior_node") or ""))
+    if (subject_action == "uncertain" and not context_operation
+            and node is not None and prior_subject is not None
+            and node.handle != prior_subject.handle
+            and _query_names_category(envelope.buyer_query or envelope.query, node)
+            and not _query_names_category(envelope.buyer_query or envelope.query, prior_subject)):
+        # A procurement lane does not establish continuity. The model supplied
+        # a registry identity named by this buyer turn, not an unnamed fragment.
+        # Do not replace it with an unrelated historical purchase before fit.
+        subject_action = "switch"
     _continues = subject_action == "continue" or (
         subject_action != "switch" and lane in ("FILTER", "COMPARE", "EXPLAIN")) or (
         active_procurement and lane == "PROCUREMENT" and subject_action != "switch")
@@ -1985,7 +1997,11 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
                     requirements[definition.key] = accepted_predicates
 
     operational_constraints = _bounded_operational_constraints(data, envelope.query)
-    case_patch_evaluation = _evaluate_bounded_case_patches(data, envelope.query)
+    case_patch_evaluation = _evaluate_bounded_case_patches(
+        data, envelope.buyer_query or envelope.query,
+        unit_nouns={part.strip().lower() for candidate, _ in cands
+                    for part in candidate.full_path.split(">") if part.strip()},
+    )
     case_patches = case_patch_evaluation.accepted
 
     from src.app.services.recommendation_core.intent_resolver import (audience_context_keys,
@@ -2018,8 +2034,12 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     # Named workloads are model-proposed but literal-clamped: every significant token must
     # occur in the current message. This prevents a model or poisoned context from introducing
     # a different title and driving an external lookup or capability floor.
-    # Preserve the existing literal entity clamp through one shared helper.
-    workload_entities = clamp_literal_workload_entities(envelope.query, data.get("workload_entities"))
+    # A successful model turn is not supplemented by the legacy title regex.
+    # Missing semantic coverage is repaired through the bounded model call
+    # above. Keep only literal edition words that the buyer supplied for an
+    # already-proposed entity. The regex recovery remains available in the
+    # explicit model-unavailable fallback path.
+    workload_entities = clamp_literal_workload_entities(envelope.query, data.get('workload_entities'))
     if not (pending and str(data.get("clarification_relation") or "").strip().lower() == "answer"):
         frame_identity = str(
             (data.get("entity_frame") or {}).get("identity")
@@ -2139,19 +2159,8 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
         for segment in candidate.full_path.split(">")
         if segment.strip()
     }
-    quantity = None
-    _qv = data.get("quantity")
-    if (isinstance(_qv, (int, float)) and not isinstance(_qv, bool) and _math.isfinite(_qv)
-            and float(_qv).is_integer() and 1 <= int(_qv) <= 100_000):   # finite + integral (P0.7)
-        quantity = int(_qv)
-    if quantity is None:
-        # graceful + model-agnostic: honor a count the model put in `requirements` (a common habit).
-        # Validate the OPERATOR (P0.7) — not a regex on the query, just reading the model flexibly.
-        _cnt = raw_requirements.get("count")
-        if (isinstance(_cnt, (list, tuple)) and len(_cnt) == 2 and str(_cnt[0]) in _ALLOWED_OPS
-                and isinstance(_cnt[1], (int, float)) and not isinstance(_cnt[1], bool)
-                and _math.isfinite(_cnt[1]) and 1 <= int(_cnt[1]) <= 100_000):
-            quantity = int(_cnt[1])
+    from src.app.services.recommendation_core.router_parser import bounded_quantity_proposal
+    quantity = bounded_quantity_proposal(data, raw_requirements, _ALLOWED_OPS)
     explicit_quantity = extract_quantity_span(
         envelope.buyer_query or envelope.query,
         unit_nouns=unit_nouns,

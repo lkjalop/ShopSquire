@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+import pytest
 
 from src.app.models.orm import Base
 from src.app.services.shopping_case_supplier_continuation import (
@@ -113,6 +114,40 @@ def test_selection_is_revision_bound_and_idempotent() -> None:
     assert error is None and replay_error is None
     assert first == replay
     assert stale is None and stale_error == "stale_fulfillment_revision:1"
+
+
+@pytest.mark.parametrize('change', [
+    {'requested_quantity':40}, {'uid':'another-buyer'}, {'preferred_sku':'OTHER'},
+    {'deadline_days':2}, {'available_now':5}, {'expected_revision':1},
+    {'choice':'wait_preferred'},
+    {'offers':[SupplierOfferInput(source_type='deterministic_certification_fixture',
+        source_reference='changed-offer',supplier_reference='supplier',offered_sku='SKU',
+        relationship='exact',quantity_available=40)]},
+])
+def test_selection_key_cannot_replay_changed_buyer_intent(change):
+    with _db() as db:
+        args=dict(tenant_id='default',case_id='sc-replay',uid='buyer',expected_revision=0,
+                  choice='split_delivery',preferred_sku='SKU',requested_quantity=30,
+                  available_now=12,idempotency_key='same-command',offers=[])
+        first,error=select_fulfillment_option(db,**args)
+        assert first and error is None
+        result,error=select_fulfillment_option(db,**{**args,**change})
+        assert result is None
+        assert error=='fulfillment_selection_replay_conflict'
+
+
+def test_legacy_selection_without_request_binding_cannot_claim_verified_replay():
+    from sqlalchemy import text
+    with _db() as db:
+        args=dict(tenant_id='default',case_id='legacy',uid='buyer',expected_revision=0,
+                  choice='split_delivery',preferred_sku='SKU',requested_quantity=30,
+                  available_now=12,idempotency_key='legacy-key',offers=[])
+        first,error=select_fulfillment_option(db,**args)
+        assert first and error is None
+        db.execute(text('UPDATE shopping_case_fulfillment_selections SET request_digest=NULL'))
+        db.commit();db.expire_all()
+        result,error=select_fulfillment_option(db,**args)
+        assert result is None and error=='fulfillment_selection_replay_unverifiable'
 
 
 def test_substitute_never_resolves_without_explicit_authorization() -> None:

@@ -71,6 +71,29 @@ def test_bounding_discards_forged_source_span():
     assert not result.get('source_fields')
 
 
+def test_explicit_storage_requirement_retains_exact_observation_span():
+    from src.app.services.connectors.workload_evidence import WorkloadEvidence
+    raw = '<li>Additional Notes: SSD required. 64-bit processor required.</li>'
+    minimum = _bounded_requirements(_parse_requirements_html(raw, include_source_fields=True))
+    evidence = WorkloadEvidence(kind='game', requested_name='Example', resolved_name='Example',
+        provider_id='steam', status='resolved', minimum=minimum).to_dict()
+    notes = [row for row in evidence['literal_requirement_observations']
+             if row['attribute_key'] == 'additional_notes']
+    assert len(notes) == 1
+    assert notes[0]['value'] == 'SSD required. 64-bit processor required.'
+    assert notes[0]['fit_authority'] == 'none'
+    assert notes[0]['source_excerpt'][notes[0]['span_start']:notes[0]['span_end']] == notes[0]['value']
+    assert minimum['storage_type'] == 'SSD'
+    receipt = minimum['source_fields']['storage_type']
+    assert receipt['text'][receipt['start']:receipt['end']] == 'SSD'
+
+
+@pytest.mark.parametrize('note', ['SSD recommended', '150 GB available space', 'SSD is not required'])
+def test_storage_preference_or_capacity_does_not_become_requirement(note):
+    parsed = _parse_requirements_html(f'<li>Additional Notes: {note}</li>', include_source_fields=True)
+    assert not parsed.get('storage_type')
+
+
 @pytest.fixture()
 def no_network(monkeypatch):
     """Any attempt to touch the network fails the test loudly."""

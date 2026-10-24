@@ -32,7 +32,8 @@ def _run(flags, qty=10, results=None):
 
 def test_availability_preserved_default_no_case():
     payload, line = _run(flags={})
-    assert payload["availability"]["shortfall"] == 6 and line == "4 of 10 now"
+    assert payload["availability"]["shortfall"] == 6
+    assert 'current stock and transfer availability are not verified' in line
     assert "fulfillment_case" not in payload  # default: no case (parity)
 
 
@@ -53,13 +54,28 @@ def test_wants_sourcing_detects_reorder_language():
 def test_availability_line_names_the_top_pick():
     # §5: for a generic bulk browse the availability is assessed against the TOP pick — the line must NAME it
     # (not imply "we have N of the thing you want" before the buyer has chosen a product).
-    avail = {"requested_qty": 20, "network": {"preferred_qty": 3, "fillable_from_network": True,
+    avail = {"requested_qty": 20,
+             "inventory_snapshot": {"status": "recorded", "freshness_status": "fresh"},
+             "network": {"preferred_qty": 3, "fillable_from_network": True,
              "transfer_plan": [{"from_location": "warehouse", "qty": 17}]}}
     named = stage._network_adjusted_availability_line("base", avail, primary_name="HP Envy x360")
     assert named.startswith("For the top match, HP Envy x360:") and "20 units are available" in named
     # no name → falls back to the neutral phrasing (never crashes)
     anon = stage._network_adjusted_availability_line("base", avail, primary_name=None)
     assert anon.startswith("On availability:")
+
+
+@pytest.mark.parametrize('freshness', ['unknown', 'stale', None])
+def test_network_narration_does_not_promote_unfresh_stock(freshness):
+    avail = {'requested_qty': 10, 'inventory_snapshot': {
+        'status': 'degraded', 'freshness_status': freshness},
+        'network': {'preferred_qty': 6, 'fillable_from_network': True,
+                    'transfer_plan': [{'qty': 4}], 'shortfall': 0}}
+    line = stage._network_adjusted_availability_line('base', avail, primary_name='Test item')
+    assert 'not verified' in line
+    assert 'available across the network' not in line
+    assert 'location now' not in line
+    assert 'can transfer' not in line
 
 
 def test_force_sourcing_emits_preview_even_when_in_stock():
@@ -217,7 +233,8 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
     assert snapshot["conservation_ok"] is True
     assert snapshot["supply_lines"][0]["source_ref"] == "local_atp"
     assert snapshot["supply_lines"][0]["arrival_max"] is None
-    assert line == "On availability: 10 are available across the network; 5 at your preferred location now and 5 can transfer from other locations."
+    assert 'current stock and transfer availability are not verified' in line
+    assert payload['inventory_snapshot']['freshness_status'] == 'unknown'
 
 
 def test_canonical_snapshot_preserves_dated_transfer_and_confirmed_supplier_arrival():

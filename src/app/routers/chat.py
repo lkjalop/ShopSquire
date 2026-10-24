@@ -3309,6 +3309,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if not active_shopping_case_id and (
         products or bool(data.get("off_catalog")) or unresolved_purchase
         or routed_decision.get("request_scope") == "product"
+        or semantic_resolution.get('outcome') == 'catalog_browse'
     ):
         try:
             from datetime import datetime, timezone

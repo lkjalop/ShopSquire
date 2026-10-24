@@ -66,6 +66,20 @@ def test_blender_contract_keeps_missing_compatibility_obligations_and_release():
     assert contract.context.version == "5.0"
 
 
+@pytest.mark.parametrize("field", ["requirement_class", "scope_caveat"])
+def test_live_outcome_cannot_mix_tiers_or_conditions_to_complete_a_manifest(field):
+    from src.app.services.research_outcome import _manifest_coverage
+    from src.app.services.recommendation_core.requirement_scope import resolve_requirement_scope
+    scope = resolve_requirement_scope(tenant_id="default", profile_id="electronics",
+                                      product_type="el-6-6", relationship="RUN_SUBJECT_ON_PRODUCT")
+    predicates = [dict(compilation_scope=scope.model_dump(), artefact_name="Unseen application",
+                       artefact_version="7", verification_status="verified", attribute_key=attribute,
+                       **{field: "minimum" if i % 2 else "recommended"})
+                  for i, attribute in enumerate(scope.required_attributes)]
+    _, missing = _manifest_coverage([{"compiled_requirements": predicates}])
+    assert missing == set(scope.required_attributes)
+
+
 def test_future_product_timestamp_does_not_grant_current_evidence():
     from src.app.services.accepted_catalog_projection import _freshness
     assert _freshness(NOW + timedelta(days=1), now=NOW, max_age_hours=720) == "unknown"

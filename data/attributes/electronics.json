@@ -323,6 +323,9 @@
           "windows 11 home",
           "windows 11 pro"
         ],
+        "Windows 10": ["win10", "windows10", "windows 10 home", "windows 10 pro"],
+        "Windows 10 (64-bit)": ["windows 10 64-bit", "windows 10 (64 bit)", "windows 10 64 bit"],
+        "Windows 11 (64-bit)": ["windows 11 64-bit", "windows 11 (64 bit)", "windows 11 64 bit"],
         "macOS": [
           "mac os",
           "osx",

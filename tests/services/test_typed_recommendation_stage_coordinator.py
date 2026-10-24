@@ -58,6 +58,7 @@ def test_coordinator_rejects_phase_regression_before_side_effects():
 def test_stage_emits_artifact_lineage_instead_of_reconstructing_it_later():
     response = Response()
     run_coordinated_stages(response, (
+        CoordinatedStage(RecommendationPhase.EVIDENCE, 'evidence', lambda: None, stage_id='evidence-accepted'),
         CoordinatedStage(
             RecommendationPhase.FIT, "fit", lambda: None,
             stage_id="fit-exact", input_artifact_refs=("requirements:accepted",),
@@ -65,7 +66,7 @@ def test_stage_emits_artifact_lineage_instead_of_reconstructing_it_later():
             dependency_stage_ids=("evidence-accepted",),
         ),
     ))
-    values = response.recorded[0][1]
+    values = response.recorded[1][1]
     assert values["stage_id"] == "fit-exact"
     assert values["input_artifact_refs"] == ("requirements:accepted",)
     assert values["output_artifact_refs"] == ("fit:verdicts",)

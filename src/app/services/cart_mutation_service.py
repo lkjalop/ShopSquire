@@ -172,7 +172,7 @@ def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
     if not row:
         return None
     return {"plan_id": row[0], "tenant_id": row[1], "uid": row[2], "trace_id": row[3],
-            "query": row[4], "plan": json.loads(row[5]) if row[5] else {}, "risk": row[6],
+            "query": row[4], "plan": json.loads(row[5]) if row[5] else {}, "raw_plan": row[5], "risk": row[6],
             "status": row[7], "cart_hash": row[8],
             "result": json.loads(row[9]) if row[9] else None,
             "expires_at": row[10], "applied_at": row[11], "cart_version": int(row[12] or 0)}
@@ -315,6 +315,13 @@ def _stash_undo(redis, uid: str, items: List[Dict[str, Any]]) -> None:
         logger.debug("undo stash skipped: %s", repr(exc)[:100])
 
 
+def _permit_has_time(expiry: object) -> bool:
+    try:
+        return _now() < datetime.strptime(str(expiry or ""), _TS_FMT)
+    except ValueError:
+        return False
+
+
 def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[str, Any]:
     """Execute a proposed plan — the ONLY mutation path. Returns a dict whose `status` is one of:
     applied | already_applied | rejected | stale_cart | expired | not_found | forbidden |
@@ -337,13 +344,8 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
         return {"status": "already_applied", "plan_id": plan_id, **(row["result"] or {})}
     if row["status"] != "proposed":
         return {"status": "conflict", "plan_id": plan_id, "current_status": row["status"]}
-    if row["expires_at"]:
-        try:
-            if _now() > datetime.strptime(row["expires_at"], _TS_FMT):
-                _finish(plan_id, "expired", {"reason": "plan_ttl_elapsed"})
-                return {"status": "expired", "plan_id": plan_id}
-        except ValueError as exc:
-            logger.debug("unparseable expires_at on %s: %s", plan_id, repr(exc)[:80])
+    if not _permit_has_time(row.get("expires_at")):
+        return {"status": "expired", "plan_id": plan_id, "reason": "invalid_or_elapsed_permit_expiry"}
 
     from src.app.routers.cart import (
         _batch_stock_levels,
@@ -369,7 +371,10 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
             # 1. IDEMPOTENCY CLAIM — the row lock serializes concurrent applies (uncommitted here).
             claimed = db.execute(text(
                 "UPDATE cart_mutation_plans SET status = 'applying' "
-                "WHERE id = :id AND status = 'proposed'"), {"id": plan_id})
+                "WHERE id = :id AND tenant_id=:tenant AND uid=:uid AND plan=:plan "
+                "AND expires_at=:expiry AND expires_at>:now AND status = 'proposed'"),
+                {"id": plan_id, "tenant": tenant_id, "uid": uid, "plan": row["raw_plan"],
+                 "expiry": row["expires_at"], "now": _now().strftime(_TS_FMT)})
             if getattr(claimed, "rowcount", 0) == 0:
                 cur = db.execute(text("SELECT status, result FROM cart_mutation_plans WHERE id = :id"),
                                  {"id": plan_id}).fetchone()
