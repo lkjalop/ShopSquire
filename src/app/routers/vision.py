@@ -774,7 +774,7 @@ async def triage(
             provider_name = provider.provider
             labels, extracted_text, product_identity = await _asyncio.wait_for(
                 provider.get_labels_and_text(analysis_content, mode="visual_search"),
-                timeout=float(os.getenv("CV_PROVIDER_TOTAL_TIMEOUT_S", "10.0") or 10.0),
+                timeout=float(os.getenv("CV_PROVIDER_TOTAL_TIMEOUT_S") or (float(os.getenv('CV_VISION_TOTAL_TIMEOUT_SEC', '60')) + 5)),
             )
             ocr_meta = dict(getattr(provider, "last_ocr_meta", {}) or {})
         except _asyncio.TimeoutError:
@@ -788,11 +788,11 @@ async def triage(
             analysis_state["analysis_pending"] = True
             analysis_state["analysis_degraded"] = True
             analysis_state["degraded_reasons"].append("vision_provider_busy")
-        except Exception:
+        except Exception as exc:
             labels, extracted_text, product_identity = [], "", None
             ocr_meta = {}
             analysis_state["analysis_degraded"] = True
-            analysis_state["degraded_reasons"].append("vision_provider_error")
+            analysis_state["degraded_reasons"].append(getattr(exc, 'failure_code', None) or "vision_provider_error")
 
     # A buyer may upload a requirements screenshot rather than a product photo.
     # In that explicit mode, recover visible text with bounded local OCR when the
@@ -1809,15 +1809,18 @@ async def triage(
         ev_id = str(uuid.uuid4())
         payload = json.dumps(resp, ensure_ascii=False)
 
-        with db_session() as db:
-            db.execute(
-                "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
-                {"id": ev_id, "type": "vision.triage", "payload": payload},
-            )
-            try:
-                db.commit()
-            except Exception:
-                pass
+        import asyncio as _db_asyncio
+        def _db_operation_1811():
+            with db_session() as db:
+                db.execute(
+                    "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
+                    {"id": ev_id, "type": "vision.triage", "payload": payload},
+                )
+                try:
+                    db.commit()
+                except Exception:
+                    pass
+        await _db_asyncio.to_thread(_db_operation_1811)
         resp["event_id"] = ev_id
     except Exception:
         pass

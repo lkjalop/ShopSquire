@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import os
 import requests
 
 from src.app.services.model_execution_gateway import ModelDeployment, ModelExecutionRequest
@@ -49,10 +50,11 @@ def ollama_generate_transport(
             "prompt": prompt,
             "stream": False,
             "think": False,
-            "keep_alive": "10m",
+            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "2m"),
             "options": {
                 "temperature": 0,
                 "num_predict": request.max_output_tokens,
+                "num_ctx": int(os.getenv("OLLAMA_CONTEXT_LENGTH", "4096")),
             },
         },
         timeout=request.timeout_ms / 1_000.0,
@@ -86,7 +88,8 @@ def make_ollama_generate_transport(
             "stream": False,
             "think": think,
             "keep_alive": keep_alive,
-            "options": {**frozen_options, "num_predict": request.max_output_tokens},
+            "options": {"num_ctx": int(os.getenv("OLLAMA_CONTEXT_LENGTH", "4096")),
+                        **frozen_options, "num_predict": request.max_output_tokens},
         }
         if response_format is not None:
             payload["format"] = response_format

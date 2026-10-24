@@ -387,6 +387,10 @@ def execute_model(
             return finish("failed", failure=failure_code,
                           dlp_hits=dlp_hits)
         text = str(value or "")
+        if not text.strip():
+            append_event('failed', failure_code='model_empty_output',
+                         **dict(getattr(value, 'execution_details', {}) or {}))
+            return finish('failed', failure='model_empty_output', dlp_hits=dlp_hits)
         if not append_event(
             "completed", output_hash=sha256_text(text),
             **dict(getattr(value, "execution_details", {}) or {}),

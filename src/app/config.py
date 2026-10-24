@@ -132,7 +132,7 @@ def _redis_url_is_tls(redis_url: str) -> bool:
 
 
 def _is_non_dev_env(env: str | None) -> bool:
-    e = str(env or "local").strip().lower()
+    e = str(env or "production").strip().lower()
     return e not in ("local", "dev", "development", "test", "testing")
 
 
@@ -143,7 +143,7 @@ def _is_truthy_env(name: str, default: str = "0") -> bool:
 @lru_cache(maxsize=8)
 def _get_settings_cached(_sig: tuple) -> Settings:
     s = Settings(
-        app_env=os.getenv("APP_ENV", "local"),
+        app_env=os.getenv("APP_ENV", "production") or "production",
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8080")),
         database_url=_resolved_secret("DATABASE_URL", _default_database_url()),

@@ -2,10 +2,10 @@
 from contextlib import contextmanager
 import types
 import os
-import re
 from sqlalchemy import create_engine
 import hashlib
 import logging
+import re
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text as sql_text
 from sqlalchemy.sql.elements import TextClause
@@ -14,6 +14,7 @@ import contextvars
 from src.app.config import get_settings
 from threading import Lock, RLock
 from weakref import WeakKeyDictionary
+from contextlib import asynccontextmanager
 
 
 
@@ -491,3 +492,30 @@ async def async_db_op(fn, *args, **kwargs):
             return fn(_db, *args, **kwargs)
 
     return await asyncio.to_thread(_run)
+
+
+
+
+@asynccontextmanager
+async def async_db_session():
+    """Offload sync session setup/teardown for an async streaming owner.
+
+    Queries still need async_db_op/to_thread; this owns only session lifetime.
+    """
+    import asyncio
+    manager = db_session()
+    entering = asyncio.create_task(asyncio.to_thread(manager.__enter__))
+    try:
+        session = await asyncio.shield(entering)
+    except asyncio.CancelledError:
+        # Cancelling an await cannot stop the worker opening the session. Close
+        # it when that worker completes, even though this stream has gone away.
+        def close_after_entry(task):
+            if not task.cancelled() and task.exception() is None:
+                asyncio.create_task(asyncio.to_thread(manager.__exit__, None, None, None))
+        entering.add_done_callback(close_after_entry)
+        raise
+    try:
+        yield session
+    finally:
+        await asyncio.shield(asyncio.to_thread(manager.__exit__, None, None, None))

@@ -4,14 +4,12 @@ import asyncio
 import os
 import json
 import base64
+import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 import logging
-import time
 import threading
-import urllib.error
-import urllib.request
 
-from src.app.security.url_guard import ensure_safe_outbound_url
+from src.app.services.local_model_roles import LocalModelFailure
 
 # ── Vision prompt templates (mode-selectable) ──
 _TRIAGE_PROMPT = (
@@ -151,7 +149,7 @@ class ManagedCVProvider:
                     except Exception:
                         pass
                 return labels, text, product_identity
-            except VisionProviderBusy:
+            except (VisionProviderBusy, LocalModelFailure):
                 raise
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
@@ -207,90 +205,25 @@ class ManagedCVProvider:
         self, image_bytes: bytes, *, mode: str = "triage",
     ) -> Tuple[List[str], str, Optional[Dict]]:
         """Call Ollama after process-level vision admission has been granted."""
-        img_b64 = base64.b64encode(image_bytes).decode("ascii")
+        from src.app.cv.image_normalizer import normalize_image_bytes
+        # Preserve original bytes for OCR/forensics; identity inference gets a
+        # bounded view so visual tokens cannot consume the whole 4096 context.
+        normalized = normalize_image_bytes(image_bytes, max_dim=512)
+        img_b64 = base64.b64encode(normalized.image_bytes).decode("ascii")
         prompt = _PRODUCT_IDENTITY_PROMPT if mode == "visual_search" else _TRIAGE_PROMPT
-        _ollama_url_env = (os.getenv("OLLAMA_URL", "") or "").strip().rstrip("/")
-        base = _ollama_url_env or "http://127.0.0.1:11434"
-        url = f"{base}/api/generate"
-        ensure_safe_outbound_url(url)
-        # Use a shorter default timeout (4 s) to avoid blocking for 2+ minutes
-        # when Ollama is not running.  Individual production deployments can
-        # raise this via CV_VISION_TIMEOUT_SEC.
-        timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "4") or 4)
-        total_timeout = float(os.getenv("CV_VISION_TOTAL_TIMEOUT_SEC", str(timeout)) or timeout)
-        deadline = time.monotonic() + max(1.0, total_timeout)
-
-        # Fast connectivity probe: hit /api/tags with a 2-second timeout before
-        # attempting any model inference.  This avoids 6 × timeout hangs when
-        # Ollama is simply not available (e.g. non-Docker dev host).
-        _probe_url = f"{base}/api/tags"
-        try:
-            ensure_safe_outbound_url(_probe_url)
-            _probe_req = urllib.request.Request(_probe_url, method="GET")
-            with urllib.request.urlopen(_probe_req, timeout=2.0):
-                pass  # reachable
-        except Exception as _probe_err:
-            logging.getLogger(__name__).debug(
-                "cv_provider.ollama_probe_failed url=%s err=%s — skipping vision inference",
-                base, _probe_err,
-            )
-            return [], "", None
-
-        # Try configured model first, then a small fallback list for resilience.
-        model_candidates = []
-        # Never fall back to the text router model for an image request. On constrained GPUs that
-        # caused a costly model swap followed by a guaranteed modality failure.
-        for m in (self.model, os.getenv("CV_VISION_MODEL"), os.getenv("OLLAMA_VISION_MODEL"),
-                  "llava-latest:latest", "llava:latest", "llava-latest", "llava"):
-            if m and str(m).strip():
-                model_candidates.append(str(m).strip())
-        # stable de-dupe preserving order
-        seen: set = set()
-        model_candidates = [m for m in model_candidates if m not in seen and not seen.add(m)]  # type: ignore[func-returns-value]
-
-        last_err = None
-        for model_name in model_candidates[:2]:  # cap at 2 models after connectivity confirmed
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.1:
-                last_err = last_err or "vision_total_deadline_exceeded"
-                break
-            req = urllib.request.Request(
-                url=url,
-                data=json.dumps(
-                    {
-                        "model": model_name,
-                        "prompt": prompt,
-                        "images": [img_b64],
-                        "stream": False,
-                        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                    }
-                ).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=max(0.1, min(timeout, remaining))) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    output = str(data.get("response") or "")
-                # Parse below; if parsing fails we'll still fall back to heuristics.
-                break
-            except urllib.error.HTTPError as e:
-                try:
-                    body = e.read().decode("utf-8", "replace")
-                except Exception:
-                    body = ""
-                last_err = f"http_error status={getattr(e, 'code', None)} body={body[:200]}"
-                continue
-            except urllib.error.URLError as e:
-                last_err = f"url_error {e}"
-                continue
-            except Exception as e:
-                last_err = f"error {type(e).__name__}: {e}"
-                logging.getLogger(__name__).exception("cv_provider.ollama_call_failed model=%s err=%s", model_name, last_err)
-                continue
-        else:
-            logging.getLogger(__name__).warning("cv_provider.ollama_unreachable url=%s err=%s", url, last_err)
-            return [], "", None
+        from src.app.services.local_model_roles import execute_local_model_role, configured_digest
+        from src.app.services.model_transports import make_ollama_generate_transport
+        output = execute_local_model_role(
+            prompt, role='product_identity', purpose='browser_image_identity',
+            prompt_id='managed-cv-identity-v1', model=self.model,
+            digest=configured_digest('CV_IDENTITY_MODEL_DIGEST'),
+            context_hash=hashlib.sha256(image_bytes).hexdigest(),
+            timeout_s=float(os.getenv('CV_VISION_TOTAL_TIMEOUT_SEC', '60')),
+            max_output_tokens=int(os.getenv('CV_VISION_MAX_OUTPUT_TOKENS', '384')),
+            transport=make_ollama_generate_transport(images=[img_b64],
+                keep_alive=os.getenv('OLLAMA_KEEP_ALIVE', '2m'),
+                options={'temperature':0}),
+        )
 
         # Try to parse JSON from the model's response
         product_identity: Optional[Dict] = None

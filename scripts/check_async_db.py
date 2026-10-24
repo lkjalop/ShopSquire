@@ -38,6 +38,14 @@ class _Visitor(ast.NodeVisitor):
                 self.violations.append((node.lineno, ast.unparse(node)))
         self.generic_visit(node)
 
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        # A sync helper defined inside an async handler is not executed at
+        # definition time. Its call site may correctly use asyncio.to_thread.
+        depth = self._async_depth
+        self._async_depth = 0
+        self.generic_visit(node)
+        self._async_depth = depth
+
 
 def check_file(path: Path) -> list[tuple[str, int, str]]:
     try:
