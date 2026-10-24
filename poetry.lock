@@ -4376,7 +4376,7 @@ version = "7.2.2"
 description = "Cross-platform lib for process and system monitoring."
 optional = false
 python-versions = ">=3.6"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "psutil-7.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:2edccc433cbfa046b980b0df0171cd25bcaeb3a68fe9022db0979e7aa74a826b"},
     {file = "psutil-7.2.2-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:e78c8603dcd9a04c7364f1a3e670cea95d51ee865e4efb3556a3a63adef958ea"},
@@ -4828,7 +4828,7 @@ version = "0.3.13"
 description = "Python-tesseract is a python wrapper for Google's Tesseract-OCR"
 optional = false
 python-versions = ">=3.8"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "pytesseract-0.3.13-py3-none-any.whl", hash = "sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34"},
     {file = "pytesseract-0.3.13.tar.gz", hash = "sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9"},
@@ -5288,7 +5288,7 @@ version = "0.1.9"
 description = "Read one-dimensional barcodes and QR codes from Python 2 and 3."
 optional = false
 python-versions = "*"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "pyzbar-0.1.9-py2.py3-none-any.whl", hash = "sha256:4559628b8192feb25766d954b36a3753baaf5c97c03135aec7e4a026036b475d"},
     {file = "pyzbar-0.1.9-py2.py3-none-win32.whl", hash = "sha256:8f4c5264c9c7c6b9f20d01efc52a4eba1ded47d9ba857a94130afe33703eb518"},
@@ -7201,4 +7201,4 @@ azure = ["azure-identity", "azure-keyvault-secrets", "azure-storage-blob"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "8db4d61250270705b5b363332f2200b30931e913a40ffea6ee0c673f9af6ccf8"
+content-hash = "bc7448204bb0213e80c2128c8cff6a84a85d469f599fa94eb29f6fd06593c1f7"
