@@ -546,3 +546,45 @@ def test_replacement_objective_supersedes_pending_question(db):
 
     assert decision.clarification_relation == "supersede"
     assert decision.subject_action == "switch"
+
+
+@pytest.mark.parametrize("query", [
+    "I need an ergonomic standing desk and mesh office chair.",
+    "I need ibuprofen and a blood pressure monitor.",
+    "I want a computer chair for the office.",
+])
+def test_disabled_model_can_report_a_literal_unsold_purchase_category(db, query):
+    decision = route_turn(db, TurnEnvelope.from_suggest_params(
+        query=query, buyer_query=query, uid="buyer-1", tenant_id="default"),
+        llm_fn=lambda _prompt, _timeout: "")
+    assert decision.lane == "OFF_CATALOG"
+    assert decision.refusal_granted is True
+    assert decision.node_handle is not None
+    assert decision.subject_role == "PROCURE_SUBJECT"
+    assert decision.requirements == {}
+
+
+@pytest.mark.parametrize("query", [
+    "I need a laptop for drone photogrammetry.",
+    "I need a laptop for Windows management and office work.",
+    "I need a laptop, not a standing desk.",
+    "show me gaming laptops between 1500 to 1900",
+])
+def test_workload_or_excluded_category_cannot_override_sold_purchase_object(db, query):
+    decision = route_turn(db, TurnEnvelope.from_suggest_params(
+        query=query, buyer_query=query, uid="buyer-1", tenant_id="default"),
+        llm_fn=lambda _prompt, _timeout: "")
+    assert decision.lane != "OFF_CATALOG"
+    assert decision.refusal_granted is False
+
+
+def test_unsold_category_is_relative_to_the_current_tenant(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="fr-7", tenant_id="furniture-shop")
+    db.commit()
+    query = "I want a computer chair for the office."
+    decision = route_turn(db, TurnEnvelope.from_suggest_params(
+        query=query, buyer_query=query, uid="buyer-1", tenant_id="furniture-shop"),
+        llm_fn=lambda _prompt, _timeout: "")
+    assert decision.lane != "OFF_CATALOG"
+    assert decision.refusal_granted is False

@@ -631,6 +631,34 @@ def _fallback_budget(envelope, *, inherit_scope=False):
 
 
 
+def _literal_off_catalog_fallback(db, envelope, *, reason, quantity, quantity_explicit):
+    from src.app.services.case_catalog_candidates import (
+        catalog_categories_related, explicit_purchase_category,
+    )
+
+    # The same literal taxonomy boundary governs case intake and degraded chat.
+    # A model outage cannot turn a clearly unsold purchase into laptop browsing.
+    sold_handle = primary_sold_node(db, tenant_id=envelope.tenant_id)
+    purchase_node = explicit_purchase_category(
+        envelope.buyer_query or envelope.query,
+        preferred_handle=sold_handle,
+    )
+    if purchase_node is not None and sold_handle and catalog_categories_related(purchase_node.handle, sold_handle):
+        return None
+    if purchase_node is not None and refusal_allowed(
+            db, purchase_node.handle, tenant_id=envelope.tenant_id):
+        budget_scope, total_budget_cents = _fallback_budget(envelope)
+        return _decision(
+            lane="OFF_CATALOG", node_handle=purchase_node.handle,
+            node_path=purchase_node.full_path, requested_product_node=purchase_node.handle,
+            requested_category_label=purchase_node.name, refusal_granted=True,
+            source=f"fallback:{reason}", subject_role="PROCURE_SUBJECT",
+            quantity=quantity, quantity_explicit=quantity_explicit,
+            budget_scope=budget_scope, total_budget_cents=total_budget_cents,
+        )
+    return None
+
+
 def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str) -> TurnDecision:
     """Recover only platform-verifiable facts when model routing is unavailable.
 
@@ -659,6 +687,12 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     }
     parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
     quantity = parsed_quantity[0] if parsed_quantity is not None else None
+    off_catalog = _literal_off_catalog_fallback(
+        db, envelope, reason=reason, quantity=quantity,
+        quantity_explicit=parsed_quantity is not None,
+    )
+    if off_catalog is not None:
+        return off_catalog
     from src.app.services.attribute_registry import (
         defs_union,
         extract_keyed_quantity_requirements,

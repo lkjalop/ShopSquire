@@ -12,15 +12,14 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
 
 from tests.utils import default_headers
 
 
-def _make_engine():
-    eng = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False},
-                        poolclass=StaticPool, future=True)
+def _make_engine(database_url):
+    from src.app.models.db import create_runtime_engine
+    eng = create_runtime_engine(database_url)
     schema_path = pathlib.Path("db/schema.sql")
     if schema_path.exists():
         with eng.connect() as conn:
@@ -37,10 +36,13 @@ def _make_engine():
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+def client(monkeypatch, tmp_path):
+    # Requests and trace workers need independent connections/transactions.
+    # StaticPool makes their rollback/commit operate on one shared connection.
+    database_url = "sqlite+pysqlite:///" + (tmp_path / "cart.sqlite3").as_posix()
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("DISABLE_UI_ROUTES", "1")
-    eng = _make_engine()
+    eng = _make_engine(database_url)
     import src.app.models.db as _dbmod
     orig = _dbmod.engine
     _dbmod.engine = eng

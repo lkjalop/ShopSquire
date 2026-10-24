@@ -80,7 +80,7 @@ def _singular(value: str) -> str:
     return " ".join(words)
 
 
-def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
+def explicit_purchase_category(purpose: str, *, preferred_handle: str | None = None):
     """Return a taxonomy node only for a strong category-name phrase.
 
     This deliberately does not classify workload words such as ``render`` or ``CAD``
@@ -148,7 +148,7 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     # This is a taxonomy relationship rule, not a workload-word exception.
     related = [
         row for row in ranked
-        if preferred_handle and _related(row[2].handle, preferred_handle)
+        if preferred_handle and catalog_categories_related(row[2].handle, preferred_handle)
     ]
     if related:
         ranked = related
@@ -173,7 +173,7 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     return max(ranked, key=lambda row: (row[0], row[1], row[2].handle))[2]
 
 
-def _related(left_handle: str, right_handle: str) -> bool:
+def catalog_categories_related(left_handle: str, right_handle: str) -> bool:
     if left_handle == right_handle:
         return True
     left_ancestors = {row.handle for row in ancestors(left_handle)}
@@ -211,8 +211,8 @@ def buyer_category_changed(prior_scope: dict, purpose: str, *, resolved_product_
     prior = str(prior_scope.get("selected_taxonomy_root") or "")
     if not prior:
         return False
-    current = get_node(resolved_product_node) if resolved_product_node else _explicit_category(purpose, preferred_handle=prior)
-    return current is not None and not _related(prior, current.handle)
+    current = get_node(resolved_product_node) if resolved_product_node else explicit_purchase_category(purpose, preferred_handle=prior)
+    return current is not None and not catalog_categories_related(prior, current.handle)
 
 
 def build_case_catalog_candidate_set(
@@ -247,7 +247,7 @@ def build_case_catalog_candidate_set(
     context_node = client_node if client_sellable is True else None
     tenant_primary_handle = primary_sold_node(db, tenant_id=tenant_id)
     tenant_primary_node = get_node(tenant_primary_handle or "")
-    explicit_node = _explicit_category(
+    explicit_node = explicit_purchase_category(
         purpose,
         preferred_handle=(
             context_node.handle if context_node is not None
@@ -346,7 +346,7 @@ def build_case_catalog_candidate_set(
     excluded: list[str] = []
     for row in rows:
         handle = _derived_configuration_handle(row)
-        if handle is not None and _related(handle, selected.handle):
+        if handle is not None and catalog_categories_related(handle, selected.handle):
             included.append(row.id)
         else:
             excluded.append(row.id)
