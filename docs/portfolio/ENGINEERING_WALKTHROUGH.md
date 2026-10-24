@@ -4,6 +4,10 @@ A ten-minute guide for engineers and hiring managers, reviewed **23 October 2026
 
 ShopSquire is substantially AI-assisted, using Claude Code and Codex. The author's work includes specifying architecture, directing implementation, reviewing changes and requiring evidence. This guide does not claim that every line was independently reviewed or every repair followed test-first development.
 
+## 25 October evidence update
+
+The [execution delta and remaining W00-W15 roadmap](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) supersedes the counts below as the current assessment. It distinguishes public main, the draft repair PR and larger frozen local candidates. The repair branch adds grounded AUD/USD/EUR previews, scoped market relevance, immutable supplier-draft review and atomic cache erasure. C15's local full Python profile is green within its declared scope; broad browser, hosted security and completed endurance remain open. See the [updated ASCII architecture](../architecture/CURRENT_ARCHITECTURE_2026-10-25.md). The original tour and historical limitations below remain dated rather than being rewritten as new evidence.
+
 ## The engineering problem
 
 What may a commerce assistant claim or do when a buyer's request, inventory, supplier messages and external sources disagree?

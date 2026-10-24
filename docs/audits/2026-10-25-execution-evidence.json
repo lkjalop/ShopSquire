@@ -1,0 +1,131 @@
+{
+  "assessment_date": "2026-10-25 Australia/Sydney",
+  "assessment_scope": "Inventory coverage is mechanical; no blanket semantic approval, completion percentage or release-green claim.",
+  "c15": {
+    "verification_commit": "a77fdbd6570cd05e82bc44b410f1b702f4eaf9ff",
+    "source_tree_sha256": "5e24c858749b5c87183e2d4c932e866df903088a0b1e1ffa2681916adb43d6ea",
+    "files": 5891,
+    "full_python": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 2150.734,
+      "counts": {
+        "tests": 9010,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 309
+      },
+      "peaks": {
+        "rss_bytes": 1362903040,
+        "handles": 3888,
+        "threads": 212
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled"
+    },
+    "focused_browser": {
+      "specs": 11,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true
+    }
+  },
+  "c16": {
+    "verification_commit": "2150400801d74c663a3617ecbe2357aa3ef8008a",
+    "source_tree_sha256": "9ce05f507c64dc461d24cc0ab83163196e03fec17a109658cad6a120d461181c",
+    "files": 5896,
+    "text_lines": 1186088,
+    "code_files": 3679,
+    "physical_code_lines": 577216,
+    "python_functions": 20027,
+    "python_parse_errors": [],
+    "broad_exception_pass_candidates": 2259,
+    "session_deltas": {
+      "modified": 103,
+      "added": 38
+    },
+    "added_lines": 14736,
+    "deleted_lines": 4180,
+    "broad_browser": {
+      "specs": 84,
+      "cases": 181,
+      "passed": 89,
+      "failed": 59,
+      "skipped": 33,
+      "flaky": 0,
+      "elapsed_seconds": 3449.204,
+      "protected_inputs_changed": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "initial_triage_not_proven_root_causes": {
+        "model_disabled_contract_conflict": 39,
+        "live_profile_precondition": 1,
+        "primary_operation_authentication_precondition": 9,
+        "behaviour_or_contract_requires_review": 5,
+        "timeout_or_transport_unresolved": 1,
+        "specialized_harness_required": 1,
+        "credential_setup": 2,
+        "missing_fixture": 1
+      }
+    }
+  },
+  "c7_eight_hour_attempt": {
+    "status": "failed",
+    "requested_seconds": 28800,
+    "successful_cycles": 130,
+    "elapsed_at_failure_seconds": 10644.875,
+    "failed_cycle": 131,
+    "observed_error": "Chromium page.goto ERR_NO_BUFFER_SPACE; secondary sessionStorage document-denial error",
+    "root_cause": "not established",
+    "resource_violation": null,
+    "owned_container_removed": true,
+    "owned_network_removed": true
+  },
+  "pending_at_this_revision": [
+    "C18 full Python",
+    "C18 all 85 browser specs",
+    "C16 separate four-hour diagnostic replay",
+    "latest hosted CI head"
+  ],
+  "later_repairs": [
+    "Currency/workload acronym and suffix-money boundary: independent 68 passes",
+    "Read-only migration/current and populated-history guard: separately validated; not part of C15/C16",
+    "Saved supplier draft chat read-through: independent 129 passes and 15 native controls",
+    "Market measurement matching: 15 reproduced failures in 22 new controls, then independent 95 passes"
+  ],
+  "public_branch_note": "Published main remains 9da621d1; draft PR 13 has narrower independently integrated cohorts. C15/C16 include additional local WIP.",
+  "updated_at_utc": "2026-10-24T15:54:18.058048+00:00",
+  "browser_c5_c16_matched_delta": {
+    "shared_cases": 181,
+    "pass_to_pass": 79,
+    "fail_to_pass": 10,
+    "fail_to_fail": 59,
+    "skip_to_skip": 33,
+    "pass_to_fail": 0,
+    "ledger": "2026-10-25-browser-c5-c16-case-delta.csv",
+    "qualification": "Same named cases, different frozen revisions; native statuses retained, no release claim."
+  },
+  "c17": {
+    "verification_commit": "70ffd08a8e79df005ffddf09384c2dc29327bd04",
+    "focused_browser": {
+      "passed": 23,
+      "failed": 3,
+      "skipped": 0,
+      "flaky": 0
+    },
+    "failure": "Three new regional reload controls; native-registration helper cleared application pointers on every document. Original failed evidence retained."
+  },
+  "c18": {
+    "verification_commit": "afdba4a5438b81546e4b4692ff4a5c8998a9549e",
+    "source_tree_sha256": "8a511e11b692996011fee6ad8c13ca10b3f2a4023a4cfe7e67f97669870007fe",
+    "qualified_so_far": [
+      "Three unchanged AU/US/German correction/draft/reload browser controls pass after helper repair",
+      "Saved reviewed draft read-through and reload browser control passes"
+    ],
+    "full_python_and_all_85_browser_specs": "running, no aggregate result yet"
+  }
+}

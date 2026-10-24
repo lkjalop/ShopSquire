@@ -2,17 +2,19 @@
 
 An evidence-governed commerce prototype: conversational buying, inventory and procurement proposals, with explicit boundaries between observations, evidence, authorization and execution.
 
-**Start with the [engineering walkthrough](docs/portfolio/ENGINEERING_WALKTHROUGH.md), [current ASCII architecture](docs/architecture/CURRENT_ARCHITECTURE_2026-10-23.md), and [evidence and remaining roadmap](docs/REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md).** Implementation is substantially AI-assisted. This is an engineering portfolio and an unfinished product; release readiness has not been established.
+**Start with the [engineering walkthrough](docs/portfolio/ENGINEERING_WALKTHROUGH.md), [current ASCII architecture](docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md), and [25 October execution delta and roadmap](docs/EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md).** Implementation is substantially AI-assisted. This is an engineering portfolio and an unfinished product; release readiness has not been established.
+
+The [draft repair PR](https://github.com/lkjalop/ShopSquire/pull/13) adds scoped market evidence, versioned supplier-draft review and grounded pricing previews. The latest larger local C15 Python run passed 8,701 tests with zero failures/errors and 309 skips; its 23 focused browser cases passed. Those local sources include additional WIP and do not certify the PR or published main. The later C16 broad browser profile reports 89 passes, 59 failures and 33 skips. Hosted security and endurance gates remain open.
 
 ## What it can demonstrate now
 
 | Capability | Evidence and limits |
 |---|---|
-| Remember corrections across turns and reload | Quantity, currency, per-unit/total budget and destination corrections; seven buyer-only browser checks pass. Distributed erasure and crash recovery remain open. |
-| Prepare a stock-shortfall enquiry | A signed buyer's 40-unit request against 15 available produces a 25-unit shortfall and retained draft. No supplier message is sent. |
+| Remember corrections across turns and reload | Quantity, currency, per-unit/total budget and destination corrections; seven buyer-only browser checks pass. Indexed memory/cache erasure has separate-process controls on the repair branch; complete data-plane erasure and recovery remain open. |
+| Prepare a stock-shortfall enquiry | A signed buyer's 40-unit request against 15 available produces a 25-unit shortfall and retained draft. The repair branch adds immutable review/edit versions and independent approval; only fictional sandbox sending is qualified. |
 | Separate authority from model suggestions | Typed stages, deterministic policy and tenant/case controls; named refusal/degradation checks. This does not certify every provider or browser flow. |
 | Explain evidence and commercial state | Decision Trace, procurement projections and audit records. Some navigation tests mock trace data; those passes do not prove live intelligence. |
-| Compare inventory and market observations | Current-stock/event-validity controls have SQLite and native PostgreSQL checks. Completed, cited market intelligence through ordinary chat remains open. |
+| Compare inventory and market observations | Current-stock/event-validity controls have SQLite and native PostgreSQL checks. The repair branch adds question-relevant cited fixture/quote context; broad live coverage and citation usefulness remain open. |
 | Bound untrusted attachments and workers | Named security, signing and sandbox-publisher checks. Broader browser coverage still fails, including actor/admission contracts. |
 
 The [browser review](docs/BROWSER_CLICKTHROUGH_DELTA_AND_NEXT_STEPS_2026-10-22.md) retains complete case ledgers, source revisions, actor distinctions and a failure screenshot. Remembered quantity alone is not task completion. An unavailable-search refusal is not completed market analysis.
@@ -48,7 +50,7 @@ The [browser review](docs/BROWSER_CLICKTHROUGH_DELTA_AND_NEXT_STEPS_2026-10-22.m
  Hippograph: advisory relationship recall      Outcomes: trace / replay / eval
 ```
 
-This maps components, not a release certification. Ordinary preference browsing without workload-qualification claims is a proposed product-contract clarification. See the [detailed map and file tour](docs/architecture/CURRENT_ARCHITECTURE_2026-10-23.md).
+This maps components, not a release certification. Ordinary preference browsing without workload-qualification claims is a proposed product-contract clarification. See the [detailed map and file tour](docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md).
 
 ## Evidence snapshot
 
@@ -56,7 +58,7 @@ These historical profiles are separate, not an additive test total or one green 
 
 | Profile | Result | Source |
 |---|---|---|
-| Latest completed full Python process | 8,237 passed, 3 failed, 280 item skips; 4 additional collection skips | `a517f22e` |
+| Historical 23 October full Python process | 8,237 passed, 3 failed, 280 item skips; 4 additional collection skips | `a517f22e` |
 | Completed broad Playwright matrix | 41 passed, 68 failed, 32 skipped; 63 specs / 141 cases | `0e177ea4` |
 | Focused browser review | 12 passed, 5 failed; 17 cases | `abde83af` |
 | Buyer-only memory replay | 7 passed; one test-setup overlay removes operator headers | `abde83af` |
