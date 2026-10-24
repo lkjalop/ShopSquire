@@ -1,5 +1,23 @@
-import {test, expect} from './helpers/authenticatedTest';
-import {turn} from './helpers/chatTurn';
+import {test as base, expect} from '@playwright/test';
+import {registerBuyer} from './helpers/registeredBuyer';
+import {terminalTurn as turn} from './helpers/terminalTurn';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
+
+const test=base.extend<{ordinaryBuyer:void}>({
+  ordinaryBuyer:[async({page,context},use)=>{
+    await registerBuyer(context);
+    const privileged:string[]=[], errors:string[]=[];
+    page.on('request',r=>{
+      if(new URL(r.url()).pathname.startsWith('/api/v1/') && r.headers()['x-api-key'])privileged.push(r.url());
+    });
+    page.on('pageerror',error=>errors.push(error.message));
+    try { await use(); } finally {
+      expect(privileged,'Ordinary buyers must not borrow operator credentials').toEqual([]);
+      expect(errors,'Uncaught browser errors').toEqual([]);
+    }
+  },{auto:true}],
+});
 
 // Imported August catalogue, illustrative stock, no workload/compatibility authority.
 for (const scenario of [
@@ -14,6 +32,8 @@ for (const scenario of [
     await info.attach('catalogue-answer.json',{body:JSON.stringify(answer,null,2),contentType:'application/json'});
     expect(answer.products?.length, 'Browsing must return useful in-category candidates').toBeGreaterThan(0);
     expect(answer.products.some((p:any)=>scenario.names.test(String(p.name ?? p.title ?? '')))).toBe(true);
+    const source=readFileSync(join(process.env.ROADMAP_TEST_ROOT!,'docs/2026-08-08 laptop-products-aug.txt'),'utf8');
+    for(const product of answer.products)expect(source).toContain(String(product.name ?? product.title));
     expect(answer.terminal_outcome.commerce_authority).toBe('none');
     await expect(page.getByText(answer.assistant_message,{exact:true}).last()).toBeVisible();
   });
