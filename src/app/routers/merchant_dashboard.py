@@ -53,11 +53,9 @@ def _merchant_html_response(request: Request, html: str) -> HTMLResponse:
 
 
 def _is_loopback(req: Request) -> bool:
-    try:
-        host = getattr(getattr(req, "client", None), "host", None)
-        return str(host) in ("127.0.0.1", "::1", "localhost")
-    except Exception:
-        return False
+    from src.app.security.local_demo import is_loopback_peer
+
+    return is_loopback_peer(req)
 
 
 def _is_local_demo_host(req: Request) -> bool:
@@ -66,14 +64,9 @@ def _is_local_demo_host(req: Request) -> bool:
 
 
 def _allow_unauth_dashboard(req: Request) -> bool:
-    # Make local demos easy: allow loopback access without headers when running in local env.
-    env = str(os.getenv("APP_ENV", "") or "").lower()
-    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return _is_loopback(req) or _is_local_demo_host(req)
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    return env in ("local", "dev", "development") and (_is_loopback(req) or _is_local_demo_host(req))
+    from src.app.security.local_demo import allow_local_demo_request
+
+    return allow_local_demo_request(req)
 
 
 

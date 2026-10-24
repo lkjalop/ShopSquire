@@ -64,11 +64,9 @@ def _incident_cookie_name(incident_id: str) -> str:
 
 
 def _is_local_demo_host(req: Request) -> bool:
-    try:
-        import ipaddress
-        return bool(req.client and ipaddress.ip_address(req.client.host).is_loopback)
-    except Exception:
-        return False
+    from src.app.security.local_demo import is_loopback_peer
+
+    return is_loopback_peer(req)
 
 
 def _utc_now() -> datetime:
@@ -145,15 +143,9 @@ def _ensure_incident_runtime_tables() -> None:
 
 
 def _allow_public_escalation(req: Request) -> bool:
-    env = str(os.getenv("APP_ENV", "") or "").lower()
-    if env not in ('local', 'dev', 'development', 'test'):
-        return False
-    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return _is_local_demo_host(req)
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    return env in ("local", "dev", "development") and _is_local_demo_host(req)
+    from src.app.security.local_demo import allow_local_demo_request
+
+    return allow_local_demo_request(req)
 
 
 def _token_key(kind: str, incident_id: str) -> str:

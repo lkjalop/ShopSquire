@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -99,29 +98,15 @@ def query_clusters(body: ClusterRequest, role: str = Depends(require_role([ROLE_
     ]}
 
 def _is_loopback_or_localhost(req: Request) -> bool:
-    try:
-        host = str((req.headers.get("host") or "")).lower()
-        # Docker port mapping means req.client.host may be a bridge address. Host header is what we want here.
-        return host.startswith("127.0.0.1") or host.startswith("localhost") or host.startswith("[::1]")
-    except Exception:
-        return False
+    from src.app.security.local_demo import is_loopback_peer
+
+    return is_loopback_peer(req)
 
 
 def _allow_unauth_merchant_analytics(req: Request) -> bool:
-    """Local-only convenience so the browser dashboard can call analytics APIs without custom headers.
+    from src.app.security.local_demo import allow_local_demo_request
 
-    This is gated by:
-      - APP_ENV in local/dev/development (default)
-      - Host header indicating loopback
-    OR an explicit ALLOW_UNAUTH_MERCHANT_DASHBOARD toggle.
-    """
-    env = str(os.getenv("APP_ENV", "") or "").lower()
-    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
-    if explicit in ("1", "true", "yes", "on"):
-        return _is_loopback_or_localhost(req)
-    if explicit in ("0", "false", "no", "off"):
-        return False
-    return env in ("local", "dev", "development") and _is_loopback_or_localhost(req)
+    return allow_local_demo_request(req)
 
 
 @router.get("/query_clusters/latest")
