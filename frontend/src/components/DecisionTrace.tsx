@@ -744,6 +744,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     journey: procJourney,
     pendingSplit,
     loading: procLoading,
+    status: procStatus,
+    error: procError,
   } = useProcurementTrace({
     active: activeTab === 'procurement',
     traceId: traceIdText,
@@ -833,6 +835,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const modalRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement;
+    modalRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, []);
 
   // Handle drag start
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -1036,7 +1045,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       setTrace({
         decision_id: String(localTurnProjection.trace_id || currentTraceId),
         timestamp: new Date().toISOString(),
-        input_query: String(localTurnProjection.objective || ''),
+        input_query: String(localTurnProjection.buyer_query || ''),
         products: Array.isArray(localTurnProjection.products) ? localTurnProjection.products : [],
         right_panel: localTurnProjection.right_panel || null,
       });
@@ -2057,7 +2066,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       <div
         ref={modalRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
+        tabIndex={-1}
         aria-label="Decision Trace"
         data-testid="decision-trace-modal"
         data-trace-id={effectiveTraceId || ''}
@@ -2424,7 +2434,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 <div className={styles.summaryPane}>
                   <div className={styles.kvRow}><span>Decision ID</span><span>{trace.decision_id}</span></div>
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
-                  <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
+                  <div className={styles.kvRow}><span>Query</span><span>{localTurnProjection?.buyer_query || trace.input_query || 'Turn query not recorded'}</span></div>
                   <div className={styles.kvRow}><span>Model</span><span>{proposalExecutionStep ? 'Model-directed router' : (ms.selected || '--')}</span></div>
                   <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? compactAuthorityPath(typedExecutionSteps) : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
                   <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
@@ -4260,7 +4270,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             audit: "The RFQ/email card should be the first-class object") — the card(s) render
                             first, the event table is demoted below, and raw JSON stays behind the per-event
                             "Raw recorded payload" disclosure. */}
-                        {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+                        <div data-testid="procurement-load-state" data-state={procStatus} aria-busy={procLoading}>
+                          {procLoading && <div className={styles.empty}>Loading the procurement case…</div>}
+                          {procStatus === 'error' && <div role="alert">Procurement details could not be loaded ({procError}).</div>}
+                          {procStatus === 'not_applicable' && <div>No procurement case is attached to this revision.</div>}
+                        </div>
 
                         <ReturnLifecycleTrace events={src || []} />
 
@@ -4282,7 +4296,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         />
                         <ProcurementMarketPanel projection={mi} />
                         {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
-                          <PendingProcurementPlan plan={pendingSplit} />
+                          <PendingProcurementPlan plan={{...pendingSplit,split:pendingSplit.split}} />
                         ) : procEvents.length === 0 ? (
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (

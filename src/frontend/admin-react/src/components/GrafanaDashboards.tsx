@@ -1,8 +1,17 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { http } from '../api/client';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
 export function GrafanaDashboards({ role }: Props) {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    http<{ configured: boolean }>('/admin/grafana_status')
+      .then(result => { if (alive) setConfigured(result.configured); })
+      .catch(() => { if (alive) setConfigured(false); });
+    return () => { alive = false; };
+  }, []);
   const grafanaProxyBase = (import.meta.env.VITE_GRAFANA_PROXY_BASE as string) || '/admin/grafana_proxy';
   const base = grafanaProxyBase.replace(/\/$/, '');
 
@@ -72,6 +81,9 @@ export function GrafanaDashboards({ role }: Props) {
       features: 'Pending table with priority colors, outcomes',
     },
   ];
+
+  if (configured === null) return <div role="status">Checking dashboard availability…</div>;
+  if (!configured) return <div role="status">Operational dashboards are unavailable. Configure the Grafana integration to view them.</div>;
 
   return (
     <div className="stagger">

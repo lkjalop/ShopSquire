@@ -8,6 +8,7 @@ type TurnRecord = {
     case_revision: number;
     operation_id?: string;
     objective?: string;
+    buyer_query?: string;
     catalog_authority?: string;
     commerce_authority?: string;
   };
@@ -25,7 +26,8 @@ export default function TurnHistoryPanel({ history }: { history: TurnRecord[] })
         {history.map(row => <option key={row.commit_id} value={row.commit_id}>Revision {row.read_model.case_revision}</option>)}
       </select>
     </label>
-    <p>{model.objective || 'Objective not recorded'}</p>
+    <p>Turn query: {model.buyer_query || 'not recorded'}</p>
+    <p>Case objective: {model.objective || 'not recorded'}</p>
     <p>Operation: {model.operation_id || 'not recorded'}</p>
     <p>Known at <time>{record.known_at}</time>; effective at <time>{record.valid_at}</time>.</p>
     <p>Catalog authority: {model.catalog_authority || 'not recorded'}; commerce authority: {model.commerce_authority || 'not recorded'}.</p>
