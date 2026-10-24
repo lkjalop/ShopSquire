@@ -2356,5 +2356,44 @@
       },
       "resource_violation": null
     }
+  },
+  "published_repair_head_combined_smoke": {
+    "source_head": "cbeab7fb6f24055444a53c689c4fd6a286cdcc60",
+    "scope": "Clean committed public repair source; exact previously fresh 127-package lean environment reused, not a fresh install or full suite",
+    "selected_tests": [
+      "tests/services/test_typed_recommendation_stage_coordinator.py",
+      "tests/services/test_local_model_roles.py",
+      "tests/services/test_research_policy.py",
+      "tests/services/test_regional_price_grounding.py",
+      "tests/services/test_market_question_relevance.py",
+      "tests/security/test_local_demo_admission_consistency.py",
+      "tests/services/test_dependency_request_context.py",
+      "tests/services/test_dependency_resilience_retry_ownership.py",
+      "tests/services/test_dependency_resilience_timeout.py",
+      "tests/services/test_dependency_resilience_lifecycle.py",
+      "tests/test_roadmap_browser_spec_selection.py",
+      "tests/services/test_browser_soak_runner.py",
+      "tests/api/test_ui_contracts.py",
+      "tests/api/test_escalation_room_security_identity.py"
+    ],
+    "tracked_source_changes": [],
+    "profile": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 30.954,
+      "peaks": {
+        "rss_bytes": 255315968,
+        "handles": 1073,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "offline_models": true,
+      "commercial_effects": "sandbox/disabled",
+      "counts": {
+        "tests": 135,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
   }
 }
