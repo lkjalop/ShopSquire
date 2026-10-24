@@ -36,7 +36,7 @@ from src.app.services.semantic_cache import SemanticCache
 from src.app.services.policy_gate import PolicyGate
 from src.app.services.recommendations import RecommendationService
 from src.app.services.interleaving_controller import InterleavingController, run_interleaved
-from src.app.services.agent_types import AgentType, agent_type_for_name
+from src.app.services.agent_types import agent_type_for_name
 from src.app.observability.metrics import (
     record_agent_invocation,
     record_agent_escalation,
@@ -640,7 +640,7 @@ class Orchestrator:
             trace_id = self._ensure_trace_id(payload if isinstance(payload, dict) else {})
             if isinstance(payload, dict) and payload.get("unusual_hours") and not payload.get("_insider_ticketed"):
                 try:
-                    t = TicketingAgent()
+                    TicketingAgent()
                     title = "Security alert: insider context anomaly"
                     desc = json.dumps({"payload": payload, "reason": "unusual_hours"}, ensure_ascii=False)
                     ticket = self._create_incident_ticket(
@@ -1746,7 +1746,6 @@ class Orchestrator:
         if not simulate_only and _autonomy_tier in ("denied", "escalated"):
             try:
                 from src.app.services.action_verifier import verify_action, RiskSignals, PolicySnapshot
-                from src.app.services.session_artifacts import RiskSignals as _RSClass, PolicySnapshot as _PSClass
 
                 _fraud_score_v = float(
                     (fraud_summary.get("score") or fraud_summary.get("fraud_score") or 0)
@@ -2348,7 +2347,7 @@ class Orchestrator:
                     # Guard: run object detection only when image quality is good or risk warrants escalation
                     from src.app.services.cv_quality import score_quality
                     q = score_quality(img, labels=["sharp", "blurry", "dark", "glare"]) or {}
-                    sharp = float((q.get("scores") or {}).get("sharp", 0.0) or 0.0)
+                    float((q.get("scores") or {}).get("sharp", 0.0) or 0.0)
                     blurry = float((q.get("scores") or {}).get("blurry", 0.0) or 0.0)
                     dark = float((q.get("scores") or {}).get("dark", 0.0) or 0.0)
                     import os as _os
@@ -2576,33 +2575,12 @@ class Orchestrator:
         return summary
 
     def execute_or_escalate(self, uid: str, proposal: Dict[str, Any], policy: Dict[str, Any], retrieved_context: Dict[str, Any] | None = None, idempotency_key: str | None = None, simulate_only: bool = False) -> bool:
-        # Use central log_decision contract to persist decisions
+        # Historical name retained for callers. This method records a pricing
+        # proposal; it has no price/cart executor and cannot return an effect
+        # receipt. An allowed policy or durable log is not a performed action.
+        # Preview requests also must not consume a commercial idempotency key.
         if not self.flags.get("DECISION_LOG_WRITES_ENABLED", False):
-            return not policy.get("approval_required", False)
-        try:
-            with db_session() as db:
-                if idempotency_key:
-                    try:
-                        if getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name == "sqlite":
-                            db.execute(text("CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
-                    except Exception:
-                        pass
-                    exists = None
-                    try:
-                        exists = db.execute(text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": idempotency_key}).scalar()
-                    except Exception:
-                        exists = None
-                    ok, _msg = self.firewall.idempotency_ok(bool(exists))
-                    if not ok:
-                        return False
-                    db.execute(text("INSERT INTO idempotency_keys (key) VALUES (:k)"), {"k": idempotency_key})
-                    try:
-                        db.commit()
-                    except Exception:
-                        pass
-        except Exception:
-            # best-effort idempotency tracking only
-            pass
+            return False
 
         # Build retrieved_context and tenant_id
         rc = retrieved_context if retrieved_context is not None else {"memory": self.memory.get_context(uid), "live": {"cart_total_cents": proposal.get("cart_total_cents"), "sku": proposal.get("sku")}}
@@ -2617,7 +2595,7 @@ class Orchestrator:
 
         try:
             from src.app.services.decision_log import log_decision as _log
-            status = "pending" if policy.get("approval_required") else "executed"
+            status = "pending" if policy.get("approval_required") else "planned"
             _log(
                 agent_name="pricing_agent",
                 input_data={"uid_hash": hash_uid(uid), "proposal": security_sanitize(proposal)},
@@ -2630,10 +2608,11 @@ class Orchestrator:
                 tenant_id=tenant,
             )
         except Exception:
-            # In test/local environments without DB, tolerate and proceed
-            import traceback, sys
+            # Missing audit persistence never becomes evidence of execution.
+            import traceback
+            import sys
             traceback.print_exc(file=sys.stderr)
-            return not policy.get("approval_required", False)
+            return False
 
         # RAGAS evaluation — runs if the optional ragas package is installed
         try:
@@ -2649,9 +2628,7 @@ class Orchestrator:
         except Exception:
             pass
 
-        # Return whether execution should proceed; simulate_only means no external
-        # effects, but we still persist the decision for audit/observability.
-        return not policy.get("approval_required", False) and not simulate_only
+        return False
 
     def _emit_synthesis_reasoning(
         self,

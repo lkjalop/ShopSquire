@@ -62,12 +62,19 @@ def project_case_commercial_decision(
     lead_times = [int(row["lead_time_days"]) for row in offers if row.get("lead_time_days") is not None]
     price_rows = [row for row in offers if row.get("unit_price_cents") is not None]
     latest_price = fulfilment.get("unit_price_cents")
-    unit_price = int(latest_price) if isinstance(latest_price, int) else (
-        min(int(row["unit_price_cents"]) for row in price_rows) if price_rows else None
-    )
-    currency = str(fulfilment.get("currency") or (
-        price_rows[0].get("currency") if price_rows else "AUD"
-    )).upper()
+    quoted_prices = {(int(row["unit_price_cents"]), str(row.get("currency") or "").upper())
+                     for row in price_rows}
+    # Distinct quotes cannot be collapsed to the cheapest price for all units.
+    # A committed case price wins; otherwise require one consistent quoted basis.
+    quoted = next(iter(quoted_prices)) if len(quoted_prices) == 1 else None
+    if isinstance(latest_price, int) and not isinstance(latest_price, bool):
+        unit_price = latest_price
+        currency = str(fulfilment.get("currency") or "").upper() or None
+    elif quoted:
+        unit_price, quoted_currency = quoted
+        currency = quoted_currency or None
+    else:
+        unit_price, currency = None, None
     budget = dict(state_data.get("budget") or {})
     budget_per_unit = budget.get("amount_minor") if budget.get("scope") == "per_unit" else None
     budget_total = budget.get("amount_minor") if budget.get("scope") == "total" else None
@@ -78,7 +85,7 @@ def project_case_commercial_decision(
         material_unknowns=[] if exact_offer else ["exact configuration identity"],
         specification_freshness="unknown",
         unit_price_cents=unit_price,
-        currency=currency,
+        currency=currency, budget_currency=budget.get("currency"),
         budget_per_unit_cents=budget_per_unit,
         budget_total_cents=budget_total,
         requested_quantity=requested,

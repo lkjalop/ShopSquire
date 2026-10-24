@@ -33,7 +33,8 @@ class CommercialCandidate(BaseModel):
     material_unknowns: list[str] = Field(default_factory=list, max_length=32)
     specification_freshness: Literal["fresh", "stale", "unknown"] = "unknown"
     unit_price_cents: int | None = Field(default=None, ge=0, le=1_000_000_000)
-    currency: str = Field(default="AUD", min_length=3, max_length=3)
+    currency: str | None = Field(default="AUD", pattern=r"^[A-Za-z]{3}$")
+    budget_currency: str | None = Field(default=None, pattern=r"^[A-Za-z]{3}$")
     budget_per_unit_cents: int | None = Field(default=None, ge=0, le=1_000_000_000)
     budget_total_cents: int | None = Field(default=None, ge=0, le=1_000_000_000_000)
     requested_quantity: int = Field(ge=1, le=1_000_000)
@@ -45,7 +46,8 @@ class CommercialCandidate(BaseModel):
 
     @model_validator(mode="after")
     def validate_budget_currency(self) -> "CommercialCandidate":
-        self.currency = self.currency.upper()
+        self.currency = self.currency.upper() if self.currency else None
+        self.budget_currency = self.budget_currency.upper() if self.budget_currency else None
         return self
 
 
@@ -120,6 +122,11 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
     )
     if candidate.budget_per_unit_cents is None and candidate.budget_total_cents is None:
         budget_outcome: BudgetOutcome = "not_stated"
+    elif (not candidate.currency or not candidate.budget_currency
+            or candidate.currency != candidate.budget_currency
+            or candidate.currency == "XXX"):
+        budget_outcome = "unknown"
+        reasons.append("Budget and price currency must be known and match; cross-currency comparison requires reviewed FX evidence.")
     elif candidate.unit_price_cents is None:
         budget_outcome = "unknown"
     else:
@@ -182,7 +189,7 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
         reasons.append("Specification evidence is stale.")
     if form_factor_unknown:
         reasons.append("The mandatory form factor has not been verified.")
-    if quantity_outcome == "unknown" or candidate.unit_price_cents is None:
+    if quantity_outcome == "unknown" or candidate.unit_price_cents is None or budget_outcome == "unknown":
         if quantity_outcome == "unknown":
             reasons.append("Quantity and delivery coverage remain unverified.")
         if candidate.unit_price_cents is None:
@@ -191,7 +198,8 @@ def reduce_commercial_candidate(candidate: CommercialCandidate) -> CommercialDec
             sku=candidate.sku, status="UNVERIFIED", fit_tier=technical_fit,
             quantity_outcome=quantity_outcome, budget_outcome=budget_outcome,
             available_by_deadline=available_by_deadline, shortfall=shortfall,
-            reasons=reasons, resolution_owner="catalog" if candidate.unit_price_cents is None else "supplier",
+            reasons=reasons, resolution_owner=("tenant_policy" if budget_outcome == "unknown" and candidate.unit_price_cents is not None
+                              else "catalog" if candidate.unit_price_cents is None else "supplier"),
         )
 
     if conditional:

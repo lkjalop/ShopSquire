@@ -37,7 +37,7 @@ def persist_decision_and_audits(
             agent_reasoning=proposal.get("reason", ""),
             policy_version=policy_version,
             approval_required=approval_required,
-            execution_status="pending" if approval_required else "executed",
+            execution_status="pending" if approval_required else "planned",
         )
         if not dec_id:
             return None

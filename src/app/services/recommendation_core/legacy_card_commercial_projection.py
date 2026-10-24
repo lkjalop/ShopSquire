@@ -15,6 +15,7 @@ def project_legacy_card_commercial_decision(
     budget_per_unit_cents: int | None,
     requested_quantity: int,
     deadline_days: int | None,
+    budget_currency: str | None = "AUD",
 ) -> dict[str, Any]:
     """Classify an old ProductCard without inventing exact-config evidence."""
 
@@ -42,7 +43,8 @@ def project_legacy_card_commercial_decision(
         material_unknowns=unknowns,
         specification_freshness=freshness,
         unit_price_cents=card.price_cents,
-        currency=str(card.currency or "AUD"),
+        currency=str(card.currency) if card.currency else None,
+        budget_currency=budget_currency,
         budget_per_unit_cents=budget_per_unit_cents,
         requested_quantity=max(1, int(requested_quantity or 1)),
         local_available_now=(

@@ -1,24 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
-from typing import Dict
+from typing import Dict, Literal
 import hashlib
 
 from src.app.deps import get_redis, hash_uid
 from src.app.security.firewall import TransactionFirewall
 from src.app.services.memory import Memory
 from src.app.services.orchestrator import Orchestrator
-from src.app.config import load_feature_flags, get_settings
+from src.app.config import get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 import time
 from src.app.observability.metrics import record_pricing_latency, record_cb_state, record_rate_limit_exceeded, record_token_budget_usage
 from src.app.observability.tracing import get_tracer
 import os
-from src.app.analytics.anomaly import ewma, is_anomaly, adaptive_ewma, isolation_forest_score
+from src.app.analytics.anomaly import is_anomaly, adaptive_ewma, isolation_forest_score
 from src.app.observability.metrics import record_incident_alert
 from src.app.services.degradation import cb_is_open, cb_record
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.token_budget import TokenBudget, estimate_tokens, estimate_cost, infer_tier
 from src.app.security.observer import analyze_payload, emit_security_event
-from src.app.services.recommendations import RecommendationService
 from src.app.policy.kill_switch import assert_autonomy_allowed
 
 
@@ -26,8 +25,17 @@ router = APIRouter(prefix="/api/v1/pricing", tags=["pricing"])
 tracer = get_tracer("pricing-router")
 
 
+def _read_only_preview(payload: Dict, *, currency: str) -> Dict:
+    """A caller amount or legacy rule is not a reviewed quote or effect receipt."""
+    return {**payload, "schema_version": "pricing-preview-v2", "currency": currency,
+            "price_basis": "unverified_cart_amount", "executed": False,
+            "execution_status": "review_required", "action_authority": "none",
+            "review_required": ["current_cart_and_price", "tenant_pricing_policy",
+                                "destination_tax_and_delivery", "any_currency_conversion"]}
+
+
 @router.get("/suggest")
-def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency_key: str | None = None, response: Response = None, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency_key: str | None = None, response: Response = None, currency: Literal["AUD", "USD", "EUR"] = "AUD", redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("pricing.suggest") as span:
         span.set_attribute("pricing.uid_hash", hash_uid(uid))
         span.set_attribute("pricing.cart_total_cents", int(cart_total_cents or 0))
@@ -39,6 +47,19 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
             source_id="Pricing_Autonomy_Governance_Agent",
             context={"uid_hash": hash_uid(uid)},
         )
+        cap = flags.get("CAPABILITIES", {}).get("pricing", {"enabled": True, "rollout_percent": flags.get("AGENT_ROLLOUT_PERCENT", 20)})
+        if not cap.get("enabled", True):
+            raise HTTPException(status_code=503, detail="Pricing capability disabled")
+        if currency != "AUD":
+            return _read_only_preview({
+                "eligible": False, "degraded": True,
+                "message": "Regional pricing policy and a current quote require review.",
+                "proposal": {"cart_total_cents": cart_total_cents, "currency": currency,
+                             "discount_percent": None, "sku": sku},
+                "firewall": {"allowed": False, "approval_required": True,
+                             "reason": "regional_pricing_policy_unverified"},
+                "latency_baseline": None,
+            }, currency=currency)
 
         # Chaos latency injection for tests/load simulations
         try:
@@ -82,7 +103,7 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                     simulate_only=True,
                     use_rules=True,
                 )
-            return {
+            return _read_only_preview({
                 "status": "budget_exceeded",
                 "reason": reason,
                 "remaining": remaining,
@@ -93,13 +114,10 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                 "executed": False,
                 "latency_baseline": None,
                 "degraded": True,
-            }
+            }, currency=currency)
         elif not allowed and bypass_budget:
             allowed = True
 
-        cap = flags.get("CAPABILITIES", {}).get("pricing", {"enabled": True, "rollout_percent": flags.get("AGENT_ROLLOUT_PERCENT", 20)})
-        if not cap.get("enabled", True):
-            raise HTTPException(status_code=503, detail="Pricing capability disabled")
         rollout = int(cap.get("rollout_percent", flags.get("AGENT_ROLLOUT_PERCENT", 20)))
         cohort = int(hashlib.sha256(uid.encode("utf-8")).hexdigest(), 16) % 100
         degradation_cfg = flags.get("DEGRADATION", {"enabled": True})
@@ -137,7 +155,7 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                         simulate_only=True,
                         use_rules=True,
                     )
-                return {
+                return _read_only_preview({
                     "eligible": False,
                     "message": "Request queued for security review.",
                     "proposal": degraded.proposal,
@@ -145,12 +163,12 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                     "executed": False,
                     "latency_baseline": None,
                     "degraded": True,
-                }
+                }, currency=currency)
             with tracer.start_as_current_span("pricing.orchestrator"):
                 result = orch.run(
                     uid,
                     {"cart_total_cents": cart_total_cents, "sku": sku, "idempotency_key": idempotency_key},
-                    simulate_only=simulate,
+                    simulate_only=True,
                     use_rules=use_rules,
                 )
             cb_record(redis, "pricing", True, degradation_cfg)
@@ -161,7 +179,7 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                 result = orch.run(
                     uid,
                     {"cart_total_cents": cart_total_cents, "sku": sku, "idempotency_key": idempotency_key},
-                    simulate_only=simulate,
+                    simulate_only=True,
                     use_rules=True,
                 )
             use_rules = True
@@ -253,4 +271,4 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
                 )
         except Exception:
             pass
-        return payload
+        return _read_only_preview(payload, currency=currency)

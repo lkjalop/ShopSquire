@@ -50,6 +50,9 @@ from src.app.services.taxonomy_registry import (
     grounding_status,
 )
 
+from src.app.observability.stage_timer import build_timing_breakdown
+from src.app.services.recommendation_core.case_binding import execute_bound_turn
+
 logger = logging.getLogger("shopsquire.recommendation_core.core")
 
 LLMFn = Callable[[str, float], str]
@@ -133,8 +136,6 @@ def _run_stage(
     run_guarded_stage(resp, name, fn, cancellation=cancellation, logger=logger)
 
 
-from src.app.observability.stage_timer import build_timing_breakdown
-from src.app.services.recommendation_core.case_binding import execute_bound_turn
 
 
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -1800,6 +1801,7 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
         card.commercial_decision = project_legacy_card_commercial_decision(
             card,
             budget_per_unit_cents=envelope.budget_max_cents,
+            budget_currency=envelope.currency,
             requested_quantity=requested_quantity,
             deadline_days=deadline_days,
         )
