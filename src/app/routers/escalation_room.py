@@ -65,8 +65,8 @@ def _incident_cookie_name(incident_id: str) -> str:
 
 def _is_local_demo_host(req: Request) -> bool:
     try:
-        host = str((req.headers.get("host") or "")).lower()
-        return host.startswith("127.0.0.1") or host.startswith("localhost")
+        import ipaddress
+        return bool(req.client and ipaddress.ip_address(req.client.host).is_loopback)
     except Exception:
         return False
 
@@ -146,14 +146,13 @@ def _ensure_incident_runtime_tables() -> None:
 
 def _allow_public_escalation(req: Request) -> bool:
     env = str(os.getenv("APP_ENV", "") or "").lower()
+    if env not in ('local', 'dev', 'development', 'test'):
+        return False
     explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
     if explicit in ("1", "true", "yes", "on"):
         return _is_local_demo_host(req)
     if explicit in ("0", "false", "no", "off"):
         return False
-    # If APP_ENV is unset, default to loopback-only allowance for local demos.
-    if not env:
-        return _is_local_demo_host(req)
     return env in ("local", "dev", "development") and _is_local_demo_host(req)
 
 
