@@ -1,0 +1,85 @@
+{
+  "assessment_date": "2026-10-24",
+  "published_base": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+  "scope": "Four independently integrated repair commits; excludes other local application and roadmap work",
+  "cohorts": [
+    {
+      "commit": "107df681",
+      "change": "Owned HTTP race actor and fixture isolation",
+      "passed": 6,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "validation": "Committed baseline plus this repair cohort; earlier independently verified repair commits included where applicable",
+      "tests": [
+        "tests/chaos/test_money_concurrency_http.py"
+      ],
+      "commercial_effects": "sandbox/disabled",
+      "models": "offline"
+    },
+    {
+      "commit": "32f2d672",
+      "change": "Dependency removal and truthful evaluation contracts",
+      "passed": 21,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "validation": "Committed baseline plus this repair cohort; earlier independently verified repair commits included where applicable",
+      "tests": [
+        "tests/scripts/test_mvp_dependency_security.py",
+        "tests/scripts/test_generate_runtime_requirements.py",
+        "tests/api/test_ragas_baseline.py",
+        "tests/api/test_ragas_alerting.py"
+      ],
+      "commercial_effects": "sandbox/disabled",
+      "models": "offline"
+    },
+    {
+      "commit": "eaf8bd7f",
+      "change": "Atomic shared semantic-cache publication and erasure",
+      "passed": 39,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "validation": "Committed baseline plus this repair cohort; earlier independently verified repair commits included where applicable",
+      "tests": [
+        "tests/integration/test_owned_redis_semantic_scope.py",
+        "tests/services/test_semantic_cache_guardrails.py",
+        "tests/services/test_temporal_cache_producers.py",
+        "tests/services/test_temporal_cache_lifecycle.py",
+        "tests/services/test_cache_rag_contract.py"
+      ],
+      "commercial_effects": "sandbox/disabled",
+      "models": "offline"
+    },
+    {
+      "commit": "a5947f2b",
+      "change": "Explicit source-validity admission",
+      "passed": 35,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "validation": "Committed baseline plus this repair cohort; earlier independently verified repair commits included where applicable",
+      "tests": [
+        "tests/services/test_market_evidence_admission.py",
+        "tests/services/test_market_admission_budget.py"
+      ],
+      "commercial_effects": "sandbox/disabled",
+      "models": "offline"
+    }
+  ],
+  "dependency_audit": {
+    "recorded_at": "2026-10-24T10:40:47.217915+00:00",
+    "lock_sha256": "1949942a0040db095a3685b7baa749ea654eac097ea230eae4183180bf1435cc",
+    "locked_package_versions": 217,
+    "package_advisory_matches": 0,
+    "errors_or_skips": []
+  },
+  "limits": [
+    "Counts overlap in scope; they are not a release completion percentage.",
+    "All-lock Python audit does not cover vendored libraries or operating-system packages.",
+    "Standalone Redis is qualified; Redis Cluster cross-slot operation and legacy physical orphan cleanup are not certified.",
+    "Full local working-tree tests, browser journeys and container builds concern separate private candidates and must not be attributed to this small publication cohort.",
+    "Broad hosted CI and production/provider/recovery/endurance gates remain required."
+  ]
+}
