@@ -1,7 +1,7 @@
 import {test as base, expect, type BrowserContext} from '@playwright/test';
 import {createHmac} from 'node:crypto';
 
-export const buyerUid='roadmap-browser-buyer';
+export const buyerUid=process.env.ROADMAP_TEST_BUYER_UID || 'roadmap-browser-buyer';
 
 // Only the test process holds this key. The application still verifies a real
 // signed credential; no test endpoint or browser-side authority bypass exists.

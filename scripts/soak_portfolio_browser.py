@@ -113,6 +113,9 @@ def main():
             stream.write(json.dumps(state)+'\n')
 
     def invoke(index):
+        cycle_environment = dict(environment)
+        if prefix := environment.get('ROADMAP_SOAK_BUYER_PREFIX'):
+            cycle_environment['ROADMAP_TEST_BUYER_UID'] = f'{prefix}-{index}'
         def sample(phase, pid=None):
             measurement = snapshot(browser_parent=pid,ports=(args.api_port,urlsplit(args.base_url).port or 80))
             measurement.update(cycle=index, phase=phase)
@@ -123,7 +126,7 @@ def main():
         sample('before')
         with (output/f'cycle-{index:04d}.log').open('w', encoding='utf-8') as log:
             process = subprocess.Popen(command+[f'--output={output / f"cycle-{index:04d}"}'],
-                cwd=root/'frontend', env={**environment, **({'PLAYWRIGHT_NET_LOG_PATH':str(output/f'network-{index:04d}.json')}
+                cwd=root/'frontend', env={**cycle_environment, **({'PLAYWRIGHT_NET_LOG_PATH':str(output/f'network-{index:04d}.json')}
                     if args.net_log else {})}, stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 180

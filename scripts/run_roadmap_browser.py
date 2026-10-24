@@ -33,6 +33,15 @@ def validate_specs(root: Path, specs: list[str]) -> list[str]:
     return selected
 
 
+def soak_buyers(duration, tenant, run_id):
+    """Explicitly enroll disposable replay actors; preserve all abuse limits."""
+    if duration <= 0:
+        return '', {}
+    prefix = 'ss-' + run_id[:8]
+    count = (duration + 59) // 60 + 1
+    return prefix, {f'{prefix}-{index}': [tenant] for index in range(1, count + 1)}
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory',type=Path,required=True)
@@ -76,6 +85,9 @@ def main():
     bindings = json.loads(config.get('BUYER_TENANT_BINDINGS_JSON', '{}'))
     for subject in offer_buyers.values():
         bindings[subject] = ['synthetic-bundles']
+    soak_prefix, replay_buyers = soak_buyers(args.soak_seconds,
+        config.get('VITE_STOREFRONT_TENANT_ID', 'synthetic-electronics'), run_id)
+    bindings.update(replay_buyers)
     config['BUYER_TENANT_BINDINGS_JSON'] = json.dumps(bindings)
     label=args.label or ('restored-browser' if args.restore else 'connected-browser')
     if not label or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in label):
@@ -87,6 +99,7 @@ def main():
             migration=db.execute('SELECT version_num FROM alembic_version').fetchone()[0],
             products=db.execute('SELECT COUNT(*) FROM products').fetchone()[0])
     env={**os.environ,**config,'ROADMAP_TEST_JWT_KEY':config['JWT_SIGNING_KEY'],
+        'ROADMAP_SOAK_BUYER_PREFIX':soak_prefix,
         'ROADMAP_BUNDLE_BUYER':offer_buyers['bundle'],'ROADMAP_UPGRADE_BUYER':offer_buyers['upgrade'],
         'ROADMAP_TEST_ROOT':str(ROOT),'ROADMAP_TEST_PYTHON':sys.executable,
         'PLAYWRIGHT_BASE_URL':f'http://127.0.0.1:{args.ui_port}', 'PLAYWRIGHT_DISABLE_GPU':'1',
