@@ -29,28 +29,35 @@ import os
 import re as _re
 import threading
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
 from src.app.services.attribute_registry import defs_union
 from src.app.services.recommendation_core.catalog_brand_constraints import (
     _clamp_brand, _explicitly_excluded_brand,
 )
 from src.app.services.catalog_classifier import candidate_nodes
-from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
+from src.app.services.recommendation_core.envelope import TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
 from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIASES
 from src.app.services.recommendation_core.router_prompt import _instruction_prefix
 from src.app.services.recommendation_core.literal_workload_identity import (
     literal_workload_identity_candidate,
-    restore_literal_edition_qualifiers,
+    clamp_literal_workload_entities,
 )
 from src.app.services.recommendation_core.semantic_coverage import discard_covered_model_workload_echo
 from src.app.services.http_defaults import DEFAULT_OUTBOUND_TIMEOUT
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
                                                 primary_sold_node, search_nodes, sells_within,
                                                 sold_nodes)
+from src.app.services.recommendation_core.turn_outcome import TurnDecision
+from src.app.services.recommendation_core.case_patch_grounding import (
+    _evaluate_bounded_case_patches,
+    _bounded_case_patches, _complete_canonical_case_patches,
+)
+
+
+
 
 _ROUTER_MAX_CONCURRENCY = max(1, min(int(os.getenv("ROUTER_MAX_CONCURRENCY", "1") or 1), 4))
 _ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
@@ -271,13 +278,8 @@ def _grounded_use_case_host(db, envelope: TurnEnvelope,
     return None
 
 
-from src.app.services.recommendation_core.turn_outcome import TurnDecision
 
 
-from src.app.services.recommendation_core.case_patch_grounding import (
-    CasePatchEvaluation, _evaluate_bounded_case_patches,
-    _bounded_case_patches, _complete_canonical_case_patches,
-)
 
 
 def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -616,6 +618,19 @@ def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
         return False
 
 
+def _fallback_budget(envelope, *, inherit_scope=False):
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+    scope = classify_budget_scope(envelope.query)
+    if scope == 'unknown' and inherit_scope:
+        accepted = str(((envelope.session or {}).get('accepted_constraints') or {}).get('budget_scope') or '').strip().lower()
+        if accepted in {'total', 'per_unit'}:
+            scope = accepted
+    parsed = parse_budget(envelope.query) if scope == 'total' else None
+    total = int(parsed.budget_max) * 100 if parsed is not None and parsed.budget_max is not None else None
+    return scope, total
+
+
+
 def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str) -> TurnDecision:
     """Recover only platform-verifiable facts when model routing is unavailable.
 
@@ -634,7 +649,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         )
 
     from src.app.services.bulk_intent import extract_quantity_span
-    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+    from src.app.services.budget_grammar import classify_budget_scope
 
     unit_nouns = {
         segment.strip().lower()
@@ -775,12 +790,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             requirements={},
             persisted_context=pending_semantic,
         )
-        budget_scope = classify_budget_scope(envelope.query)
-        total_budget_cents = None
-        if budget_scope == "total":
-            parsed_budget = parse_budget(envelope.query)
-            if parsed_budget is not None and parsed_budget.budget_max is not None:
-                total_budget_cents = int(parsed_budget.budget_max) * 100
+        budget_scope, total_budget_cents = _fallback_budget(envelope)
         return _decision(
             lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
             source=f"fallback:{reason}",
@@ -801,24 +811,12 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         if node.handle in set(use_cases_registry.host_nodes_for([use_case]))
     )
 
-    budget_scope = classify_budget_scope(envelope.query)
-    if budget_scope == "unknown" and subject_action == "continue":
-        accepted_scope = str(
-            (session.get("accepted_constraints") or {}).get("budget_scope") or ""
-        ).strip().lower()
-        if accepted_scope in {"total", "per_unit"}:
-            budget_scope = accepted_scope
-    total_budget_cents = None
-    if budget_scope == "total":
-        parsed_budget = parse_budget(envelope.query)
-        if parsed_budget is not None and parsed_budget.budget_max is not None:
-            total_budget_cents = int(parsed_budget.budget_max) * 100
+    budget_scope, total_budget_cents = _fallback_budget(envelope, inherit_scope=subject_action == 'continue')
 
     semantic = {} if pending_budget_answer else _semantic_proposal_or_relation_fallback(
         {}, query=envelope.query, requirements={}, persisted_context=pending_semantic,
     )
     from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
-
     if not explicit_requirements:
         semantic = unresolved_purpose_proposal(
             query=envelope.query,
@@ -1988,34 +1986,8 @@ def _route_turn_raw(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = Non
     # Named workloads are model-proposed but literal-clamped: every significant token must
     # occur in the current message. This prevents a model or poisoned context from introducing
     # a different title and driving an external lookup or capability floor.
-    workload_entities: List[Tuple[str, str]] = []
-    query_entity_text = _re.sub(r"[^a-z0-9]+", " ", envelope.query.lower()).strip()
-    query_entity_tokens = set(query_entity_text.split())
-    raw_entities = data.get("workload_entities")
-    if not isinstance(raw_entities, (list, tuple)):
-        raw_entities = []
-    for item in list(raw_entities)[:3]:
-        if not isinstance(item, dict):
-            continue
-        kind = str(item.get("kind") or "").strip().lower()
-        name = _re.sub(r"[\x00-\x1f\x7f]+", " ", str(item.get("name") or ""))
-        name = _re.sub(r"\s+", " ", name).strip()[:80]
-        normalized = _re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-        tokens = set(normalized.split())
-        if (kind not in ("game", "software") or len(normalized) < 2
-                or not tokens or not tokens <= query_entity_tokens):
-            continue
-        entity = (kind, name)
-        if entity not in workload_entities:
-            workload_entities.append(entity)
-    # A successful model turn is not supplemented by the legacy title regex.
-    # Missing semantic coverage is repaired through the bounded model call
-    # above. Keep only literal edition words that the buyer supplied for an
-    # already-proposed entity. The regex recovery remains available in the
-    # explicit model-unavailable fallback path.
-    workload_entities = restore_literal_edition_qualifiers(
-        workload_entities, query_entity_tokens,
-    )
+    # Preserve the existing literal entity clamp through one shared helper.
+    workload_entities = clamp_literal_workload_entities(envelope.query, data.get("workload_entities"))
     if not (pending and str(data.get("clarification_relation") or "").strip().lower() == "answer"):
         frame_identity = str(
             (data.get("entity_frame") or {}).get("identity")

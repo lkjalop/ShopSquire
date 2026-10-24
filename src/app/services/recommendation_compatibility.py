@@ -389,6 +389,34 @@ def _append_generic_procurement_question(
     return ordered
 
 
+def _explicit_compatibility_budget(params):
+    compatibility_constraints: Dict[str, Any] = {}
+    if params.get("budget_min") is not None:
+        compatibility_constraints["budget_min"] = params.get("budget_min")
+    if params.get("budget_max") is not None:
+        compatibility_constraints["budget_max"] = params.get("budget_max")
+    if not compatibility_constraints:
+        from src.app.services.budget_grammar import parse_budget
+
+        parsed_budget = parse_budget(str(params.get("query") or ""))
+        if parsed_budget is not None and parsed_budget.budget_min is not None:
+            compatibility_constraints["budget_min"] = parsed_budget.budget_min
+        if parsed_budget is not None and parsed_budget.budget_max is not None:
+            compatibility_constraints["budget_max"] = parsed_budget.budget_max
+    return compatibility_constraints
+
+
+def _compatibility_timeout_seconds():
+    try:
+        compatibility_timeout_s = max(
+            0.5,
+            min(float(os.getenv("RECOMMEND_COMPAT_TIMEOUT_SEC", "8") or 8), 15.0),
+        )
+    except (TypeError, ValueError):
+        compatibility_timeout_s = 8.0
+    return compatibility_timeout_s
+
+
 def serve_v2_compatibility(
     *,
     request: Any,
@@ -408,13 +436,7 @@ def serve_v2_compatibility(
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
     from src.app.services.recommendation_core.cancellation import RecommendationCancellation
 
-    try:
-        compatibility_timeout_s = max(
-            0.5,
-            min(float(os.getenv("RECOMMEND_COMPAT_TIMEOUT_SEC", "8") or 8), 15.0),
-        )
-    except (TypeError, ValueError):
-        compatibility_timeout_s = 8.0
+    compatibility_timeout_s = _compatibility_timeout_seconds()
     compatibility_cancellation = RecommendationCancellation.with_timeout(
         compatibility_timeout_s
     )
@@ -441,19 +463,7 @@ def serve_v2_compatibility(
         str(params.get("query") or ""),
         has_image=bool(params.get("image_labels") or params.get("image_hash")),
     )
-    compatibility_constraints: Dict[str, Any] = {}
-    if params.get("budget_min") is not None:
-        compatibility_constraints["budget_min"] = params.get("budget_min")
-    if params.get("budget_max") is not None:
-        compatibility_constraints["budget_max"] = params.get("budget_max")
-    if not compatibility_constraints:
-        from src.app.services.budget_grammar import parse_budget
-
-        parsed_budget = parse_budget(str(params.get("query") or ""))
-        if parsed_budget is not None and parsed_budget.budget_min is not None:
-            compatibility_constraints["budget_min"] = parsed_budget.budget_min
-        if parsed_budget is not None and parsed_budget.budget_max is not None:
-            compatibility_constraints["budget_max"] = parsed_budget.budget_max
+    compatibility_constraints = _explicit_compatibility_budget(params)
     if (
         classification.get("turn_intent") == "SUPPORT_CLAIM"
         and classification.get("category")

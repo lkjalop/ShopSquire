@@ -4,17 +4,13 @@ import asyncio
 import json
 import logging
 import re
-import time
 import uuid
-import base64
 import hashlib
 import os
 from typing import Any, Dict, List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
-
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.buyer_principal import require_buyer_or_operator
 from src.app.deps import get_redis
@@ -28,14 +24,63 @@ from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.services.answer_quality import apply_answer_quality
 from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.services.price_conversion import cents_to_dollars, dollars_to_cents
-from src.app.security.dread_scorer import compute_dread
-from src.app.security.framework_correlation import correlate_security_analysis
-from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 from src.app.services.additive_workload_projection import catalog_authority_for_turn, hold_prior_slate
 from src.app.services.infrastructure_alternative_projection import project_for_unresolved_form_factor
 from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set, buyer_category_changed
 from src.app.services.turn_transition import effective_turn_facts
+from src.app.services.chat_transport import (
+    _chat_in_progress,
+    _chat_idempotency_cache_key,
+    _chat_request_timeout_seconds,
+    _automatic_research_timeout_seconds,
+)
+from src.app.services.chat_turn_projection import (
+    _extract_confirmed_slots,
+)
+from src.app.services.chat_transport import (
+    _chat_replay_mark_once,
+)
+from src.app.services.chat_persistence import (
+    _store_chat_message,
+)
+from src.app.services.chat_turn_projection import (
+    _extract_budget_bounds,
+    _is_budget_query_text,
+    _strip_deficit_observation,
+    _is_deficit_reorder_query,
+    _classify_turn_intent,
+    _is_budget_question,
+)
+from src.app.services.chat_cart_projection import (
+    _cart_mutation_short_circuit,
+)
+from src.app.services.chat_turn_projection import (
+    _budget_range_from_slots,
+)
+from src.app.services.chat_turn_projection import (
+    _build_anchor_sections, _build_right_panel_contract,
+    _compute_widened_budget, _derive_image_security_posture,
+    _extract_brand_mentions, _include_adaptive_metadata, _merge_material_nqe_answer as _merge_material_nqe_answer,
+)
+from src.app.services.chat_image_security import (
+    _summarize_recognized_product,
+    _assess_image_compromise_breach,
+    _derive_qr_details,
+    _image_trust_channels,
+    _frameworks_for_image_security,
+)
+from src.app.services.chat_persistence import (
+    _stash_image_blob_for_recommend,
+    _persist_chat_structured_state,
+)
+from src.app.services.chat_transport import (
+    _idem_single_flight,
+)
+
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +107,6 @@ def _request_tenant_id(request: Request | None) -> str:
     return str(current_tenant_id() or "default")
 
 
-from src.app.services.chat_transport import (
-    _chat_in_progress,
-    _chat_operation_failed,
-    _chat_idempotency_cache_key,
-    _chat_request_timeout_seconds,
-    _automatic_research_timeout_seconds,
-)
 
 
 def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
@@ -99,57 +137,19 @@ def _normalize_recent_messages(raw: Any, *, limit: int = 16) -> List[Dict[str, s
     return out[-max(1, int(limit or 1)) :]
 
 
-from src.app.services.chat_turn_projection import (
-    _extract_confirmed_slots,
-)
 
 
-from src.app.services.chat_transport import (
-    _chat_replay_mark_once,
-)
 
 
-from src.app.services.chat_persistence import (
-    _store_chat_message,
-)
 
 
-from src.app.services.chat_turn_projection import (
-    _extract_budget_bounds,
-    _is_budget_query_text,
-    _strip_deficit_observation,
-    _is_deficit_reorder_query,
-    _classify_turn_intent,
-    _is_budget_question,
-)
 
 
-from src.app.services.chat_cart_projection import (
-    _cart_mutation_short_circuit,
-)
 
 
-from src.app.services.chat_turn_projection import (
-    _budget_range_from_slots,
-)
 
 
-from src.app.services.chat_turn_projection import (
-    _brand_hint_from_text, _build_anchor_sections, _build_right_panel_contract,
-    _compute_widened_budget, _derive_image_security_posture,
-    _extract_brand_mentions, _extract_image_cv_signals,
-    _extract_image_product_identity, _image_anchor_hint,
-    _include_adaptive_metadata, _merge_material_nqe_answer,
-)
 
-from src.app.services.chat_image_security import (
-    _derive_attack_intent_and_repercussions,
-    _summarize_recognized_product,
-    _assess_image_compromise_breach,
-    _derive_qr_details,
-    _image_trust_channels,
-    _frameworks_for_image_security,
-)
 
 
 def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
@@ -158,13 +158,6 @@ def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
     return decode_image_b64(image_obj)
 
 
-from src.app.services.chat_persistence import (
-    _stash_image_blob_for_recommend,
-    _persist_chat_structured_state,
-)
-from src.app.services.chat_transport import (
-    _idem_single_flight,
-)
 
 
 async def _call_recommend_in_process(
@@ -2927,78 +2920,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     ambiguity_exploration: Dict[str, Any] | None = None
     ambiguous_product_shelves: Dict[str, Any] | None = None
     if preflight_workload_evidence:
-        # Canonical local identity data is deterministic and must not disappear
-        # when the live router varies its output. Merge metadata into the
-        # recommendation-owned authorization envelope without changing that
-        # envelope's product or commerce decision.
-        projected_authorization = dict(
-            data.get("workload_authorization")
-            if isinstance(data.get("workload_authorization"), dict) else {}
-        )
-        projected_items = [
-            dict(item) for item in list(projected_authorization.get("evidence") or [])
-            if isinstance(item, dict)
-        ]
-        for canonical_item in preflight_workload_evidence:
-            canonical_item = dict(canonical_item)
-            if (
-                str(canonical_item.get("status") or "").strip().lower() == "resolved"
-                and not list(canonical_item.get("compiled_requirements") or [])
-            ):
-                try:
-                    from src.app.services.recommendation_core.workload_grounding import (
-                        compile_workload_evidence_requirements,
-                    )
-
-                    _preflight_compilation = compile_workload_evidence_requirements(
-                        canonical_item,
-                        kind=str(canonical_item.get("kind") or "workload"),
-                        product_type=str(
-                            (data.get("decision") or {}).get("requested_product_node")
-                            or (data.get("decision") or {}).get("node_handle") or ""
-                        ),
-                        name=str(
-                            canonical_item.get("canonical_title")
-                            or canonical_item.get("resolved_name")
-                            or canonical_item.get("requested_name")
-                            or "workload"
-                        ),
-                    )
-                    canonical_item["compiled_requirements"] = [
-                        item.model_dump() for item in _preflight_compilation.requirements
-                    ]
-                    canonical_item["claim_rejections"] = list(
-                        _preflight_compilation.rejections
-                    )
-                except Exception as exc:
-                    logger.debug(
-                        "canonical workload requirement projection skipped: %s", exc,
-                    )
-            canonical_key = str(
-                canonical_item.get("app_id")
-                or canonical_item.get("canonical_title")
-                or canonical_item.get("resolved_name")
-                or ""
-            ).strip().lower()
-            match_index = next((
-                index for index, item in enumerate(projected_items)
-                if canonical_key and canonical_key in {
-                    str(item.get("app_id") or "").strip().lower(),
-                    str(item.get("canonical_title") or "").strip().lower(),
-                    str(item.get("resolved_name") or "").strip().lower(),
-                }
-            ), None)
-            if match_index is None:
-                projected_items.append(dict(canonical_item))
-            else:
-                from src.app.services.structured_requirement_claims import merge_preflight_identity
-                projected_items[match_index] = merge_preflight_identity(
-                    projected_items[match_index], canonical_item,
-                )
-        projected_authorization["evidence"] = projected_items
-        projected_authorization.setdefault("status", "evidence_resolved_catalog_pending")
-        projected_authorization.setdefault("reason", "canonical_identity_preflight")
-        data["workload_authorization"] = projected_authorization
+        from src.app.services.structured_requirement_claims import merge_preflight_authorization
+        data['workload_authorization'] = merge_preflight_authorization(data, preflight_workload_evidence)
     _workload_authorization = (
         data.get("workload_authorization")
         if isinstance(data.get("workload_authorization"), dict) else {}
@@ -3574,7 +3497,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     + " No cart or supplier action was authorized."
                 )
                 products = []
-        except Exception as exc:
+        except Exception:
             logger.warning("atomic buyer source intake failed closed", exc_info=True)
             source_intake_result = {
                 "schema_version": "buyer-evidence-source-resolution-v1",
@@ -3837,7 +3760,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             budget_cents=(int(float(response_confirmed_slots['budget_max']) * 100)
                           if response_confirmed_slots.get('budget_max') is not None else None),
             requested_quantity=(data.get('requested_quantity')
-                                if type(data.get('requested_quantity')) is int
+                                if isinstance(data.get('requested_quantity'), int)
+                                and not isinstance(data.get('requested_quantity'), bool)
                                 and data['requested_quantity'] > 0 else None),
         )
         ambiguous_product_shelves = _resolved_projection.model_dump(mode='json')

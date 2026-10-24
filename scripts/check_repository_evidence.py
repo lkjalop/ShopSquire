@@ -40,7 +40,8 @@ def check_links(root: Path = ROOT) -> tuple[int, list[str]]:
             if parts.scheme or parts.netloc:
                 continue
             target = (source.parent / unquote(parts.path)).resolve() if parts.path else source
-            if not target.is_relative_to(root.resolve()) or '.artifacts' in target.parts:
+            if (not target.is_relative_to(root.resolve())
+                    or '.artifacts' in target.relative_to(root.resolve()).parts):
                 failures.append(f'{name}: non-public target {href}')
                 continue
             if not target.is_file():

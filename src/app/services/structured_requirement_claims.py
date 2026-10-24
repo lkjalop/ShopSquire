@@ -5,6 +5,9 @@ from typing import Any, Mapping
 from copy import deepcopy
 import hashlib
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def merge_preflight_identity(current: Mapping[str, Any], preflight: Mapping[str, Any]) -> dict[str, Any]:
@@ -82,3 +85,77 @@ def project_structured_requirement_claims(
 
 
 __all__ = ["project_structured_requirement_claims"]
+
+
+def merge_preflight_authorization(data, preflight_workload_evidence):
+    # Canonical local identity data is deterministic and must not disappear
+    # when the live router varies its output. Merge metadata into the
+    # recommendation-owned authorization envelope without changing that
+    # envelope's product or commerce decision.
+    projected_authorization = dict(
+        data.get("workload_authorization")
+        if isinstance(data.get("workload_authorization"), dict) else {}
+    )
+    projected_items = [
+        dict(item) for item in list(projected_authorization.get("evidence") or [])
+        if isinstance(item, dict)
+    ]
+    for canonical_item in preflight_workload_evidence:
+        canonical_item = dict(canonical_item)
+        if (
+            str(canonical_item.get("status") or "").strip().lower() == "resolved"
+            and not list(canonical_item.get("compiled_requirements") or [])
+        ):
+            try:
+                from src.app.services.recommendation_core.workload_grounding import (
+                    compile_workload_evidence_requirements,
+                )
+
+                _preflight_compilation = compile_workload_evidence_requirements(
+                    canonical_item,
+                    kind=str(canonical_item.get("kind") or "workload"),
+                    product_type=str(
+                        (data.get("decision") or {}).get("requested_product_node")
+                        or (data.get("decision") or {}).get("node_handle") or ""
+                    ),
+                    name=str(
+                        canonical_item.get("canonical_title")
+                        or canonical_item.get("resolved_name")
+                        or canonical_item.get("requested_name")
+                        or "workload"
+                    ),
+                )
+                canonical_item["compiled_requirements"] = [
+                    item.model_dump() for item in _preflight_compilation.requirements
+                ]
+                canonical_item["claim_rejections"] = list(
+                    _preflight_compilation.rejections
+                )
+            except Exception as exc:
+                logger.debug(
+                    "canonical workload requirement projection skipped: %s", exc,
+                )
+        canonical_key = str(
+            canonical_item.get("app_id")
+            or canonical_item.get("canonical_title")
+            or canonical_item.get("resolved_name")
+            or ""
+        ).strip().lower()
+        match_index = next((
+            index for index, item in enumerate(projected_items)
+            if canonical_key and canonical_key in {
+                str(item.get("app_id") or "").strip().lower(),
+                str(item.get("canonical_title") or "").strip().lower(),
+                str(item.get("resolved_name") or "").strip().lower(),
+            }
+        ), None)
+        if match_index is None:
+            projected_items.append(dict(canonical_item))
+        else:
+            projected_items[match_index] = merge_preflight_identity(
+                projected_items[match_index], canonical_item,
+            )
+    projected_authorization["evidence"] = projected_items
+    projected_authorization.setdefault("status", "evidence_resolved_catalog_pending")
+    projected_authorization.setdefault("reason", "canonical_identity_preflight")
+    return projected_authorization

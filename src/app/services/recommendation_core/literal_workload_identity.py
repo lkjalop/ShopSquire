@@ -238,3 +238,23 @@ def recover_literal_workload_identity(
         ):
             entities.append(candidate)
     return restore_literal_edition_qualifiers(entities, query_tokens)
+
+
+def clamp_literal_workload_entities(query, proposed):
+    """A model may name only entities literally present in this buyer turn."""
+    query_tokens = set(re.sub(r'[^a-z0-9]+', ' ', query.lower()).strip().split())
+    entities = []
+    for item in list(proposed if isinstance(proposed, (list, tuple)) else [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get('kind') or '').strip().lower()
+        name = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(item.get('name') or ''))
+        name = re.sub(r'\s+', ' ', name).strip()[:80]
+        normalized = re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip()
+        tokens = set(normalized.split())
+        if kind not in ('game', 'software') or len(normalized) < 2 or not tokens or not tokens <= query_tokens:
+            continue
+        entity = (kind, name)
+        if entity not in entities:
+            entities.append(entity)
+    return restore_literal_edition_qualifiers(entities, query_tokens)

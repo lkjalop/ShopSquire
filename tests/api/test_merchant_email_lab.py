@@ -4,7 +4,7 @@ from src.app.main import create_app
 
 
 def test_merchant_email_lab_sets_inline_csp_and_csrf_cookie():
-    client = TestClient(create_app())
+    client = TestClient(create_app(), client=("127.0.0.1", 50000), headers={"x-api-key": "local-owner-key"})
 
     resp = client.get("/merchant/email-lab", headers={"host": "127.0.0.1:8080"})
 
