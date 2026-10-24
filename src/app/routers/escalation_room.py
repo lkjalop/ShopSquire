@@ -860,7 +860,6 @@ def collect_security_matrix(
     severity, risk_raw, risk_adj, details = compute_risk(payload)
 
     # Store as a security_scan trace event
-    scan_event_id = str(uuid.uuid4())
     from datetime import datetime as _dt
 
     now_iso = _dt.utcnow().isoformat()
@@ -953,7 +952,7 @@ async def ws_room(incident_id: str, websocket: WebSocket):
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-20:]
-                await websocket.send_text(json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False))
+                await websocket.send_text(json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False))
         except Exception:
             pass
         while True:
@@ -989,7 +988,7 @@ async def sse_room(
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-50:]
-                yield "data: " + json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False) + "\n\n"
         except Exception:
             pass
         try:
@@ -2059,7 +2058,7 @@ async def public_sse_room(
             p = _log_path(incident_id)
             if p.exists():
                 lines = p.read_text(encoding="utf-8").splitlines()[-50:]
-                yield "data: " + json.dumps([json.loads(l) for l in lines if l.strip()], ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps([json.loads(log_line) for log_line in lines if log_line.strip()], ensure_ascii=False) + "\n\n"
         except Exception:
             pass
         try:
