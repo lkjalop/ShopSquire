@@ -16,6 +16,65 @@ from src.app.services.fulfillment import outbound_queue as queue, person_approva
 outbound_engine = shared_fixtures.outbound_engine
 
 
+@pytest.mark.parametrize("stale_coverage", [False, True])
+def test_separate_chat_transaction_reads_the_saved_draft_version(outbound_engine, stale_coverage):
+    from datetime import datetime, timedelta, timezone
+    from src.app.deps import hash_uid
+    from src.app.services import supplier_enquiry_journey as journey
+    from src.app.services.case_task_delivery import deliver_case_task
+    from tests.services.test_supplier_draft_continuity import state
+
+    row, _ = prepare(outbound_engine)
+    with Session(outbound_engine) as db:
+        state(db)
+        db.execute(text("ALTER TABLE shopping_cases ADD COLUMN uid TEXT"))
+        db.execute(text("UPDATE shopping_cases SET uid='owned-chat-buyer'"))
+        db.execute(
+            text("UPDATE conversation_case_state SET subject_ref=:subject"),
+            {"subject": hash_uid("owned-chat-buyer")},
+        )
+        expiry = datetime.now(timezone.utc) + timedelta(hours=2)
+        db.execute(
+            text("UPDATE inventory_reservation SET expires_at=:expiry"),
+            {"expiry": expiry.isoformat()},
+        )
+        db.commit()
+        changed = journey.revise_draft(
+            db,
+            tenant_id="shop",
+            enquiry_id=row["id"],
+            operator_principal="alice-key-1",
+            expected_version=1,
+            include_budget=False,
+            now=NOW,
+        )
+        db.commit()
+        if stale_coverage:
+            db.execute(
+                text("UPDATE inventory_reservation SET expires_at='2000-01-01T00:00:00+00:00'")
+            )
+            db.commit()
+        out = {"case_id": "case", "operation_id": "owned-pg-chat", "read_only_case_task": True}
+        deliver_case_task(
+            out=out,
+            request_db=db,
+            tenant_id="shop",
+            uid="owned-chat-buyer",
+            session_epoch="epoch",
+            query="Show the supplier email draft for my current request.",
+        )
+        draft = out["email_draft"]
+        if stale_coverage:
+            assert draft["status"] == "draft_stale"
+            assert draft.get("draft_artifact") is None
+        else:
+            assert draft["draft_version"] == 2
+            assert draft["draft_artifact"] == changed["draft_artifact"]
+            assert draft["body"] == changed["message"]["body"]
+        assert draft["dispatch_authorized"] is False
+        assert db.execute(text("SELECT COUNT(*) FROM outbound_message")).scalar_one() == 0
+
+
 def prepare(engine, *, uncertain=False):
     with Session(engine) as db:
         person_approval.ensure_tables(db)

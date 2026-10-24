@@ -8,6 +8,7 @@ import hashlib
 import json
 
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 
 DDL = """CREATE TABLE IF NOT EXISTS supplier_enquiry_draft (
@@ -100,12 +101,102 @@ def load(db, row):
     if not stored:
         return None
     artifact = json.loads(stored[2])
+    if not isinstance(artifact, dict):
+        raise ValueError("enquiry_draft_integrity_failed")
     if seal(artifact)["content_hash"] != stored[1] or artifact.get("content_hash") != stored[1]:
         raise ValueError("enquiry_draft_integrity_failed")
     for key in ("tenant_id", "case_id", "case_revision", "requested_quantity", "shortfall", "sku"):
         if artifact.get(key) != row[key]:
             raise ValueError("enquiry_draft_binding_failed")
     return dict(draft_version=int(stored[0]), draft_artifact=artifact)
+
+
+def preview_for_case(db, *, tenant_id, case_id, revision, state, now=None):
+    """Read the saved version for chat; no edit, approval, enqueue or composition.
+
+    Before an enquiry exists the caller may compose a provisional preview.
+    A known saved enquiry cannot silently fall back to a fresh composition.
+    """
+    result = dict(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=revision,
+        requested_quantity=state.get("requested_quantity"),
+        shortfall=None,
+        recipient=None,
+        subject="Stock shortfall enquiry",
+        body="",
+        commerce_authority="none",
+        dispatch_authorized=False,
+    )
+    try:
+        if not inspect(db.connection()).has_table("supplier_enquiry_request"):
+            return None
+        rows = (
+            db.execute(
+                text(
+                    "SELECT * FROM supplier_enquiry_request WHERE tenant_id=:tenant "
+                    "AND case_id=:case AND case_revision=:revision ORDER BY id LIMIT 2"
+                ),
+                dict(tenant=tenant_id, case=case_id, revision=revision),
+            )
+            .mappings()
+            .all()
+        )
+        if not rows:
+            return None
+        if len(rows) > 1:
+            return dict(
+                result,
+                status="draft_selection_required",
+                missing_inputs=["supplier_enquiry_selection"],
+                body="Select the supplier enquiry to review; this case has more than one saved draft.",
+            )
+        row = dict(rows[0])
+        if row["requested_quantity"] != state.get("requested_quantity"):
+            raise ValueError("enquiry_case_revision_stale")
+        stored = load(db, row)
+        if not stored:
+            raise ValueError("enquiry_versioned_draft_required")
+        from src.app.services.supplier_enquiry_journey import _current
+
+        _current(db, row, now=now)
+        artifact = stored["draft_artifact"]
+        return dict(
+            result,
+            **stored,
+            enquiry_id=row["id"],
+            subject=artifact["subject"],
+            body=artifact["body"],
+            shortfall=artifact["shortfall"],
+            sku=artifact["sku"],
+            recipient=row["recipient"],
+            status="saved_draft",
+            missing_inputs=[],
+        )
+    except ValueError as exc:
+        stale = str(exc) in {
+            "enquiry_case_revision_stale",
+            "enquiry_selection_stale",
+            "enquiry_shortfall_stale",
+        }
+        return dict(
+            result,
+            status="draft_stale" if stale else "draft_unavailable",
+            missing_inputs=["current_accepted_selection" if stale else "saved_draft_review"],
+            body=(
+                "The saved draft needs a fresh review against the current selection and stock coverage."
+                if stale
+                else "The saved supplier draft could not be verified. Ask an operator to review it."
+            ),
+        )
+    except SQLAlchemyError:
+        return dict(
+            result,
+            status="draft_unavailable",
+            missing_inputs=["saved_draft_review"],
+            body="The saved supplier draft is unavailable. Ask an operator to review it.",
+        )
 
 
 def revise(db, row, *, expected_version, include_budget, operator_principal, now):

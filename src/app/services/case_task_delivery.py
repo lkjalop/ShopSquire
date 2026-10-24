@@ -151,18 +151,35 @@ def deliver_case_task(*, out, request_db, tenant_id, uid, session_epoch, query):
             raise ValueError("case_task_state_not_current")
         if intent == "shortfall_email":
             from src.app.services.shortfall_enquiry_preview import shortfall_draft
+            from src.app.services.supplier_enquiry_drafts import preview_for_case
 
-            draft = shortfall_draft(
+            draft = preview_for_case(
                 db, tenant_id=tenant_id, case_id=case_id, revision=revision, state=state
             )
+            if draft is None:
+                draft = shortfall_draft(
+                    db, tenant_id=tenant_id, case_id=case_id, revision=revision, state=state
+                )
             out["email_draft"] = draft
             out["supplier_email_draft"] = draft
-            out["assistant_message"] = (
-                "Draft — choose a supplier contact before sending.\nSubject: "
-                + draft["subject"]
-                + "\n\n"
-                + draft["body"]
-            )
+            if draft["status"] == "saved_draft":
+                out["assistant_message"] = (
+                    f"Saved supplier draft, version {draft['draft_version']}.\n"
+                    f"To: {draft['recipient']}\nSubject: {draft['subject']}\n\n{draft['body']}"
+                )
+            elif draft["status"] in {
+                "draft_selection_required",
+                "draft_stale",
+                "draft_unavailable",
+            }:
+                out["assistant_message"] = draft["body"]
+            else:
+                out["assistant_message"] = (
+                    "Draft — choose a supplier contact before sending.\nSubject: "
+                    + draft["subject"]
+                    + "\n\n"
+                    + draft["body"]
+                )
         elif intent == "market_intelligence":
             from src.app.services.market_intelligence_agent import gather_market_context
 
