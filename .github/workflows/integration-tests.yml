@@ -34,6 +34,7 @@ jobs:
       APP_ENV: test
       TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/shopsquire_integration
       ROADMAP_OWNED_REDIS_URL: redis://127.0.0.1:6379/1
+      TEST_OWNED_PRIVACY_REDIS_URL: redis://127.0.0.1:6379/2
       REDIS_TEST_URL: redis://127.0.0.1:6379/15
       USE_MOCK_LLM: "1"
       USE_OLLAMA_INTENT: "0"
