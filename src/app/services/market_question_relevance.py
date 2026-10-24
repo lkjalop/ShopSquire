@@ -5,6 +5,7 @@ text and graph labels are not evidence that a different quantity was measured.
 Temporal/provenance admission remains a separate mandatory check.
 """
 
+import math
 import re
 
 
@@ -29,7 +30,8 @@ _FINDING_FACETS = {
     "delivery_delay": {"lead_time"},
     "demand_shift": {"demand"},
     "segment_shift": {"demand"},
-    "inventory_demand_mismatch": {"demand", "stock"},
+    # Unmet catalogue searches are a demand proxy, not a physical stock count.
+    "inventory_demand_mismatch": {"demand"},
     "inventory_snapshot": {"stock"},
     "supplier_stock": {"stock"},
     "stock_availability": {"stock"},
@@ -63,6 +65,52 @@ def finding_facets(finding):
     return _FINDING_FACETS.get(str(finding.get("finding_type") or ""), set())
 
 
-def answer_coverage(findings, requested):
+def finite_measurement(value):
+    """Keep numeric observations; do not coerce booleans or prose into measurements."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _time_measurement(finding, kinds, *, signed=False):
+    low = finite_measurement(finding.get("magnitude_low"))
+    high = finite_measurement(finding.get("magnitude_high"))
+    return bool(
+        finding.get("finding_type") in kinds
+        and finding.get("measurement_definition")
+        and str(finding.get("uom") or "").strip().lower()
+        in {"day", "days", "calendar days", "business days", "hour", "hours", "week", "weeks"}
+        and low is not None and high is not None and low <= high
+        and (signed or low >= 0)
+    )
+
+
+def answer_coverage(findings, requested, *, query=None):
     supported = set().union(*(finding_facets(item) for item in findings))
+    if "lead_time" in requested:
+        text = str(query or "")
+        change = bool(re.search(
+            r"\b(?:changed|changes|increas(?:ed|ing)|decreas(?:ed|ing)|longer|shorter)\b", text, re.I,
+        ))
+        delay = bool(re.search(r"\b(?:delays?|late|lateness)\b", text, re.I))
+        level = not (change or delay) or bool(re.search(
+            r"\b(?:eta|when|how\s+(?:long|soon)|delivery\s+(?:date|window))\b", text, re.I,
+        ))
+        requirements = []
+        if level:
+            requirements.append(({"supplier_lead_time", "lead_time"}, False))
+        if change:
+            requirements.append(({"lead_time_change"}, True))
+        if delay:
+            requirements.append(({"delivery_delay"}, False))
+        # A level, a change from a baseline and a delay against a promise are
+        # different measurements. Neither topic labels nor summary prose can
+        # substitute for any requested measurement.
+        if not all(any(_time_measurement(item, kinds, signed=signed) for item in findings)
+                   for kinds, signed in requirements):
+            supported.discard("lead_time")
     return sorted(set(requested) & supported), sorted(set(requested) - supported)

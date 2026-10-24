@@ -80,6 +80,8 @@ def current_case_lead_times(db, *, tenant_id, case_id, case_revision, skus, limi
                 measurement_definition="Reviewed supplier-quoted lead time in calendar days",
                 measurement_scope="This accepted case only; not delivery performance or physical stock",
                 uom="days",
+                magnitude_low=terms["lead_days"],
+                magnitude_high=terms["lead_days"],
                 coverage=dict(
                     case_id=case_id,
                     case_revision=case_revision,

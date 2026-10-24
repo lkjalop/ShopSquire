@@ -33,6 +33,10 @@ def evidence(kind, sku="SKU-1", **changes):
         effective_from=now.isoformat(),
         effective_to=(now + timedelta(hours=1)).isoformat(),
     )
+    if kind in {"supplier_lead_time", "lead_time"}:
+        # The positive fixture measures an actual duration, not just its topic.
+        facts.update(magnitude_low=5, magnitude_high=5, uom="days",
+                     measurement_definition="Supplier-quoted elapsed calendar days")
     facts.update(changes)
     return MarketFinding(kind, sku, "info", 0.9, f"Observed {kind}", facts, "1h")
 
@@ -135,7 +139,11 @@ def test_delivery_paraphrases_require_delivery_evidence(db, query):
     ],
 )
 def test_delivery_paraphrases_keep_the_relevant_positive(db, query):
-    seed(db, evidence("supplier_lead_time"))
+    if "delays" in query:
+        seed(db, evidence("delivery_delay", magnitude_low=2, magnitude_high=2, uom="days",
+                          measurement_definition="Elapsed days beyond the promised delivery date"))
+    else:
+        seed(db, evidence("supplier_lead_time"))
     answer = context(db, query)
     assert answer["delivery_status"] == "available"
     assert answer["answered_market_facets"] == ["lead_time"]

@@ -57,6 +57,8 @@ def _normalized_direction(value: Any) -> str:
 
 
 def _finding_dict(f: Any, *, tenant_id: str) -> Dict[str, Any]:
+    from src.app.services.market_question_relevance import finite_measurement
+
     evidence = getattr(f, "evidence", None) or {}
     entity_ref = str(getattr(f, "entity_ref", None) or "")
     provenance = [str(item) for item in (evidence.get("provenance_chain") or []) if str(item)]
@@ -109,8 +111,8 @@ def _finding_dict(f: Any, *, tenant_id: str) -> Dict[str, Any]:
         uom=evidence.get("uom"),
         release_version=evidence.get("release_version"),
         coverage=dict(evidence.get("coverage") or {}),
-        magnitude_low=evidence.get("magnitude_low"),
-        magnitude_high=evidence.get("magnitude_high"),
+        magnitude_low=finite_measurement(evidence.get("magnitude_low")),
+        magnitude_high=finite_measurement(evidence.get("magnitude_high")),
         propagation_lag_min_days=evidence.get("propagation_lag_min_days"),
         propagation_lag_max_days=evidence.get("propagation_lag_max_days"),
         dependency_path_ids=list(evidence.get("dependency_path_ids") or []),
@@ -393,7 +395,7 @@ def gather_market_context(
         out["market_evidence"] = _structured_evidence(accepted, out["hippograph_insights"])
         out["narration_note"] = format_evidence_for_narration(accepted)
         if out["needs_market_evidence"]:
-            answered, unanswered = answer_coverage(accepted, requested)
+            answered, unanswered = answer_coverage(accepted, requested, query=query)
             out.update(answered_market_facets=answered, unanswered_market_facets=unanswered)
             out["delivery_status"] = (
                 ("partial" if unanswered else "available") if accepted else "blocked"
