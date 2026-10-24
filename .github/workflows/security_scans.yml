@@ -199,7 +199,7 @@ jobs:
           echo "artifacts=${ARTIFACTS}" >> "$GITHUB_OUTPUT"
 
       - name: Generate SLSA provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/shopsquire-source.tar.gz
 
