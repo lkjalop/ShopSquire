@@ -86,7 +86,7 @@ jobs:
             tests/services/test_dependency_resilience_timeout.py
       - name: Upload diagnostics and duration evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: service-shard-${{ matrix.shard }}
           path: |

@@ -156,7 +156,7 @@ jobs:
           test "$failures" -eq 0
       - name: Upload general-suite diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: general-suite-diagnostics-${{ matrix.shard }}
           path: test-results/**

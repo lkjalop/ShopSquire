@@ -47,7 +47,7 @@ jobs:
             tests/services/test_local_model_roles.py tests/services/test_research_policy.py
       - name: Preserve focused results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: focused-core-evidence
           path: test-results/**
