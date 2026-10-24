@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
+from tests.utils import with_client_address
 
 
-def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
-    client = TestClient(create_app())
+def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    client = TestClient(with_client_address(create_app(), "127.0.0.1"), headers={"x-api-key": "local-owner-key"})
 
     response = client.get("/merchant/email-lab", headers={"host": "127.0.0.1:8080"})
 
@@ -100,7 +102,7 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
 
 
 def test_email_security_replay_event_endpoint_accepts_normalized_event():
-    client = TestClient(create_app())
+    client = TestClient(with_client_address(create_app(), "127.0.0.1"), headers={"x-api-key": "local-owner-key"})
 
     response = client.post(
         "/api/v1/admin/email_security/connectors/replay-event",

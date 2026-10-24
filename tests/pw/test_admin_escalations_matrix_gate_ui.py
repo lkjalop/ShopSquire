@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -73,12 +74,14 @@ def admin_frontend_server(test_server):
 
 def test_escalations_shows_matrix_gate_error_on_409(page, admin_frontend_server):
     incident_id = "inc-matrix-001"
-
+    # Closing incidents requires an operator. A merchant's denied admission
+    # cannot exercise the separate 409 matrix-completeness contract below.
+    owner_key = os.environ["OWNER_API_KEY"]
+    page.set_extra_http_headers({"x-api-key": owner_key})
     page.add_init_script(
-        """
-        localStorage.setItem('shopsquire_api_key', 'local-merchant-key');
-        localStorage.setItem('x-api-key', 'local-merchant-key');
-        """
+        "(() => { const key = " + json.dumps(owner_key) + ";"
+        "localStorage.setItem('shopsquire_api_key', key);"
+        "localStorage.setItem('x-api-key', key); })();"
     )
 
     page.route(

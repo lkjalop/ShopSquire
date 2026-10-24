@@ -9,7 +9,20 @@ on:
 jobs:
   ui-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
+      APP_ENV: test
+      MERCHANT_API_KEY: local-merchant-key
+      OWNER_API_KEY: local-owner-key
+      DEVELOPER_API_KEY: local-developer-key
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      CV_PROVIDER: basic
+      CV_OCR_PROVIDER: tesseract
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
       API_PORT: '8081'
       DISABLE_UI_ROUTES: '0'
       DATABASE_URL: ${{ github.workspace }}/tmp/e2e.sqlite
@@ -28,16 +41,18 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Prepare repo
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install poetry
-          poetry install --no-interaction --no-ansi --no-root
+      - name: Install the locked API and test profile
+        uses: ./.github/actions/install-backend
+        with:
+          profile: api-test
 
       - name: Install frontend deps & Playwright browsers
         run: |
+          npm ci --prefix frontend
           npm ci --prefix src/frontend/admin-react
-          npx playwright install --with-deps
+          python -m playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr libzbar0
 
       - name: Start backend (uvicorn)
         run: |
@@ -95,13 +110,13 @@ jobs:
               print('options error', exc)
           PY
 
-      - name: Run Playwright tests (if configured)
+      - name: Run the admin component suite with its configured runner
+        working-directory: src/frontend/admin-react
         run: |
-          pushd src/frontend/admin-react || true
-          npx playwright test --reporter=list
-          popd || true
+          npm test -- --run
+          npx tsc --noEmit
+          npm run build
 
       - name: Run pytest PW suite
         run: |
-          python -m pip install pytest
-          pytest tests/pw -q
+          python -m pytest tests/pw -q --timeout=120 --timeout-method=thread

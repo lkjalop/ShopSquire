@@ -1,5 +1,10 @@
 name: Install locked backend
-description: Install the complete default Poetry development profile in the selected Python.
+description: Install a committed backend profile in the selected Python.
+inputs:
+  profile:
+    description: default (complete Poetry development) or api-test (exported API and test profile)
+    default: default
+    required: false
 runs:
   using: composite
   steps:
@@ -10,8 +15,14 @@ runs:
         python -m pip install poetry==2.4.1
     - name: Install the committed lock including test tools
       shell: bash
+      env:
+        SHOPSQUIRE_BACKEND_PROFILE: ${{ inputs.profile }}
       run: |
         poetry config virtualenvs.create false
         poetry check --lock
-        poetry install --no-interaction --no-ansi --no-root
+        case "$SHOPSQUIRE_BACKEND_PROFILE" in
+          default) poetry install --no-interaction --no-ansi --no-root ;;
+          api-test) python -m pip install -r requirements/api-runtime.txt -r requirements/test-runtime.txt ;;
+          *) echo "Unsupported committed backend profile" >&2; exit 2 ;;
+        esac
         python -m pip check

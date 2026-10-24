@@ -618,6 +618,13 @@ def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
         return False
 
 
+def _prior_sold_node(db, envelope):
+    prior = get_node(str((envelope.session or {}).get('prior_node') or ''))
+    if prior is not None and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True:
+        return prior
+    return None
+
+
 def _fallback_budget(envelope, *, inherit_scope=False):
     from src.app.services.budget_grammar import classify_budget_scope, parse_budget
     scope = classify_budget_scope(envelope.query)
@@ -792,12 +799,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             node = prior
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
     if pending_budget_answer and node is None and not unresolved_case:
-        prior = get_node(str(session.get("prior_node") or ""))
-        if (
-            prior is not None
-            and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True
-        ):
-            node = prior
+        node = _prior_sold_node(db, envelope)
     if pending_budget_answer and node is not None:
         subject_action = "continue"
     if node is None and quantity is not None and active_procurement and not unresolved_case:
@@ -810,12 +812,8 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         # A number+unit bound to a registry attribute is a verifiable filter,
         # not a new product identity. During model outage it may refine the
         # already accepted sold subject, but cannot create one on cold start.
-        prior = get_node(str(session.get("prior_node") or ""))
-        if (
-            prior is not None
-            and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True
-        ):
-            node = prior
+        node = _prior_sold_node(db, envelope)
+        if node is not None:
             subject_action = "continue"
     if node is None:
         semantic = _semantic_proposal_or_relation_fallback(

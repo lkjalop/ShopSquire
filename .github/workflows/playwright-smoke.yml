@@ -8,6 +8,17 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      MERCHANT_API_KEY: local-merchant-key
+      OWNER_API_KEY: local-owner-key
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -17,14 +28,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Poetry
-        run: |
-          pip install poetry
-          poetry --version
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install the locked API and test profile
+        uses: ./.github/actions/install-backend
+        with:
+          profile: api-test
 
       - name: Install dependencies
         run: |
-          poetry install --no-interaction --no-root
           npm --prefix frontend ci
 
       - name: Install Playwright browsers
