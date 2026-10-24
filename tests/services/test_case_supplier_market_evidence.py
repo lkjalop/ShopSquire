@@ -1,6 +1,7 @@
 """Reviewed supplier lead-time evidence is advisory and owned by one case."""
 
 from datetime import timedelta
+import re
 
 import pytest
 from sqlalchemy import text
@@ -14,7 +15,7 @@ from src.app.services.market_intelligence_agent import gather_market_context
 db = shared_fixtures.db
 
 
-def reviewed(db, *, quantity=None):
+def reviewed(db, *, quantity=None, clock=None):
     row, _ = sent(db)
     from src.app.services.market_analysis import ensure_finding_table
 
@@ -23,7 +24,7 @@ def reviewed(db, *, quantity=None):
     # The native workflow clock is fixed; consumer validity uses current time.
     from datetime import datetime, timezone
 
-    clock = datetime.now(timezone.utc)
+    clock = clock or datetime.now(timezone.utc)
     terms["expires_at"] = (clock + timedelta(hours=1)).isoformat()
     if quantity is not None:
         terms["quantity"] = quantity
@@ -68,13 +69,23 @@ def ask(db, **changes):
 
 
 def test_owned_reviewed_quote_supplies_cited_lead_time_without_wholesale_prices(db):
-    _, reply = reviewed(db)
+    from datetime import datetime, timezone
+
+    # The price digits also occur in this legitimate provenance timestamp.
+    clock = (datetime.now(timezone.utc) - timedelta(seconds=2)).replace(microsecond=370059)
+    _, reply = reviewed(db, clock=clock)
     result = ask(db)
     assert result["delivery_status"] == "available"
     assert result["market_evidence"]["citations"][0]["source_record_id"] == reply["id"]
     assert "5 days" in result["market_evidence"]["findings"][0]["summary"]
     assert "quoted" in result["market_evidence"]["findings"][0]["summary"].lower()
-    assert "700" not in result["narration_note"]
+    assert not re.search(
+        r"(?<![A-Za-z0-9.])(?:(?:AUD|USD|EUR)\s*)?(?:700(?:\.00)?|70000)(?![A-Za-z0-9.])",
+        result["narration_note"],
+    )
+    finding = result["market_evidence"]["findings"][0]
+    assert "unit_price_cents" not in finding
+    assert "wholesale_price" not in finding
 
 
 @pytest.mark.parametrize(
