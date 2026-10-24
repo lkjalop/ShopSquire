@@ -4,14 +4,13 @@ import json
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import text
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.analytics.features_timeseries import security_timeseries
 from src.app.analytics.risk_scoring import score_graph_risk
 from src.app.services.db_read_routing import read_session
 from src.app.services.dependency_resilience import call_with_resilience
-from sqlalchemy import text as sql_text
+from sqlalchemy import text
 
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])

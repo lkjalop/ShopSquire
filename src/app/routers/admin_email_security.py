@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
 import hashlib
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger("shopsquire.admin_email_security")
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import HTMLResponse
@@ -18,9 +15,9 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 from src.app.platform.tenant_context import current_tenant_id
 from src.app.deps import get_redis, DummyRedis
-from src.app.config import load_feature_flags, get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
+from src.app.security.email_addresses import extract_emails as _extract_emails
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
 from src.app.security.siem_adapter import (
@@ -62,8 +59,10 @@ from src.app.security.supplier_governance_store import (
 )
 
 
+logger = logging.getLogger("shopsquire.admin_email_security")
+
+
 router = APIRouter(prefix="/api/v1/admin/email_security", tags=["admin-email-security"])
-_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 
 def _ensure_demo_routes_enabled() -> None:
@@ -114,22 +113,6 @@ def _policy_targets() -> Dict[str, Any]:
     }
 
 
-def _extract_emails(value: Any) -> List[str]:
-    out: List[str] = []
-    if value is None:
-        return out
-    if isinstance(value, list):
-        for x in value:
-            out.extend(_extract_emails(x))
-        return out
-    if isinstance(value, dict):
-        for x in value.values():
-            out.extend(_extract_emails(x))
-        return out
-    text = str(value or "").strip()
-    if not text:
-        return out
-    return [m.group(0).lower() for m in _EMAIL_RE.finditer(text)]
 
 
 def _extract_action_targets(incident: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2867,8 +2850,8 @@ def email_click_redirect(
     ``email_url_click_protect.rewrite_urls_in_email()``.
     """
     from fastapi.responses import RedirectResponse, JSONResponse
-    from src.app.security.email_url_click_protect import verify_click_redirect
     from src.app.config import get_settings
+    from src.app.security.email_url_click_protect import verify_click_redirect
 
     secret = str(os.getenv("CLICK_PROTECT_SECRET") or getattr(get_settings(), "click_protect_secret", "") or "")
     if not secret:

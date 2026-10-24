@@ -7,13 +7,25 @@ on:
 jobs:
   build-and-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      ROUTER_MODEL_ENABLED: "0"
+      PAYMENT_EXECUTION_ENABLED: "0"
+      FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+      FULFILLMENT_PO_TRANSPORT: sandbox
+      METRICS_INTERNAL_ONLY: "0"
+      METRICS_REQUIRE_AUTH: "0"
+      REDIS_URL: redis://127.0.0.1:1/0
+      OLLAMA_URL: http://127.0.0.1:1
     services:
       prometheus:
-        image: prom/prometheus:latest
+        image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
         ports:
           - 9090:9090
         options: >-
-          --health-cmd "curl -sS http://localhost:9090/-/healthy || exit 1"
+          --add-host=host.docker.internal:host-gateway
+          --health-cmd "wget -q -O /dev/null http://localhost:9090/-/ready || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 3
@@ -23,16 +35,12 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry config virtualenvs.create false
-          poetry install --no-interaction --no-ansi --no-root
+      - name: Install locked backend and test tools
+        uses: ./.github/actions/install-backend
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Build frontend
@@ -43,14 +51,46 @@ jobs:
           popd
       - name: Start app
         run: |
-          nohup python -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory > out.log 2>&1 &
-          sleep 6
-      - name: Wait for Prometheus
+          nohup python -m uvicorn src.app.main:create_app --host 0.0.0.0 --port 8081 --factory > out.log 2>&1 &
+          curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8081/healthz
+      - name: Configure the application scrape target
+        env:
+          PROMETHEUS_CONTAINER: ${{ job.services.prometheus.id }}
         run: |
-          for i in {1..10}; do curl -sS http://localhost:9090/-/healthy && break || sleep 2; done
+          cat > /tmp/shopsquire-prometheus.yml <<'YAML'
+          global:
+            scrape_interval: 1s
+          scrape_configs:
+            - job_name: shopsquire
+              static_configs:
+                - targets: ['host.docker.internal:8081']
+          YAML
+          chmod 644 /tmp/shopsquire-prometheus.yml
+          docker cp /tmp/shopsquire-prometheus.yml "$PROMETHEUS_CONTAINER:/etc/prometheus/prometheus.yml"
+          docker kill --signal HUP "$PROMETHEUS_CONTAINER"
+          curl --fail --retry 15 --retry-delay 1 http://localhost:9090/-/ready
       - name: Verify metrics endpoint
         run: |
-          curl -sS http://127.0.0.1:8081/metrics | egrep 'shopsquire_geoip_lookups_total|shopsquire_ragas_evaluations_total' || (echo "Metrics missing" && exit 1)
-      - name: Query Prometheus for a metric
+          curl --fail --silent --show-error http://127.0.0.1:8081/metrics > metrics.txt
+          grep -E '^shopsquire_geoip_lookups_total ' metrics.txt
+      - name: Require a successful application scrape and stored metric
         run: |
-          curl -sS 'http://localhost:9090/api/v1/query?query=shopsquire_geoip_lookups_total' | jq . || true
+          for attempt in {1..20}; do
+            curl --fail --silent --show-error --get http://localhost:9090/api/v1/query --data-urlencode 'query=up{job="shopsquire"}' > scrape.json
+            curl --fail --silent --show-error --get http://localhost:9090/api/v1/query --data-urlencode 'query=shopsquire_geoip_lookups_total{job="shopsquire"}' > metric.json
+            if jq -e '.status == "success" and (.data.result | length == 1) and .data.result[0].value[1] == "1"' scrape.json && jq -e '.status == "success" and (.data.result | length > 0)' metric.json; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat scrape.json metric.json
+          exit 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prometheus-integration-evidence
+          path: |
+            out.log
+            metrics.txt
+            scrape.json
+            metric.json

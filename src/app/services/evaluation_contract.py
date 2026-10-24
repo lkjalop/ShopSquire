@@ -38,7 +38,8 @@ def evaluate_sample(question: Any, context: Any, answer: Any) -> dict[str, Any]:
         if not question or not answer or not chunks or not reference:
             result.update(status='not_evaluated', error_code='reference_sample_incomplete')
             return result
-        stringify = lambda value: value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        def stringify(value):
+            return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
         dataset = Dataset.from_list([{'question': stringify(question), 'answer': stringify(answer),
             'contexts': [stringify(chunk) for chunk in chunks], 'ground_truth': stringify(reference)}])
         measured = evaluate(dataset, metrics=[faithfulness, answer_relevancy, context_precision, context_recall])

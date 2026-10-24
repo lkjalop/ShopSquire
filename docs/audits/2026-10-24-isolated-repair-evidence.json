@@ -1,7 +1,7 @@
 {
   "assessment_date": "2026-10-24",
   "published_base": "9da621d1f4751669ce836c2844939b0e4eb2372b",
-  "scope": "Four independently integrated repair commits; excludes other local application and roadmap work",
+  "scope": "Four independently integrated functional repairs plus bounded CI, lint and unchanged-behaviour email extraction repairs; excludes other local MVP work",
   "cohorts": [
     {
       "commit": "107df681",
@@ -81,5 +81,51 @@
     "Standalone Redis is qualified; Redis Cluster cross-slot operation and legacy physical orphan cleanup are not certified.",
     "Full local working-tree tests, browser journeys and container builds concern separate private candidates and must not be attributed to this small publication cohort.",
     "Broad hosted CI and production/provider/recovery/endurance gates remain required."
-  ]
+  ],
+  "ci_integration": {
+    "checks": [
+      {
+        "name": "owned Redis/PostgreSQL repair-cohort regression",
+        "passed": 101,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "owned HTTP latency and runtime boundaries",
+        "passed": 4,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "existing email investigation, intelligence, route and detonation controls",
+        "passed": 8,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "changed-Python Ruff",
+        "exit_code": 0
+      },
+      {
+        "name": "source size ratchet without ceiling increase",
+        "exit_code": 0,
+        "oversize_warnings": 49
+      },
+      {
+        "name": "actual pinned Prometheus application scrape, dead target and recovery",
+        "passed": true,
+        "owned_resources_removed": true
+      }
+    ],
+    "scope_notes": [
+      "Prometheus local validation used the clean review source with the previously qualified API dependency image in an owned bridge network. Hosted Linux host-gateway wiring remains subject to its CI run.",
+      "The existing accumulated Ruff checkpoint remains a required gate; this change does not waive historical lint debt.",
+      "The owned HTTP latency test now accepts the owned backend URL and merchant credential; its numerical latency expectations are unchanged.",
+      "Cache-test formatting preserves AST semantics; email extraction moves the original implementation without changing its address grammar.",
+      "Hosted broad tests remain required; successful local targeted checks do not imply hosted or release green."
+    ]
+  }
 }

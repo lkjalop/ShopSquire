@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from src.app.services import ragas_eval
-from src.app.services.evaluation_contract import METRICS, CONTRACT_VERSION, persist_evaluation
+from src.app.services.evaluation_contract import METRICS, persist_evaluation
 from src.app.platform.tenant_context import set_active_tenant_id, reset_active_tenant_id
 
 
