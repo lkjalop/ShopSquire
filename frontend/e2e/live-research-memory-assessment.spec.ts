@@ -1,4 +1,4 @@
-import {test,expect} from './helpers/authenticatedTest';
+import {test,expect} from './helpers/ordinaryBuyerTest';
 import {turn,readChatResponse} from './helpers/chatTurn';
 import {execFileSync} from 'node:child_process';
 
