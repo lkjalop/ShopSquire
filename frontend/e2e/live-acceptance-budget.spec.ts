@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 test.describe.configure({ retries: 0 });
 for (const stretch of [false, true]) test(`live manual acceptance preserves case budget and cannot verify partial evidence (stretch=${stretch})`, async ({ page }, info) => {
@@ -7,7 +8,7 @@ for (const stretch of [false, true]) test(`live manual acceptance preserves case
   page.on('request', request => {
     if (request.method() === 'POST' && /confirm-cart|send-approved|send-autonomous|payments/.test(request.url())) mutations.push(request.url());
   });
-  await page.addInitScript(uid => sessionStorage.setItem('uid', uid), `acceptance-budget-${Date.now()}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: 'Ask Me!', exact: true }).click();
   await page.getByPlaceholder('Type your message...').fill('I need a laptop under AUD 3000 for Rockwell Emulate3D locally');

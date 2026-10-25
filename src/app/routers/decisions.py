@@ -685,10 +685,14 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
                 ).fetchall()
             except Exception:
                 try:
-                    with db_session() as _db:
-                        rows = _db.execute(
-                            text("SELECT id, agent_name, valid_from, input_data, policy_version, execution_status FROM decision_logs ORDER BY valid_from DESC LIMIT 50")
-                        ).fetchall()
+                    import asyncio as _db_asyncio
+                    def _db_operation_688():
+                        with db_session() as _db:
+                            rows = _db.execute(
+                                text("SELECT id, agent_name, valid_from, input_data, policy_version, execution_status FROM decision_logs ORDER BY valid_from DESC LIMIT 50")
+                            ).fetchall()
+                        return rows
+                    rows = await _db_asyncio.to_thread(_db_operation_688)
                 except Exception:
                     rows = []
             # Find first match
@@ -1055,10 +1059,14 @@ async def websocket_stream_summary(websocket: WebSocket, uid: str | None = None,
                     ).fetchall()
                 else:
                     # fallback: use session wrapper
-                    with db_session() as _db:
-                        rows = _db.execute(
-                            text("SELECT id, agent_name, valid_from, input_data, policy_version, execution_status FROM decision_logs ORDER BY valid_from DESC LIMIT 50")
-                        ).fetchall()
+                    import asyncio as _db_asyncio
+                    def _db_operation_1058():
+                        with db_session() as _db:
+                            rows = _db.execute(
+                                text("SELECT id, agent_name, valid_from, input_data, policy_version, execution_status FROM decision_logs ORDER BY valid_from DESC LIMIT 50")
+                            ).fetchall()
+                        return rows
+                    rows = await _db_asyncio.to_thread(_db_operation_1058)
             except Exception:
                 rows = []
             payload = {"available": False}
@@ -1993,16 +2001,20 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
         row = None
     if not row:
         try:
-            with db_session() as _db:
-                row = _db.execute(
-                    _text(
-                        """
-                        SELECT id, agent_name, valid_from, input_data, retrieved_context, proposed_action
-                        FROM decision_logs WHERE id = :id LIMIT 1
-                        """
-                    ),
-                    {"id": trace_id},
-                ).mappings().first()
+            import asyncio as _db_asyncio
+            def _db_operation_1996():
+                with db_session() as _db:
+                    row = _db.execute(
+                        _text(
+                            """
+                            SELECT id, agent_name, valid_from, input_data, retrieved_context, proposed_action
+                            FROM decision_logs WHERE id = :id LIMIT 1
+                            """
+                        ),
+                        {"id": trace_id},
+                    ).mappings().first()
+                return row
+            row = await _db_asyncio.to_thread(_db_operation_1996)
         except Exception:
             row = None
     if not row:

@@ -63,6 +63,18 @@ def test_gateway_executes_one_enrolled_deployment_and_records_hashes_only():
     assert events[-1].details["output_hash"] == result.output_hash
 
 
+@pytest.mark.parametrize('output', ['', '   ', None])
+def test_empty_provider_result_is_a_failure_and_cannot_be_narrated(output):
+    ledger = AgentRunEventLedger()
+    result = execute_model(_request(), _deployment(), prompt='hello',
+        transport=lambda *args: output, ledger=ledger)
+    assert result.status == 'failed' and result.text is None
+    assert result.failure_code == 'model_empty_output'
+    events = ledger.events_for(result.run_id, tenant_id='tenant-a')
+    assert [event.event_type for event in events] == ['accepted', 'failed']
+    assert events[-1].details['failure_code'] == 'model_empty_output'
+
+
 def test_gateway_rejects_artifact_or_prompt_identity_mismatch_before_transport():
     called = False
 

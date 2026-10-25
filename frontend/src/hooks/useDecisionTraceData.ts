@@ -38,7 +38,9 @@ export function useDecisionTraceData({ active, caseId, revision }: { active: boo
     try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; }
   }, []);
   const tenantId = useMemo(() => {
-    try { return sessionStorage.getItem('tenant_id') || 'default'; } catch { return 'default'; }
+    const configured = String(import.meta.env.VITE_STOREFRONT_TENANT_ID || '').trim();
+    if (configured) return configured;
+    try { return sessionStorage.getItem('tenant_id')?.trim() || 'default'; } catch { return 'default'; }
   }, []);
 
   useEffect(() => {

@@ -1,0 +1,10 @@
+{
+  "version": "fictional-memory-companion-v1",
+  "simulation_only": true,
+  "base_configuration_id": "simulation:memory-lab:configuration-v1",
+  "target_sku": "HDD-3A5E65F1",
+  "target_title": "Fictional compatible backup drive",
+  "need": "portable_backup",
+  "kind": "cross_sell",
+  "benefit": "This fictional exact pairing provides portable backup storage; compatibility is invented for this demonstration."
+}

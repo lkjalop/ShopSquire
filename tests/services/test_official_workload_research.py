@@ -120,7 +120,11 @@ def test_reviewed_source_without_fast_parser_uses_cited_generic_extractor() -> N
 def test_application_parsers_do_not_share_claims_across_publishers() -> None:
     observed_at = "2026-08-08T00:00:00Z"
     blender, _ = compile_source_claims(
-        "blender_official_requirements", b"Recommended 32 GB RAM and 8 GB VRAM",
+        "blender_official_requirements", b"""<details><summary>Windows</summary><table>
+        <tr><th></th><th>Minimum</th><th>Recommended</th></tr>
+        <tr><td>RAM</td><td>8 GB</td><td>32 GB</td></tr>
+        <tr><td>GPU</td><td>2 GB VRAM</td><td>8 GB VRAM</td></tr>
+        </table></details>""",
         observed_at=observed_at, citation_url="https://www.blender.org/download/requirements/",
     )
     epic, _ = compile_source_claims(

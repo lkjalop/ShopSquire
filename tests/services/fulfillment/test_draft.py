@@ -172,6 +172,36 @@ def test_request_approval_advances_and_carries_hash(db):
 def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
 
 
+def test_approval_spend_validation_failure_leaves_durable_case_unchanged(db, monkeypatch):
+    from contextlib import contextmanager
+    from fastapi import HTTPException
+    from src.app.routers import fulfillment_cases as route
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref='SKU-1', quantity=6,
+                      rank_fn=_rank_ok, allowlist_fn=_allow, now_iso='2026-06-26 09:05:10')
+    before = wf.repository.current_version(db, cid)
+    @contextmanager
+    def session():
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+    def invalid_spend(*args, **kwargs):
+        raise HTTPException(status_code=409, detail='committed_spend_unknown')
+    monkeypatch.setattr(route, 'db_session', session)
+    monkeypatch.setattr(route, '_operator_case_tenant', lambda *args: 'default')
+    monkeypatch.setattr(route, '_case_spend_cents', lambda *args: 1000)
+    monkeypatch.setattr(route, '_case_category', lambda *args: 'default')
+    monkeypatch.setattr(route, '_category_committed_cents', invalid_spend)
+    for _ in range(2):
+        with pytest.raises(HTTPException) as error:
+            route.request_approval(cid, role='owner')
+        assert error.value.status_code == 409
+        after = wf.repository.current_version(db, cid)
+        assert (after.state, after.version_id) == (before.state, before.version_id)
+
+
 def _to_awaiting_approval(db):
     cid = _committed_case(db)
     D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6, rank_fn=_rank_ok,
@@ -347,6 +377,29 @@ def test_no_requirements_block_when_case_has_none(db):
     draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
                           rank_fn=_rank_ok, allowlist_fn=_allow)
     assert "key requirements" not in draft.body.lower()
+
+
+def test_typed_requirement_labels_come_from_active_profile(tmp_path, monkeypatch):
+    import json
+    from src.app.platform import store_profile
+    (tmp_path / 'industrial.json').write_text(json.dumps({
+        'id': 'industrial', 'requirement_attribute_labels': {'load_capacity': 'Rated working load'},
+    }), encoding='utf-8')
+    monkeypatch.setenv('STORE_PROFILES_DIR', str(tmp_path))
+    store_profile.reset_cache()
+    token = store_profile.set_active_profile_id('industrial')
+    try:
+        block = D._requirements_block({'requirements': {'accepted_claims': [
+            {'attribute': 'load_capacity', 'value': 150, 'unit': 'kg', 'authority_status': 'buyer_accepted'},
+            {'attribute': 'seal_rating', 'value': 'IP67', 'authority_status': 'buyer_accepted'},
+            {'attribute': 'unreviewed', 'value': 'PRIVATE', 'authority_status': 'pending'},
+        ]}})
+        assert 'Rated working load: 150 kg' in block
+        assert 'Seal Rating: IP67' in block
+        assert 'PRIVATE' not in block
+    finally:
+        store_profile.reset_active_profile_id(token)
+        store_profile.reset_cache()
 
 
 def test_supplier_greeting_uses_legal_name_when_resolvable(db, monkeypatch):
@@ -643,26 +696,3 @@ def test_rfq_completeness_reason_unit():
     vague = dict(ok, deadline_date="the stated deadline")
     assert D.rfq_completeness_reason(vague) == "missing_rfq_fields:deadline_date"
     assert D.rfq_completeness_reason({}).startswith("missing_rfq_fields:")
-
-
-def test_typed_requirement_labels_come_from_active_profile(tmp_path, monkeypatch):
-    import json
-    from src.app.platform import store_profile
-    (tmp_path / 'industrial.json').write_text(json.dumps({
-        'id': 'industrial', 'requirement_attribute_labels': {'load_capacity': 'Rated working load'},
-    }), encoding='utf-8')
-    monkeypatch.setenv('STORE_PROFILES_DIR', str(tmp_path))
-    store_profile.reset_cache()
-    token = store_profile.set_active_profile_id('industrial')
-    try:
-        block = D._requirements_block({'requirements': {'accepted_claims': [
-            {'attribute': 'load_capacity', 'value': 150, 'unit': 'kg', 'authority_status': 'buyer_accepted'},
-            {'attribute': 'seal_rating', 'value': 'IP67', 'authority_status': 'buyer_accepted'},
-            {'attribute': 'unreviewed', 'value': 'PRIVATE', 'authority_status': 'pending'},
-        ]}})
-        assert 'Rated working load: 150 kg' in block
-        assert 'Seal Rating: IP67' in block
-        assert 'PRIVATE' not in block
-    finally:
-        store_profile.reset_active_profile_id(token)
-        store_profile.reset_cache()

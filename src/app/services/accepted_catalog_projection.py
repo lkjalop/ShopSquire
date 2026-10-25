@@ -124,6 +124,8 @@ def _freshness(
     if observed > now:
         return "unknown"
     expiry = _as_utc(expires_at)
+    if expires_at is not None and expiry is None:
+        return "unknown"
     if expiry is not None:
         return "fresh" if now <= expiry else "stale"
     age_hours = (now - observed).total_seconds() / 3600
@@ -467,6 +469,7 @@ def project_accepted_catalog(
     now: datetime | None = None,
     case_id: str | None = None,
     uid: str | None = None,
+    availability_observations: Sequence[ProductAvailabilityObservation] | None = None,
 ) -> ProductShelfProjection:
     observed_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     contract_receipt = None
@@ -501,10 +504,14 @@ def project_accepted_catalog(
             ProductEvidenceObservation.configuration_id.in_(configuration_ids),
         )).scalars():
             evidence_by_configuration[item.configuration_id].append(item)
-        for item in db.execute(select(ProductAvailabilityObservation).where(
-            ProductAvailabilityObservation.configuration_id.in_(configuration_ids),
-        )).scalars():
-            availability_by_configuration[item.configuration_id].append(item)
+        # Trusted server adapters may supply current stock observations. Never
+        # accept this override from buyer/model payloads or mix it with old snapshots.
+        observations = availability_observations if availability_observations is not None else db.execute(
+            select(ProductAvailabilityObservation).where(
+                ProductAvailabilityObservation.configuration_id.in_(configuration_ids))).scalars()
+        for item in observations:
+            if item.configuration_id in configuration_ids:
+                availability_by_configuration[item.configuration_id].append(item)
     conditional = [claim for claim in accepted_claims if claim.get("condition")]
     shared_claims = [claim for claim in accepted_claims if not claim.get("condition")]
     proposed_labels = {

@@ -1,0 +1,510 @@
+{
+  "source_commit": "c11d51b048e5cc25b40231822d55e79c7202d796",
+  "runs": [
+    {
+      "phase": "buyer-baseline",
+      "stats": {
+        "startTime": "2026-10-25T02:03:49.133Z",
+        "duration": 12389.948999999999,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 974
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 702
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 783
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 972
+            }
+          ]
+        },
+        {
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 5090
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-source-categories",
+      "stats": {
+        "startTime": "2026-10-25T02:08:00.610Z",
+        "duration": 13505.824999999999,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 1148
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 833
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 844
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 1020
+            }
+          ]
+        },
+        {
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 5436
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-browse-narration",
+      "stats": {
+        "startTime": "2026-10-25T02:13:43.954Z",
+        "duration": 11354.885999999999,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 1096
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 556
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 673
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 919
+            }
+          ]
+        },
+        {
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 5354
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-storage-scope",
+      "stats": {
+        "startTime": "2026-10-25T02:14:42.056Z",
+        "duration": 10214.110999999999,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 1109
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 579
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 796
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 757
+            }
+          ]
+        },
+        {
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 5002
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-browse-presentation-before",
+      "stats": {
+        "startTime": "2026-10-25T02:16:07.045Z",
+        "duration": 67446.51,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 21195
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 20854
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 21105
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 978
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-browse-presentation-after",
+      "stats": {
+        "startTime": "2026-10-25T02:18:10.451Z",
+        "duration": 10440.454000000002,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 1104
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 653
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 856
+            }
+          ]
+        },
+        {
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "status": "unexpected",
+          "attempts": [
+            {
+              "status": "failed",
+              "duration_ms": 826
+            }
+          ]
+        },
+        {
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 4975
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-live-current",
+      "stats": {
+        "startTime": "2026-10-25T02:22:35.290Z",
+        "duration": 13399.353000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "file": "consented-live-research.spec.ts",
+          "title": "consented live discovery preserves scope and grants no commerce authority",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 5678
+            }
+          ]
+        },
+        {
+          "file": "live-research-memory-assessment.spec.ts",
+          "title": "live research quantity correction supplier-draft request market question and reload retain scoped facts",
+          "status": "expected",
+          "attempts": [
+            {
+              "status": "passed",
+              "duration_ms": 6490
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "task_observations": [
+    {
+      "draft": {
+        "status": "provisional_draft",
+        "requested_quantity": 40,
+        "shortfall": null,
+        "missing_inputs": [
+          "supplier_contact",
+          "current_accepted_selection"
+        ],
+        "dispatch_authorized": false
+      },
+      "market": {
+        "delivery_status": "blocked",
+        "delivery_reason": "no_current_scoped_evidence",
+        "requested_market_facets": [
+          "lead_time"
+        ],
+        "answered_market_facets": [],
+        "unanswered_market_facets": [
+          "lead_time"
+        ]
+      },
+      "citation_count": 0
+    }
+  ],
+  "live_dispatch_receipt_occurrences": 18,
+  "live_dispatch_receipts": [
+    {
+      "serialized_receipt_sha256": "d6aba95c61c1a1bff5553fd658fc2d68c79138963662940ef4a4a33670b6f536",
+      "external_call_dispatched": true,
+      "fixture": false,
+      "http_status": 200
+    },
+    {
+      "serialized_receipt_sha256": "54b34ab917a05ac42d72cc0c4349e36a06c3a290ab6a97c0a158fb75a06f3790",
+      "external_call_dispatched": true,
+      "fixture": false,
+      "http_status": 200
+    },
+    {
+      "serialized_receipt_sha256": "b0dfada66061395da9c9c3cd17436cd31f1a6820febddfa34346917a1c02b7cf",
+      "external_call_dispatched": true,
+      "fixture": false,
+      "http_status": 200
+    }
+  ],
+  "receipt_count_meaning": "Distinct serialized receipts after nested-copy deduplication; not an independent call counter.",
+  "source_sha256": {
+    "scripts/seed_electronics_shop.py": "00b006a0bdb137c720f6bf0fa92a69d91836181503c99fafb1d8dcf7ee33d178",
+    "src/app/services/terminal_research_narration.py": "5cb5d20b681393f76416c41513bbaed92430c77248202b36c5aab780236ff159",
+    "src/app/services/turn_transition.py": "932f30e19acdc121589d2b6f2903bc23fc7935f749452195e1123170d3614134",
+    "src/app/services/chat_terminal_projection.py": "572ae3b8350b2adbb1d288d670f4415cb445d73296204c6af99b4f58f980dcbb",
+    "frontend/src/App.tsx": "0762e007b270aa7ec0e6e347b1261835b43e61dd1877ea9f7a497878fb00ec8d",
+    "frontend/e2e/mock-catalog-category-pilot.spec.ts": "c0ed8507bb9cfe5ff97290c527861f25288a8fc947541b568362c22b2e38281d"
+  },
+  "scope": {
+    "catalogue_and_stock": "fictional electronics fixture",
+    "models": "unavailable",
+    "live_search": "consented SearXNG dispatch; discovery only",
+    "real_commercial_effects": "disabled",
+    "api_mocks": "none in selected buyer browser cases",
+    "oracle_change": "Source-title whitespace normalized; browsing presentation rejection controls added. Other useful-product/draft expectations retained."
+  },
+  "source_hash_basis": "source_sha256 identifies tested Windows checkout bytes; git_blob_sha256 identifies committed blobs. LF/CRLF normalization was checked separately.",
+  "git_blob_sha256": {
+    "scripts/seed_electronics_shop.py": "00b006a0bdb137c720f6bf0fa92a69d91836181503c99fafb1d8dcf7ee33d178",
+    "src/app/services/terminal_research_narration.py": "fc1327a80c19aab46f7a42a9c3636c5df29e70cfb5c58e8c053cc3ac6f52461c",
+    "src/app/services/turn_transition.py": "932f30e19acdc121589d2b6f2903bc23fc7935f749452195e1123170d3614134",
+    "src/app/services/chat_terminal_projection.py": "6aa4669ed63da97a2ac814e6e97e60a3165baac75c90f387bdb0152c31a7d471",
+    "frontend/src/App.tsx": "3f6d3bb611847833920502e854625aacda48ae400930277b89f21e8a6543e716",
+    "frontend/e2e/mock-catalog-category-pilot.spec.ts": "c0ed8507bb9cfe5ff97290c527861f25288a8fc947541b568362c22b2e38281d"
+  }
+}

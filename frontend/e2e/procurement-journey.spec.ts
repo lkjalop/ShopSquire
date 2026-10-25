@@ -1,7 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
-const UID = `e2e-procurement-${Date.now()}`;
-const API_KEY = process.env.VITE_API_KEY?.trim() || 'local-merchant-key';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -14,7 +13,7 @@ async function send(page: Page, text: string) {
 
 test('demo procurement journey: clear, exact cart line, amendment and delivery reconfirmation', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), UID);
+  const uid = await registerBuyer(page.context());
   await page.goto('/');
 
   await send(page, 'clear my cart');
@@ -22,8 +21,7 @@ test('demo procurement journey: clear, exact cart line, amendment and delivery r
     .toBeVisible({ timeout: 30_000 });
 
   const seeded = await page.request.post('/api/v1/cart/items', {
-    headers: { 'x-api-key': API_KEY },
-    data: { uid: UID, sku: 'RGAM-0007', quantity: 10 },
+    data: { uid, sku: 'RGAM-0007', quantity: 10 },
   });
   expect(seeded.ok(), await seeded.text()).toBeTruthy();
 

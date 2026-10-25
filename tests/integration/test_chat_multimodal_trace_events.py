@@ -28,7 +28,7 @@ def _compatibility_image_response(**_kwargs):
             }
 
 
-def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch):
+def test_unscoped_image_result_is_held_and_emits_multimodal_trace(monkeypatch):
     from src.app.routers import chat as chat_router
 
     async def fake_recommend(*_args, **_kwargs):
@@ -98,21 +98,13 @@ def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch)
     assert body.get("decision_trace_id") == trace_id
     terminal = body.get("terminal_outcome") or {}
     assert terminal.get("decision_trace_id") == trace_id
-    assert body.get("products"), {
-        "message": body.get("assistant_message"),
-        "catalog_authority": (body.get("terminal_outcome") or {}).get("catalog_authority"),
-        "recommendation_status": (body.get("terminal_outcome") or {}).get("recommendation_status"),
-        "research_status": (body.get("terminal_outcome") or {}).get("research_status"),
-        "scope": ((body.get("terminal_outcome") or {}).get("catalog_scope") or {}),
-        "authorization": body.get("workload_authorization"),
-    }
-    product = (body.get("products") or [])[0]
-    assert product["price"] == 1499.0
-    assert product["price_cents"] == 149900
-    assert product["specs"]["gpu"] == "RTX 4060"
-    assert product["stock_status"] == "in_stock"
-    assert product["cart_eligible"] is True
-    assert "+embedding_similarity" in product["why"]
+    # This fake seam supplies an invented SKU and no scoped authority receipt.
+    # Multimodal processing must remain observable without promoting those
+    # unsupported results into an actionable shelf.
+    assert body.get("products") == []
+    assert terminal["catalog_authority"] == "unknown"
+    assert terminal["recommendation_status"] == "held"
+    assert terminal["commerce_authority"] == "none"
 
     ev = client.get(f"/api/v1/trace/{trace_id}/events", headers=headers)
     assert ev.status_code == 200

@@ -55,6 +55,26 @@ def changed_python_files(repo: Path, *, base: str | None) -> list[str]:
     })
 
 
+def _ruff_batches(executable: str, files: list[str]) -> list[list[str]]:
+    """Keep quoted UTF-16 argv comfortably below Windows' 32,767-unit limit."""
+    prefix = [executable, 'check']
+    batches: list[list[str]] = []
+    current = prefix.copy()
+    for path in files:
+        single = [*prefix, path]
+        if len(subprocess.list2cmdline(single).encode('utf-16-le')) // 2 > 24000:
+            raise ValueError('A single Ruff path exceeds the supported command budget')
+        candidate = [*current, path]
+        if len(subprocess.list2cmdline(candidate).encode('utf-16-le')) // 2 > 24000:
+            batches.append(current)
+            current = single
+        else:
+            current = candidate
+    if len(current) > len(prefix):
+        batches.append(current)
+    return batches
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Ruff changed-file ratchet (not a whole-repository check)",
@@ -72,17 +92,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     if not files:
         return 0
-    result = subprocess.run(
-        [args.ruff, "check", *files],
-        cwd=repo,
-        check=False,
-    )
-    if result.returncode == 0:
+    exit_code = 0
+    for command in _ruff_batches(args.ruff, files):
+        result = subprocess.run(command, cwd=repo, check=False)
+        # Preserve negative signal exits too; max(0, -signal) would report green.
+        exit_code = exit_code or result.returncode
+    if exit_code == 0:
         print(
             "Ruff changed-file gate passed. "
             "Legacy findings outside the changed-file scope may remain.",
         )
-    return int(result.returncode)
+    return int(exit_code)
 
 
 if __name__ == "__main__":

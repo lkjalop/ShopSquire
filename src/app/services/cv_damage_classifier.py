@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, Tuple
 
 
@@ -79,7 +80,9 @@ class DamageClassifier:
             self.model = None
 
     def _load_yolo(self) -> None:
-        if not self.yolo_model_path:
+        # Model acquisition belongs to explicit provisioning, never a buyer's
+        # image request. Ultralytics interprets absent model names as downloads.
+        if not self.yolo_model_path or not Path(self.yolo_model_path).is_file():
             return
         try:
             from ultralytics import YOLO  # type: ignore

@@ -1,13 +1,10 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import {registerBuyer} from './helpers/registeredBuyer';
 
-async function openBuyer(browser: Browser, label: string) {
+async function openBuyer(browser: Browser, _label: string) {
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `live-matrix-${label}-${Date.now()}-${Math.random()}`);
+  await registerBuyer(context);
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
   return { context, page };

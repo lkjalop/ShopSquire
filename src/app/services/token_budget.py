@@ -125,6 +125,13 @@ class TokenBudget:
         except Exception:
             pass
 
+    def record_router_reservation(self, uid: str, estimated_tokens: int, model_receipt: dict) -> int:
+        """Release a disabled router's estimate; unknown execution stays conservative."""
+        charged = 0 if model_receipt.get('outcome') in {'disabled', 'mock_disabled'} else estimated_tokens
+        if charged:
+            self.record_usage(uid, charged, estimate_cost(charged))
+        return charged
+
     def get_remaining(self, uid: str, tier: str) -> Dict[str, float]:
         limits = self.limits.get(tier, self.limits["guest"])
         usage = self.get_usage(uid)

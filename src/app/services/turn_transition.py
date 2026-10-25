@@ -208,6 +208,8 @@ def build_turn_read_model(commit: TurnCommit, *, revision: int,
         existing_message=commit.assistant_message,
         subject_role=commit.subject_role,
         product_shelves=commit.product_shelves,
+        catalog_browse=right_panel.get('semantic_resolution'),
+        catalog_product_count=len(commit.products) if effective_authority == 'permitted' else 0,
     )
     from src.app.services.chat_case_continuity import project_retained_facts, retained_facts_message
     view = {"case_id": commit.case_id, "case_revision": revision,

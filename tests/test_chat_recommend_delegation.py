@@ -158,6 +158,16 @@ def test_typed_facade_failure_is_observable(monkeypatch):
     assert dispatches == [{'outcome': 'error', 'lane': None, 'reason': 'core_error'}]
 
 
+def test_unenrolled_lane_preserves_completed_model_receipt():
+    result=v2_only_unavailable_response(status='delegate',reason='lane_not_enrolled',lane='PROCUREMENT',
+        trace_id='completed-but-unenrolled',execution_evidence={'component':'recommendation_turn_router',
+            'status':'completed','failure_code':'lane_not_enrolled'})
+    assert result['execution_state_envelope']['model_status']=='completed'
+    assert result['semantic_resolution']['reason']=='lane_not_enrolled'
+    assert result['execution_state_envelope']['catalog_authority']=='blocked'
+    assert result['products']==[] and result['action_executed'] is False
+
+
 def test_typed_and_spoken_input_share_one_semantic_dispatch_contract(monkeypatch):
     typed_query, typed_voice, _ = _effective_chat_query({
         "query": "compare Dell G16 and Lenovo Legion",

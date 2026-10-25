@@ -495,7 +495,7 @@ export function MerchantBIPro({ role }: Props) {
       setAttackError(null);
       setAttackDemoSeeded(false);
       try {
-        const data = await fetchSecurityAttackTimeseries(hours, 8000);
+        const data = await fetchSecurityAttackTimeseries(168, 8000);
         if (cancelled) return;
         const buckets = Array.isArray(data.buckets) ? data.buckets : [];
         if (buckets.length > 0) {
@@ -504,7 +504,7 @@ export function MerchantBIPro({ role }: Props) {
           return;
         }
         if (allowSyntheticFallback) {
-          setAttackBuckets(buildDeterministicAttackDemo(hours));
+          setAttackBuckets(buildDeterministicAttackDemo(168));
           setAttackDemoSeeded(true);
         } else {
           setAttackBuckets([]);
@@ -514,7 +514,7 @@ export function MerchantBIPro({ role }: Props) {
         if (cancelled) return;
         setAttackError(e.message || 'Failed to load security trends');
         if (allowSyntheticFallback) {
-          setAttackBuckets(buildDeterministicAttackDemo(hours));
+          setAttackBuckets(buildDeterministicAttackDemo(168));
           setAttackDemoSeeded(true);
         } else {
           setAttackBuckets([]);
@@ -536,7 +536,7 @@ export function MerchantBIPro({ role }: Props) {
       setGeoError(null);
       setGeoDemoSeeded(false);
       try {
-        const data = await fetchSecurityGeoAsnTrends(hours, 4000);
+        const data = await fetchSecurityGeoAsnTrends(168, 4000);
         if (cancelled) return;
         const trends = Array.isArray(data.trends) ? data.trends.slice(0, 10) : [];
         if (trends.length > 0) {
@@ -545,7 +545,7 @@ export function MerchantBIPro({ role }: Props) {
           return;
         }
         if (allowSyntheticFallback) {
-          setGeo(buildDeterministicGeoDemo(hours));
+          setGeo(buildDeterministicGeoDemo(168));
           setGeoDemoSeeded(true);
         } else {
           setGeo([]);
@@ -555,7 +555,7 @@ export function MerchantBIPro({ role }: Props) {
         if (cancelled) return;
         setGeoError(e.message || 'Failed to load geo/ASN trends');
         if (allowSyntheticFallback) {
-          setGeo(buildDeterministicGeoDemo(hours));
+          setGeo(buildDeterministicGeoDemo(168));
           setGeoDemoSeeded(true);
         } else {
           setGeo([]);
@@ -790,7 +790,7 @@ export function MerchantBIPro({ role }: Props) {
     <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14 }}>
       <div>
         <h3 style={{ marginBottom: 6 }}>Merchant BI (Custom)</h3>
-        <div className="page-sub">Transactions and security posture. Toggle daily vs monthly; focus ranges for Jan-Feb demo or last 30/90 days.</div>
+        <div className="page-sub">Choose the transaction range below. Security trends show the latest 7 days, independently of the transaction range.</div>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <button className={`btn ${granularity === 'day' ? '' : 'secondary'}`} onClick={() => setGranularity('day')}>Daily</button>

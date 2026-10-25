@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.main import app
 from src.app.services import attribution
 from src.app.services.hippograph import recall
 from src.app.services.hippograph_db import build_from_db
-from tests.utils import default_headers
 from tests.market_migration_helpers import apply_market_migration
 
 
@@ -114,11 +111,15 @@ def test_build_from_db_degrades_when_tables_absent():
 
 
 # ── endpoint contract (read-only, role-gated) ────────────────────────────────
-_client = TestClient(app, headers=default_headers())
+@pytest.fixture
+def graph_client(owned_operator_client):
+    client, headers = owned_operator_client("default", role="merchant")
+    client.headers.update(headers)
+    return client
 
 
-def test_hippograph_recall_endpoint_contract():
-    r = _client.get("/api/v1/hippograph/recall", params={"seed": "GAM-1", "kind": "product", "top_k": 5})
+def test_hippograph_recall_endpoint_contract(graph_client):
+    r = graph_client.get("/api/v1/hippograph/recall", params={"seed": "GAM-1", "kind": "product", "top_k": 5})
     assert r.status_code == 200, r.text
     b = r.json()
     assert b["kind"] == "product"
@@ -126,8 +127,8 @@ def test_hippograph_recall_endpoint_contract():
     assert "node_count" in b and "edge_count" in b
 
 
-def test_hippograph_journey_endpoint_is_typed_and_non_authoritative():
-    response = _client.get(
+def test_hippograph_journey_endpoint_is_typed_and_non_authoritative(graph_client):
+    response = graph_client.get(
         "/api/v1/hippograph/journey",
         params={"seed": "case-demo", "kind": "shopping_case", "top_k": 5},
     )
@@ -144,8 +145,8 @@ def test_hippograph_journey_endpoint_is_typed_and_non_authoritative():
     ]
 
 
-def test_hippograph_view_endpoint_selects_bounded_non_authoritative_view():
-    response = _client.get(
+def test_hippograph_view_endpoint_selects_bounded_non_authoritative_view(graph_client):
+    response = graph_client.get(
         "/api/v1/hippograph/view",
         params={
             "seed_id": "shopping_case:case-demo",

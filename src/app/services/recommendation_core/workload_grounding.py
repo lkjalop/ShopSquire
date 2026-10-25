@@ -7,6 +7,7 @@ and returns registry-shaped constraints for the shared fit engine.
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
 from typing import Any, Dict, Iterable, Tuple
 
@@ -123,14 +124,29 @@ def compile_workload_evidence_requirements(
                 and receipt.get("representation") == "steam_requirement_line_v1"
                 and (result.get("source") or result.get("provider_id")) == "steam"):
             continue
+        # Exact alternatives, never performance equivalence.
+        alternatives, spans = [], []
+        if field in ('cpu', 'gpu'):
+            offset = 0
+            for separator in list(re.finditer(r'\s*/\s*|\s+or\s+', value, re.I)) + [None]:
+                stop = separator.start() if separator else len(value)
+                raw = value[offset:stop]
+                item = raw.strip()
+                if item:
+                    left = offset + len(raw) - len(raw.lstrip())
+                    alternatives.append(item)
+                    spans.append([start + left, start + left + len(item)])
+                offset = separator.end() if separator else len(value)
+        if not alternatives:
+            alternatives, spans = [value], [[start, end]]
         claims.append({
             "subject_span": str(name)[:120], "artefact_name": canonical_name,
             "status": "accepted", "authority": "official_requirements",
             "claim_origin": "observed", "source_id": "steam", "lineage_root": "steam",
             "source_record_id": result.get("source_record_id") or result.get("app_id"),
             "observed_at": result.get("retrieved_at"), "confidence": result.get("confidence"),
-            "attribute_key": attribute, "operator": "in", "value": [value],
-            "source_excerpt": excerpt, "value_spans": [[start, end]],
+            "attribute_key": attribute, "operator": "in", "value": alternatives,
+            "source_excerpt": excerpt, "value_spans": spans,
             "requirement_class": "minimum",
         })
     from src.app.platform.store_profile import active_profile_id
@@ -207,6 +223,7 @@ def resolve_named_workloads(
                 "source_url": result.get("source_url"),
                 "retrieved_at": result.get("retrieved_at"),
                 "cached": bool(result.get("cached")),
+                "fetch_receipt": dict(result.get("fetch_receipt") or {}),
                 "confidence": result.get("confidence"),
                 "identity_resolution": dict(result.get("identity_resolution") or {}),
                 "minimum": dict(result.get("minimum") or {}),
@@ -246,6 +263,7 @@ def resolve_named_workloads(
             "source_url": result.get("source_url"),
             "retrieved_at": result.get("retrieved_at"),
             "cached": bool(result.get("cached")),
+            "fetch_receipt": dict(result.get("fetch_receipt") or {}),
             "confidence": result.get("confidence"),
             "provenance_chain": list(result.get("provenance_chain") or []),
             "minimum": dict(result.get("minimum") or {}),

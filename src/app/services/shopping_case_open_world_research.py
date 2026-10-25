@@ -378,7 +378,7 @@ async def execute_open_world_publisher_discovery_async(
             "structured_provider_resolution": concept_resolution,
         }
     else:
-        if not readiness.get("effective"):
+        if not readiness.get("effective") and readiness.get("error_code") != "discovery_reachability_not_observed":
             raise OpenWorldResearchUnavailable(
                 code=str(readiness.get("error_code") or "external_research_degraded"),
                 readiness=readiness,
@@ -613,7 +613,7 @@ async def execute_open_world_publisher_discovery_async(
         *[dict(claim) for claim in held_origin_claims if isinstance(claim, dict)],
     ]
     shelves = project_accepted_catalog(
-        db,
+        db, case_id=case_id, uid=uid,
         accepted_claims=structured_claims,
         desired_outcome=plan.retained_purpose,
         budget_cents=budget_cents,

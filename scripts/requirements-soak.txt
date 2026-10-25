@@ -1,0 +1,2 @@
+# Diagnostic-only dependency; install in the test environment, not production.
+psutil==7.2.2

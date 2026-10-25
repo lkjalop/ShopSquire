@@ -599,6 +599,7 @@ body {
 /* Right Panel */
 .rightPanel {
   flex: 0 0 57.15%; /* 40% of 70% = ~57.15% */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   position: relative;

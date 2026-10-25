@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test';
+import {test,expect,buyerUid} from './helpers/authenticatedTest';
 
 test('shopping-case fast lane returns provisional shelves before external research', async ({ page }) => {
   test.setTimeout(90_000);
-  const uid = `fast-lane-${Date.now()}-${Math.random()}`;
+  const uid = buyerUid;
   await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });

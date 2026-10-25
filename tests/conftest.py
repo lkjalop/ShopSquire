@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ["tests.owned_security_runtime", "tests.owned_playwright_runtime", "tests.owned_timeout_lifecycle"]
+pytest_plugins = ["tests.owned_security_runtime", "tests.owned_playwright_runtime", "tests.owned_timeout_lifecycle", "tests.owned_operator_membership"]
 
 
 # ---------------------------------------------------------------------------

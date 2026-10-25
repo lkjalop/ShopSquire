@@ -1,29 +1,5 @@
-import os
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from src.app.main import create_app
-from src.app.models.db import set_engine
-
-
-def _client(tmp_path):
-    db_path = tmp_path / "rules_validation.sqlite"
-    os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{db_path}"
-    eng = create_engine(f"sqlite+pysqlite:///{db_path}", connect_args={"check_same_thread": False}, future=True)
-    set_engine(eng)
-    try:
-        import src.app.models.db as dbmod
-        dbmod.SessionLocal = sessionmaker(bind=eng, future=True)
-    except Exception:
-        pass
-    app = create_app()
-    return TestClient(app)
-
-
-def test_rules_reject_invalid_regex(tmp_path):
-    client = _client(tmp_path)
-    headers = {"x-api-key": "local-developer-key"}
+def test_rules_reject_invalid_regex(owned_operator_client):
+    client, headers = owned_operator_client("rules-validation", role="developer")
 
     r = client.post("/api/v1/rules/", headers=headers, json={"title": "bad", "pattern": "("})
     assert r.status_code == 400
@@ -31,9 +7,8 @@ def test_rules_reject_invalid_regex(tmp_path):
     assert body.get("detail", {}).get("error") == "invalid_regex"
 
 
-def test_rules_dry_run_priority_order(tmp_path):
-    client = _client(tmp_path)
-    headers = {"x-api-key": "local-developer-key"}
+def test_rules_dry_run_priority_order(owned_operator_client):
+    client, headers = owned_operator_client("rules-validation", role="developer")
 
     payload = {
         "text": "please refund my order",

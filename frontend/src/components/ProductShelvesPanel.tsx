@@ -62,8 +62,8 @@ export type ProductShelfProjection = {
   schema_version: 'product-shelves-v1';
   shelves: ProductShelf[];
   evidence_status?: 'provisional' | 'researched' | 'context_only' | 'unresolved';
-  buyer_accepted_claim_count?: number;
   official_claim_count?: number;
+  buyer_accepted_claim_count?: number;
   context_claim_count?: number;
   research_delta?: {
     sku: string; before?: number | null; after?: number | null;

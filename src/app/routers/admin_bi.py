@@ -24,6 +24,7 @@ from src.app.schemas.metric_evidence import (
     AuditorMetricProjection, MetricEvidence, OperatorMetricProjection,
 )
 from src.app.services.bi_intelligence import (
+    slo_state as _slo_state,
     margin_intelligence,
     supplier_scorecard,
     clv_prediction,
@@ -295,16 +296,6 @@ def _http_p95_ms_from_prom(path: str, method: str = "GET") -> float | None:
                 return None
             return round(le * 1000.0, 2)
     return None
-
-
-def _slo_state(value: float | None, warn: float, crit: float) -> str:
-    if value is None:
-        return "unknown"
-    if value >= crit:
-        return "critical"
-    if value >= warn:
-        return "warn"
-    return "ok"
 
 
 def _dialect_name(db) -> str:
@@ -1915,22 +1906,27 @@ def slo_alerts_api(
     }
 
 
+def _load_security_event_batch(tenant_id: str, cursor: int) -> List[Dict[str, Any]]:
+    from src.app.platform.tenant_context import reset_active_tenant_id, set_active_tenant_id
+    from src.app.services.security_event_stream import read_security_event_batch
+    token = set_active_tenant_id(tenant_id)
+    try:
+        with db_session() as database:
+            return read_security_event_batch(database, tenant_id=tenant_id, after_id=cursor,
+                                             classify_details=_security_type_from_details)
+    finally:
+        reset_active_tenant_id(token)
+
+
 @router.get("/security-events/stream")
 async def security_events_stream(
     request: Request,
     last_id: int = Query(default=0, ge=0, description="Last seen row id; returns only newer events"),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> StreamingResponse:
-    """Server-Sent Events stream for live security events.
-
-    Polls both `security_event_ingest` and `security_events` tables every 3 s and
-    pushes new rows to the client as ``data: <JSON>\\n\\n`` frames.
-
-    Query params:
-    - **last_id**: cursor — only rows with `id > last_id` are emitted (default 0 = all recent)
-
-    The stream closes after 120 s of inactivity or on client disconnect.
-    """
+    """Tenant-scoped polling with a 120-second lifetime and terminal DB errors."""
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = current_tenant_id()
     _ = role
 
     async def event_gen():
@@ -1939,79 +1935,17 @@ async def security_events_stream(
         while asyncio.get_event_loop().time() < deadline:
             if await request.is_disconnected():
                 break
-            rows: List[Dict[str, Any]] = []
             try:
-                with db_session() as db:
-                    # Primary: security_event_ingest (has rowid-like id)
-                    try:
-                        raw = db.execute(
-                            sql_text(
-                                """
-                                SELECT id, event_time, event_type, severity, vendor, tenant_id
-                                FROM security_event_ingest
-                                WHERE id > :cursor
-                                ORDER BY id ASC
-                                LIMIT 50
-                                """
-                            ),
-                            {"cursor": cursor},
-                        ).fetchall()
-                        for r in raw or []:
-                            rows.append(
-                                {
-                                    "id": int(r[0] or 0),
-                                    "event_time": str(r[1] or ""),
-                                    "event_type": str(r[2] or ""),
-                                    "severity": str(r[3] or "unknown"),
-                                    "vendor": str(r[4] or ""),
-                                    "tenant_id": str(r[5] or ""),
-                                    "source": "security_event_ingest",
-                                }
-                            )
-                    except Exception:
-                        pass
-                    # Fallback: security_events
-                    if not rows:
-                        try:
-                            raw2 = db.execute(
-                                sql_text(
-                                    """
-                                    SELECT id, event_time, severity, details, tenant_id
-                                    FROM security_events
-                                    WHERE id > :cursor
-                                    ORDER BY id ASC
-                                    LIMIT 50
-                                    """
-                                ),
-                                {"cursor": cursor},
-                            ).fetchall()
-                            for r in raw2 or []:
-                                rows.append(
-                                    {
-                                        "id": int(r[0] or 0),
-                                        "event_time": str(r[1] or ""),
-                                        "event_type": _security_type_from_details(r[3]),
-                                        "severity": str(r[2] or "unknown"),
-                                        "vendor": "",
-                                        "tenant_id": str(r[4] or ""),
-                                        "source": "security_events",
-                                    }
-                                )
-                        except Exception:
-                            pass
+                import asyncio as _db_asyncio
+                rows = await _db_asyncio.to_thread(_load_security_event_batch, tenant_id, cursor)
             except Exception:
-                pass
-
+                yield 'event: error\ndata: {"code":"security_stream_unavailable"}\n\n'
+                return
             for row in rows:
-                new_id = int(row.get("id") or 0)
-                if new_id > cursor:
-                    cursor = new_id
+                cursor = max(cursor, int(row.get('id') or 0))
                 yield f"data: {json.dumps(row)}\n\n"
-
             if not rows:
-                # Heartbeat keeps the connection alive
                 yield ": heartbeat\n\n"
-
             await asyncio.sleep(3)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")

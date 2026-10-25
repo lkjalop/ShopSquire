@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { AmbiguityExploration } from '../components/AmbiguityExplorationPanel';
 import type { ProductShelfProjection } from '../components/ProductShelvesPanel';
 import type { SupplierContinuation } from '../components/SupplierContinuationCard';
-import { apiUrl, safeJson } from '../lib/api';
+import { apiRequestHeaders, apiUrl, safeJson } from '../lib/api';
 import { csrfHeaders } from '../lib/csrf';
 
 export type ActiveShoppingCase = {
@@ -74,7 +74,7 @@ export function shoppingCasePresentationReducer(
 const requestHeaders = (idempotencyKey?: string) => ({
   'Content-Type': 'application/json',
   ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-  'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+  ...apiRequestHeaders(),
   ...csrfHeaders(),
 });
 
@@ -179,7 +179,7 @@ export function useShoppingCaseResearch() {
             + `/interpretation-jobs/latest?uid=${encodeURIComponent(active.uid || '')}`,
         ), {
           credentials: 'include', signal: controller.signal,
-          headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          headers: { ...apiRequestHeaders() },
         });
         if (latest.ok) {
           const job = await safeJson(latest);
@@ -193,7 +193,7 @@ export function useShoppingCaseResearch() {
           `/api/v1/trace/${encodeURIComponent(traceId)}/events/stream`,
         ), {
           credentials: 'include', signal: controller.signal,
-          headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          headers: { ...apiRequestHeaders() },
         });
         if (!response.ok || !response.body) return;
         const reader = response.body.getReader();
@@ -244,7 +244,7 @@ export function useShoppingCaseResearch() {
         keepalive: true,
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          ...apiRequestHeaders(),
           ...csrfHeaders(),
         },
         body: JSON.stringify({
@@ -308,7 +308,7 @@ export function useShoppingCaseResearch() {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          ...apiRequestHeaders(),
           ...csrfHeaders(),
         },
         body: JSON.stringify({

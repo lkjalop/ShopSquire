@@ -81,6 +81,17 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
                 command.upgrade(Config("alembic.ini"), "head")
                 set_engine(engine)
                 _seed_catalog(engine)
+                from sqlalchemy.orm import Session
+                from src.app.services.operator_tenant_membership import grant_membership, principal_hash_for_api_key
+
+                key = f"availability-test-{uuid.uuid4().hex}"
+                patch.setenv("MERCHANT_API_KEY", key)
+                patch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "strict")
+                with Session(engine) as grant_db:
+                    grant_membership(grant_db, principal_hash=principal_hash_for_api_key(key),
+                                     tenant_id="default", role="merchant", auth_method="api_key",
+                                     created_by="owned-availability-fixture")
+                    grant_db.commit()
                 app = create_app()
                 created_engine = getattr(app.state, "engine", None)
                 if getattr(app.state, "owns_engine", False) and created_engine is not engine and created_engine is not None:
@@ -88,7 +99,7 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
                 app.state.engine = engine
                 app.state.owns_engine = False
                 with database_owner(engine), TestClient(app) as client:
-                    body = _request_availability(client)
+                    body = _request_availability(client, headers={"x-skip-observer": "1", "x-api-key": key, "x-tenant-id": "default"})
         finally:
             set_engine(original_engine)
             engine.dispose()
@@ -96,14 +107,14 @@ def test_bulk_availability_query_wired_end_to_end(monkeypatch):
     _assert_availability(body)
 
 
-def _request_availability(client):
+def _request_availability(client, *, headers):
     r = client.get(
         "/api/v1/recommend/suggest",
         params={
             "uid": f"bulk-avail-e2e-{uuid.uuid4()}",
             "query": "10 gaming laptops at $1800 each, can you deliver in 4 weeks?",
         },
-        headers={"x-skip-observer": "1", "x-api-key": "local-merchant-key"},
+        headers=headers,
     )
     assert r.status_code == 200, r.text
     return r.json()

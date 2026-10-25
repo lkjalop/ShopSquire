@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, buyerUid } from './helpers/authenticatedTest';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { readFileSync } from 'fs';
@@ -11,11 +11,32 @@ const mimeMismatch = resolve(fixtureDir, 'png_bytes_declared_as.pdf');
 const hiddenInjection = resolve(fixtureDir, 'steg_prompt_injection.png');
 
 test.beforeAll(() => {
-  execFileSync('python', [
+  execFileSync(process.env.ROADMAP_TEST_PYTHON || 'python', [
     resolve(repoRoot, 'scripts/gen_browser_security_fixtures.py'),
     '--out',
     fixtureDir,
   ], { cwd: repoRoot, stdio: 'pipe' });
+});
+
+const effectSnapshot=()=>JSON.parse(execFileSync(process.env.ROADMAP_TEST_PYTHON || 'python',
+  ['-m','scripts.demo_effect_snapshot'],{cwd:repoRoot,env:process.env,timeout:15000}).toString());
+let effectsBefore:unknown;
+test.beforeEach(async({page},info)=>{
+  const beforeStartup=effectSnapshot();
+  // The storefront's authenticated cart read initializes an empty draft. Take
+  // the attack baseline after that authorized read, preserving both snapshots.
+  const response=await page.request.get('/api/v1/cart',{params:{uid:buyerUid}});
+  expect(response.ok()).toBe(true);
+  expect((await response.json()).items).toEqual([]);
+  effectsBefore=effectSnapshot();
+  await info.attach('startup-effect-counts.json',{
+    body:JSON.stringify({before:beforeStartup,after:effectsBefore}),contentType:'application/json',
+  });
+});
+test.afterEach(async({},info)=>{
+  const after=effectSnapshot();
+  await info.attach('effect-counts.json',{body:JSON.stringify({before:effectsBefore,after}),contentType:'application/json'});
+  expect(after).toEqual(effectsBefore);
 });
 
 test('rejected attachment remains visible and cannot become an attachment-free recommendation', async ({ page }) => {

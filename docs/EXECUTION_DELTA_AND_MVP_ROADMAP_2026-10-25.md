@@ -1,5 +1,7 @@
 # Execution delta, MVP contract and remaining roadmap
 
+**Historical pre-consolidation ledger.** The [consolidated savepoint and pilot roadmap](CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md) records the subsequent integration of all 339 dirty paths and fresh tests. Counts and source identities below retain their original meaning.
+
 Assessment date: **25 October 2026, Australia/Sydney**. This updates the [published 23 October status](REPOSITORY_STATUS_AND_ROADMAP_2026-10-23.md) and the locally retained 24 October reassessment. It is not a release declaration. The ten-hour work window began at 24 October 09:52:41 UTC and ends at 19:52:41 UTC. Results below distinguish independently integrated GitHub changes from larger local candidates.
 
 ## Read this first

@@ -4,25 +4,27 @@ import json
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.analytics.features_timeseries import security_timeseries
 from src.app.analytics.risk_scoring import score_graph_risk
 from src.app.services.db_read_routing import read_session
 from src.app.services.dependency_resilience import call_with_resilience
-from sqlalchemy import text
 
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
 
 def _load_security_events(limit: int = 200) -> List[Dict[str, Any]]:
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant = current_tenant_id()
     events: List[Dict[str, Any]] = []
     def _query_rows():
         with read_session(read_class="analytics") as db:
             return db.execute(
-                text("SELECT details FROM security_events ORDER BY event_time DESC LIMIT :limit"),
-                {"limit": limit},
+                text("SELECT details FROM security_events WHERE tenant_id = :tenant ORDER BY event_time DESC LIMIT :limit"),
+                {"limit": limit, "tenant": tenant},
             ).fetchall()
 
     rows = call_with_resilience("db.analytics.security_events", _query_rows, timeout_s=4.0, retries=1)
@@ -41,17 +43,19 @@ def fraud_timeseries(
     days: int = Query(14, ge=1, le=90),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant = current_tenant_id()
     return call_with_resilience(
         "db.analytics.timeseries",
-        lambda: _timeseries(days),
+        lambda: _timeseries(days, tenant),
         timeout_s=5.0,
         retries=1,
     )
 
 
-def _timeseries(days: int) -> Dict[str, Any]:
+def _timeseries(days: int, tenant_id: str) -> Dict[str, Any]:
     with read_session(read_class="analytics") as db:
-        return security_timeseries(db, days=days)
+        return security_timeseries(db, days=days, tenant_id=tenant_id)
 
 
 @router.get("/fraud/graph")

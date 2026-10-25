@@ -105,7 +105,7 @@ def _simulate_policy(
             for receipt_day, quantity in arrivals.items()
             if receipt_day > day
         )
-        if on_hand + incoming <= reorder_point:
+        if reorder_quantity > 0 and on_hand + incoming <= reorder_point:
             lead_time = lead_times[purchase_orders % len(lead_times)]
             receipt_day = day + lead_time
             arrivals[receipt_day] = arrivals.get(receipt_day, 0) + reorder_quantity
@@ -121,7 +121,7 @@ def _simulate_policy(
             "reorder_point_units": round(float(reorder_point), 4),
             "reorder_quantity_units": int(reorder_quantity),
         },
-        "fill_rate": round(filled / total_demand, 6),
+        "fill_rate": round(filled / total_demand, 6) if total_demand else None,
         "filled_units": filled,
         "lost_units": lost_units,
         "stockout_days": stockout_days,
@@ -133,7 +133,7 @@ def _simulate_policy(
         "service_impact": round(
             (filled / total_demand) - (stockout_days / len(demand)),
             6,
-        ),
+        ) if total_demand else None,
         "purchase_orders": purchase_orders,
         "purchased_units": purchased_units,
         "purchase_spend_minor": purchase_spend,

@@ -1,9 +1,39 @@
 from types import SimpleNamespace
+import uuid
+
+import pytest
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from src.app.services import market_projection
+from src.app.services.operator_tenant_membership import grant_membership, principal_hash_for_api_key, revoke_membership
+
+
+@pytest.fixture
+def operator_client(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.app.main import create_app
+
+    key = f"projection-test-owner-{uuid.uuid4().hex}"
+    tenant = f"projection-test-{uuid.uuid4().hex}"
+    principal = principal_hash_for_api_key(key)
+    monkeypatch.setenv("OWNER_API_KEY", key)
+    monkeypatch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "strict")
+    app = create_app()
+    with Session(app.state.engine) as db:
+        grant_membership(db, principal_hash=principal, tenant_id=tenant, role="owner",
+                         auth_method="api_key", created_by="owned-test-fixture")
+        db.commit()
+    client = TestClient(app)
+    try:
+        yield client, {"x-api-key": key, "x-tenant-id": tenant}, principal
+    finally:
+        client.close()
+        with Session(app.state.engine) as db:
+            db.execute(text("DELETE FROM operator_tenant_membership WHERE principal_hash=:principal"),
+                       {"principal": principal})
+            db.commit()
 
 
 def test_sparse_projection_sources_do_not_poison_the_caller_transaction():
@@ -49,9 +79,8 @@ def test_product_projection_endpoint_requires_operator_auth():
     assert response.status_code in {401, 403}
 
 
-def test_commercial_proposal_submission_queues_review_without_execution(monkeypatch):
-    from fastapi.testclient import TestClient
-    from src.app.main import create_app
+def test_commercial_proposal_submission_queues_review_without_execution(monkeypatch, operator_client):
+    client, headers, _ = operator_client
 
     monkeypatch.setattr(
         market_projection,
@@ -72,9 +101,9 @@ def test_commercial_proposal_submission_queues_review_without_execution(monkeypa
         "src.app.routers.approvals.enqueue_approval",
         lambda *a, **k: "approval-1",
     )
-    response = TestClient(create_app()).post(
+    response = client.post(
         "/api/v1/admin/bi/product-projection/SKU-1/proposals/discount",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
     )
     assert response.status_code == 200
     assert response.json() == {
@@ -86,9 +115,8 @@ def test_commercial_proposal_submission_queues_review_without_execution(monkeypa
     }
 
 
-def test_commercial_proposal_submission_fails_closed(monkeypatch):
-    from fastapi.testclient import TestClient
-    from src.app.main import create_app
+def test_commercial_proposal_submission_fails_closed(monkeypatch, operator_client):
+    client, headers, _ = operator_client
 
     monkeypatch.setattr(
         market_projection,
@@ -103,17 +131,16 @@ def test_commercial_proposal_submission_fails_closed(monkeypatch):
             },
         },
     )
-    response = TestClient(create_app()).post(
+    response = client.post(
         "/api/v1/admin/bi/product-projection/SKU-1/proposals/replenishment",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
     )
     assert response.status_code == 409
     assert response.json()["detail"]["reasons"] == ["untrusted_or_stale_atp"]
 
 
-def test_newsletter_endpoint_returns_human_gated_draft(monkeypatch):
-    from fastapi.testclient import TestClient
-    from src.app.main import create_app
+def test_newsletter_endpoint_returns_human_gated_draft(monkeypatch, operator_client):
+    client, headers, _ = operator_client
 
     monkeypatch.setattr(
         market_projection,
@@ -131,9 +158,9 @@ def test_newsletter_endpoint_returns_human_gated_draft(monkeypatch):
             },
         },
     )
-    response = TestClient(create_app()).post(
+    response = client.post(
         "/api/v1/admin/bi/newsletter-draft",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"skus": ["SKU-1"]},
     )
     assert response.status_code == 200
@@ -142,3 +169,21 @@ def test_newsletter_endpoint_returns_human_gated_draft(monkeypatch):
     assert body["status"] == "draft"
     assert body["send_gate"] == "human"
     assert body["sent"] is False
+
+
+def test_operator_projection_rejects_a_tenant_without_membership(operator_client):
+    client, headers, _ = operator_client
+    response = client.get("/api/v1/admin/bi/product-projection", params={"sku": "SKU-1"},
+                          headers={**headers, "x-tenant-id": "ungranted-test-tenant"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "operator_tenant_membership_required"
+
+
+def test_operator_projection_rejects_revoked_membership(operator_client):
+    client, headers, principal = operator_client
+    with Session(client.app.state.engine) as db:
+        assert revoke_membership(db, principal_hash=principal, tenant_id=headers["x-tenant-id"])
+        db.commit()
+    response = client.get("/api/v1/admin/bi/product-projection", params={"sku": "SKU-1"}, headers=headers)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "operator_tenant_membership_required"

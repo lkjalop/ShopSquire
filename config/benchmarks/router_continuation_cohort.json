@@ -1,0 +1,205 @@
+{
+  "provenance": "tests\\characterization\\batteries\\starter_battery.json",
+  "review_status": "historical_characterization_with_agent_derived_lane_labels_not_independent_holdout",
+  "cases": [
+    {
+      "id": "search_budget",
+      "query": "gaming laptop under $2000",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "search"
+    },
+    {
+      "id": "search_university",
+      "query": "recommend a laptop for university",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "search"
+    },
+    {
+      "id": "budget_cap_negated",
+      "query": "show me laptops but nothing over $1900",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "budget"
+    },
+    {
+      "id": "budget_binary_floor",
+      "query": "is $1800 enough for a gaming laptop?",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "budget"
+    },
+    {
+      "id": "budget_band",
+      "query": "laptop between $1200 and $1800",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "budget"
+    },
+    {
+      "id": "offcatalog_a100",
+      "query": "need five rack-mount A100 GPU servers under $80,000",
+      "expected_lanes": [
+        "OFF_CATALOG"
+      ],
+      "stratum": "off_catalog"
+    },
+    {
+      "id": "offcatalog_paraphrase",
+      "query": "quote me a couple of rackmount GPU nodes for our datacenter",
+      "expected_lanes": [
+        "OFF_CATALOG"
+      ],
+      "stratum": "off_catalog"
+    },
+    {
+      "id": "offcatalog_never_listed",
+      "query": "do you sell forklifts?",
+      "expected_lanes": [
+        "OFF_CATALOG"
+      ],
+      "stratum": "off_catalog"
+    },
+    {
+      "id": "spec_not_formfactor",
+      "query": "a laptop with performance close to an A100 for local AI work",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "off_catalog_boundary"
+    },
+    {
+      "id": "workload_cyberpunk",
+      "query": "laptop that can run cyberpunk 2077",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "workload"
+    },
+    {
+      "id": "workload_valorant_fps",
+      "query": "i want to play valorant at 144fps",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "workload"
+    },
+    {
+      "id": "workload_ai_finetune",
+      "query": "laptop for fine-tuning small language models locally",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "workload"
+    },
+    {
+      "id": "compare_two_models",
+      "query": "compare the dell g16 against the lenovo legion for gaming",
+      "expected_lanes": [
+        "COMPARE"
+      ],
+      "stratum": "compare"
+    },
+    {
+      "id": "deficit_reorder",
+      "query": "I need 50 units but you only have a few in stock, am I ok waiting for a reorder?",
+      "expected_lanes": [
+        "PROCUREMENT"
+      ],
+      "stratum": "procurement"
+    },
+    {
+      "id": "procurement_bulk",
+      "query": "we need 25 laptops for our new office, can you do a bulk quote?",
+      "expected_lanes": [
+        "PROCUREMENT"
+      ],
+      "stratum": "procurement"
+    },
+    {
+      "id": "cart_swap_via_suggest",
+      "query": "swap the dell for a lenovo legion in my cart",
+      "expected_lanes": [
+        "CART_MUTATE"
+      ],
+      "stratum": "cart"
+    },
+    {
+      "id": "policy_payment_plans",
+      "query": "do you offer payment plans?",
+      "expected_lanes": [
+        "POLICY_QUESTION"
+      ],
+      "stratum": "policy"
+    },
+    {
+      "id": "policy_returns",
+      "query": "what is your returns policy?",
+      "expected_lanes": [
+        "POLICY_QUESTION"
+      ],
+      "stratum": "policy"
+    },
+    {
+      "id": "support_claim_damage",
+      "query": "my laptop arrived with a cracked screen and I want a refund",
+      "expected_lanes": [
+        "SUPPORT_CLAIM"
+      ],
+      "stratum": "support_claim"
+    },
+    {
+      "id": "accessory_bag",
+      "query": "a laptop bag that fits a 16 inch laptop",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "accessory"
+    },
+    {
+      "id": "persona_creator",
+      "query": "laptop for video editing and streaming on twitch",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "persona"
+    },
+    {
+      "id": "heldout_future_game_alias_authority",
+      "query": "i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?",
+      "expected_lanes": [
+        "SEARCH",
+        "FILTER"
+      ],
+      "stratum": "research_clarification"
+    }
+  ],
+  "excluded_unsupported_labels": [
+    {
+      "id": "off_domain",
+      "query": "recommend a good pizza place near me",
+      "expected_lanes": [
+        "OFF_DOMAIN"
+      ],
+      "stratum": "off_domain"
+    }
+  ],
+  "revision_note": "Corrected runtime lane vocabulary after first ABBA run. Historical results remain bound to .artifacts/continuation-router-original-cohort.json; do not rescore them using this revision."
+}

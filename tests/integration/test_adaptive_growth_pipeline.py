@@ -81,9 +81,13 @@ def test_gate2_signal_to_finding_to_recall_to_narration(db):
                                      result_skus=["sku9monitor"])
     assert any(i.get("kind") == "finding" for i in insights["hippograph_insights"]), \
         "an exact result-SKU finding must be reachable in recall"
-    # narration receives structured + plain-English evidence
-    assert ctx["market_evidence"]["findings"]
-    assert "sku9monitor" in ctx["narration_note"] or ctx["narration_note"]  # note built
+    # These historical synthetic signals lack an observation validity contract.
+    # Discovery/recall may expose them diagnostically, but neither path grants
+    # narration authority. Current attributed observations are tested separately.
+    assert ctx["market_evidence"]["findings"] == []
+    assert ctx["withheld_market_findings"]
+    assert ctx["narration_note"] == ""
+    assert all(item['kind'] != 'finding' for item in ctx['market_evidence']['salient_entities'])
 
 
 # ── Gate 3: assignment → ranking delta → outcome → guardrail → rollback ───────

@@ -9,6 +9,20 @@ on:
 jobs:
   smoke-clean-checkout:
     runs-on: ubuntu-latest
+    env:
+      # Test imports must not boot with production-only secret requirements.
+      # Production validation and owned security profiles remain separate.
+      APP_ENV: test
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
 
@@ -38,7 +52,9 @@ jobs:
 
       - name: Source size architecture ratchet
         run: |
+          python scripts/check_json_configs.py
           python scripts/check_source_file_sizes.py
+          python scripts/check_function_sizes.py
 
       - name: Signature and path smoke tests
         run: |
@@ -61,3 +77,53 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      - name: Shared cache scope and partition regression
+        env:
+          ROADMAP_OWNED_REDIS_URL: redis://127.0.0.1:6379/0
+        run: pytest -q tests/integration/test_owned_redis_semantic_scope.py tests/services/test_semantic_cache_guardrails.py
+
+      - name: Electronics catalogue and scenario regression gates
+        env:
+          APP_ENV: local
+        run: |
+          pytest -q tests/test_inventory_import_boundaries.py tests/services/test_electronics_shop_scenario.py tests/services/test_shop_operational_history.py tests/api/test_electronics_shop_demo.py tests/services/test_case_contract_binding.py tests/api/test_case_contract_selection.py tests/services/test_v2_contract_binding.py
+
+      - name: Install Chromium for portfolio clickthrough
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Catalogue metadata and buyer estimate boundaries
+        env:
+          APP_ENV: test
+          STRIPE_API_KEY: ""
+          STRIPE_API_KEY_REF: ""
+        run: |
+          pytest -q \
+            tests/test_catalog_fixture_retrieval_contract.py \
+            tests/services/test_buyer_supplier_constraints.py \
+            tests/services/test_buyer_supplier_selection.py \
+            tests/services/test_buyer_supplier_quotes.py \
+            tests/services/test_payment_provider_execution_policy.py \
+            tests/unit/test_cloud_runtime_config.py \
+            tests/api/test_payment_ledger_refunds.py
+
+      - name: Migrated synthetic shop and real API browser clickthrough
+        run: |
+          for scenario in electronics-shop-scenario case-contract-selection governed-product-offers supplier-enquiry-journey supplier-recovery; do
+            fixture=".artifacts/electronics-ci/$scenario"
+            python -m scripts.prepare_roadmap_demo --directory "$fixture"
+            python -m scripts.run_roadmap_browser --directory "$fixture" --api-port 8087 --ui-port 5173 "$scenario.spec.ts"
+            python -m scripts.run_roadmap_browser --directory "$fixture" --restore --api-port 8087 --ui-port 5173 "$scenario.spec.ts"
+          done
+
+      - name: Preserve electronics scenario evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electronics-shop-evidence
+          path: |
+            .artifacts/electronics-ci/**/receipt.json
+            .artifacts/electronics-ci/**/report.json
+            .artifacts/electronics-ci/**/*.log
+            .artifacts/electronics-ci/**/traces

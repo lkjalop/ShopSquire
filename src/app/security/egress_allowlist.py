@@ -271,6 +271,7 @@ _guard: EgressDomainGuard | None = None
 _patched_httpx = False
 _patched_requests = False
 _orig_requests_send = None
+_httpx_original_sends = None
 
 
 def get_guard() -> EgressDomainGuard:
@@ -289,7 +290,7 @@ def patch_httpx_egress_guard(guard: EgressDomainGuard | None = None) -> None:
 
     Call this once during application startup (e.g., in create_app()).
     """
-    global _patched_httpx
+    global _patched_httpx, _httpx_original_sends
     if _patched_httpx:
         return
     g = guard or get_guard()
@@ -303,6 +304,7 @@ def patch_httpx_egress_guard(guard: EgressDomainGuard | None = None) -> None:
 
         _orig_sync_send = httpx.Client.send
         _orig_async_send = httpx.AsyncClient.send
+        _httpx_original_sends = (httpx.Client,_orig_sync_send,httpx.AsyncClient,_orig_async_send)
 
         def _patched_send(self_client, request, *args, **kwargs):
             g.check(str(request.url))
@@ -368,17 +370,14 @@ def patch_outbound_egress_guard(guard: EgressDomainGuard | None = None) -> None:
 
 def unpatch_httpx_egress_guard() -> None:
     """Remove monkey-patch (for testing only). Not thread-safe."""
-    global _patched_httpx, _guard
-    try:
-        import httpx
-
-        # Restore by reimporting originals from the module
-        import importlib
-        fresh = importlib.import_module("httpx")
-        # Easiest reset: reload the module
-        importlib.reload(fresh)
-    except Exception:
-        pass
+    global _patched_httpx, _guard, _httpx_original_sends
+    # Reloading httpx retains the cached _client classes and their old guard
+    # closures. Restore the exact methods saved when this guard was installed.
+    if _httpx_original_sends is not None:
+        sync_client,sync_send,async_client,async_send=_httpx_original_sends
+        sync_client.send=sync_send
+        async_client.send=async_send
+    _httpx_original_sends = None
     _patched_httpx = False
     _guard = None
 

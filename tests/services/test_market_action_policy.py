@@ -184,3 +184,13 @@ def test_sku_action_does_not_accept_category_only_subject_evidence():
     )
     assert verdict["allowed"] is False
     assert verdict["qualified_demand_facts"] == 1
+
+
+def test_expired_quote_and_future_demand_cannot_authorize_replenishment():
+    inputs = dict(demand_facts=[_demand("ga4"), _demand("orders")], atp=_atp(),
+                  economics=_economics(), now=NOW, tenant_id="tenant-a", sku="SKU-1")
+    stale = authorize_replenishment(**{**inputs, "economics":_economics(effective_to="2026-07-20T00:00:00Z")})
+    assert not stale["allowed"] and not stale["economics_authoritative"]
+    future = authorize_replenishment(**{**inputs, "demand_facts":[
+        _demand("ga4") | {"observed_at":"2027-01-01T00:00:00Z"}, _demand("orders")]})
+    assert not future["allowed"] and future["qualified_demand_facts"] == 1

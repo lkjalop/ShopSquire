@@ -1,7 +1,7 @@
 """W1 golden workload matrix (2026-07-08) — the 8 reference queries both audits converged on.
 
 Two tiers: UNIT tier (no backend — stage/gate contracts, always runs in CI) and LIVE tier
-(skipped unless :8080 answers — end-to-end payload shape through /chat/query). These encode the
+(explicit local runtime opt-in — end-to-end payload shape through /chat/query). These encode the
 capability boundary: gaming fit carries min-vs-recommended verdicts; AI honesty names limits;
 off-catalog never sells laptops for datacenter asks."""
 from __future__ import annotations
@@ -72,15 +72,11 @@ def test_off_catalog_gate_fires_on_datacenter_not_on_laptops():
 
 # ── LIVE TIER (the 8 golden queries; skip when backend down) ────────────────────────────────
 
-def _backend_up() -> bool:
-    try:
-        import httpx
-        return httpx.get("http://127.0.0.1:8080/healthz", timeout=3).status_code == 200
-    except Exception:
-        return False
+from tests.acceptance.live_runtime import live_base_url
 
 
-live = pytest.mark.skipif(not _backend_up(), reason="backend :8080 not running")
+BASE_URL = live_base_url()
+live = pytest.mark.skipif(BASE_URL is None, reason="live acceptance not explicitly enabled")
 
 
 def _chat(q: str, uid: str) -> dict:
@@ -88,10 +84,11 @@ def _chat(q: str, uid: str) -> dict:
     import uuid
     from tests.utils import default_headers
     H = {**default_headers(), "Content-Type": "application/json"}
-    r = httpx.Client(timeout=120).post("http://127.0.0.1:8080/api/v1/chat/query",
-                                       headers=H,
-                                       json={"uid": f"{uid}-{uuid.uuid4().hex[:10]}", "query": q})
-    return r.json() if r.status_code == 200 else {}
+    with httpx.Client(timeout=120) as client:
+        response = client.post(f"{BASE_URL}/api/v1/chat/query", headers=H,
+                               json={"uid": f"{uid}-{uuid.uuid4().hex[:10]}", "query": q})
+        response.raise_for_status()
+        return response.json()
 
 
 @live

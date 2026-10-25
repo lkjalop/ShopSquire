@@ -1,4 +1,4 @@
-import { apiUrl, safeJson } from './api';
+import { apiRequestHeaders, apiUrl, safeJson } from './api';
 import { csrfHeaders } from './csrf';
 
 
@@ -18,7 +18,7 @@ export async function postShoppingCaseAction(
     method: 'POST', credentials: 'include', signal: options.signal,
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+      ...apiRequestHeaders(),
       ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
       ...csrfHeaders(),
     },

@@ -423,6 +423,9 @@ def run_fulfillment_stage(
                      flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,
                      force_sourcing=_wants_sourcing(query), primary_name=_primary_name,
                      query=query or "")
+    if line:
+        line = _network_adjusted_availability_line(
+            line, payload.get("availability") or {}, primary_name=_primary_name)
     return line
 
 
@@ -433,6 +436,11 @@ def _network_adjusted_availability_line(line: str, avail: Dict[str, Any], primar
     hasn't chosen a product yet, so we NAME that pick ("For the top match, <name>: …") rather than implying
     "we have N of the thing you want". Keeps the copy honest without hiding availability from a bulk buyer.
     """
+    snapshot = (avail or {}).get("inventory_snapshot") or {}
+    if snapshot.get("status") != "recorded" or snapshot.get("freshness_status") != "fresh":
+        subject = f"For the top match, {primary_name}: " if primary_name else "On availability: "
+        return (subject + "current stock and transfer availability are not verified. "
+                "Recorded inventory is provisional; confirm current quantities before committing.")
     net = (avail or {}).get("network") if isinstance(avail, dict) else {}
     if not isinstance(net, dict) or not net.get("transfer_plan"):
         return line

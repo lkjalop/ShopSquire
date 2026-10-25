@@ -8,7 +8,8 @@ export function formatMoney(value: number, currency: unknown = 'USD'): string {
     style: 'currency',
     currency: normalizeCurrency(currency),
     currencyDisplay: 'code',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
   });
 }
 

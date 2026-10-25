@@ -38,6 +38,8 @@ def terminal_research_narration(
     subject_role: str | None = None,
     current_exploration: Mapping[str, Any] | None = None,
     product_shelves: Mapping[str, Any] | None = None,
+    catalog_browse: Mapping[str, Any] | None = None,
+    catalog_product_count: int = 0,
 ) -> str:
     """Return canonical failure/held narration, otherwise preserve the answer."""
 
@@ -48,6 +50,24 @@ def terminal_research_narration(
     if (exploration.get('case_id') and outcome.get('case_id')
             and exploration['case_id'] != outcome['case_id']):
         return str(existing_message or '')
+    browse = dict(catalog_browse or {})
+    if (catalog_product_count > 0 and not exploration and not outcome.get('identity')
+            and outcome.get('catalog_authority') != 'blocked'
+            and outcome.get('requirement_completeness') not in {'partial', 'complete'}
+            and browse.get('outcome') == 'catalog_browse'
+            and browse.get('catalog_authority') == 'permitted'
+            and browse.get('scope') == 'category_and_price'
+            and browse.get('qualification_authority') == 'none'
+            and browse.get('requirements_status') == 'not_requested'
+            and browse.get('commerce_authority') == 'none'):
+        if browse.get('bundle_browse') is True:
+            return str(existing_message or '')
+        degraded = ('The workload interpreter was unavailable. '
+                    if (execution_evidence or {}).get('failure_code') == 'model_execution_unavailable'
+                    else '')
+        return (degraded + f'I found {catalog_product_count} catalogue choices matching the category and price filters. '
+                'These are catalogue snapshots; workload compatibility and current availability are not verified. '
+                'No cart or supplier action was authorized.')
     if outcome.get('identity') and outcome.get('requirement_completeness') == 'partial':
         missing = ', '.join(str(key).replace('_', ' ') for key in outcome.get('missing_requirement_attributes', []))
         return (f"Research accepted {int(outcome.get('accepted_claim_count') or 0)} requirement claims, "

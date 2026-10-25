@@ -66,6 +66,8 @@ def test_bounded_cleanup(number,live_owner):
     (tmp_path / 'test_cleanup_child.py').write_text(source, encoding='utf-8')
     (tmp_path / 'pytest.ini').write_text('[pytest]\ntimeout=180\ntimeout_method=thread\n', encoding='utf-8')
     env = {**os.environ, 'PYTHONPATH': str(root),
+        'SECURITY_SERVER_SPAWN': '0', 'E2E_BASE_URL': '',
+        'PYTEST_OWNED_SECURITY_DIRECTORY': '',
         'PYTEST_LAST_RUNNING_FILE': str(tmp_path / 'last-running'), 'PYTEST_FAIL_ON_THREAD_LEAK': '1'}
     for name in ('PYTEST_RESULT_STREAM', 'PYTEST_CAPTURE_RESOURCES', 'PYTEST_RESOURCE_GC_STREAM'):
         env.pop(name, None)

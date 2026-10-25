@@ -13,7 +13,8 @@ import json
 import os
 from pathlib import Path
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 from src.app.models.db import create_runtime_engine
 from src.app.models.database_ownership import database_owner
 
@@ -91,6 +92,24 @@ def test_order_attributes_to_decision(stack):
     assert order_trace and order_trace[0] == "ATTR-T", "E1: order should carry the trace_id"
     assert conv and conv[0] == "ATTR-D", "E2: order should link to the recorded decision"
     assert int(conv[1] or 0) == 119900, "E2: conversion should carry the order value"
+
+
+def test_order_prices_use_the_supplied_transaction_even_with_an_unrelated_request_context(stack):
+    from types import SimpleNamespace
+    from src.app.models.db import CURRENT_REQUEST, db_session
+    from src.app.routers.orders import create_order_core
+    foreign = create_engine('sqlite+pysqlite:///:memory:', poolclass=StaticPool)
+    try:
+        with db_session() as owned:
+            token = CURRENT_REQUEST.set(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=foreign))))
+            try:
+                result = create_order_core(owned, uid='owned-transaction-buyer',
+                    items=[{'sku':'ATTR-1','quantity':2}], trace_id='ATTR-T')
+                assert result['total_cents'] == 239800
+            finally:
+                CURRENT_REQUEST.reset(token)
+    finally:
+        foreign.dispose()
 
 
 def test_e0_records_bandit_arm_not_ab_variant(stack):

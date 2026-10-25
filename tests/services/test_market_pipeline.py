@@ -80,6 +80,28 @@ def test_pipeline_is_idempotent_on_reingest(db):
     assert first["persisted"] >= 1
 
 
+def test_failed_commit_never_claims_persistence_or_writes_history(db, monkeypatch):
+    from src.app.services import market_store
+    called = []
+    monkeypatch.setattr(market_store, 'persist_history', lambda *a, **k: called.append(True))
+    def fail_commit():
+        raise RuntimeError('injected commit failure')
+    monkeypatch.setattr(db, 'commit', fail_commit)
+    out = mp.run_pipeline(db, anomaly_fn=_flag_last_outlier)
+    assert out['status'] == 'commit_failed'
+    assert out['persisted'] == out['rolled_up'] == out['pruned'] == 0
+    assert not called
+    assert db.execute(text('SELECT COUNT(*) FROM market_signal')).scalar() == 0
+
+
+def test_uncommitted_pipeline_reports_pending_and_can_be_rolled_back(db):
+    out = mp.run_pipeline(db, anomaly_fn=_flag_last_outlier, commit=False)
+    assert out['status'] == 'pending_commit'
+    assert out['persisted'] == 0 and out['pending_findings'] > 0
+    db.rollback()
+    assert db.execute(text('SELECT COUNT(*) FROM market_signal')).scalar() == 0
+
+
 def test_pipeline_excludes_replay_tenant(db):
     # a replay-demo signal must NOT leak into the real (default) findings
     from src.app.services import market_signal as ms

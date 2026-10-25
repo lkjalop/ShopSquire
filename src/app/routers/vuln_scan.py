@@ -127,7 +127,7 @@ async def run_full_scan(
 
 
 @router.get("/scorecard")
-async def security_scorecard(
+def security_scorecard(
     tenant_id: Optional[str] = Query(None, description="Tenant to scope scorecard (omit for platform-wide)"),
     days: int = Query(30, ge=1, le=365, description="Lookback window in days"),
     _role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),

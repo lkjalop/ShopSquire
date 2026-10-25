@@ -1,0 +1,57 @@
+import {test,expect} from '@playwright/test';
+import {authenticateBuyer} from './helpers/authenticatedTest';
+const root='/api/v1/demo/product-offer-cases';
+
+for(const kind of ['bundle','upgrade'])test(`buyer reviews and explicitly accepts a supported ${kind} with durable prices`,async({page,context,baseURL},info)=>{
+ const subject=process.env[kind==='bundle'?'ROADMAP_BUNDLE_BUYER':'ROADMAP_UPGRADE_BUYER']||`roadmap-${kind}-buyer`;
+ await authenticateBuyer(context,baseURL!,subject,'synthetic-bundles');
+ await page.goto('/?surface=product-offers');
+ await page.getByRole('button',{name:'Start fictional offer case'}).click();
+ const cart=page.getByRole('region',{name:'Durable draft cart'});
+ await expect(cart).toContainText('Empty');
+ const uid=await page.evaluate(()=>sessionStorage.getItem('uid'));
+ const caseId=new URL(page.url()).searchParams.get('case_id')!;
+ for(const label of ['Fictional incompatible bag','Bag with unknown compatibility']){
+  await page.getByRole('button',{name:`Review ${label}`,exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('No offer can be made.');
+  await expect(cart).toContainText('Empty');
+  await expect(page.getByRole('button',{name:'Accept exact product offer'})).toHaveCount(0);
+ }
+ if(kind==='upgrade')await page.getByLabel('Offer buyer need').selectOption('memory_capacity');
+ await page.getByLabel('Offer quantity').fill('2');
+ const target=kind==='bundle'?'Fictional compatible backup drive':'Fictional memory upgrade';
+ let pending=page.waitForResponse(r=>r.url().endsWith('/offers')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:`Review ${target}`,exact:true}).click();
+ let response=await pending;expect(response.ok(),await response.text()).toBe(true);const declined=await response.json();
+ await expect(cart).toContainText('Empty');
+ await page.getByRole('button',{name:'Decline offer',exact:true}).click();
+ await expect(cart).toContainText('Empty');
+ pending=page.waitForResponse(r=>r.url().endsWith('/offers')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:`Review ${target}`,exact:true}).click();
+ response=await pending;expect(response.ok()).toBe(true);const offer=await response.json();
+ expect(offer.id).not.toBe(declined.id);
+ const review=page.getByRole('region',{name:'Product offer review'});
+ await expect(review).toContainText(`Total: AUD ${(offer.total_cents/100).toFixed(2)}`);
+ await expect(review).toContainText('simulation:reviewed-pair-fixture');
+ expect(offer.total_cents).toBe(kind==='bundle'?140730:129800);
+ const headers={'x-api-key':process.env.MERCHANT_API_KEY!,'x-tenant-id':'synthetic-bundles'};
+ const declinedReplay=await page.request.post(`${root}/${caseId}/offers/${declined.id}/accept`,{headers,data:{uid}});
+ expect(declinedReplay.status()).toBe(409);
+ const wrongBuyer=await page.request.post(`${root}/${caseId}/offers/${offer.id}/accept`,{headers,data:{uid:'unrelated-buyer'}});
+ expect(wrongBuyer.status()).toBe(403);await expect(cart).toContainText('Empty');
+ pending=page.waitForResponse(r=>r.url().endsWith(`/${offer.id}/accept`)&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Accept exact product offer'}).click();
+ response=await pending;expect(response.ok(),await response.text()).toBe(true);const receipt=await response.json();
+ expect(receipt.purchase_authority).toBe('none');expect(receipt.total_cents).toBe(offer.total_cents);
+ await expect(cart).toContainText('Cart version 1');
+ const replay=await page.request.post(`${root}/${caseId}/offers/${offer.id}/accept`,{headers,data:{uid}});
+ expect(replay.ok()).toBe(true);expect(await replay.json()).toEqual(receipt);
+ await page.reload();await expect(cart).toContainText('Cart version 1');
+ await expect(cart.getByRole('listitem')).toHaveCount(kind==='bundle'?2:1);
+ const state=await (await page.request.get(`${root}/${caseId}?uid=${encodeURIComponent(uid!)}`,{headers})).json();
+ expect(state.cart.version).toBe(1);expect(state.cart.items.every((i:any)=>i.quantity===2)).toBe(true);
+ const actual=await page.request.get(`/api/v1/cart?uid=${encodeURIComponent(uid!)}`,{headers:{...headers,'x-tenant-id':'synthetic-bundles'}});
+ expect(actual.ok(),await actual.text()).toBe(true);const actualCart=await actual.json();
+ expect(actualCart.bundle_savings.final_total_cents).toBe(offer.total_cents);
+ await info.attach('accepted-offer.json',{body:JSON.stringify({offer,receipt,state,actualCart},null,2),contentType:'application/json'});
+});

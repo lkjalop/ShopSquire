@@ -125,7 +125,8 @@ async def chat_stream(
             # races under real SSE traffic. Own the session for the lifetime of
             # the generator instead, and close it only after chat_query and all
             # persistence have completed.
-            with db_session() as stream_db:
+            from src.app.models.db import async_db_session
+            async with async_db_session() as stream_db:
                 async for state, value in _run_with_heartbeats(
                     chat_query(
                         request,

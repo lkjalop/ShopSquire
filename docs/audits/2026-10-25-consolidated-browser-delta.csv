@@ -1,0 +1,189 @@
+spec,title,project,c23_native_status,consolidated_native_status
+accepted-stock.spec.ts,accepted quantity changes replace holds and invalidate qualification,chromium,expected,expected
+adversarial-case-isolation.spec.ts,cross-tenant canary stays private under direct injection and UID spoofing,chromium,expected,expected
+artifact-security-boundary.spec.ts,"malicious or incompletely inspected image is blocked, traced, and records monitoring outcome",chromium,expected,expected
+artifact-security-boundary.spec.ts,rejected attachment remains visible and cannot become an attachment-free recommendation,chromium,expected,expected
+browser-native-tenant-procurement.spec.ts,ordinary signed-buyer requests retain their selected tenant without harness headers,chromium,expected,expected
+budget-subject-rfq-live.spec.ts,software budget truth is consistent and off-catalog sourcing is explicit and draft-only,chromium,expected,expected
+bulk-order-economics-live.spec.ts,"bulk order within budget keeps one canonical role, amount and order result",chromium,expected,expected
+bulk-order-economics-live.spec.ts,underfunded bulk order reports exact shortfall with no false fitting shelf,chromium,expected,expected
+buyer-evidence-source-live.spec.ts,buyer checks an official URL locally then explicitly authorizes canonical research,chromium,skipped,skipped
+buyer-flow.spec.ts,T1 — search shows products with no internal ranker tags leaked to the buyer,chromium,expected,expected
+buyer-flow.spec.ts,"T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)",chromium,expected,expected
+buyer-only-procurement.spec.ts,a signed buyer without an operator API key retains the exact shortage draft,chromium,expected,expected
+canonical-ambiguous-procurement.spec.ts,ambiguous workload explores locally before optional research without cart authority,chromium,unexpected,unexpected
+cart-clear-outage.spec.ts,a failed cart clear stays visible and can recover without a false success,chromium,expected,expected
+cart-clear-restore.spec.ts,clearing a real two-line cart immediately offers an exact one-time restore,chromium,expected,expected
+case-contract-selection.spec.ts,case requirements persist across reload and reject a stale second tab,chromium,expected,expected
+case-panel-trace-consistency.spec.ts,shopping-case panel and Decision Trace consume the same truth projection,chromium,expected,expected
+commercial-interpretation.spec.ts,budget maximum stays a commercial constraint through normal chat,chromium,expected,expected
+commercial-interpretation.spec.ts,product description does not become bulk demand: 15 inch laptops for work under AUD 1400,chromium,expected,expected
+commercial-interpretation.spec.ts,product description does not become bulk demand: Dell 15 laptop under AUD 1400,chromium,expected,expected
+consented-live-research.spec.ts,consented live discovery preserves scope and grants no commerce authority,chromium,unexpected,unexpected
+context-retention.spec.ts,budget context survives raise + cut across turns (one session),chromium,expected,expected
+context-retention.spec.ts,bulk quantity survives non-qty turns; a fresh amendment wins and then holds,chromium,expected,expected
+conversational-integrity.spec.ts,a product swap preserves the CAD purpose and quantity,chromium,expected,expected
+conversational-integrity.spec.ts,commercial turns remain bound to an ambiguous case and preserve its purpose,chromium,unexpected,unexpected
+conversational-integrity.spec.ts,ordinary gaming catalog exploration renders products without requiring research,chromium,unexpected,unexpected
+conversational-integrity.spec.ts,prospective arrival request reaches fulfilment instead of post-purchase refusal,chromium,unexpected,unexpected
+conversational-qualification.spec.ts,normal chat rejects conflicting evidence when consumed,chromium,expected,expected
+conversational-qualification.spec.ts,normal chat rejects expired evidence when consumed,chromium,expected,expected
+conversational-qualification.spec.ts,normal chat rejects revoked-source evidence when consumed,chromium,expected,expected
+conversational-qualification.spec.ts,ordinary chat qualifies fictional evidence with trace agreement and revocation,chromium,expected,expected
+conversational-qualification.spec.ts,ordinary qualified case connects to accepted holds and an independently approved fake supplier conversation,chromium,unexpected,unexpected
+conversational-qualification.spec.ts,ordinary qualified case offers an evidenced accessory and changes the draft only after acceptance,chromium,unexpected,unexpected
+conversational-spatiotemporal-certificate.spec.ts,procurement certificate requires an enrolled actor,chromium,expected,expected
+conversational-spatiotemporal-certificate.spec.ts,two-turn procurement decision lab renders and seals the canonical certificate,chromium,expected,expected
+decision-run-disturbance.spec.ts,inventory disturbance projects selective invalidation and unresolved delivery conflict,chromium,expected,expected
+decision-trace-live-audit.spec.ts,"live Decision Trace is durable, factual, and honest across all leaves",chromium,expected,expected
+decision-trace-navigation.spec.ts,"consolidated Decision Trace preserves requests, keyboard use, and every deep link",chromium,expected,expected
+decision-trace-navigation.spec.ts,qualified evidence chain remains visibly human gated,chromium,expected,expected
+decision-trace-procurement-operations.spec.ts,"Commercial Journey renders governed supplier pressure, wave and route evidence",chromium,expected,expected
+decision-trace-temporal-contact.spec.ts,phone-only supplier stays queued and opens a procurement human room,chromium,expected,expected
+decision-trace-temporal-contact.spec.ts,weekend email transmits while supplier response SLA remains paused,chromium,expected,expected
+electronics-shop-scenario.spec.ts,quantity expansion displays real API arithmetic without granting commerce authority,chromium,expected,expected
+empty-profile-auth.spec.ts,ordinary registration and login permit own shopping but never operator approval access,chromium,expected,expected
+fit-deadline-trace.spec.ts,"typed fit, quantity and deadline semantics produce governed alternatives",chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: budgeted-fleet,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: exact-1,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: exact-2,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: exact-3,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: fleet-thirty-days,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: fleet-two-days,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: named-model,chromium,unexpected,unexpected
+five-year-fleet-consent-regression.spec.ts,five-year fleet consent is consequential and bounded: personal-one,chromium,unexpected,unexpected
+governed-conversation-lifecycle.spec.ts,20-turn corrections and pronouns retain one browser session and explicit product anchor,chromium,expected,expected
+governed-product-offers.spec.ts,buyer reviews and explicitly accepts a supported bundle with durable prices,chromium,unexpected,unexpected
+governed-product-offers.spec.ts,buyer reviews and explicitly accepts a supported upgrade with durable prices,chromium,unexpected,unexpected
+inventory-scheduler.spec.ts,scheduled expiry releases an accepted buyer hold and records one durable expiry,chromium,expected,expected
+legacy-review-failure.spec.ts,failed requirement acceptance never becomes a completed review,chromium,expected,expected
+live-acceptance-budget.spec.ts,live manual acceptance preserves case budget and cannot verify partial evidence (stretch=false),chromium,expected,expected
+live-acceptance-budget.spec.ts,live manual acceptance preserves case budget and cannot verify partial evidence (stretch=true),chromium,expected,expected
+live-buyer-regression-matrix.spec.ts,BG3 affordability plus Emulate3D additive workload retains budget and researches the combined case,chromium,unexpected,unexpected
+live-buyer-regression-matrix.spec.ts,a Rockwell Emulate3D pivot supersedes gaming and dispatches enrolled research with buyer authorization,chromium,unexpected,unexpected
+live-buyer-regression-matrix.spec.ts,"an unseen Steam title resolves live identity, release state, requirements, and catalog fit",chromium,skipped,skipped
+live-buyer-regression-matrix.spec.ts,chat-pasted official URL and specifications enter their governed review paths,chromium,unexpected,unexpected
+live-buyer-regression-matrix.spec.ts,"covered gaming, university, and corporate searches stay on the normal buyer path",chromium,unexpected,unexpected
+live-buyer-regression-matrix.spec.ts,light and strenuous Emulate3D scopes remain separate and fail closed before evidence,chromium,expected,expected
+live-buyer-regression-matrix.spec.ts,natural workload replacements advance one revision and never project the prior subject,chromium,unexpected,unexpected
+live-external-ot-research-certification.spec.ts,live OT research stays in one case and exposes real provider receipts,chromium,skipped,skipped
+live-external-search-battery.spec.ts,A-H live external intelligence battery is revision-bound and fail-closed,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,evidence delivery never binds FreeCAD to AutoCAD requirements,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,evidence delivery preserves official values without qualifying partial requirements,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,low-confidence cited identity asks for confirmation without fetching,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,non-instructive continuation resolves its clean subject span,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,scope and stock: bulk,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,scope and stock: chair,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,scope and stock: unrelated,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,unseen title dawnwalker resolves without an application alias,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,unseen title mio resolves without an application alias,chromium,skipped,skipped
+live-novel-title-intelligence.spec.ts,unseen title pragmata resolves without an application alias,chromium,skipped,skipped
+live-procurement-disturbance-certificate.spec.ts,real backend seals a topology-neutral side-effect-free disturbance matrix,chromium,skipped,skipped
+live-research-memory-assessment.spec.ts,live research quantity correction supplier-draft request market question and reload retain scoped facts,chromium,skipped,skipped
+live-turn-trace-continuity.spec.ts,genuine bulk purchase retains quantity with readable currency narration,chromium,expected,expected
+live-turn-trace-continuity.spec.ts,live category and quantity turns retain their own trace and recorded history,chromium,unexpected,unexpected
+live-turn-trace-continuity.spec.ts,screenshot price correction never becomes a bulk order,chromium,unexpected,unexpected
+live-unresolved-purchase-boundary.spec.ts,"KCD2 partial evidence agrees across chat, questions and persisted turn",chromium,unexpected,unexpected
+live-unresolved-purchase-boundary.spec.ts,approximate budget keeps its literal anchor without automatic stretch,chromium,expected,expected
+live-unresolved-purchase-boundary.spec.ts,held workload cannot answer a new unresolved purchase,chromium,unexpected,unexpected
+live-unresolved-purchase-boundary.spec.ts,live complete-evidence qualified-product delivery gate,chromium,unexpected,unexpected
+live-unresolved-purchase-boundary.spec.ts,live preflight cannot replace executed provider requirements,chromium,unexpected,unexpected
+market-adaptation.spec.ts,"adaptive storefront — strong signal adapts, weak signal is governed, clearing reverts",chromium,expected,expected
+market-adaptation.spec.ts,demo demand injection requires an enrolled actor,chromium,expected,expected
+memory-restart.spec.ts,accepted buyer facts survive a real server restart without Redis,chromium,unexpected,unexpected
+merchant-replenishment.spec.ts,merchant reviews a persisted synthetic decision and wrong scope returns no data,chromium,expected,expected
+mock-catalog-category-pilot.spec.ts,buyer can request a laptop monitor and bag bundle without involuntary cart additions,chromium,not_present,unexpected
+mock-catalog-category-pilot.spec.ts,ordinary buyer can browse useful bag candidates from the mock file,chromium,not_present,unexpected
+mock-catalog-category-pilot.spec.ts,ordinary buyer can browse useful monitor candidates from the mock file,chromium,not_present,unexpected
+mock-catalog-category-pilot.spec.ts,ordinary buyer can browse useful storage candidates from the mock file,chromium,not_present,unexpected
+model-offline-turn-outcome.spec.ts,Ollama offline preserves canonical order truth and fails closed,chromium,skipped,skipped
+official-research-authorization.spec.ts,production-enrolled official evidence compiles into product authorization under one trace,chromium,skipped,skipped
+open-world-unseen-live-matrix.spec.ts,unseen 1: consent dispatches free discovery without granting authority,chromium,unexpected,unexpected
+open-world-unseen-live-matrix.spec.ts,unseen 2: consent dispatches free discovery without granting authority,chromium,unexpected,unexpected
+open-world-unseen-live-matrix.spec.ts,unseen 3: consent dispatches free discovery without granting authority,chromium,unexpected,unexpected
+open-world-unseen-live-matrix.spec.ts,unseen 4: consent dispatches free discovery without granting authority,chromium,unexpected,unexpected
+open-world-unseen-live-matrix.spec.ts,unseen 5: consent dispatches free discovery without granting authority,chromium,unexpected,unexpected
+open-world-workload-regression.spec.ts,Heroes III Remake to BG3 resolves the new canonical Steam identity,chromium,expected,expected
+open-world-workload-regression.spec.ts,demo URL policy strips ad tracking and rejects a purpose-mismatched community page,chromium,expected,expected
+open-world-workload-regression.spec.ts,digital twin to Heroes III Remake supersedes evidence and consent but retains budget,chromium,expected,expected
+open-world-workload-regression.spec.ts,explicit furniture and pharmacy categories cannot inherit laptop shelves,chromium,unexpected,unexpected
+open-world-workload-regression.spec.ts,first-turn Emulate3D URL creates its case and source-security receipt without a bridge race,chromium,expected,expected
+open-world-workload-regression.spec.ts,held-out future-game alias resolves identity but cannot invent fit or budget sufficiency,chromium,expected,expected
+open-world-workload-regression.spec.ts,"novel publisher is approved case-only, fetched, reviewed, and reranked in one case",chromium,unexpected,unexpected
+open-world-workload-regression.spec.ts,novel suitability request stays provisional and exposes a durable research plan,chromium,unexpected,unexpected
+open-world-workload-regression.spec.ts,private-IP source is blocked before fetch with one visible SSRF receipt,chromium,expected,expected
+open-world-workload-regression.spec.ts,unenrolled Larian URL is rejected with a visible zero-fetch security receipt,chromium,unexpected,unexpected
+operator-inventory.spec.ts,accepted buyer holds connect to approved shipping returns and cancellation,chromium,expected,expected
+operator-inventory.spec.ts,independent people receive and transfer stock exactly once through real API and UI,chromium,expected,expected
+ordinary-case-requirements.spec.ts,ordinary chat exposes owned requirements and rejects stale or foreign selection,chromium,expected,expected
+ordinary-chat-shortfall.spec.ts,ordinary chat drafts the accepted forty-unit shortfall and retains it through market analysis and reload,chromium,expected,expected
+platform-audit-memory.spec.ts,audit consented external research reports unavailable without qualification,chromium,expected,expected
+platform-audit-memory.spec.ts,audit direct authority injection cannot grant commerce authority,chromium,expected,expected
+platform-audit-memory.spec.ts,audit real browser retains and amends quantity over five messages and reload,chromium,expected,expected
+platform-audit-memory.spec.ts,audit twenty real turns retain amended procurement facts,chromium,expected,expected
+platform-audit-memory.spec.ts,deadline corrections survive unrelated turns and reload without promising delivery,chromium,expected,expected
+platform-audit-memory.spec.ts,recall preserves currency total budget and destination corrections,chromium,expected,expected
+platform-audit-memory.spec.ts,unresolved product fit preserves quantity and asks material budget scope,chromium,expected,expected
+portfolio-narration-preview.spec.ts,"local narration is buyer-triggered, critic-accepted and commercially powerless",chromium,skipped,skipped
+portfolio-qualification.spec.ts,"buyer selects fictional scope, qualifies, reloads and invalidates evidence",chromium,expected,expected
+portfolio-recording-walkthrough.spec.ts,deterministic portfolio recording walkthrough,chromium,unexpected,unexpected
+portfolio-supplier-continuation.spec.ts,buyer can review wait and split paths then cancel without changing the cart,chromium,skipped,skipped
+portfolio-supplier-continuation.spec.ts,high-value bulk request shows governed fulfilment choices and explicit exact confirmation,chromium,skipped,skipped
+portfolio-supplier-continuation.spec.ts,unavailable flagship offers a proportionate conditional substitute without silent cart change,chromium,skipped,skipped
+privacy-session-isolation.spec.ts,temporary chat rotates the browser epoch and marks requests no-memory,chromium,expected,expected
+procurement-amendment-permutations.spec.ts,read-only follow-up preserves exact identity without granting unverified fit authority,chromium,unexpected,unexpected
+procurement-amendment-permutations.spec.ts,relative bulk amendment preserves the cart line and exposes one confirmation authority,chromium,unexpected,unexpected
+procurement-journey.spec.ts,"demo procurement journey: clear, exact cart line, amendment and delivery reconfirmation",chromium,unexpected,unexpected
+procurement-trace.spec.ts,"procurement decision trace — drafted supplier RFQ + audit, re-routes per product",chromium,unexpected,unexpected
+qualified-commercial-journey.spec.ts,ambiguous research continues into an explicit synthetic supplier decision,chromium,unexpected,unexpected
+regional-shopping-memory.spec.ts,"Australia: currency, quantity and supplier draft survive correction and reload",chromium,expected,expected
+regional-shopping-memory.spec.ts,"Germany: currency, quantity and supplier draft survive correction and reload",chromium,expected,expected
+regional-shopping-memory.spec.ts,"United States: currency, quantity and supplier draft survive correction and reload",chromium,expected,expected
+requirement-load-recovery.spec.ts,failed requirement read offers recovery without mutating selection,chromium,expected,expected
+research-degradation-live.spec.ts,unreachable discovery degrades to canonical origin without hanging or claiming discovery,chromium,skipped,skipped
+research-disconnect-live.spec.ts,buyer disconnect during live discovery does not strand backend responsiveness,chromium,expected,expected
+research-disconnect-live.spec.ts,forced disconnect cooperatively stops undispatched discovery queries,chromium,skipped,skipped
+research-origin-degradation-kind.spec.ts," remains honest, bounded, and offers buyer evidence fallback",chromium,skipped,skipped
+research-partial-engine-live.spec.ts,one failed search engine remains visible while free discovery succeeds,chromium,skipped,skipped
+reviewed-supplier-draft-continuity.spec.ts,"ordinary buyer draft survives independent review, revision, quoted intelligence and reload",chromium,expected,expected
+roadmap-browser-soak.spec.ts,buyer request researches official Blender requirements in a fresh case,chromium,unexpected,unexpected
+roadmap-browser-soak.spec.ts,changed workload binds research to the new case without inherited consent,chromium,unexpected,unexpected
+roadmap-browser-soak.spec.ts,repeated browser image uploads reach bounded triage before further text turns,chromium,unexpected,unexpected
+roadmap-browser-soak.spec.ts,repeated live browser turns keep rendered answer and trace on the same revision,chromium,expected,expected
+rotating-intelligence-certificate.spec.ts,seeded official-feed titles exercise generic identity and fail-closed behavior,chromium,skipped,skipped
+semantic-resolution-journey.spec.ts,unfamiliar capability request plans research before buyer-specific clarification,chromium,unexpected,unexpected
+shopping-case-fast-lane-timing.spec.ts,shopping-case fast lane returns provisional shelves before external research,chromium,unexpected,unexpected
+shopping-case-sse-revision-supersession.spec.ts,SSE reconnect observes canonical shopping-case revision supersession,chromium,expected,expected
+six-prompt-live-research-certification.spec.ts,live case-bound research: CGI rendering,chromium,skipped,skipped
+six-prompt-live-research-certification.spec.ts,live case-bound research: PLC factory and OT cyber range,chromium,skipped,skipped
+six-prompt-live-research-certification.spec.ts,live case-bound research: Unreal Engine Nanite and Lumen,chromium,skipped,skipped
+six-prompt-live-research-certification.spec.ts,live case-bound research: large BIM and real-time walkthroughs,chromium,skipped,skipped
+six-prompt-live-research-certification.spec.ts,live case-bound research: large CAD and point clouds,chromium,skipped,skipped
+six-prompt-live-research-certification.spec.ts,live case-bound research: manufacturing digital twin and predictive maintenance,chromium,skipped,skipped
+split-fulfillment.spec.ts,"pre-payment split-fulfilment — ships now + supplier-ETA follow-up, buyer confirms before checkout",chromium,unexpected,unexpected
+supplier-enquiry-journey.spec.ts,accepted shortfall connects to independent approval fake send and reviewed supplier replies,chromium,expected,expected
+supplier-recovery.spec.ts,operator reconciles uncertain delivery and obtains fresh independent approval for one replacement,chromium,expected,expected
+terminal-response-race.spec.ts,new terminal survives late failure,chromium,expected,expected
+terminal-response-race.spec.ts,new terminal survives late success,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper accepts a completed JSON turn and releases its listener,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper cannot replace its pending operation with a foreign completed operation,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper exposes HTTP 401 instead of waiting for a successful answer,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper exposes HTTP 403 instead of waiting for a successful answer,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper exposes malformed JSON instead of hiding the parser failure,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper ignores another actor response,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper ignores another query response,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper keeps the pending operation through its actual POST poll,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper preserves multiline CRLF SSE data,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper rejects inconsistent envelope and terminal operation identities,chromium,expected,expected
+terminal-turn-helper.spec.ts,terminal helper retains its deadline when no completed turn arrives,chromium,expected,expected
+turn-transition-revision-matrix.spec.ts,every conversational transition publishes one matching case revision,chromium,expected,expected
+unresolved-workload-authority.spec.ts,noun-free paraphrase has the same unresolved workload authority,chromium,unexpected,unexpected
+unresolved-workload-authority.spec.ts,product noun cannot bypass unresolved workload authority,chromium,unexpected,unexpected
+uploaded-requirements-journey.spec.ts,PDF requirements use the same review and correction contract,chromium,expected,expected
+uploaded-requirements-journey.spec.ts,manual specifications use the same editable same-case corroboration contract,chromium,expected,expected
+uploaded-requirements-journey.spec.ts,plain-text requirements use the same provisional review contract,chromium,expected,expected
+uploaded-requirements-journey.spec.ts,requirements screenshot becomes reviewable provisional claims,chromium,expected,expected
+varied-image-continuity.spec.ts,image 1 triage and corrections preserve authority and effect state,chromium,expected,expected
+varied-image-continuity.spec.ts,image 2 triage and corrections preserve authority and effect state,chromium,expected,expected
+varied-image-continuity.spec.ts,image 3 triage and corrections preserve authority and effect state,chromium,expected,expected
+voice-v2-pilot.spec.ts,spoken input shares the canonical V2 fail-closed recommendation path,chromium,unexpected,unexpected

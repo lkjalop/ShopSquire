@@ -10,7 +10,7 @@ safe by construction:
     NOT fetched, so the SSRF surface is exactly that one configured host.
   * SSRF guard on the endpoint host: scheme must be http/https; the host is DNS-resolved and any
     private / loopback / link-local / reserved / multicast / unspecified address is refused (unless
-    EXTERNAL_RESEARCH_ALLOW_PRIVATE=1 for a localhost dev endpoint).
+    EXTERNAL_RESEARCH_ALLOW_PRIVATE=1 for a literal loopback endpoint).
   * redirects are NOT followed (a 3xx to an internal host yields no data).
   * response is size-bounded and only 2xx JSON is parsed.
   * result domains are filtered against the caller's allowlist (defense in depth — the service
@@ -56,8 +56,14 @@ def _host_is_safe(host: str, *, resolver: Callable[..., Any], allow_private: boo
     """True only if the host resolves exclusively to public, routable addresses. Fail-closed."""
     if not host:
         return False
+    # Compatibility flag permits literal loopback only, never arbitrary private
+    # networks, link-local metadata endpoints, or DNS names that can rebind.
     if allow_private:
-        return True
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return True
+        except ValueError:
+            pass
     try:
         infos = resolver(host, None)
     except Exception:
@@ -167,7 +173,10 @@ class HttpxResearchFetcher:
         self, scrubbed_query: str, allowlist: List[str], timeout_s: float,
         *, cancellation: Any = None, discovery_candidates_only: bool = False,
     ) -> List[Dict[str, Any]]:
+        self.last_receipt = {"execution_status": "not_dispatched", "external_call_dispatched": False,
+                             "network_execution": False, "provider_status": "unavailable"}
         if httpx is None or not self._template or not str(scrubbed_query).strip():
+            self.last_receipt["error"] = "discovery_not_configured_or_empty_query"
             return []
         if bool(getattr(cancellation, "cancelled", False)):
             return []
@@ -195,9 +204,11 @@ class HttpxResearchFetcher:
             "execution_status": "not_dispatched",
             "external_call_dispatched": False,
         }
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            self.last_receipt.update(execution_status="blocked", error="discovery_endpoint_invalid")
             return []
         if not _host_is_safe(parsed.hostname, resolver=self._resolver, allow_private=self._allow_private):
+            self.last_receipt.update(execution_status="blocked", error="discovery_endpoint_denied")
             return []
 
         client = self._client or httpx.Client(
@@ -219,8 +230,18 @@ class HttpxResearchFetcher:
             ).start()
         try:
             request_started = time.perf_counter()
-            resp = client.get(url, timeout=timeout_s, headers=self._request_headers or None)
-            raw_body = bytes(resp.content)
+            with client.stream("GET", url, timeout=timeout_s, headers=self._request_headers or None,
+                               follow_redirects=False) as resp:
+                chunks = []
+                size = 0
+                for chunk in resp.iter_bytes():
+                    size += len(chunk)
+                    if size > self._max_bytes:
+                        self.last_receipt.update(network_execution=True, external_call_dispatched=True,
+                            execution_status="failed", error="discovery_body_too_large")
+                        return []
+                    chunks.append(chunk)
+                raw_body = b"".join(chunks)
             completed_at = datetime.now(timezone.utc).isoformat()
             self.last_receipt.update({
                 "network_execution": True,
@@ -236,7 +257,7 @@ class HttpxResearchFetcher:
             })
             if not (200 <= resp.status_code < 300):  # 3xx (un-followed redirect) / 4xx / 5xx → no data
                 return []
-            data = json.loads(resp.text[: self._max_bytes])
+            data = json.loads(raw_body.decode("utf-8"))
         except Exception as exc:
             self.last_receipt.update({
                 "network_execution": True,
@@ -359,7 +380,10 @@ class AsyncHttpxResearchFetcher(HttpxResearchFetcher):
         self, scrubbed_query: str, allowlist: List[str], timeout_s: float,
         *, discovery_candidates_only: bool,
     ) -> List[Dict[str, Any]]:
+        self.last_receipt = {"execution_status": "not_dispatched", "external_call_dispatched": False,
+                             "network_execution": False, "provider_status": "unavailable"}
         if httpx is None or not self._template or not str(scrubbed_query).strip():
+            self.last_receipt["error"] = "discovery_not_configured_or_empty_query"
             return []
         url = self._template.replace("{query}", quote_plus(str(scrubbed_query)))
         parsed = urlparse(url)
@@ -381,11 +405,13 @@ class AsyncHttpxResearchFetcher(HttpxResearchFetcher):
             "network_execution": False, "cache_status": "miss", "billing_class": "free",
             "execution_status": "not_dispatched", "external_call_dispatched": False,
         }
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            self.last_receipt.update(execution_status="blocked", error="discovery_endpoint_invalid")
             return []
         if not _host_is_safe(
             parsed.hostname, resolver=self._resolver, allow_private=self._allow_private,
         ):
+            self.last_receipt.update(execution_status="blocked", error="discovery_endpoint_denied")
             return []
         client = self._async_client or httpx.AsyncClient(
             timeout=timeout_s, follow_redirects=False, headers={"User-Agent": self._ua},
@@ -395,6 +421,7 @@ class AsyncHttpxResearchFetcher(HttpxResearchFetcher):
         try:
             async with client.stream(
                 "GET", url, timeout=timeout_s, headers=self._request_headers or None,
+                follow_redirects=False,
             ) as response:
                 chunks: list[bytes] = []
                 size = 0

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { registerBuyer } from './helpers/registeredBuyer';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -9,12 +10,7 @@ async function send(page: Page, text: string) {
 
 test('typed fit, quantity and deadline semantics produce governed alternatives', async ({ page }) => {
   test.setTimeout(300_000);
-  const uid = `fit-deadline-${Date.now()}-${Math.random()}`;
-  await page.addInitScript((value) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', value);
-  }, uid);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 

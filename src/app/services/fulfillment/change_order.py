@@ -70,12 +70,12 @@ def assess_cancellation(*, committed_cost_cents: Any, restock_fee_pct: Optional[
             "refundable_to_buyer_cents": refundable, "requires_human": True}
 
 
-def assess_for_case(db, case_id: str, *, refundable_to_buyer_cents: Any = 0) -> Dict[str, Any]:
+def assess_for_case(db, case_id: str, *, refundable_to_buyer_cents: Any = 0, tenant_id: str = "default") -> Dict[str, Any]:
     """Convenience: the already-committed SUPPLIER cost is the PO's total amount (what we owe the supplier) —
     read it off the case's purchase_order, falling back to economics' supplier_cost_cents. Then assess."""
     committed = 0
     try:
-        cur = workflow.repository.current_version(db, case_id)
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
         sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
         committed = int((sj.get("purchase_order") or {}).get("total_amount_cents") or 0)
     except Exception as exc:
@@ -83,7 +83,7 @@ def assess_for_case(db, case_id: str, *, refundable_to_buyer_cents: Any = 0) -> 
     if committed <= 0:
         try:
             from src.app.services.fulfillment import economics as feco
-            committed = int((feco.from_case(db, case_id) or {}).get("supplier_cost_cents") or 0)
+            committed = int((feco.from_case(db, case_id, tenant_id=tenant_id) or {}).get("supplier_cost_cents") or 0)
         except Exception as exc:
             logger.debug("assess_for_case economics unavailable for %s: %s", case_id, exc)
     return assess_cancellation(committed_cost_cents=committed, refundable_to_buyer_cents=refundable_to_buyer_cents)
@@ -96,7 +96,7 @@ def propose_change(db, *, case_id: str, actor: Actor, kind: str = KIND_CANCEL, r
     state change, no money moves — so the request + its economics are on the bitemporal record and a human can
     act. Agent/buyer/system/operator may propose. ``derived_pr_id`` links the new intent as a separate PR."""
     if assessment is None:
-        assessment = assess_for_case(db, case_id)
+        assessment = assess_for_case(db, case_id, tenant_id=tenant_id)
     return workflow.transition(
         db, case_id=case_id, event="change_requested", actor=actor, reason_code=reason,
         evidence={"kind": kind, "assessment": assessment, "derived_from_pr": derived_pr_id, "proposed_by": actor.type.value},
@@ -114,7 +114,7 @@ def authorize_cancellation(db, *, case_id: str, actor: Actor, assessment: Option
     are recorded. Refund/restock EXECUTION is stubbed behind FULFILLMENT_REFUND_ENABLED — until it's on (with
     payment/ERP secrets) we record the intent + amounts but move NO money."""
     if assessment is None:
-        assessment = assess_for_case(db, case_id)
+        assessment = assess_for_case(db, case_id, tenant_id=tenant_id)
     refund_executed = False
     refund_note = "refund_disabled"
     if _refund_enabled():

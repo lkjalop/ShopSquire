@@ -389,6 +389,31 @@ def _append_generic_procurement_question(
     return ordered
 
 
+def _quota_headers(outcome):
+    admission = (outcome.diagnostics or {}).get('quota_admission') or {}
+    return {header: str(admission[field]) for header, field in (
+        ('X-Rate-Limit-Reason', 'reason'),
+        ('X-Rate-Limit-Tokens-Remaining', 'tokens_remaining'),
+        ('X-Rate-Limit-Cost-Remaining-USD', 'cost_remaining_usd'),
+    ) if field in admission}
+
+
+def _quantity_nouns():
+    from src.app.platform.store_profile import profile_slot
+    categories = profile_slot('category_keywords', default={}) or {}
+    if not isinstance(categories, dict):
+        return ()
+    return tuple({word for category, aliases in categories.items()
+                  for word in [category, *(aliases if isinstance(aliases, (list, tuple)) else [aliases])]
+                  if isinstance(word, str) and word.strip()})
+
+
+def _quantity_spans(query):
+    from src.app.services.bulk_intent import absurd_quantity_span, extract_quantity_span
+    nouns = _quantity_nouns()
+    return extract_quantity_span(query, unit_nouns=nouns), absurd_quantity_span(query, unit_nouns=nouns)
+
+
 def _explicit_compatibility_budget(params):
     compatibility_constraints: Dict[str, Any] = {}
     if params.get("budget_min") is not None:
@@ -473,22 +498,7 @@ def serve_v2_compatibility(
         # shopping turn. Post-purchase claims do not carry a fresh product budget.
         classification = dict(classification)
         classification["turn_intent"] = "FILTER"
-    from src.app.services.bulk_intent import absurd_quantity_span, extract_quantity_span
-
-    unit_nouns = (
-        "laptop", "laptops", "computer", "computers", "desktop", "desktops",
-        "monitor", "monitors", "tablet", "tablets", "phone", "phones",
-        "keyboard", "keyboards", "mouse", "mice", "headset", "headsets",
-        "router", "routers", "charger", "chargers", "dock", "docks",
-    )
-    quantity_span = extract_quantity_span(
-        str(params.get("query") or ""),
-        unit_nouns=unit_nouns,
-    )
-    absurd_quantity = absurd_quantity_span(
-        str(params.get("query") or ""),
-        unit_nouns=unit_nouns,
-    )
+    quantity_span, absurd_quantity = _quantity_spans(str(params.get('query') or ''))
     if quantity_span:
         compatibility_constraints["order_quantity"] = quantity_span[0]
     from src.app.services.recommend_nqe_helpers import apply_nqe_selection_to_constraints
@@ -549,16 +559,7 @@ def serve_v2_compatibility(
         compatibility_cutover=True,
         cancellation=compatibility_cancellation,
     )
-    quota_admission = (outcome.diagnostics or {}).get("quota_admission") or {}
-    quota_headers = {
-        header: str(quota_admission[field])
-        for header, field in (
-            ("X-Rate-Limit-Reason", "reason"),
-            ("X-Rate-Limit-Tokens-Remaining", "tokens_remaining"),
-            ("X-Rate-Limit-Cost-Remaining-USD", "cost_remaining_usd"),
-        )
-        if field in quota_admission
-    }
+    quota_headers = _quota_headers(outcome)
     if response is not None:
         response.headers.update(quota_headers)
 

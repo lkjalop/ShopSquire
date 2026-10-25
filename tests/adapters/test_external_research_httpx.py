@@ -242,7 +242,7 @@ def test_non_http_scheme_blocked():
 
 def test_allow_private_opt_in_permits_localhost():
     results = [{"title": "Local", "url": "https://trusted.com/a"}]
-    f = HttpxResearchFetcher(client=_client(_ok_results(results)), search_url_template=_TEMPLATE,
+    f = HttpxResearchFetcher(client=_client(_ok_results(results)), search_url_template="http://127.0.0.1:8888/search?q={query}",
                              resolver=_resolver_private, allow_private=True)
     assert len(f.fetch("q", allowlist=["trusted.com"])) == 1
 

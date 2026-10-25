@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
+import { projectUploadSecurityFallback } from './decision-trace/uploadSecurityProjection';
 import styles from './DecisionTrace.module.css';
 import MarketIntelligencePanel from './decision-trace/MarketIntelligencePanel';
 import RawTracePanel from './decision-trace/RawTracePanel';
@@ -43,6 +44,7 @@ import {
 } from './decision-trace/traceNavigation';
 import { useMarketHippographTrace } from '../hooks/useMarketHippographTrace';
 import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from '../hooks/useDecisionTraceData';
+import { boundImageTriage, boundResearchOutcome, boundTurnProjection } from '../lib/traceSnapshotBinding';
 import DecisionRunTracePanel from './decision-trace/DecisionRunTracePanel';
 import type { ResearchOutcome } from './ResearchOutcomeSummary';
 
@@ -682,17 +684,17 @@ export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
   return <HippographEvidencePanel insights={insights} classNames={styles} />;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
-  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedImageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
+  const API_KEY = import.meta.env.VITE_API_KEY || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
   // An explicitly supplied operator key must outrank the storefront's build-time merchant key so the
   // component can use the authenticated operator projection rather than the buyer-safe trace summary.
   const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
-  const localTurnProjection = evidence?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
-    ? evidence.turn_read_model : null;
-  const currentResearchOutcome = researchOutcome || localTurnProjection?.research_outcome || null;
+  const localTurnProjection = boundTurnProjection(evidence?.turn_read_model, traceId);
+  const currentResearchOutcome = boundResearchOutcome(researchOutcome, localTurnProjection)
+    || boundResearchOutcome(localTurnProjection?.research_outcome, localTurnProjection);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -724,11 +726,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [docked, setDocked] = useState(() => window.innerWidth >= 1100);
-  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth'>('poll');
+  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth' | 'snapshot'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
   const noTraceTelemetrySentRef = useRef(false);
   const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
+  const imageTriage = boundImageTriage(suppliedImageTriage, effectiveTraceId);
   const traceIdText = effectiveTraceId || '';
   const procurementRevision = events.reduce((revision, event) => {
     if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) return revision;
@@ -744,6 +747,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     journey: procJourney,
     pendingSplit,
     loading: procLoading,
+    status: procStatus,
+    error: procError,
   } = useProcurementTrace({
     active: activeTab === 'procurement',
     traceId: traceIdText,
@@ -763,7 +768,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const selectTraceLeaf = (leaf: TraceLeafTab) => {
     setActiveTab(leaf);
     setActiveSectionId(traceSectionForLeaf(leaf).id);
-    if (leaf === 'audit' && !auditTrail && traceIdText && !auditLoading) {
+    if (leaf === 'audit' && effectiveApiKey && !auditTrail && traceIdText && !auditLoading) {
       setAuditLoading(true);
       setAuditError(null);
       fetchJsonWithDeadline(
@@ -833,6 +838,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const modalRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement;
+    modalRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, []);
 
   // Handle drag start
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -955,7 +967,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   }, []);
 
   const fetchExplainReplayLazy = useCallback(async () => {
-    if (!effectiveTraceId) return;
+    if (!effectiveTraceId || !effectiveApiKey) return;
     const tabsAllowFetch = activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
     if (!tabsAllowFetch) return;
 
@@ -1012,6 +1024,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   useEffect(() => {
     const currentTraceId = effectiveTraceId;
+    setTrace(null);
+    setEvents([]);
+    setExplain(null);
+    setReplay(null);
+    setAuditTrail(null);
     if (!currentTraceId) {
       setTrace(null);
       setEvents([]);
@@ -1036,10 +1053,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       setTrace({
         decision_id: String(localTurnProjection.trace_id || currentTraceId),
         timestamp: new Date().toISOString(),
-        input_query: String(localTurnProjection.objective || ''),
+        input_query: String(localTurnProjection.buyer_query || ''),
         products: Array.isArray(localTurnProjection.products) ? localTurnProjection.products : [],
         right_panel: localTurnProjection.right_panel || null,
       });
+    }
+
+    // Returned buyer evidence is a bound snapshot, not permission to read the
+    // operator event stream. Avoid predictably rejected reads and retry loops.
+    if (!effectiveApiKey) {
+      setStreamMode(localTurnProjection || imageTriage.length ? 'snapshot' : 'auth');
+      setUpdating(false);
+      return;
     }
 
     const stopLiveTransport = () => {
@@ -1221,7 +1246,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
       } catch {}
     };
-  }, [effectiveTraceId]);
+  }, [effectiveTraceId, localTurnProjection, suppliedImageTriage, effectiveApiKey]);
 
   useEffect(() => {
     if (!effectiveTraceId) return;
@@ -1523,56 +1548,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     return normalizeSecurityPayload(securityLikeEvent?.payload);
   };
 
-  const fallbackSecurity = (() => {
-    const tr: any = trace || {};
-    const recPayload: any = recommendationEventPayload || {};
-    const triage = (Array.isArray(imageTriage) && imageTriage.length > 0) ? (imageTriage[0] || {}) : {};
-    const triageSec = (triage?.security && typeof triage.security === 'object') ? triage.security : triage;
-    const triageSignals = (triageSec?.signals && typeof triageSec.signals === 'object') ? triageSec.signals : {};
-    const imageSecurity =
-      (tr?.image_security && typeof tr.image_security === 'object')
-      ? tr.image_security
-      : ((recPayload?.image_security && typeof recPayload.image_security === 'object') ? recPayload.image_security : {});
-    const matrix =
-      (tr?.right_panel?.security_matrix && typeof tr.right_panel.security_matrix === 'object')
-      ? tr.right_panel.security_matrix
-      : ((recPayload?.right_panel_contract?.security_matrix && typeof recPayload.right_panel_contract.security_matrix === 'object')
-        ? recPayload.right_panel_contract.security_matrix
-        : {});
-
-    if (
-      Object.keys(triageSignals || {}).length === 0
-      && Object.keys(imageSecurity || {}).length === 0
-      && Object.keys(matrix || {}).length === 0
-    ) {
-      return null;
-    }
-
-    const unsafeFlags = Array.isArray(imageSecurity?.unsafe_flags) ? imageSecurity.unsafe_flags : [];
-    const mergedSignals: Record<string, any> = {
-      ...triageSignals,
-      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
-      recommendation_allowed: true,
-      deep_security_pending: true,
-    };
-    for (const flag of unsafeFlags) {
-      mergedSignals[String(flag)] = true;
-    }
-    return {
-      severity: imageSecurity?.trust_state === 'under_review' ? 'review' : 'info',
-      policy_route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
-      route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
-      owasp_llm_top10: Array.isArray(matrix?.owasp) ? matrix.owasp : [],
-      mitre_atlas: Array.isArray(matrix?.mitre) ? matrix.mitre : [],
-      maestro: Array.isArray(matrix?.maestro) ? matrix.maestro : [],
-      signals: mergedSignals,
-      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
-      recommendation_allowed: true,
-      deep_security_pending: true,
-      image_triage: Array.isArray(imageTriage) ? imageTriage : [],
-      image_security: imageSecurity,
-    };
-  })();
+  const fallbackSecurity = projectUploadSecurityFallback(trace,recommendationEventPayload,imageTriage);
 
   const security = extractSecurity() || fallbackSecurity;
 
@@ -1774,7 +1750,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const mapping: Record<string, string> = {
       ssn_leakage_linked_qr: 'Linked QR path suggests SSN or PII exposure.',
       prompt_injection_hidden: 'Hidden prompt-injection content was detected.',
-      c2_beacon_pattern: 'Hidden beacon or callback behavior was detected.',
+      c2_beacon_pattern: 'Decoded text contains a beacon or callback pattern; runtime activity is unconfirmed.',
       lolbin_command_sequence: 'Hidden LOLBin execution instructions were detected.',
       data_exfiltration_instruction: 'Hidden data-exfiltration instructions were detected.',
     };
@@ -1797,31 +1773,31 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const sigs = triageItems[0]?.security?.signals || triageItems[0]?.signals || security?.signals || {};
     const primaryFinding = payloadFindings[0] || {};
     const qrDestinationKnown = !isMissingValue(qrInfo?.destination_url) || !isMissingValue(qrInfo?.final_url);
-    const correlationSeen = !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict) || qrDestinationKnown;
+    const correlationSeen = !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict);
     const agentRows = [
       {
-        label: 'Payload Agent',
-        direct: sigs.qr_code_detected ? 'Decoded QR content or hidden payload content was inspected.' : 'No direct QR or hidden payload content was observed.',
+        label: 'Payload inspection',
+        direct: sigs.qr_code_detected || Boolean(sigs.steg_details?.decoded_content) || payloadAnalysis.payload_type === 'steg_decoded_payload' ? 'Decoded QR content or hidden payload content was inspected.' : 'No decoded QR or hidden payload content was recorded.',
         inferred: payloadFindings.length ? summarizeSecurityFindingType(String(primaryFinding.finding_type || '')) : 'No stronger payload hypothesis was needed.',
         contextual: 'Did not widen the verdict using narrative or contextual text alone.',
         detail: payloadFindings.length > 1 ? payloadFindings.slice(1).map((finding: any) => summarizeSecurityFindingType(String(finding?.finding_type || ''))) : [],
       },
       {
-        label: 'Correlation Agent',
-        direct: correlationSeen ? 'Checked QR destination reputation and linked-artifact context against supporting telemetry.' : 'No stronger infrastructure overlap was observed.',
-        inferred: correlationSeen ? 'Only widened the incident story when destination or reputation overlap was present.' : 'No extra correlation lead was justified.',
+        label: 'Correlation evidence',
+        direct: correlationSeen ? 'Destination reputation results were recorded; endpoint activity is not established by those results.' : qrDestinationKnown ? 'A QR destination was decoded; reputation and runtime correlation were not recorded.' : 'No destination reputation or runtime correlation was recorded.',
+        inferred: correlationSeen ? 'Use the recorded indicators for human correlation; they do not establish a compromise.' : 'No runtime or linked-host activity was confirmed.',
         contextual: 'Did not escalate based on missing or placeholder enrichment values.',
         detail: [],
       },
       {
-        label: 'Threat Hunter Agent',
+        label: 'Suggested hunting',
         direct: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.what_we_observed?.[0], 'Evidence-backed hunt lead available.') : 'No direct artifact or infrastructure lead was strong enough to widen the hunt.',
         inferred: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.why_it_matters, 'Used only evidence-backed overlap to suggest likely next checks.') : 'No hunt lead was emitted without direct evidence or real overlap.',
         contextual: 'Did not widen the hunt using contextual guides, specs, or generator files alone.',
         detail: [],
       },
       {
-        label: 'Playbook Agent',
+        label: 'Suggested response',
         direct: playbookPreview ? `Recommended ${formatDisplayText(playbookData?.title || playbookData?.id || 'response playbook')}.` : 'No response playbook was attached.',
         inferred: 'Mapped the evidence to next steps only after policy and severity were known.',
         contextual: 'Did not add response actions from low-authority context alone.',
@@ -1890,7 +1866,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       ? 'Push to SIEM/XDR now'
       : 'Hold push until human review';
     return {
-      decision: `${decision} - ${severity} confidence`,
+      decision,
       triggers: Array.from(new Set(triggers)).slice(0, 3),
       agentBriefs,
       businessImpact,
@@ -2057,7 +2033,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       <div
         ref={modalRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
+        tabIndex={-1}
         aria-label="Decision Trace"
         data-testid="decision-trace-modal"
         data-trace-id={effectiveTraceId || ''}
@@ -2086,7 +2063,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               </span>
             )}
             {updating && <span className={styles.updating}>updating</span>}
-            <span className={`${styles.streamBadge} ${streamMode === 'ws' ? styles.streamWS : (streamMode === 'sse' ? styles.streamSSE : styles.streamPoll)}`} title="Streaming mode">
+            <span className={`${styles.streamBadge} ${streamMode === 'ws' ? styles.streamWS : (streamMode === 'sse' ? styles.streamSSE : styles.streamPoll)}`} title="Trace data source">
               {streamMode}
             </span>
           </div>
@@ -2424,7 +2401,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 <div className={styles.summaryPane}>
                   <div className={styles.kvRow}><span>Decision ID</span><span>{trace.decision_id}</span></div>
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
-                  <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
+                  <div className={styles.kvRow}><span>Query</span><span>{localTurnProjection?.buyer_query || trace.input_query || 'Turn query not recorded'}</span></div>
                   <div className={styles.kvRow}><span>Model</span><span>{proposalExecutionStep ? 'Model-directed router' : (ms.selected || '--')}</span></div>
                   <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? compactAuthorityPath(typedExecutionSteps) : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
                   <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
@@ -3395,7 +3372,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               </ul>
                             </div>
                             <div className={styles.briefCard}>
-                              <div className={styles.briefTitle}>What Agents Found</div>
+                              <div className={styles.briefTitle}>Inspection and suggested follow-up</div>
                               <div className={styles.agentBriefStack}>
                                 {(incident.agentBriefs || []).map((agent: any, idx: number) => (
                                   <details key={`agent-${idx}`} className={styles.detailSection}>
@@ -4260,7 +4237,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             audit: "The RFQ/email card should be the first-class object") — the card(s) render
                             first, the event table is demoted below, and raw JSON stays behind the per-event
                             "Raw recorded payload" disclosure. */}
-                        {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+                        <div data-testid="procurement-load-state" data-state={procStatus} aria-busy={procLoading}>
+                          {procLoading && <div className={styles.empty}>Loading the procurement case…</div>}
+                          {procStatus === 'error' && <div role="alert">Procurement details could not be loaded ({procError}).</div>}
+                          {procStatus === 'not_applicable' && <div>No procurement case is attached to this revision.</div>}
+                        </div>
 
                         <ReturnLifecycleTrace events={src || []} />
 
@@ -4282,7 +4263,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         />
                         <ProcurementMarketPanel projection={mi} />
                         {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
-                          <PendingProcurementPlan plan={pendingSplit} />
+                          <PendingProcurementPlan plan={{...pendingSplit,split:pendingSplit.split}} />
                         ) : procEvents.length === 0 ? (
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (

@@ -193,38 +193,13 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         reason = "taxonomy_grounding_error" if grounding == "error" else "catalog_not_onboarded"
         return degraded_response(envelope, reason=reason, grounding=grounding)
 
-    import dataclasses
-    from src.app.services.budget_grammar import parse_budget_delta
+    from src.app.services.catalog_bundle_browse import bundle_browse_response
+    bundle = bundle_browse_response(db, envelope)
+    if bundle is not None:
+        return bundle
 
-    # A relative budget instruction is authorized only against the immutable
-    # accepted session value. Apply it before routing/retrieval so every later
-    # stage sees the same bounded envelope; never reinterpret the delta as an
-    # absolute cap.
-    _accepted_before_route = (envelope.session or {}).get("accepted_constraints") or {}
-    _budget_delta = parse_budget_delta(envelope.query)
-    _prior_budget_max = _accepted_before_route.get("budget_max_cents")
-    if _budget_delta is not None and _prior_budget_max is not None:
-        try:
-            _updated_budget_max = int(_prior_budget_max) + (_budget_delta * 100)
-            _prior_budget_min = _accepted_before_route.get("budget_min_cents")
-            _updated_budget_min = (
-                int(_prior_budget_min) + (_budget_delta * 100)
-                if _prior_budget_min is not None
-                else None
-            )
-        except (TypeError, ValueError):
-            _updated_budget_max = 0
-            _updated_budget_min = None
-        if _updated_budget_max > 0:
-            envelope = dataclasses.replace(
-                envelope,
-                budget_min_cents=(
-                    _updated_budget_min
-                    if _updated_budget_min is not None and _updated_budget_min > 0
-                    else None
-                ),
-                budget_max_cents=_updated_budget_max,
-            )
+    from src.app.services.recommendation_core.budget_subject import apply_relative_budget
+    envelope = apply_relative_budget(envelope)
 
     # time the whole DECIDE phase (the ~7s router model call + KB intent resolution + reroute +
     # continuation inheritance) — this is the turn's dominant latency, so the canary can attribute
@@ -259,6 +234,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     _parsed_turn_budget = parse_budget(envelope.query)
     _explicit_turn_scope = classify_budget_scope(envelope.query)
     _accepted = (envelope.session or {}).get("accepted_constraints") or {}
+    from src.app.services.recommendation_core.budget_subject import apply_single_item_budget
+    decision=apply_single_item_budget(decision,parsed_budget=_parsed_turn_budget,query=envelope.query,
+        commercial_quantity=envelope.commercial_terms.quantity)
     # A consent retry is semantically the same turn. Sparse model output may omit an unchanged
     # workload title, so adopt a prior title only when every normalized title token still occurs
     # in the current message. This prevents an old game from contaminating a new query.
@@ -1237,6 +1215,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 key: [list(predicate) for predicate in predicates]
                 for key, predicates in decision.requirements.items()
             }
+    from src.app.services.recommendation_core.gates import catalog_browse_resolution
+    browse = catalog_browse_resolution(decision, has_semantic_alignment=semantic_decision_for_alignment is not None)
+    if browse:
+        resp.extras['semantic_resolution'] = browse
     if decision.product_type_options:
         choices = []
         for handle in decision.product_type_options:
@@ -1438,14 +1420,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     )
     from src.app.services.recommendation_core.typed_stage_coordinator import run_coordinated_stages
     run_coordinated_stages(resp, build_post_retrieval_stage_plan({
-        "capability_budget": lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
-        "shelf": lambda: _build_shelf(db, envelope, decision, resp, limit),
-        "variant_clarify": lambda: _maybe_variant_clarify(envelope, decision, resp),
-        "complement_offer": lambda: _maybe_complement_offer(db, envelope, decision, resp),
-        "bulk_economics": lambda: _maybe_bulk_economics(db, envelope, decision, resp),
-        "fulfillment_preview": lambda: _maybe_fulfillment_preview(envelope, decision, resp),
-        "secondary_explanation": lambda: coordinate_exact_product_fit(db, envelope, decision, resp),
-    }), cancellation=envelope.cancellation, logger=logger)
+        "capability_budget": lambda output: _apply_capability_budget(db, envelope, decision, output, limit),
+        "shelf": lambda output: _build_shelf(db, envelope, decision, output, limit),
+        "variant_clarify": lambda output: _maybe_variant_clarify(envelope, decision, output),
+        "complement_offer": lambda output: _maybe_complement_offer(db, envelope, decision, output),
+        "bulk_economics": lambda output: _maybe_bulk_economics(db, envelope, decision, output),
+        "fulfillment_preview": lambda output: _maybe_fulfillment_preview(envelope, decision, output),
+        "secondary_explanation": lambda output: coordinate_exact_product_fit(db, envelope, decision, output),
+    }, isolated=True), cancellation=envelope.cancellation, logger=logger)
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:

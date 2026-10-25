@@ -1,0 +1,64 @@
+{
+  "source_commit": "c7338465dfdbcfbaed201510d591723260027336",
+  "sources": [
+    {
+      "path": "frontend/src/App.tsx",
+      "checkout_sha256": "e2319f5184e43aaa7c2bcd57ddcbcce8c5a56e9d76232fde368d1dfec643c242",
+      "git_blob_sha256": "ec7eb2c7ce092ced58de8ddd34019605cb08b80c246f193f07bce9a193079367"
+    },
+    {
+      "path": "frontend/e2e/late-image-trace-continuity.spec.ts",
+      "checkout_sha256": "cabcef27b7ca142072b0008f80b9ba8b5ef15e27e7f2638a59598dc1123a5698",
+      "git_blob_sha256": "cabcef27b7ca142072b0008f80b9ba8b5ef15e27e7f2638a59598dc1123a5698"
+    }
+  ],
+  "browsers": [
+    {
+      "phase": "late-before-v3",
+      "stats": {
+        "startTime": "2026-10-25T06:58:14.541Z",
+        "duration": 23660.453,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      }
+    },
+    {
+      "phase": "late-after",
+      "stats": {
+        "startTime": "2026-10-25T06:59:35.177Z",
+        "duration": 63779.613,
+        "expected": 12,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  ],
+  "storefront": {
+    "counts": {
+      "tests": 461,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "native_exit_code": 0,
+    "elapsed_seconds": 59.515,
+    "peaks": {
+      "rss_bytes": 233803776,
+      "handles": 278,
+      "threads": 78
+    },
+    "resource_violation": null
+  },
+  "method": "A Playwright route pauses and then continues the original browser multipart upload after a newer catalogue turn. The server performs actual inspection. No inspection response, auth result or chat answer is mocked.",
+  "before_failure": "The requested newer decision ID was replaced by the older upload artifact ID after the native HTTP-200 quarantine response.",
+  "repair": "Reuse existing terminal-installation generation guard for delayed support dispatch, deep completion, awaited image results and routing state.",
+  "setup_failures": "Earlier late-before and late-before-v2 profiles returned HTTP400 while route.fetch replayed multipart; they did not exercise the target expectation and are not application regression evidence.",
+  "limits": [
+    "Original adversarial paths include duplicate content; unique-hash scope remains six.",
+    "This is a client ordering repair, not an upload worker cancellation or server endurance qualification.",
+    "Delayed support callback now uses the same guard, but that support branch was not exercised by the new native race case."
+  ]
+}

@@ -152,14 +152,14 @@ def test_bulk_qty_returns_products_and_qty(query, qty):
 @pytest.mark.parametrize("query", ["dell 15 laptop under 1400", "15 inch laptops for work under 1400"])
 def test_model_and_spec_numbers_are_not_quantities(query):
     body = _suggest(query)
-    assert body.get("requested_quantity") in (None, 0)
+    assert body.get("requested_quantity") in (None, 0), json.dumps(body, default=str)
 
 
 # ── 3. budget grammar end-to-end (the five-parser class) ───────────────────────────────────────────
 def test_budget_cut_revision_parses_as_ceiling():
     body = _suggest("cut it to 1300 max, work laptops")
     ps = _prices(body)
-    assert ps, "cut phrasing must still return products"
+    assert ps, json.dumps(body, default=str)
     assert all(p <= 1300 * 1.001 for p in ps), f"cut ceiling violated: {ps}"
 
 

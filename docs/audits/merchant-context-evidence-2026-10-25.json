@@ -1,0 +1,188 @@
+{
+  "source_commit": "59e430a0bd550b4ea36dba2eaff426142e13e67a",
+  "profiles": [
+    {
+      "name": "mvp-merchant-history-before",
+      "counts": {
+        "tests": 7,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 1,
+      "elapsed_seconds": 1.593,
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-merchant-history-after",
+      "counts": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 1.656,
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-merchant-context-storefront-unit",
+      "counts": {
+        "tests": 461,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 58.359,
+      "resource_violation": null
+    }
+  ],
+  "browsers": [
+    {
+      "phase": "buyer-context-before",
+      "stats": {
+        "startTime": "2026-10-25T06:51:22.350Z",
+        "duration": 12860.322,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": false,
+          "statuses": [
+            "failed"
+          ]
+        },
+        {
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": false,
+          "statuses": [
+            "failed"
+          ]
+        },
+        {
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": false,
+          "statuses": [
+            "failed"
+          ]
+        },
+        {
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": false,
+          "statuses": [
+            "failed"
+          ]
+        },
+        {
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "ok": true,
+          "statuses": [
+            "passed"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "buyer-context-after",
+      "stats": {
+        "startTime": "2026-10-25T06:52:33.726Z",
+        "duration": 10742.467,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      },
+      "cases": [
+        {
+          "title": "ordinary buyer can browse useful monitor candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": true,
+          "statuses": [
+            "passed"
+          ]
+        },
+        {
+          "title": "ordinary buyer can browse useful bag candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": true,
+          "statuses": [
+            "passed"
+          ]
+        },
+        {
+          "title": "ordinary buyer can browse useful storage candidates from the mock file",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": true,
+          "statuses": [
+            "passed"
+          ]
+        },
+        {
+          "title": "buyer can request a laptop monitor and bag bundle without involuntary cart additions",
+          "file": "mock-catalog-category-pilot.spec.ts",
+          "ok": false,
+          "statuses": [
+            "failed"
+          ]
+        },
+        {
+          "title": "ordinary buyer draft survives independent review, revision, quoted intelligence and reload",
+          "file": "reviewed-supplier-draft-continuity.spec.ts",
+          "ok": true,
+          "statuses": [
+            "passed"
+          ]
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "path": "frontend/src/App.tsx",
+      "checkout_sha256": "51bfc71553c290385932c9c6256501cca24b653abe07dc0da96a5735a406ef14",
+      "git_blob_sha256": "384352396488a4ccc337051c0f4f857bcbbc3f19134b5ae6dd610b989444134c"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "checkout_sha256": "c874ad519eb0bfb77a8453fcdf063c44812d93f1c75ea306505a83f135f6ef2b",
+      "git_blob_sha256": "c874ad519eb0bfb77a8453fcdf063c44812d93f1c75ea306505a83f135f6ef2b"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/api.test.ts",
+      "checkout_sha256": "c9fba218a53a7ba6c7f8ed3237f29371297dbb70cc3cdd7e90a3503d4aa4cfa5",
+      "git_blob_sha256": "c9fba218a53a7ba6c7f8ed3237f29371297dbb70cc3cdd7e90a3503d4aa4cfa5"
+    },
+    {
+      "path": "frontend/src/hooks/useDecisionTraceData.ts",
+      "checkout_sha256": "15f472daa61174bbcef59b03c86b2606154bccb5cf935f1cea388fc91fbfbcac",
+      "git_blob_sha256": "15f472daa61174bbcef59b03c86b2606154bccb5cf935f1cea388fc91fbfbcac"
+    },
+    {
+      "path": "frontend/src/hooks/useDecisionTraceData.test.ts",
+      "checkout_sha256": "1c25966f962d20173bda6267c76b5b389edabffd343d7287e0b9aa2aa183e9db",
+      "git_blob_sha256": "1c25966f962d20173bda6267c76b5b389edabffd343d7287e0b9aa2aa183e9db"
+    },
+    {
+      "path": "frontend/e2e/mock-catalog-category-pilot.spec.ts",
+      "checkout_sha256": "f98d3c35e1f2b1ee80fa7e0cb5fb70a1b03567809af958cbc8120051107be638",
+      "git_blob_sha256": "f98d3c35e1f2b1ee80fa7e0cb5fb70a1b03567809af958cbc8120051107be638"
+    },
+    {
+      "path": "frontend/.env.example",
+      "checkout_sha256": "56f8dcc5c88c21dea331ed67f2cd3fee43e2a1ee1c2fa3eb0f5ae255aadd0e18",
+      "git_blob_sha256": "56f8dcc5c88c21dea331ed67f2cd3fee43e2a1ee1c2fa3eb0f5ae255aadd0e18"
+    }
+  ],
+  "scope": "History routing tests mock fetch. Buyer category and reviewed draft cases use native API, fictional source/stock and simulated supplier transport. Before browser includes the unchanged known bundle failure plus three new taxonomy request-body failures; after retains only the bundle failure.",
+  "authority": "Merchant configuration is a routing hint. Backend membership and sellability validation remain authoritative."
+}

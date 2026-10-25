@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, UploadFile, File
+import asyncio
+from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from fastapi.responses import ORJSONResponse
 
 from src.app.security.auth import require_role, ROLE_OWNER, ROLE_DEVELOPER
@@ -18,13 +19,16 @@ async def ingest(
     if len(data) > _MAX_DMARC_UPLOAD_BYTES:
         from fastapi import HTTPException
         raise HTTPException(status_code=413, detail="DMARC report exceeds 10 MB limit")
-    reports, records = ingest_aggregate(data)
+    try:
+        reports, records = await asyncio.to_thread(ingest_aggregate, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ORJSONResponse({"reports": reports, "records": records})
 
 
 @router.get("/summary")
 def summary(
-    days: int = 30,
+    days: int = Query(30, ge=1, le=365),
     _role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ):
     return ORJSONResponse(get_summary(days))

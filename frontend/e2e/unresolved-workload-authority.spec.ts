@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import {type Page} from '@playwright/test';
+import {test,expect,buyerUid} from './helpers/authenticatedTest';
 
 async function send(page: Page, text: string) {
   const responsePromise = page.waitForResponse(
@@ -50,7 +51,7 @@ for (const scenario of unresolvedCases) {
       sessionStorage.clear();
       localStorage.setItem('uid', uid);
       sessionStorage.setItem('uid', uid);
-    }, `unresolved-workload-${suffix}`);
+    }, buyerUid);
     // Keep this semantic authority test single-flight. SSE retry/abort behavior
     // has its own operational suite and must not execute the model twice here.
     await page.route('**/api/v1/chat/stream', route => route.abort());

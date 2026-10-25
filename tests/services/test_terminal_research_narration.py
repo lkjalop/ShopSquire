@@ -2,6 +2,39 @@ from src.app.services.terminal_research_narration import terminal_research_narra
 import pytest
 
 
+def _browse():
+    return {'outcome':'catalog_browse','catalog_authority':'permitted',
+            'scope':'category_and_price','qualification_authority':'none',
+            'requirements_status':'not_requested','commerce_authority':'none'}
+
+
+def test_category_browsing_remains_useful_during_model_outage_without_claiming_fit():
+    message=terminal_research_narration(
+        research_outcome={'catalog_authority':'permitted'},
+        execution_evidence={'failure_code':'model_execution_unavailable'},
+        existing_message='I found 4 options.',catalog_browse=_browse(),catalog_product_count=4,
+    )
+    assert '4 catalogue choices' in message
+    assert 'workload compatibility' in message
+    assert 'not verified' in message
+    assert 'unavailable' in message
+    assert 'no cart or supplier action' in message.lower()
+
+
+@pytest.mark.parametrize('outcome',[
+    {'catalog_authority':'blocked'},
+    {'catalog_authority':'permitted','requirement_completeness':'partial'},
+    {'identity':{'title':'Unresolved application'},'catalog_authority':'unknown'},
+])
+def test_browse_receipt_cannot_override_material_research_blocker(outcome):
+    message=terminal_research_narration(
+        research_outcome=outcome,
+        execution_evidence={'failure_code':'model_execution_unavailable'},
+        existing_message='Current answer',catalog_browse=_browse(),catalog_product_count=4,
+    )
+    assert '4 catalogue choices' not in message
+
+
 @pytest.mark.parametrize('state', [
     {'requirement_completeness': 'partial'},
     {'catalog_authority': 'blocked'},

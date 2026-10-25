@@ -52,6 +52,10 @@ def authorize_replenishment(
             return fact_sku == expected_sku
         return bool(expected_taxonomy and fact_taxonomy == expected_taxonomy)
 
+    def _not_expired(fact: Dict[str, Any]) -> bool:
+        end = fact.get("effective_to") or fact.get("expires_at")
+        return end is None or (_time(end) is not None and _time(end) > current)
+
     eligible = []
     for fact in demand_facts or []:
         observed = _time(fact.get("observed_at") or fact.get("detected_at"))
@@ -60,7 +64,8 @@ def authorize_replenishment(
             continue
         if float(fact.get("confidence") or 0.0) < min_confidence or not _is_upward(fact):
             continue
-        if observed is None or (current - observed).total_seconds() > max_demand_age_seconds:
+        if (observed is None or not -300 <= (current - observed).total_seconds() <= max_demand_age_seconds
+                or not _not_expired(fact)):
             continue
         if not fact.get("source_system") or not fact.get("provenance_chain"):
             continue
@@ -79,7 +84,7 @@ def authorize_replenishment(
     atp_observed = _time(atp.get("observed_at"))
     atp_age = (current - atp_observed).total_seconds() if atp_observed else None
     atp_authoritative = (
-        atp_observed is not None
+        atp_observed is not None and _not_expired(atp)
         and -300 <= float(atp_age) <= float(max_atp_age_seconds)
         and float(atp.get("confidence") or 0.0) >= min_confidence
         and bool(atp.get("source_system"))
@@ -90,6 +95,7 @@ def authorize_replenishment(
     economics_currency = str(economics.get("currency") or "").strip().upper()
     margin_authoritative = (
         bool(economics.get("available")) and bool(economics.get("clears_floor"))
+        and _not_expired(economics)
         and str(economics.get("cost_basis") or "")
         == "validated_landed_supplier_quote"
         and bool(economics.get("source_record_id"))

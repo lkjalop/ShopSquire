@@ -1,0 +1,180 @@
+{
+  "source_commit": "82e5cabcb83d43cd00911e6155a17daabcfb0c97",
+  "hash_scope": "Checkout bytes and normalized Git blob bytes are identified separately.",
+  "sources": [
+    {
+      "path": "frontend/src/App.tsx",
+      "checkout_sha256": "96f10bf962cc49d7b69fdfa7345880f8b4346dceb18ff6a5721340e16c75b13d",
+      "git_blob_sha256": "e9ab00e83ee9a5311314f9a8294089f4007167e2a49ebc4cd0aa2b4eb4e8daee"
+    },
+    {
+      "path": "frontend/src/lib/productLanes.ts",
+      "checkout_sha256": "0c06eaa0fe477ca17e3d589abfbbe66f09fdc629587756291202443066e5f392",
+      "git_blob_sha256": "0c06eaa0fe477ca17e3d589abfbbe66f09fdc629587756291202443066e5f392"
+    },
+    {
+      "path": "src/app/security/steg_detector.py",
+      "checkout_sha256": "08e153a56403726407410126587424e2ba5245771c7c78f464b335eea4396f38",
+      "git_blob_sha256": "35e9a4d5eabbb73af9c081ba7dd0ab08424a5f45ccf46dde0796256fe10d9e6b"
+    },
+    {
+      "path": "frontend/src/components/DecisionTrace.tsx",
+      "checkout_sha256": "7b8944354527a1679ec9f0488ac049f529a3ad92bd990c7469f3e8b0748014df",
+      "git_blob_sha256": "7b8944354527a1679ec9f0488ac049f529a3ad92bd990c7469f3e8b0748014df"
+    },
+    {
+      "path": "frontend/src/lib/traceSnapshotBinding.ts",
+      "checkout_sha256": "61e26cfbdb9b83755690cacc656b84a36b5a40470a4c58bd0444496255a8babc",
+      "git_blob_sha256": "61e26cfbdb9b83755690cacc656b84a36b5a40470a4c58bd0444496255a8babc"
+    },
+    {
+      "path": "frontend/src/components/__tests__/DecisionTraceBinding.test.tsx",
+      "checkout_sha256": "4ff28d4d01e071f14142f134a11640bd46ae298afed8680ad366899da3fb519a",
+      "git_blob_sha256": "4ff28d4d01e071f14142f134a11640bd46ae298afed8680ad366899da3fb519a"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/traceSnapshotBinding.test.ts",
+      "checkout_sha256": "993422089a0758e9546462282b5108a440ef762aa9f7ae316062dff009732c52",
+      "git_blob_sha256": "993422089a0758e9546462282b5108a440ef762aa9f7ae316062dff009732c52"
+    },
+    {
+      "path": "frontend/e2e/original-adversarial-images.spec.ts",
+      "checkout_sha256": "43767aefc3307b97d20d04e420e8a22f581619210dab1a56fb40a2cdb7164768",
+      "git_blob_sha256": "43767aefc3307b97d20d04e420e8a22f581619210dab1a56fb40a2cdb7164768"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "mvp-trace-binding-after",
+      "native_exit_code": 0,
+      "elapsed_seconds": 4.25,
+      "peaks": {
+        "rss_bytes": 283627520,
+        "handles": 270,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "mvp-trace-binding-buyer-before-v2",
+      "native_exit_code": 1,
+      "elapsed_seconds": 5.844,
+      "peaks": {
+        "rss_bytes": 267993088,
+        "handles": 270,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 30,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "mvp-trace-binding-buyer-after",
+      "native_exit_code": 0,
+      "elapsed_seconds": 4.25,
+      "peaks": {
+        "rss_bytes": 265891840,
+        "handles": 270,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 30,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "mvp-trace-binding-storefront-unit",
+      "native_exit_code": 0,
+      "elapsed_seconds": 60.515,
+      "peaks": {
+        "rss_bytes": 228315136,
+        "handles": 272,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 454,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "mvp-buyer-snapshot-storefront-unit",
+      "native_exit_code": 0,
+      "elapsed_seconds": 59.187,
+      "peaks": {
+        "rss_bytes": 235196416,
+        "handles": 278,
+        "threads": 78
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 456,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "mvp-adversarial-original-browser-buyer-snapshot-after",
+      "native_exit_code": 0,
+      "elapsed_seconds": 73.406,
+      "peaks": {
+        "rss_bytes": 784109568,
+        "handles": 1155,
+        "threads": 78
+      },
+      "resource_violation": null
+    }
+  ],
+  "original_browser_stats": {
+    "startTime": "2026-10-25T06:46:08.306Z",
+    "duration": 61359.070999999996,
+    "expected": 11,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "benchmark": {
+    "scope": "Three repeats per deterministic uint8 channel. Calculation only; no overall API, hang, or detector-accuracy claim.",
+    "before_source_sha256": "36e6b4b3695e466a22394c9a15f5b8d305c4d657503827295e2bcdbac0a96baf",
+    "after_source_sha256": "08e153a56403726407410126587424e2ba5245771c7c78f464b335eea4396f38",
+    "after_was_uncommitted_patch_on": "344b8223a9c879f95d25019fb7a95aa72da39bb6",
+    "rows": [
+      {
+        "size": 512,
+        "input_sha256": "27a95133e0a8f0ec620653e4dd4a4741452d90c623fb12b675f319689ed8ac80",
+        "score": 0.006771422289853002,
+        "before_median_seconds": 0.04663220001384616,
+        "after_median_seconds": 0.0010788999497890472
+      },
+      {
+        "size": 2000,
+        "input_sha256": "9b38d7669a883df5389615d550d654ceb1ede3328542d619683e71b9d7587304",
+        "score": 0.39945267306149707,
+        "before_median_seconds": 0.7963696999941021,
+        "after_median_seconds": 0.022454199963249266
+      }
+    ]
+  },
+  "limits": [
+    "Focused tests overlap the full storefront suite; do not sum them as independent coverage.",
+    "Operator component transport checks use mocked fetch; original browser upload assertions use native API.",
+    "Prior broad security, full Python and buyer/live results remain historical source scopes.",
+    "Bundling, completed live search-to-shortfall workflow, required CI, recovery and endurance remain open."
+  ]
+}

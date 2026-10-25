@@ -44,45 +44,6 @@
         "x": 12,
         "y": 0,
         "w": 12,
-          {
-            "type": "timeseries",
-            "title": "Complaint Triage / min by Intent+Severity",
-            "datasource": {
-              "type": "prometheus",
-              "uid": "Prometheus"
-            },
-            "targets": [
-              {
-                "expr": "sum(rate(shopsquire_complaint_triage_total[5m])) by (intent, severity)",
-                "legendFormat": "{{intent}} {{severity}}"
-              }
-            ],
-            "gridPos": {
-              "x": 0,
-              "y": 73,
-              "w": 24,
-              "h": 6
-            }
-          },
-          {
-            "type": "nodeGraph",
-            "title": "Complaint Flow (Intent → Action)",
-            "datasource": {
-              "type": "prometheus",
-              "uid": "Prometheus"
-            },
-            "options": {
-              "edges": [],
-              "nodes": []
-            },
-            "description": "Expert view: visualize how intents map to actions; populate via JSON data source or backend plugin in future.",
-            "gridPos": {
-              "x": 0,
-              "y": 79,
-              "w": 24,
-              "h": 10
-            }
-          }
         "h": 8
       }
     },
@@ -359,8 +320,7 @@
         "h": 5
       },
       "id": 25
-    }
-    ,
+    },
     {
       "type": "timeseries",
       "title": "UI Actions / min",
@@ -379,6 +339,45 @@
         "y": 73,
         "w": 24,
         "h": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Complaint Triage / min by Intent+Severity",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_complaint_triage_total[5m])) by (intent, severity)",
+          "legendFormat": "{{intent}} {{severity}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "nodeGraph",
+      "title": "Complaint Flow (Intent → Action)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "options": {
+        "edges": [],
+        "nodes": []
+      },
+      "description": "Expert view: visualize how intents map to actions; populate via JSON data source or backend plugin in future.",
+      "gridPos": {
+        "x": 0,
+        "y": 79,
+        "w": 24,
+        "h": 10
       }
     }
   ],

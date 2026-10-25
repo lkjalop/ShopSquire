@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+import pytest
 
 from src.app.models.orm import Base
 from src.app.services.shopping_case_supplier_continuation import (
@@ -14,34 +15,53 @@ from src.app.services.shopping_case_supplier_continuation import (
 
 def test_certification_fixture_contains_positive_and_negative_responses() -> None:
     rows = certification_fixture_offers(
-        case_id="sc-demo", preferred_sku="PREFERRED", substitute_sku="SUBSTITUTE",
-        requested_quantity=30, available_now=12,
+        case_id="sc-demo",
+        preferred_sku="PREFERRED",
+        substitute_sku="SUBSTITUTE",
+        requested_quantity=30,
+        available_now=12,
     )
 
-    assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 18 and row.lead_time_days == 8 for row in rows)
+    assert any(
+        row.offered_sku == "PREFERRED" and row.quantity_available == 18 and row.lead_time_days == 8
+        for row in rows
+    )
     assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 0 for row in rows)
     assert any(row.quantity_available == 9 and row.lead_time_days == 5 for row in rows)
     assert any(row.offered_sku == "SUBSTITUTE" and row.quantity_available == 30 for row in rows)
-    assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 30 and row.lead_time_days == 21 for row in rows)
+    assert any(
+        row.offered_sku == "PREFERRED" and row.quantity_available == 30 and row.lead_time_days == 21
+        for row in rows
+    )
     assert any(row.trust_status == "untrusted" for row in rows)
 
 
 def _db() -> Session:
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:", future=True,
-        connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     return Session(engine)
 
 
 def test_existing_procurement_offer_is_buyer_safe_and_retains_provenance() -> None:
-    offers = normalize_supplier_offers([SupplierOfferInput(
-        source_type="existing_procurement_case", source_reference="case-17/rfq-2",
-        supplier_reference="supplier-approved-3", offered_sku="SKU-EXACT",
-        relationship="exact", quantity_available=18, lead_time_days=8,
-        unit_price_cents=500_000,
-    )])
+    offers = normalize_supplier_offers(
+        [
+            SupplierOfferInput(
+                source_type="existing_procurement_case",
+                source_reference="case-17/rfq-2",
+                supplier_reference="supplier-approved-3",
+                offered_sku="SKU-EXACT",
+                relationship="exact",
+                quantity_available=18,
+                lead_time_days=8,
+                unit_price_cents=500_000,
+            )
+        ]
+    )
 
     assert offers[0].supplier_send == "not_performed"
     assert offers[0].purchase_commitment is False
@@ -54,12 +74,22 @@ def test_existing_procurement_offer_is_buyer_safe_and_retains_provenance() -> No
 
 
 def test_supplier_disclosures_distinguish_zero_from_not_disclosed() -> None:
-    offer = normalize_supplier_offers([SupplierOfferInput(
-        source_type="existing_procurement_case", source_reference="case/rfq",
-        supplier_reference="supplier", offered_sku="SKU", relationship="exact",
-        quantity_available=0, lead_time_days=None, unit_price_cents=None,
-        warranty_type=None, warranty_duration_months=None,
-    )])[0]
+    offer = normalize_supplier_offers(
+        [
+            SupplierOfferInput(
+                source_type="existing_procurement_case",
+                source_reference="case/rfq",
+                supplier_reference="supplier",
+                offered_sku="SKU",
+                relationship="exact",
+                quantity_available=0,
+                lead_time_days=None,
+                unit_price_cents=None,
+                warranty_type=None,
+                warranty_duration_months=None,
+            )
+        ]
+    )[0]
     by_metric = {item.metric: item for item in offer.evidence_measurements}
     assert by_metric["availability_quantity"].state == "attested"
     assert by_metric["availability_quantity"].value == 0
@@ -70,11 +100,17 @@ def test_supplier_disclosures_distinguish_zero_from_not_disclosed() -> None:
 
 def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> None:
     rows = certification_fixture_offers(
-        case_id="sc-demo", preferred_sku="PREFERRED", substitute_sku="SUBSTITUTE",
-        requested_quantity=30, available_now=12,
+        case_id="sc-demo",
+        preferred_sku="PREFERRED",
+        substitute_sku="SUBSTITUTE",
+        requested_quantity=30,
+        available_now=12,
     )
     offers = normalize_supplier_offers(
-        rows, requested_quantity=30, available_now=12, deadline_days=10,
+        rows,
+        requested_quantity=30,
+        available_now=12,
+        deadline_days=10,
     )
     by_supplier = {row.provenance["supplier_reference"]: row for row in offers}
     assert by_supplier["fixture-supplier-preferred"].response_status == "accepted"
@@ -95,44 +131,143 @@ def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> Non
 def test_selection_is_revision_bound_and_idempotent() -> None:
     with _db() as db:
         args = dict(
-            tenant_id="default", case_id="sc-1", uid="buyer", expected_revision=0,
-            choice="split_delivery", preferred_sku="PREFERRED", requested_quantity=30,
-            available_now=12, idempotency_key="select-key-1",
-            offers=[SupplierOfferInput(
-                source_type="deterministic_certification_fixture",
-                source_reference="fixture-1", supplier_reference="supplier-fixture",
-                offered_sku="PREFERRED", relationship="exact", quantity_available=18,
-            )],
+            tenant_id="default",
+            case_id="sc-1",
+            uid="buyer",
+            expected_revision=0,
+            choice="split_delivery",
+            preferred_sku="PREFERRED",
+            requested_quantity=30,
+            available_now=12,
+            idempotency_key="select-key-1",
+            offers=[
+                SupplierOfferInput(
+                    source_type="deterministic_certification_fixture",
+                    source_reference="fixture-1",
+                    supplier_reference="supplier-fixture",
+                    offered_sku="PREFERRED",
+                    relationship="exact",
+                    quantity_available=18,
+                )
+            ],
         )
         first, error = select_fulfillment_option(db, **args)
         replay, replay_error = select_fulfillment_option(db, **args)
-        stale, stale_error = select_fulfillment_option(db, **{
-            **args, "idempotency_key": "select-key-2", "expected_revision": 0,
-        })
+        stale, stale_error = select_fulfillment_option(
+            db,
+            **{
+                **args,
+                "idempotency_key": "select-key-2",
+                "expected_revision": 0,
+            },
+        )
 
     assert error is None and replay_error is None
     assert first == replay
     assert stale is None and stale_error == "stale_fulfillment_revision:1"
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"requested_quantity": 40},
+        {"uid": "another-buyer"},
+        {"preferred_sku": "OTHER"},
+        {"deadline_days": 2},
+        {"available_now": 5},
+        {"expected_revision": 1},
+        {"choice": "wait_preferred"},
+        {
+            "offers": [
+                SupplierOfferInput(
+                    source_type="deterministic_certification_fixture",
+                    source_reference="changed-offer",
+                    supplier_reference="supplier",
+                    offered_sku="SKU",
+                    relationship="exact",
+                    quantity_available=40,
+                )
+            ]
+        },
+    ],
+)
+def test_selection_key_cannot_replay_changed_buyer_intent(change):
+    with _db() as db:
+        args = dict(
+            tenant_id="default",
+            case_id="sc-replay",
+            uid="buyer",
+            expected_revision=0,
+            choice="split_delivery",
+            preferred_sku="SKU",
+            requested_quantity=30,
+            available_now=12,
+            idempotency_key="same-command",
+            offers=[],
+        )
+        first, error = select_fulfillment_option(db, **args)
+        assert first and error is None
+        result, error = select_fulfillment_option(db, **{**args, **change})
+        assert result is None
+        assert error == "fulfillment_selection_replay_conflict"
+
+
+def test_legacy_selection_without_request_binding_cannot_claim_verified_replay():
+    from sqlalchemy import text
+
+    with _db() as db:
+        args = dict(
+            tenant_id="default",
+            case_id="legacy",
+            uid="buyer",
+            expected_revision=0,
+            choice="split_delivery",
+            preferred_sku="SKU",
+            requested_quantity=30,
+            available_now=12,
+            idempotency_key="legacy-key",
+            offers=[],
+        )
+        first, error = select_fulfillment_option(db, **args)
+        assert first and error is None
+        db.execute(text("UPDATE shopping_case_fulfillment_selections SET request_digest=NULL"))
+        db.commit()
+        db.expire_all()
+        result, error = select_fulfillment_option(db, **args)
+        assert result is None and error == "fulfillment_selection_replay_unverifiable"
+
+
 def test_substitute_never_resolves_without_explicit_authorization() -> None:
     with _db() as db:
         selection, _ = select_fulfillment_option(
-            db, tenant_id="default", case_id="sc-2", uid="buyer", expected_revision=0,
-            choice="substitute", preferred_sku="PREFERRED", requested_quantity=30,
-            available_now=12, idempotency_key="select-substitute",
-            offers=[SupplierOfferInput(
-                source_type="deterministic_certification_fixture",
-                source_reference="fixture-2", supplier_reference="supplier-fixture",
-                offered_sku="SUBSTITUTE", relationship="compatible_substitute",
-                quantity_available=30,
-            )],
+            db,
+            tenant_id="default",
+            case_id="sc-2",
+            uid="buyer",
+            expected_revision=0,
+            choice="substitute",
+            preferred_sku="PREFERRED",
+            requested_quantity=30,
+            available_now=12,
+            idempotency_key="select-substitute",
+            offers=[
+                SupplierOfferInput(
+                    source_type="deterministic_certification_fixture",
+                    source_reference="fixture-2",
+                    supplier_reference="supplier-fixture",
+                    offered_sku="SUBSTITUTE",
+                    relationship="compatible_substitute",
+                    quantity_available=30,
+                )
+            ],
         )
     assert selection is not None
     offer = selection.offers[0]
     try:
         resolve_confirmed_cart_target(
-            selection, selected_offer_id=offer.offer_id, substitution_authorized=False,
+            selection,
+            selected_offer_id=offer.offer_id,
+            substitution_authorized=False,
         )
     except ValueError as exc:
         assert str(exc) == "substitution_requires_explicit_authorization"
@@ -140,7 +275,9 @@ def test_substitute_never_resolves_without_explicit_authorization() -> None:
         raise AssertionError("silent substitution was accepted")
 
     target, quantity, chosen = resolve_confirmed_cart_target(
-        selection, selected_offer_id=offer.offer_id, substitution_authorized=True,
+        selection,
+        selected_offer_id=offer.offer_id,
+        substitution_authorized=True,
     )
     assert (target, quantity, chosen.offer_id) == ("SUBSTITUTE", 30, offer.offer_id)
 
@@ -149,46 +286,72 @@ def test_split_and_wait_keep_exact_preferred_sku() -> None:
     for choice in ("split_delivery", "wait_preferred"):
         with _db() as db:
             selection, error = select_fulfillment_option(
-                db, tenant_id="default", case_id=f"sc-{choice}", uid="buyer",
-                expected_revision=0, choice=choice, preferred_sku="PREFERRED",
-                requested_quantity=30, available_now=12,
-                idempotency_key=f"select-{choice}", offers=[],
+                db,
+                tenant_id="default",
+                case_id=f"sc-{choice}",
+                uid="buyer",
+                expected_revision=0,
+                choice=choice,
+                preferred_sku="PREFERRED",
+                requested_quantity=30,
+                available_now=12,
+                idempotency_key=f"select-{choice}",
+                offers=[],
             )
         assert error is None and selection is not None
         target, quantity, offer = resolve_confirmed_cart_target(
-            selection, selected_offer_id=None, substitution_authorized=False,
+            selection,
+            selected_offer_id=None,
+            substitution_authorized=False,
         )
         assert (target, quantity, offer) == ("PREFERRED", 30, None)
 
 
 def test_untrusted_supplier_offer_is_quarantined_from_cart_resolution() -> None:
-    offers = normalize_supplier_offers([SupplierOfferInput(
-        source_type="deterministic_certification_fixture",
-        source_reference="fixture-untrusted",
-        supplier_reference="supplier-untrusted",
-        offered_sku="PREFERRED",
-        relationship="exact",
-        quantity_available=30,
-        trust_status="untrusted",
-    )], requested_quantity=30)
-    assert offers[0].response_status == "quarantined"
-    with _db() as db:
-        selection, error = select_fulfillment_option(
-            db, tenant_id="default", case_id="sc-untrusted", uid="buyer",
-            expected_revision=0, choice="supplier_enquiry", preferred_sku="PREFERRED",
-            requested_quantity=30, available_now=0, idempotency_key="select-untrusted",
-            offers=[SupplierOfferInput(
+    offers = normalize_supplier_offers(
+        [
+            SupplierOfferInput(
                 source_type="deterministic_certification_fixture",
                 source_reference="fixture-untrusted",
                 supplier_reference="supplier-untrusted",
-                offered_sku="PREFERRED", relationship="exact", quantity_available=30,
+                offered_sku="PREFERRED",
+                relationship="exact",
+                quantity_available=30,
                 trust_status="untrusted",
-            )],
+            )
+        ],
+        requested_quantity=30,
+    )
+    assert offers[0].response_status == "quarantined"
+    with _db() as db:
+        selection, error = select_fulfillment_option(
+            db,
+            tenant_id="default",
+            case_id="sc-untrusted",
+            uid="buyer",
+            expected_revision=0,
+            choice="supplier_enquiry",
+            preferred_sku="PREFERRED",
+            requested_quantity=30,
+            available_now=0,
+            idempotency_key="select-untrusted",
+            offers=[
+                SupplierOfferInput(
+                    source_type="deterministic_certification_fixture",
+                    source_reference="fixture-untrusted",
+                    supplier_reference="supplier-untrusted",
+                    offered_sku="PREFERRED",
+                    relationship="exact",
+                    quantity_available=30,
+                    trust_status="untrusted",
+                )
+            ],
         )
     assert error is None and selection is not None
     try:
         resolve_confirmed_cart_target(
-            selection, selected_offer_id=selection.offers[0].offer_id,
+            selection,
+            selected_offer_id=selection.offers[0].offer_id,
             substitution_authorized=False,
         )
     except ValueError as exc:

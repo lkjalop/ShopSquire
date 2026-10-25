@@ -5,6 +5,15 @@ from src.app.services import secrets_manager
 from src.app.routers.payments import _payment_execution_enabled
 
 
+@pytest.fixture(autouse=True)
+def isolated_settings_and_secret_cache():
+    secrets_manager._CACHE.clear()
+    get_settings.cache_clear()
+    yield
+    secrets_manager._CACHE.clear()
+    get_settings.cache_clear()
+
+
 def _secure_non_payment_runtime(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("SECRETS_ALLOW_ENV_REF_IN_STRICT", "1")

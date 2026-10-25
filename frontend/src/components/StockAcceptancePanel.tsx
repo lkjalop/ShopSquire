@@ -14,6 +14,7 @@ export default function StockAcceptancePanel({caseId,uid,revision,onAccepted,sku
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const generation=useRef(0);
+  useEffect(()=>{setQuantity(initialQuantity);},[initialQuantity]);
   const endpoint=sku ? `/api/v1/shopping-cases/${encodeURIComponent(caseId)}`
     : `/api/v1/demo/qualification-cases/${encodeURIComponent(caseId)}`;
   const headers=():Record<string,string>=>sku ? {} : {'X-Tenant-ID':'synthetic-electronics'};

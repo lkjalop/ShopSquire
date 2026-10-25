@@ -6,7 +6,7 @@ vertical-agnostic and deliberately carries no ranking or commerce authority.
 """
 from __future__ import annotations
 
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

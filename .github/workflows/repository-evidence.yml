@@ -73,6 +73,11 @@ jobs:
           npm test
           npx tsc --noEmit
           npm run build
+      - name: Parse all repository JavaScript and test the dependency-free Grafana adapters
+        if: matrix.directory == 'frontend'
+        run: |
+          node scripts/check_javascript_syntax.cjs
+          node --test config/observability/grafana/json-datasource/adapter.test.cjs
 
   architecture-ratchets:
     runs-on: ubuntu-latest

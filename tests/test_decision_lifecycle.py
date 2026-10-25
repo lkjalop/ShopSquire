@@ -2,19 +2,19 @@ import json
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text, Table, Column
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from tests.utils import default_headers
 
 from src.app.config import get_settings
 
 
 def test_approve_and_reject_decision(monkeypatch, tmp_path):
-    # shared in-memory sqlite
+    # File-backed SQLite needs a connection per concurrent owner. StaticPool
+    # shares one DBAPI connection with background event writers.
     db_file = tmp_path / "decision_lifecycle.sqlite"
     db_url = f"sqlite+pysqlite:///{db_file}"
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("DATABASE_URL_RO", db_url)
-    engine = create_engine(db_url, connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    engine = create_engine(db_url, connect_args={"check_same_thread": False}, future=True)
     SessionLocal = sessionmaker(bind=engine, future=True)
     import src.app.models.db as dbmod
     monkeypatch.setattr(dbmod, "engine", engine)

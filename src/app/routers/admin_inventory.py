@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Literal
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+
 from src.app.models.db import db_session
 from src.app.platform.tenant_context import current_tenant_id
-from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role_or_oidc
+from src.app.routers.operator_supplier_enquiries import router as supplier_enquiry_router
+from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT, require_role_or_oidc
 from src.app.erp.jobs import (
     enqueue_netsuite_outbound,
     run_netsuite_delta_sync,
@@ -22,11 +26,31 @@ from src.app.services.inventory_projection_read_model import (
     inventory_projection_status,
     rebuild_inventory_projection,
 )
-from src.app.routers.operator_supplier_enquiries import router as supplier_enquiry_router
 
 
 router = APIRouter(prefix="/api/v1/admin/inventory", tags=["admin-inventory"])
 router.include_router(supplier_enquiry_router)
+
+
+def _scoped_inventory_tenant(requested: Any = None) -> str:
+    """A body/query tenant cannot widen the operator's authenticated context."""
+    tenant = str(current_tenant_id() or "default")
+    if requested is not None and str(requested) != tenant:
+        raise HTTPException(status_code=403, detail="inventory_tenant_mismatch")
+    return tenant
+
+
+class InventoryOperationBody(BaseModel):
+    model_config = {'extra': 'forbid'}
+    kind: Literal['receive','transfer','ship','cancel','return']
+    sku: str = Field(min_length=1,max_length=255)
+    source_reference: str = Field(min_length=1,max_length=200)
+    destination_location: str | None = Field(default=None,min_length=1,max_length=200)
+    source_location: str | None = Field(default=None,max_length=200)
+    quantity: int = Field(strict=True,ge=1,le=10000)
+    reservation_id: str | None = Field(default=None,max_length=200)
+    case_id: str | None = Field(default=None,max_length=200)
+    case_revision: int | None = Field(default=None,strict=True,ge=1)
 
 
 def _inventory_operator(request: Request):
@@ -45,6 +69,98 @@ def _inventory_operator(request: Request):
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
     return identity
+
+
+def _inventory_operation_view(row):
+    return {key:row.get(key) for key in ('id','status','value_cents','currency','approval_id','requester_principal')} | {
+        'payload':json.loads(row['payload_json']), 'simulation_only':True,
+        'result':json.loads(row['result_json']) if row.get('result_json') else None}
+
+
+@router.post('/operations')
+def request_inventory_operation(body: InventoryOperationBody, request: Request,
+        role=Depends(require_role_or_oidc([ROLE_OWNER,ROLE_MERCHANT,ROLE_DEVELOPER]))):
+    from src.app.services.operator_inventory_requests import create_request
+    actor=_inventory_operator(request)
+    try:
+        with db_session() as db:
+            row=create_request(db,tenant_id=actor.tenant_id,requester_principal=actor.principal_hash,**body.model_dump())
+            db.commit()
+            return _inventory_operation_view(row)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+
+@router.get('/operations/{request_id}')
+def read_inventory_operation(request_id: str, request: Request,
+        role=Depends(require_role_or_oidc([ROLE_OWNER,ROLE_MERCHANT,ROLE_DEVELOPER]))):
+    from src.app.services.operator_inventory_requests import get_request
+    actor=_inventory_operator(request)
+    with db_session() as db:
+        try:
+            return _inventory_operation_view(get_request(db,tenant_id=actor.tenant_id,request_id=request_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=404,detail=str(exc)) from exc
+
+
+@router.post('/operations/{request_id}/approve')
+def approve_inventory_operation(request_id: str, request: Request,
+        role=Depends(require_role_or_oidc([ROLE_OWNER,ROLE_MERCHANT,ROLE_DEVELOPER]))):
+    from src.app.services.operator_inventory_requests import approve_request
+    actor=_inventory_operator(request)
+    try:
+        with db_session() as db:
+            row=approve_request(db,tenant_id=actor.tenant_id,request_id=request_id,approver_principal=actor.principal_hash)
+            db.commit()
+            return _inventory_operation_view(row)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+
+@router.post('/operations/{request_id}/execute')
+def execute_inventory_operation(request_id: str, request: Request,
+        role=Depends(require_role_or_oidc([ROLE_OWNER,ROLE_MERCHANT,ROLE_DEVELOPER]))):
+    from src.app.services.operator_inventory_requests import execute_request
+    from src.app.services.fulfillment.person_approval import _person
+    actor=_inventory_operator(request)
+    try:
+        with db_session() as db:
+            _person(db,actor.tenant_id,actor.principal_hash)
+            result=execute_request(db,tenant_id=actor.tenant_id,request_id=request_id)
+            db.commit()
+            return {**result,'simulation_only':True}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
+
+
+@router.get('/operation-stock/{sku}')
+def inventory_operation_stock(sku: str, request: Request,
+        role=Depends(require_role_or_oidc([ROLE_OWNER,ROLE_MERCHANT,ROLE_DEVELOPER]))):
+    from src.app.services.fulfillment.person_approval import _person
+    from src.app.services.shop_operational_history import reconcile_inventory
+    actor=_inventory_operator(request)
+    with db_session() as db:
+        try:
+            _person(db,actor.tenant_id,actor.principal_hash)
+        except ValueError as exc:
+            raise HTTPException(status_code=403,detail=str(exc)) from exc
+        args=dict(tenant=actor.tenant_id,sku=sku)
+        rows=db.execute(text('SELECT location_id,on_hand,reserved,available FROM inventory_level WHERE tenant_id=:tenant AND sku=:sku ORDER BY location_id'),args).mappings().all()
+        if not rows:
+            raise HTTPException(status_code=404,detail='inventory_not_found')
+        count=db.execute(text('SELECT COUNT(*) FROM inventory_stock_movement WHERE tenant_id=:tenant AND sku=:sku'),args).scalar_one()
+        reservations=db.execute(text('''SELECT r.reservation_id,r.location_id,r.quantity,r.status,r.returned_quantity,r.expires_at,
+            s.case_id,s.revision AS selection_revision,c.revision AS case_revision FROM inventory_reservation r
+            LEFT JOIN shopping_case_fulfillment_selections s ON s.tenant_id=r.tenant_id
+              AND r.reservation_id LIKE 'selection:' || s.selection_id || ':%'
+            LEFT JOIN shopping_cases c ON c.tenant_id=s.tenant_id AND c.case_id=s.case_id
+            WHERE r.tenant_id=:tenant AND r.sku=:sku ORDER BY r.created_at DESC LIMIT 100'''),args).mappings().all()
+        event_count=db.execute(text('''SELECT COUNT(*) FROM inventory_effect_event e JOIN inventory_reservation r
+            ON r.tenant_id=e.tenant_id AND r.reservation_id=e.reservation_id WHERE r.tenant_id=:tenant AND r.sku=:sku'''),args).scalar_one()
+        baseline=db.execute(text('SELECT scenario_id FROM synthetic_shop_history WHERE tenant_id=:tenant AND sku=:sku ORDER BY scenario_id LIMIT 1'),args).first()
+        reconciliation=reconcile_inventory(db,tenant_id=actor.tenant_id,sku=sku,scenario_id=baseline[0]) if baseline else None
+        return dict(locations=[dict(row) for row in rows],movement_count=count,reservations=[dict(row) for row in reservations],
+                    reservation_event_count=event_count,reconciliation=reconciliation,simulation_only=True)
 
 
 class ProjectionRebuildBody(BaseModel):
@@ -89,9 +205,7 @@ def _invalidate_catalog_profile_after_product_write(tenant_id: str | None) -> No
     # Keep this close to the write endpoints so future product CRUD additions
     # invalidate the merchant catalog profile cache by default.
     try:
-        invalidate_catalog_profile_cache(
-            tenant_id=str(tenant_id) if tenant_id is not None else None
-        )
+        invalidate_catalog_profile_cache(tenant_id=str(tenant_id) if tenant_id is not None else None)
     except Exception:
         pass
 
@@ -100,7 +214,6 @@ def _load_csv_connector(path: str | None = None):
     from src.app.erp.connectors.csv_inventory import CSVInventoryConnector
 
     return CSVInventoryConnector(path=path)
-
 
 def _load_shopify_connector():
     from src.app.erp.connectors.shopify_inventory import ShopifyInventoryConnector
@@ -111,16 +224,7 @@ def _load_shopify_connector():
 def _load_external_connector(connector_id: str):
     cid = str(connector_id or "").strip().lower()
     # Deep provider connectors (delta cursors + outbound maps).
-    if cid in (
-        "netsuite",
-        "sap",
-        "dynamics",
-        "quickbooks",
-        "coupa",
-        "ariba",
-        "salesforce",
-        "hubspot",
-    ):
+    if cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
         from src.app.erp.provider_registry import load_provider
 
         return load_provider(cid)
@@ -139,33 +243,18 @@ def _json_load(raw: Any, default: Any):
 
 
 @router.get("/connectors")
-def connectors(
-    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
-) -> Dict[str, Any]:
+def connectors(role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, Any]:
     csv_path = os.getenv("CSV_INVENTORY_PATH") or ""
     c = _load_csv_connector(csv_path if csv_path else None)
     s = _load_shopify_connector()
-    items = [
-        {"id": "csv", "name": c.name(), "health": c.health()},
-        {"id": "shopify", "name": s.name(), "health": s.health()},
-    ]
-    for cid in (
-        "netsuite",
-        "sap",
-        "dynamics",
-        "quickbooks",
-        "coupa",
-        "ariba",
-        "salesforce",
-        "hubspot",
-    ):
+    items = [{"id": "csv", "name": c.name(), "health": c.health()}, {"id": "shopify", "name": s.name(), "health": s.health()}]
+    for cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
         try:
             ec = _load_external_connector(cid)
             items.append({"id": cid, "name": ec.name(), "health": ec.health()})
         except Exception as exc:
             items.append({"id": cid, "name": cid, "health": {"ok": False, "error": str(exc)}})
     return {"items": items}
-
 
 @router.get("/connectors/summary")
 def connectors_summary(
@@ -174,22 +263,14 @@ def connectors_summary(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     """Return per-connector health plus last sync run and sample snapshot rows."""
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(0, min(int(limit_samples or 5), 25))
     csv_path = os.getenv("CSV_INVENTORY_PATH") or ""
     connectors = [
         {"id": "csv", "connector": _load_csv_connector(csv_path if csv_path else None)},
         {"id": "shopify", "connector": _load_shopify_connector()},
     ]
-    for cid in (
-        "netsuite",
-        "sap",
-        "dynamics",
-        "quickbooks",
-        "coupa",
-        "ariba",
-        "salesforce",
-        "hubspot",
-    ):
+    for cid in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
         try:
             connectors.append({"id": cid, "connector": _load_external_connector(cid)})
         except Exception:
@@ -209,11 +290,6 @@ def connectors_summary(
         prev_run = None
         sample = []
         try:
-            where = "WHERE source = :source"
-            params: Dict[str, Any] = {"source": cid}
-            if tenant_id:
-                where += " AND tenant_id = :tenant_id"
-                params["tenant_id"] = str(tenant_id)
             with db_session() as db:
                 runs = db.execute(
                     text(
@@ -257,10 +333,10 @@ def connectors_summary(
                         text(
                             "SELECT sku, warehouse, stock, observed_at "
                             "FROM inventory_external_stock "
-                            "WHERE source = :source "
+                            "WHERE source = :source AND tenant_id = :tenant_id "
                             "ORDER BY observed_at DESC LIMIT :lim"
                         ),
-                        {"source": cid, "lim": lim},
+                        {"source": cid, "tenant_id": tenant_id, "lim": lim},
                     ).fetchall()
         except Exception:
             last_run = None
@@ -270,9 +346,7 @@ def connectors_summary(
         delta_applied = None
         try:
             if last_run and prev_run:
-                delta_applied = int(last_run.get("records_applied") or 0) - int(
-                    prev_run.get("records_applied") or 0
-                )
+                delta_applied = (int(last_run.get("records_applied") or 0) - int(prev_run.get("records_applied") or 0))
             elif last_run:
                 delta_applied = int(last_run.get("records_applied") or 0)
         except Exception:
@@ -285,10 +359,7 @@ def connectors_summary(
                 "health": health,
                 "last_run": last_run,
                 "delta_applied": delta_applied,
-                "sample": [
-                    {"sku": r[0], "warehouse": r[1], "stock": r[2], "observed_at": r[3]}
-                    for r in (sample or [])
-                ],
+                "sample": [{"sku": r[0], "warehouse": r[1], "stock": r[2], "observed_at": r[3]} for r in (sample or [])],
             }
         )
 
@@ -301,26 +372,18 @@ def sync_runs(
     tenant_id: str | None = None,
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(1, min(int(limit or 50), 500))
     rows = []
     try:
         with db_session() as db:
-            if tenant_id:
-                rows = db.execute(
-                    text(
-                        "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
-                        "FROM inventory_sync_runs WHERE tenant_id = :tid ORDER BY started_at DESC LIMIT :lim"
-                    ),
-                    {"tid": str(tenant_id), "lim": lim},
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    text(
-                        "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
-                        "FROM inventory_sync_runs ORDER BY started_at DESC LIMIT :lim"
-                    ),
-                    {"lim": lim},
-                ).fetchall()
+            rows = db.execute(
+                text(
+                    "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
+                    "FROM inventory_sync_runs WHERE tenant_id = :tid ORDER BY started_at DESC LIMIT :lim"
+                ),
+                {"tid": tenant_id, "lim": lim},
+            ).fetchall()
     except Exception:
         rows = []
     items = []
@@ -347,7 +410,7 @@ def sync(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     connector_id = str(body.get("connector") or "csv").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     csv_path = body.get("csv_path")
@@ -356,16 +419,7 @@ def sync(
         c = _load_csv_connector(path=str(csv_path) if csv_path else None)
     elif connector_id == "shopify":
         c = _load_shopify_connector()
-    elif connector_id in (
-        "netsuite",
-        "sap",
-        "dynamics",
-        "quickbooks",
-        "coupa",
-        "ariba",
-        "salesforce",
-        "hubspot",
-    ):
+    elif connector_id in ("netsuite", "sap", "dynamics", "quickbooks", "coupa", "ariba", "salesforce", "hubspot"):
         c = _load_external_connector(connector_id)
     else:
         raise HTTPException(status_code=400, detail="unsupported connector")
@@ -376,26 +430,15 @@ def sync(
     from src.app.erp.sync import sync_inventory
     from src.app.observability.metrics import record_inventory_sync
 
-    out = sync_inventory(
-        connector=c,
-        tenant_id=str(tenant_id) if tenant_id is not None else None,
-        dry_run=dry_run,
-        upsert_products=upsert_products,
-    )
+    out = sync_inventory(connector=c, tenant_id=str(tenant_id) if tenant_id is not None else None, dry_run=dry_run, upsert_products=upsert_products)
     if not dry_run and upsert_products and not out.get("error"):
-        _invalidate_catalog_profile_after_product_write(
-            str(tenant_id) if tenant_id is not None else None
-        )
+        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
     try:
         record_inventory_sync(
             str(out.get("source") or connector_id),
             str(out.get("status") or "unknown"),
-            records_seen=int(out.get("records_seen") or 0)
-            if out.get("records_seen") is not None
-            else None,
-            records_applied=int(out.get("records_applied") or 0)
-            if out.get("records_applied") is not None
-            else None,
+            records_seen=int(out.get("records_seen") or 0) if out.get("records_seen") is not None else None,
+            records_applied=int(out.get("records_applied") or 0) if out.get("records_applied") is not None else None,
         )
     except Exception:
         pass
@@ -407,7 +450,7 @@ def sync_netsuite_delta(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     limit = int(body.get("limit", 2000) or 2000)
@@ -424,7 +467,7 @@ def enqueue_netsuite(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     entity_type = str(body.get("entity_type") or "").strip().lower()
     if entity_type not in {"customer", "sales_order", "order"}:
         raise HTTPException(status_code=400, detail="unsupported_entity_type")
@@ -443,11 +486,9 @@ def run_netsuite_outbound(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     limit = int(body.get("limit", 100) or 100)
-    return run_netsuite_outbound_sync(
-        tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
-    )
+    return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
 
 
 @router.post("/sync/erp/delta")
@@ -456,7 +497,7 @@ def sync_erp_delta(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     limit = int(body.get("limit", 2000) or 2000)
@@ -479,13 +520,10 @@ def sync_erp_delta(
     next_cursor = None
     rows = []
     try:
-        rows, next_cursor = getattr(c, "fetch_inventory_delta")(
-            cursor=prev_cursor, tenant_id=tenant_scope, limit=limit
-        )
+        rows, next_cursor = getattr(c, "fetch_inventory_delta")(cursor=prev_cursor, tenant_id=tenant_scope, limit=limit)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"delta_fetch_failed:{exc}")
     from src.app.erp.jobs import _SnapshotConnector  # local helper
-
     out = sync_inventory(
         connector=_SnapshotConnector(rows=rows, name=provider),
         tenant_id=str(tenant_id) if tenant_id is not None else None,
@@ -493,15 +531,8 @@ def sync_erp_delta(
         upsert_products=upsert_products,
     )
     if not dry_run and upsert_products and not out.get("error"):
-        _invalidate_catalog_profile_after_product_write(
-            str(tenant_id) if tenant_id is not None else None
-        )
-    if (
-        not dry_run
-        and not out.get("error")
-        and next_cursor is not None
-        and prev_cursor != next_cursor
-    ):
+        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
+    if not dry_run and not out.get("error") and next_cursor is not None and prev_cursor != next_cursor:
         getattr(c, "set_cursor")(
             tenant_id=tenant_scope,
             entity_type="inventory",
@@ -520,7 +551,7 @@ def enqueue_erp_outbound(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     entity_type = str(body.get("entity_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     max_attempts = int(body.get("max_attempts", 3) or 3)
@@ -532,14 +563,7 @@ def enqueue_erp_outbound(
             max_attempts=max_attempts,
         )
     from src.app.erp.jobs_generic import enqueue_outbound
-
-    return enqueue_outbound(
-        provider=provider,
-        tenant_id=str(tenant_id) if tenant_id is not None else None,
-        entity_type=entity_type,
-        payload=payload,
-        max_attempts=max_attempts,
-    )
+    return enqueue_outbound(provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, entity_type=entity_type, payload=payload, max_attempts=max_attempts)
 
 
 @router.post("/sync/erp/outbound/run")
@@ -548,17 +572,12 @@ def run_erp_outbound(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     limit = int(body.get("limit", 100) or 100)
     if provider == "netsuite":
-        return run_netsuite_outbound_sync(
-            tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
-        )
+        return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
     from src.app.erp.jobs_generic import run_outbound
-
-    return run_outbound(
-        provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit
-    )
+    return run_outbound(provider=provider, tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
 
 
 @router.get("/external_stock/recent")
@@ -569,6 +588,7 @@ def external_stock_recent(
     sku: str | None = None,
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(1, min(int(limit or 200), 1000))
     params: Dict[str, Any] = {
         "lim": lim,
@@ -584,7 +604,7 @@ def external_stock_recent(
                 text(
                     "SELECT id, tenant_id, source, sku, warehouse, stock, observed_at, raw_json "
                     "FROM inventory_external_stock "
-                    "WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id) "
+                    "WHERE tenant_id = :tenant_id "
                     "AND (:source IS NULL OR source = :source) "
                     "AND (:sku IS NULL OR sku = :sku) "
                     "ORDER BY observed_at DESC LIMIT :lim"
@@ -627,9 +647,7 @@ def analysis_summary(
 
         readiness = compute_inventory_readiness()
         agent = InventoryAgent()
-        transfers = agent.suggest_rebalancing_transfers(
-            max_suggestions=max(1, min(int(max_transfers or 10), 50))
-        )
+        transfers = agent.suggest_rebalancing_transfers(max_suggestions=max(1, min(int(max_transfers or 10), 50)))
         return {
             "readiness": {
                 "score": readiness.score,
@@ -728,9 +746,7 @@ def ops_readiness(
                     except Exception:
                         pass
             metrics["forecast_mape_count"] = len(mape_vals)
-            metrics["forecast_mape_avg"] = (
-                round(sum(mape_vals) / len(mape_vals), 4) if mape_vals else 0.0
-            )
+            metrics["forecast_mape_avg"] = round(sum(mape_vals) / len(mape_vals), 4) if mape_vals else 0.0
 
             try:
                 t_rows = db.execute(
@@ -785,9 +801,7 @@ def ops_readiness(
     req = int(metrics["reorder_approvals_required"] or 0)
     done = int(metrics["reorder_approvals_completed"] or 0)
     metrics["approval_completion_rate"] = round(float(done) / float(max(1, req)), 4)
-    metrics["po_creation_rate_per_day"] = round(
-        float(metrics["po_created_count"] or 0) * 24.0 / float(window_h), 4
-    )
+    metrics["po_creation_rate_per_day"] = round(float(metrics["po_created_count"] or 0) * 24.0 / float(window_h), 4)
 
     alerts = {
         "approval_backlog_high": req > 0 and (done / float(max(1, req))) < 0.6,
@@ -837,9 +851,7 @@ def supplier_risk_summary(
                 sid = str(r[1] or "unknown")
                 risk = float(r[5] or 0.0)
                 scores.append(risk)
-                bucket = src_acc.setdefault(
-                    sid, {"source": sid, "quarantined": 0, "risk_sum": 0.0, "risk_avg": 0.0}
-                )
+                bucket = src_acc.setdefault(sid, {"source": sid, "quarantined": 0, "risk_sum": 0.0, "risk_avg": 0.0})
                 bucket["quarantined"] = int(bucket["quarantined"]) + 1
                 bucket["risk_sum"] = float(bucket["risk_sum"]) + risk
                 if len(out["recent_quarantines"]) < 20:
@@ -870,9 +882,7 @@ def supplier_risk_summary(
                         "trust_score": round(max(0.0, 1.0 - (float(v["risk_sum"]) / float(q))), 4),
                     }
                 )
-            out["source_risk"] = sorted(
-                source_risk, key=lambda x: (x["quarantined"], x["risk_avg"]), reverse=True
-            )
+            out["source_risk"] = sorted(source_risk, key=lambda x: (x["quarantined"], x["risk_avg"]), reverse=True)
     except Exception:
         pass
     out["avg_risk_score"] = round(sum(scores) / len(scores), 4) if scores else 0.0
@@ -931,11 +941,7 @@ def inventory_drift_check(
             except Exception:
                 pass
             try:
-                rows = db.execute(
-                    text(
-                        "SELECT line_items, tenant_id FROM draft_orders ORDER BY created_at DESC LIMIT 800"
-                    )
-                ).fetchall()
+                rows = db.execute(text("SELECT line_items, tenant_id FROM draft_orders ORDER BY created_at DESC LIMIT 800")).fetchall()
                 unknown = 0
                 for r in rows or []:
                     raw = r[0] if isinstance(r, (list, tuple)) else r[0]
@@ -948,9 +954,7 @@ def inventory_drift_check(
                         sku = str(it.get("sku") or "").strip()
                         if not sku:
                             continue
-                        exists = db.execute(
-                            text("SELECT 1 FROM products WHERE sku = :sku LIMIT 1"), {"sku": sku}
-                        ).fetchone()
+                        exists = db.execute(text("SELECT 1 FROM products WHERE sku = :sku LIMIT 1"), {"sku": sku}).fetchone()
                         if not exists:
                             unknown += 1
                 out["unknown_order_line_skus"] = int(unknown)
@@ -958,14 +962,6 @@ def inventory_drift_check(
                 pass
     except Exception:
         pass
-    if any(
-        int(out.get(k) or 0) > 0
-        for k in (
-            "missing_inventory_products",
-            "orphan_inventory_rows",
-            "unknown_order_line_skus",
-            "negative_stock_rows",
-        )
-    ):
+    if any(int(out.get(k) or 0) > 0 for k in ("missing_inventory_products", "orphan_inventory_rows", "unknown_order_line_skus", "negative_stock_rows")):
         out["status"] = "attention"
     return out

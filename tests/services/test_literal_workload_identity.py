@@ -94,3 +94,10 @@ def test_single_token_application_in_explicit_hardware_grammar_replaces_workload
     utterance = "I need hardware for CupixWorks. Please inspect this page."
     assert literal_software_identity_candidate(utterance) == (("software", "CupixWorks"),)
     assert deterministic_named_workload_switch(utterance)
+
+
+def test_governed_single_word_workload_replaces_generic_shopping_purpose():
+    assert deterministic_named_workload_switch('I need a laptop for Blender rendering and large scenes.')
+    assert not deterministic_named_workload_switch('I need a laptop for university.')
+    assert not deterministic_named_workload_switch('I do not need a laptop for Blender.')
+    assert not deterministic_named_workload_switch('Yes, research the official Blender requirements online.')

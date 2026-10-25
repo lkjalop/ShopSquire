@@ -157,6 +157,8 @@ def _norm_req(d: Any) -> Dict[str, Any]:
         "storage_gb": d.get("storage_gb"),
         "os": d.get("os"),
         **({"cpu": d["cpu"]} if d.get("cpu") else {}),
+        **({"storage_type": d["storage_type"]} if d.get("storage_type") else {}),
+        **({"additional_notes": d["additional_notes"]} if d.get("additional_notes") else {}),
     }
 
 
@@ -182,12 +184,15 @@ def _bounded_requirements(value: Any) -> Dict[str, Any]:
         "storage_gb": storage if storage is not None and 1 <= storage <= 8192 else None,
         "os": _bounded_text(req.get("os"), 160),
         **({"cpu": _bounded_text(req["cpu"], 240)} if req.get("cpu") else {}),
+        **({"storage_type": _bounded_text(req["storage_type"], 32)} if req.get("storage_type") else {}),
+        **({"additional_notes": _bounded_text(req["additional_notes"], 900)}
+           if req.get("additional_notes") else {}),
     }
     # Spans refer to normalized publisher lines, not offsets in HTML. Preserve
     # only exact matches; bounding/normalization must never fabricate a quote.
     receipts = value.get("source_fields") if isinstance(value, dict) else None
     retained = {}
-    for key in ("cpu", "gpu", "os"):
+    for key in ("cpu", "gpu", "os", "additional_notes", "storage_type"):
         receipt = receipts.get(key) if isinstance(receipts, dict) else None
         if not isinstance(receipt, dict):
             continue
@@ -275,6 +280,10 @@ def _parse_requirements_html(raw: Any, *, include_source_fields: bool = False) -
                 out["os"] = val
             elif "cpu" not in out and lab in ("processor", "cpu"):
                 out["cpu"] = val
+            elif include_source_fields and lab == "additional notes" and "additional_notes" not in out:
+                # Preserve publisher context for typed extraction; no storage,
+                # architecture or compatibility predicate is inferred here.
+                out["additional_notes"] = val
             elif out["ram_gb"] is None and lab == "memory":
                 m = _SIZE_RE.search(val)
                 if m:
@@ -293,7 +302,18 @@ def _parse_requirements_html(raw: Any, *, include_source_fields: bool = False) -
                     else:
                         out["storage_gb"] = max(1, int(round(n / 1024)))
             if include_source_fields:
-                for key in ("cpu", "gpu", "os"):
+                # An explicit requirement is an observation. Capacity alone and
+                # recommendations do not authorise a storage-type predicate.
+                if lab in ('additional notes', 'storage'):
+                    storage = re.search(r'\b(SSD|HDD)\b\s+(?:is\s+)?required\b', val, re.I)
+                    if storage and 'storage_type' not in out:
+                        out['storage_type'] = storage.group(1)
+                        start = line.index(':') + 1 + len(value) - len(value.lstrip()) + storage.start(1)
+                        out.setdefault('source_fields', {})['storage_type'] = {
+                            'text': line, 'start': start, 'end': start + len(storage.group(1)),
+                            'representation': 'steam_requirement_line_v1',
+                        }
+                for key in ("cpu", "gpu", "os", "additional_notes"):
                     if out.get(key) == val and key not in out.get("source_fields", {}):
                         start = line.index(":") + 1
                         start += len(value) - len(value.lstrip())
@@ -549,6 +569,8 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
                 "source_url": f"https://store.steampowered.com/app/{int(appid)}/",
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "cached": False,
+                "fetch_receipt": {"source_id": "steam", "execution_status": "completed",
+                                  "source_url": _DETAILS_URL, "source_record_id": str(appid)},
             }
     except Exception as exc:
         logger.debug("steam live lookup failed for %r: %s", title, exc)
@@ -582,7 +604,11 @@ def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[d
                 else _LIVE_NEGATIVE_CACHE_TTL_S
             )
             if now - cached[0] <= cache_ttl:
-                return dict(cached[1]) if cached[1] is not None else None
+                if cached[1] is None:
+                    return None
+                return {**cached[1], "cached": True,
+                        "fetch_receipt": {"source_id": "steam", "execution_status": "cached",
+                                          "source_record_id": str(cached[1].get('appid') or '')}}
         result = _live_lookup(title)
         if result is None:
             identity = _live_identity_candidate(title)

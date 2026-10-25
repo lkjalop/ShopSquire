@@ -43,7 +43,7 @@ def variant_attributes(view: VariantView,
     title extraction (specs win on conflict — structured data outranks marketing copy), then
     cross-key derivations (gpu_discrete=false ⇒ gpu_vram_gb=0 — fill-only-missing, so both the
     specs and the extraction still outrank a derived value)."""
-    defs = defs or defs_union(DEFAULT_VERTICALS)
+    defs = defs_union(DEFAULT_VERTICALS) if defs is None else defs
     attrs, _dropped = normalize_specs(view.specs or {}, defs)
     extracted, _ambiguous = extract_quantities(view.title or "", defs)
     for k, v in extracted.items():
@@ -109,7 +109,7 @@ def build_cards(variants: List[VariantView],
     shopper's explicit price preference within fit-truth tiers. preferred (review-9 #3) is the
     KB's recommended values {key: value} — a SOFT nearness stage in the ranker, never a gate."""
     from src.app.services.recommendation_core.ranking import rank as _rank
-    defs = defs or defs_union(DEFAULT_VERTICALS)
+    defs = defs_union(DEFAULT_VERTICALS) if defs is None else defs
     # retrieval_order = the SKU order the evidence stage handed us (relevance signal for the
     # ranker's stage 4); the ranker owns ORDERING, this stage owns VERDICTS.
     retrieval_order = [v.sku for v in variants]
@@ -178,7 +178,7 @@ def relaxation_options(variants: List[VariantView], requirements: Optional[Dict[
     computed once per candidate."""
     if not requirements or len(requirements) < 2 or not variants:
         return []
-    defs = defs or defs_union(DEFAULT_VERTICALS)
+    defs = defs_union(DEFAULT_VERTICALS) if defs is None else defs
     attrs_list = [variant_attributes(v, defs) for v in variants]
     out: List[Dict[str, Any]] = []
     for drop in list(requirements):
@@ -205,7 +205,7 @@ def assess_intent_fit(candidate: VariantView, requirements: Optional[Dict[str, A
     shopper proceed either way."""
     if not requirements:
         return {"verdict": "none", "advisory": False, "sku": candidate.sku}
-    defs = defs or defs_union(DEFAULT_VERTICALS)
+    defs = defs_union(DEFAULT_VERTICALS) if defs is None else defs
     verdict = evaluate_requirements(variant_attributes(candidate, defs), requirements)
     overall = verdict["overall"]
     out: Dict[str, Any] = {"verdict": overall, "per_key": verdict["per_key"],

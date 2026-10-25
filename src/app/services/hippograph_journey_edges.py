@@ -7,7 +7,7 @@ observations remain reachable through explicit supersession/contradiction links.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

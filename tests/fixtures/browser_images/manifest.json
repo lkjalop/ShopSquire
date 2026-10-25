@@ -1,0 +1,23 @@
+{
+  "scope": "Existing repository images copied unchanged for portable browser regression; no product certification.",
+  "images": [
+    {
+      "file": "macbook.jpg",
+      "sha256": "5e2ec3a835e086e9533bc8b8565711cef02b7aad61e6f8c17aef8d4ff2a58a24",
+      "source": "dump\\test-cv\\macbook.jpg",
+      "bytes": 83778
+    },
+    {
+      "file": "Dell 15 DC15255.webp",
+      "sha256": "8947a9ae79d14989af692db1a9388e0939524c8dbd52c6095be5134fa7a2ddb2",
+      "source": "dump\\test-cv\\Dell 15 DC15255.webp",
+      "bytes": 98846
+    },
+    {
+      "file": "lenovo-pro7.webp",
+      "sha256": "1c72767e8a2812d9967ccf024e3976462b43c3f3d273b6c14215e188bad2a722",
+      "source": "dump\\test-cv\\lenovo-pro7.webp",
+      "bytes": 123426
+    }
+  ]
+}

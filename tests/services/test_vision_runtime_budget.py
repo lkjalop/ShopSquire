@@ -5,9 +5,7 @@ import base64
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
 
-from src.app.main import create_app
 from src.app.routers.vision import _needs_damage_reasoning
 from src.app.services.cv_provider import ManagedCVProvider
 from src.app.services.cv_provider import VisionProviderBusy
@@ -39,7 +37,7 @@ async def test_visual_search_does_not_launch_unbounded_local_ocr_fallback(monkey
     assert provider.last_ocr_meta["cv_extraction_method"] == "visual_search_ocr_deferred"
 
 
-def test_provider_timeout_is_degradation_not_security_risk(monkeypatch):
+def test_provider_timeout_is_degradation_not_security_risk(monkeypatch, owned_operator_client):
     import src.app.routers.vision as vision
     import src.app.services.product_identity_agent as identity
 
@@ -58,10 +56,10 @@ def test_provider_timeout_is_degradation_not_security_risk(monkeypatch):
     monkeypatch.setattr(identity, "identify_product_from_image",
                         lambda *_args, **_kwargs: {"identified": False})
 
-    client = TestClient(create_app())
+    client, headers = owned_operator_client("default", role="merchant")
     response = client.post(
         "/api/v1/vision/triage",
-        headers={"x-api-key": "local-merchant-key"},
+        headers=headers,
         files={"image": ("plain-product.png", _PNG_1X1, "image/png")},
     )
     assert response.status_code == 200, response.text
@@ -74,7 +72,7 @@ def test_provider_timeout_is_degradation_not_security_risk(monkeypatch):
     assert body["security"]["commercial_authority"] == "blocked"
 
 
-def test_provider_capacity_is_pending_not_security_risk(monkeypatch):
+def test_provider_capacity_is_pending_not_security_risk(monkeypatch, owned_operator_client):
     import src.app.routers.vision as vision
     import src.app.services.product_identity_agent as identity
 
@@ -94,9 +92,10 @@ def test_provider_capacity_is_pending_not_security_risk(monkeypatch):
     monkeypatch.setattr(identity, "identify_product_from_image",
                         lambda *_args, **_kwargs: {"identified": False})
 
-    response = TestClient(create_app()).post(
+    client, headers = owned_operator_client("default", role="merchant")
+    response = client.post(
         "/api/v1/vision/triage",
-        headers={"x-api-key": "local-merchant-key"},
+        headers=headers,
         files={"image": ("plain-product.png", _PNG_1X1, "image/png")},
     )
 
@@ -108,7 +107,7 @@ def test_provider_capacity_is_pending_not_security_risk(monkeypatch):
     assert "vision_provider_busy" in state["degraded_reasons"]
 
 
-def test_elevated_steg_heuristic_is_advisory_until_detector_threshold(monkeypatch):
+def test_elevated_steg_heuristic_is_advisory_until_detector_threshold(monkeypatch, owned_operator_client):
     """A near-threshold compressed/blurred photo must not demand re-upload.
 
     The signal remains visible for evidence and drift review, but only the
@@ -143,9 +142,10 @@ def test_elevated_steg_heuristic_is_advisory_until_detector_threshold(monkeypatc
         ),
     )
 
-    response = TestClient(create_app()).post(
+    client, headers = owned_operator_client("default", role="merchant")
+    response = client.post(
         "/api/v1/vision/triage",
-        headers={"x-api-key": "local-merchant-key"},
+        headers=headers,
         files={"image": ("blurred-product.png", _PNG_1X1, "image/png")},
     )
 

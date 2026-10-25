@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timezone
-from enum import StrEnum
+from src.app.compat import StrEnum
 from typing import Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field

@@ -78,6 +78,10 @@ def test_market_pipeline_error_enqueues_market_exception(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("ingest exploded")
     monkeypatch.setattr(msa, "backfill_from_db", _boom)  # run_pipeline imports it from here
-    res = mp.run_pipeline(object())  # truthy db; backfill raises inside the try
+    from unittest.mock import MagicMock
+    from sqlalchemy.orm import Session
+    session = MagicMock(spec=Session)
+    res = mp.run_pipeline(session)
+    session.rollback.assert_called_once()
     assert res["findings"] == 0 and res["persisted"] == 0  # safe zero-result shape preserved
     assert any(c.get("domain") == "market" and c.get("terminal_outcome") == "pipeline_error" for c in calls), calls

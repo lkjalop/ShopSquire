@@ -1,4 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
+import {authenticateFixtureMerchant} from './helpers/fixtureMerchant';
+
+test.beforeEach(async({context,baseURL})=>{
+  await authenticateFixtureMerchant(context,baseURL!);
+});
 
 async function openBuyer(page: Page, label: string) {
   await page.addInitScript(value => {

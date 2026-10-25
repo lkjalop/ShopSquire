@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import {registerBuyer} from './helpers/registeredBuyer';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -79,12 +80,7 @@ async function send(page: import('@playwright/test').Page, text: string, require
 
 test('novel suitability request stays provisional and exposes a durable research plan', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-open-world-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -132,13 +128,8 @@ test('novel suitability request stays provisional and exposes a durable research
 
 test('held-out future-game alias resolves identity but cannot invent fit or budget sufficiency', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   const prompt = 'i need a laptop to play the new remastered heroes of might and magic 3? is 3000 enough?';
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-heldout-game-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -194,12 +185,7 @@ test('held-out future-game alias resolves identity but cannot invent fit or budg
 
 test('first-turn Emulate3D URL creates its case and source-security receipt without a bridge race', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-emulate-link-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -244,10 +230,7 @@ test('first-turn Emulate3D URL creates its case and source-security receipt with
 
 test('digital twin to Heroes III Remake supersedes evidence and consent but retains budget', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-digital-twin-heroes-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -277,10 +260,7 @@ test('digital twin to Heroes III Remake supersedes evidence and consent but reta
 
 test('Heroes III Remake to BG3 resolves the new canonical Steam identity', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-heroes-bg3-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -303,10 +283,7 @@ test('Heroes III Remake to BG3 resolves the new canonical Steam identity', async
 
 test('unenrolled Larian URL is rejected with a visible zero-fetch security receipt', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-larian-reject-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -331,10 +308,7 @@ test('unenrolled Larian URL is rejected with a visible zero-fetch security recei
 
 test('private-IP source is blocked before fetch with one visible SSRF receipt', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-private-link-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -368,10 +342,7 @@ test('private-IP source is blocked before fetch with one visible SSRF receipt', 
 
 test('demo URL policy strips ad tracking and rejects a purpose-mismatched community page', async ({ page }) => {
   test.setTimeout(180_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-demo-link-policy-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -414,12 +385,7 @@ test('demo URL policy strips ad tracking and rejects a purpose-mismatched commun
 
 test('explicit furniture and pharmacy categories cannot inherit laptop shelves', async ({ page }) => {
   test.setTimeout(120_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-category-boundary-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
@@ -441,12 +407,7 @@ test('explicit furniture and pharmacy categories cannot inherit laptop shelves',
 
 test('novel publisher is approved case-only, fetched, reviewed, and reranked in one case', async ({ page }) => {
   test.setTimeout(240_000);
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  await page.addInitScript((uid) => {
-    localStorage.clear();
-    sessionStorage.clear();
-    sessionStorage.setItem('uid', uid);
-  }, `enterprise-e2e-publisher-${suffix}`);
+  await registerBuyer(page.context());
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 

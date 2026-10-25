@@ -1,0 +1,421 @@
+{
+  "profiles": [
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-memory",
+      "counts": {
+        "passed": 226,
+        "skipped": 13
+      },
+      "scope": "existing tests; offline models; native prerequisites may skip"
+    },
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-market",
+      "counts": {
+        "passed": 371,
+        "skipped": 19
+      },
+      "scope": "existing tests; offline models; native prerequisites may skip"
+    },
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-supplier",
+      "counts": {
+        "passed": 267,
+        "skipped": 7
+      },
+      "scope": "existing tests; offline models; native prerequisites may skip"
+    },
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-native-v2",
+      "counts": {
+        "passed": 33
+      },
+      "scope": "owned PostgreSQL and Redis"
+    },
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-live-usgs",
+      "counts": {
+        "passed": 1
+      },
+      "scope": "live official USGS ScienceBase protocol, no mocked transport"
+    },
+    {
+      "surface": "python",
+      "profile": "reassessment-20261024-integration-seams",
+      "counts": {
+        "passed": 206
+      },
+      "scope": "existing tests; offline models; native prerequisites may skip"
+    },
+    {
+      "surface": "python",
+      "profile": "new-proposed-admission-relevance-and-erasure-contract",
+      "counts": {
+        "passed": 3,
+        "failed": 4
+      },
+      "scope": "assessment-only new contract tests; failures retained, no implementation repair"
+    },
+    {
+      "surface": "playwright",
+      "profile": "browser",
+      "counts": {
+        "passed": 15,
+        "failed": 5
+      },
+      "complete": true,
+      "changed_inputs": [],
+      "elapsed_seconds": 518.484,
+      "resources_removed": true
+    },
+    {
+      "surface": "playwright",
+      "profile": "live-browser",
+      "counts": {
+        "passed": 1
+      },
+      "complete": true,
+      "changed_inputs": [],
+      "elapsed_seconds": 48.141,
+      "resources_removed": true
+    }
+  ],
+  "frontend": [
+    {
+      "surface": "storefront",
+      "unit_passes": 408
+    },
+    {
+      "surface": "admin",
+      "unit_passes": 63
+    }
+  ],
+  "frontend_steps": [
+    {
+      "surface": "storefront",
+      "step": "unit",
+      "exit": 0,
+      "elapsed": 44.328,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    },
+    {
+      "surface": "storefront",
+      "step": "types",
+      "exit": 0,
+      "elapsed": 49.281,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    },
+    {
+      "surface": "storefront",
+      "step": "build",
+      "exit": 0,
+      "elapsed": 2.703,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    },
+    {
+      "surface": "admin",
+      "step": "unit",
+      "exit": 0,
+      "elapsed": 19.094,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    },
+    {
+      "surface": "admin",
+      "step": "types",
+      "exit": 0,
+      "elapsed": 13.297,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    },
+    {
+      "surface": "admin",
+      "step": "build",
+      "exit": 0,
+      "elapsed": 9.656,
+      "installation": "Reused qualified exact-lock Node 22 dependencies; not a fresh install"
+    }
+  ],
+  "existing_python_observations": 1143,
+  "existing_python_unique_cases": 1078,
+  "existing_python_cases_with_pass": 1078,
+  "existing_python_cases_only_skipped": 0,
+  "browser_failures": [
+    {
+      "profile": "browser",
+      "spec": "bulk-order-economics-live.spec.ts",
+      "title": "bulk order within budget keeps one canonical role, amount and order result",
+      "error": "Error: expect(received).toMatchObject(expected)\n\n- Expected  - 2\n+ Received  + 2\n\n@@ -1,13 +1,13 @@\n  Object {\n    \"action_executed\": false,\n    \"bulk_budget\": Object {\n      \"budget_scope\": \"total\",\n-     \"budget_shortfall_cents\": 0,\n+     \"budget_shortfall_cents\": 699000,\n      \"quantity\": 10,\n      \"total_budget_cents\": 3000000,\n-     \"verdict\": \"fits\",\n+     \"verdict\": \"over_budget\",\n    },\n    \"canonical_budget\": Object {\n      \"budget_max\": 30000,\n    },\n    \"requested_quantity\": 10,"
+    },
+    {
+      "profile": "browser",
+      "spec": "bulk-order-economics-live.spec.ts",
+      "title": "underfunded bulk order reports exact shortfall with no false fitting shelf",
+      "error": "Error: expect(received).toMatchObject(expected)\n\n- Expected  - 3\n+ Received  + 3\n\n@@ -1,13 +1,13 @@\n  Object {\n    \"action_executed\": false,\n    \"bulk_budget\": Object {\n      \"budget_scope\": \"total\",\n-     \"budget_shortfall_cents\": 774000,\n-     \"max_affordable_quantity\": 47,\n+     \"budget_shortfall_cents\": 19194000,\n+     \"max_affordable_quantity\": 8,\n      \"quantity\": 60,\n-     \"required_total_cents\": 3774000,\n+     \"required_total_cents\": 22194000,\n      \"total_budget_cents\": 3000000,\n      \"verdict\": \"over_budget\",\n    },\n    \"canonical_budget\": Object {\n      \"budget_max\": 30000,"
+    },
+    {
+      "profile": "browser",
+      "spec": "context-retention.spec.ts",
+      "title": "budget context survives raise + cut across turns (one session)",
+      "error": "Error: expect(received).toBeGreaterThan(expected)\n\nExpected: > 0\nReceived:   0"
+    },
+    {
+      "profile": "browser",
+      "spec": "conversational-spatiotemporal-certificate.spec.ts",
+      "title": "two-turn procurement decision lab renders and seals the canonical certificate",
+      "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByTestId('procurement-certification-showcase')\nExpected: visible\nTimeout: 60000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 60000ms\n  - waiting for getByTestId('procurement-certification-showcase')\n"
+    },
+    {
+      "profile": "browser",
+      "spec": "market-adaptation.spec.ts",
+      "title": "adaptive storefront \u2014 strong signal adapts, weak signal is governed, clearing reverts",
+      "error": "Error: demo signal failed (401)\n\nexpect(received).toBeTruthy()\n\nReceived: false"
+    }
+  ],
+  "scope_note": "Per-profile observations overlap. Existing passing tests do not satisfy the new failing acceptance contracts. Full Python and broad browser matrices were not rerun.",
+  "source": {
+    "head": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+    "scope": "Exact authored working-tree snapshot, tracked plus nonignored untracked files; generated ignored artifacts excluded",
+    "files": 5858,
+    "text_lines": 1175532,
+    "code_files": 3657,
+    "code_lines": 573779,
+    "dirty_paths": 327,
+    "staged_paths": [],
+    "python_functions": 19878,
+    "python_parse_errors": [],
+    "static_candidates": 2260,
+    "source_tree_sha256": "2d965cd90fd6ea6a09eada8973f4cb4f3cfc546640f68823d01977c79f16ab9d",
+    "dirty_paths_preserved": 327
+  },
+  "static_checks": [
+    {
+      "check": "check_function_sizes",
+      "exit": 1,
+      "output_lines": 6
+    },
+    {
+      "check": "check_source_file_sizes",
+      "exit": 0,
+      "warnings": 49,
+      "failures": [],
+      "scope": "all snapshotted maintained files, including local-only files"
+    }
+  ],
+  "public_links": {
+    "exit": 0,
+    "checked": 50,
+    "failures": 0,
+    "execution": "original workspace; entrypoint and target bytes match candidate; snapshot path under .artifacts triggers the checker exclusion and is not a broken-public-link finding"
+  },
+  "setup_attempts": [
+    {
+      "check": "native PostgreSQL/Redis first attempt",
+      "result": "32 pass, 1 failure due Windows spawn re-import of unguarded assessment wrapper; corrected wrapper run 33 pass, 0 skip",
+      "application_changed": false
+    },
+    {
+      "check": "public links in snapshot",
+      "result": "50 exclusions because every absolute target includes parent .artifacts; correct workspace run 50 links pass",
+      "application_changed": false
+    }
+  ],
+  "hosted_runs": [
+    {
+      "id": 39880426200,
+      "name": "Container Scan (Trivy)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426200",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426209,
+      "name": "Security Scans (Trivy, SBOM, Snyk)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426209",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426149,
+      "name": "Clean Checkout Smoke",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426149",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880425796,
+      "name": "Security Scans (Trivy, SBOM, Snyk)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "checkpoint/turn-state-consolidation-20260830",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880425796",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426182,
+      "name": "Service tests sharded",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426182",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426099,
+      "name": "Integration contracts (owned services)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426099",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426142,
+      "name": "Security Tests",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426142",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426325,
+      "name": "Playwright Smoke",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426325",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880425799,
+      "name": "Repository evidence (scoped)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "checkpoint/turn-state-consolidation-20260830",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880425799",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426072,
+      "name": "Playwright UI + Observability Smoke",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426072",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426267,
+      "name": "Repository evidence (scoped)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426267",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426117,
+      "name": "CI",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426117",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426243,
+      "name": "Procurement browser and worker isolation",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426243",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426159,
+      "name": "V2 Gates (mandatory)",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426159",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426186,
+      "name": "CI Tests",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426186",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426187,
+      "name": "CI Smoke Tests",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426187",
+      "created_at": "2026-10-23T00:49:47Z"
+    },
+    {
+      "id": 39880426127,
+      "name": "Playwright Tests",
+      "head_sha": "9da621d1f4751669ce836c2844939b0e4eb2372b",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/39880426127",
+      "created_at": "2026-10-23T00:49:47Z"
+    }
+  ],
+  "new_contract_receipt": {
+    "native_exit_code": 1,
+    "scope": "seven assessment-only contract probes on fixed candidate; no source repair"
+  },
+  "live_workflow": {
+    "requested_quantity": 40,
+    "shortfall": null,
+    "missing_inputs": [
+      "supplier_contact",
+      "current_accepted_selection"
+    ],
+    "dispatch_authorized": false,
+    "draft_body": "Hello,\n\nPlease confirm availability, price and lead time toward our request for 40 units. The exact shortfall is pending confirmation of the accepted product and current inventory coverage.\nDelivery: Sydney (40 units).\nBudget: AUD 1500.00 per unit.\n\nPlease include freight costs and any minimum order quantity. This enquiry does not authorize a purchase.",
+    "market_delivery_status": "blocked",
+    "market_delivery_reason": "no_current_scoped_evidence",
+    "research": {
+      "discovery_status": "degraded",
+      "fetch_status": "not_attempted",
+      "accepted_claim_count": 0,
+      "failure_code": "publisher_not_yet_accepted",
+      "simulation_only": false
+    },
+    "same_case_across_all_turns": true
+  }
+}

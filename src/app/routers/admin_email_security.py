@@ -17,7 +17,6 @@ from src.app.platform.tenant_context import current_tenant_id
 from src.app.deps import get_redis, DummyRedis
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
-from src.app.security.email_addresses import extract_emails as _extract_emails
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
 from src.app.security.siem_adapter import (
@@ -33,6 +32,7 @@ from src.app.services.decision_log import log_trace_event
 from src.app.security.threshold_tuning import recompute_thresholds_from_corrections
 from src.app.security.threat_intel_store import list_indicators, upsert_indicator
 from src.app.services.decision_replay import replay_decision
+from src.app.security.email_addresses import extract_emails as _extract_emails
 from src.app.services.ml_decision_gate import score_with_learned_model, gate_decision
 from src.app.services.ml_decision_gate_training import train_gate_from_db, save_gate_artifact
 from src.app.services.url_recheck_scheduler import (
@@ -773,7 +773,7 @@ def _render_supplier_governance_console() -> HTMLResponse:
         <script>
           function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
           async function api(path){
-            const r = await fetch(path, { headers:{ 'x-api-key':'local-owner-key' } });
+            const r = await fetch(path, { headers:{ 'x-api-key':'' } });
             return await r.json();
           }
           async function loadList(){
@@ -887,7 +887,7 @@ def _render_supplier_governance_console_v2() -> HTMLResponse:
         <script>
           function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
           async function api(path){
-            const r = await fetch(path, { headers:{ 'x-api-key':'local-owner-key' } });
+            const r = await fetch(path, { headers:{ 'x-api-key':'' } });
             return await r.json();
           }
           async function loadList(){
@@ -1097,7 +1097,7 @@ def privacy_review_console(
             return `<span class="pill ${cls}">${esc(s)}</span>`;
           }
           async function load(){
-            const r = await fetch('/api/v1/admin/email_security/privacy/review?limit=100', { headers:{ 'x-api-key':'local-owner-key' } });
+            const r = await fetch('/api/v1/admin/email_security/privacy/review?limit=100', { headers:{ 'x-api-key':'' } });
             const j = await r.json();
             const sum = j.summary || {};
             document.getElementById('summary').innerHTML = [
@@ -1637,7 +1637,7 @@ def connector_registry_console(
         </div>
         <script>
           async function api(path, opts){
-            const r = await fetch(path, { headers: { 'x-api-key': 'local-owner-key' }, ...(opts || {}) });
+            const r = await fetch(path, { headers: { 'x-api-key': '' }, ...(opts || {}) });
             return await r.json();
           }
           function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
@@ -1669,7 +1669,7 @@ def connector_registry_console(
             document.getElementById('history_rows').innerHTML = hist || '<tr><td colspan="6" class="muted">No delivery history recorded in the current window.</td></tr>';
           }
           async function replayDlq(){
-            await api('/api/v1/admin/email_security/connectors/dlq/replay', { method:'POST', headers:{ 'Content-Type':'application/json','x-api-key':'local-owner-key' }, body: JSON.stringify({ limit: 20, dry_run: false }) });
+            await api('/api/v1/admin/email_security/connectors/dlq/replay', { method:'POST', headers:{ 'Content-Type':'application/json','x-api-key':'' }, body: JSON.stringify({ limit: 20, dry_run: false }) });
             await loadAll();
           }
           loadAll();
@@ -2850,8 +2850,8 @@ def email_click_redirect(
     ``email_url_click_protect.rewrite_urls_in_email()``.
     """
     from fastapi.responses import RedirectResponse, JSONResponse
-    from src.app.config import get_settings
     from src.app.security.email_url_click_protect import verify_click_redirect
+    from src.app.config import get_settings
 
     secret = str(os.getenv("CLICK_PROTECT_SECRET") or getattr(get_settings(), "click_protect_secret", "") or "")
     if not secret:
@@ -2898,7 +2898,11 @@ def replay_lab_run(
     payload: Dict[str, Any] = Body(default_factory=dict),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = str(payload.get("tenant_id") or "").strip() or None
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or 'default')
+    requested_tenant = str(payload.get('tenant_id') or '').strip()
+    if requested_tenant and requested_tenant != tenant_id:
+        raise HTTPException(status_code=403, detail='tenant_scope_mismatch')
     incident_ids = [str(x).strip() for x in (payload.get("incident_ids") or []) if str(x or "").strip()][:100]
     decision_ids = [str(x).strip() for x in (payload.get("decision_ids") or []) if str(x or "").strip()][:200]
     if incident_ids:

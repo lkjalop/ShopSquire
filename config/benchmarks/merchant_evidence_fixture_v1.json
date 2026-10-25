@@ -1,0 +1,19 @@
+{
+  "version":"merchant-evidence-fixture-v1",
+  "simulation_only":true,
+  "tenant_id":"synthetic-market-pilot",
+  "sku":"LAP-01B48B57",
+  "documents":[
+    {
+      "id":"supplier-terms-note-v1",
+      "source_id":"simulation:fictional-electronics-quote-v1",
+      "text":"Delivery lead time is 9 days. Supplier capacity is 100 units.",
+      "observed_at":"2026-09-30T00:00:00+00:00",
+      "expires_at":"2026-10-03T00:00:00+00:00",
+      "expected_claims":[
+        {"field":"lead_time","value":9,"unit":"days","quote":"Delivery lead time is 9 days."},
+        {"field":"capacity","value":100,"unit":"units","quote":"Supplier capacity is 100 units."}
+      ]
+    }
+  ]
+}

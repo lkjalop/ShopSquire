@@ -4,6 +4,7 @@ Every command goes through transition(): illegal/disallowed → rejected (no sta
 gated transitions authorize, each accepted command writes a bitemporal version + is idempotent. This is
 the layer the API/buttons sit on — if these hold, wiring a button is mechanical.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,7 +19,9 @@ from src.app.services.fulfillment.domain import Actor, ActorType as A, Fulfillme
 
 @pytest.fixture()
 def db():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    eng = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
     s = sessionmaker(bind=eng, future=True)()
     try:
         yield s
@@ -26,11 +29,24 @@ def db():
         s.close()
 
 
-def AG(): return Actor(A.AGENT, "Procurement_Agent")
-def BU(): return Actor(A.BUYER, "u1")
-def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
-def EX(): return Actor(A.EXTERNAL, "supplier-sys")
-def SY(): return Actor(A.SYSTEM, "batch")
+def AG():
+    return Actor(A.AGENT, "Procurement_Agent")
+
+
+def BU():
+    return Actor(A.BUYER, "u1")
+
+
+def HU():
+    return Actor(A.HUMAN_OPERATOR, "owner-01")
+
+
+def EX():
+    return Actor(A.EXTERNAL, "supplier-sys")
+
+
+def SY():
+    return Actor(A.SYSTEM, "batch")
 
 
 # (event, actor, now_iso) — the happy path with controllable business timestamps
@@ -54,8 +70,13 @@ _HAPPY = [
 
 
 def _open(db):
-    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="TRACE-1", requested_by="u1",
-                       now_iso="2026-06-26 09:13:00")
+    cid = wf.open_case(
+        db,
+        buyer_uid_hash="u1",
+        source_trace_id="TRACE-1",
+        requested_by="u1",
+        now_iso="2026-06-26 09:13:00",
+    )
     db.commit()
     return cid
 
@@ -64,8 +85,15 @@ def test_happy_path_persists_and_advances(db):
     cid = _open(db)
     assert wf.current_state(db, cid) == S.NEW
     for event, actor, ts in _HAPPY:
-        r = wf.transition(db, case_id=cid, event=event, actor=actor, now_iso=ts,
-                          evidence={"e": event}, reason_code=f"rc-{event}")
+        r = wf.transition(
+            db,
+            case_id=cid,
+            event=event,
+            actor=actor,
+            now_iso=ts,
+            evidence={"e": event},
+            reason_code=f"rc-{event}",
+        )
         assert r.ok, f"{event} by {actor.type}: {r.reason}"
     assert wf.current_state(db, cid) == S.COMPLETED
     # full history preserved (case_opened + 15 transitions)
@@ -86,7 +114,9 @@ def test_disallowed_actor_is_rejected_403_no_state_change(db):
 
 def test_illegal_transition_is_rejected_409(db):
     cid = _open(db)
-    r = wf.transition(db, case_id=cid, event="external_message_sent", actor=HU())  # can't send from NEW
+    r = wf.transition(
+        db, case_id=cid, event="external_message_sent", actor=HU()
+    )  # can't send from NEW
     assert r.ok is False and r.reason == "illegal_transition" and r.http_status == 409
     assert wf.current_state(db, cid) == S.NEW
 
@@ -108,10 +138,12 @@ def test_confidence_gate_denies_low_confidence_engage(db, monkeypatch):
     before = len(wf.journey(db, cid))
     r = wf.transition(db, case_id=cid, event="external_message_drafted", actor=AG(), confidence=0.5)
     assert r.ok is False and r.reason == "gate:low_confidence" and r.http_status == 403
-    assert wf.current_state(db, cid) == S.COMMITTED          # not advanced
-    assert len(wf.journey(db, cid)) == before                # no version written
+    assert wf.current_state(db, cid) == S.COMMITTED  # not advanced
+    assert len(wf.journey(db, cid)) == before  # no version written
     # sufficient confidence proceeds
-    assert wf.transition(db, case_id=cid, event="external_message_drafted", actor=AG(), confidence=0.9).ok
+    assert wf.transition(
+        db, case_id=cid, event="external_message_drafted", actor=AG(), confidence=0.9
+    ).ok
     assert wf.current_state(db, cid) == S.QUOTE_DRAFTED
 
 
@@ -119,8 +151,12 @@ def test_idempotent_send_does_not_double_apply(db):
     cid = _open(db)
     for event, actor, ts in _HAPPY[:6]:  # → APPROVED_TO_SEND
         assert wf.transition(db, case_id=cid, event=event, actor=actor, now_iso=ts).ok
-    r1 = wf.transition(db, case_id=cid, event="external_message_sent", actor=HU(), idempotency_key="SEND-1")
-    r2 = wf.transition(db, case_id=cid, event="external_message_sent", actor=HU(), idempotency_key="SEND-1")
+    r1 = wf.transition(
+        db, case_id=cid, event="external_message_sent", actor=HU(), idempotency_key="SEND-1"
+    )
+    r2 = wf.transition(
+        db, case_id=cid, event="external_message_sent", actor=HU(), idempotency_key="SEND-1"
+    )
     assert r1.ok and r1.reason == "ok"
     assert r2.ok and r2.reason == "idempotent_replay" and r2.version_id == r1.version_id
     assert wf.current_state(db, cid) == S.QUOTE_SENT  # applied exactly once
@@ -142,10 +178,22 @@ def test_bitemporal_as_of_reconstructs_past_state(db):
 
 def test_state_json_accumulates_across_transitions(db):
     cid = _open(db)
-    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
-                  state_patch={"shortfall": 6}, now_iso="2026-06-26 09:14:00")
-    wf.transition(db, case_id=cid, event="request_buyer_commitment", actor=AG(),
-                  state_patch={"asked": True}, now_iso="2026-06-26 09:14:05")
+    wf.transition(
+        db,
+        case_id=cid,
+        event="availability_assessed",
+        actor=AG(),
+        state_patch={"shortfall": 6},
+        now_iso="2026-06-26 09:14:00",
+    )
+    wf.transition(
+        db,
+        case_id=cid,
+        event="request_buyer_commitment",
+        actor=AG(),
+        state_patch={"asked": True},
+        now_iso="2026-06-26 09:14:05",
+    )
     cur = repo.current_version(db, cid)
     assert cur.state_json.get("shortfall") == 6 and cur.state_json.get("asked") is True  # merged
 
@@ -155,14 +203,58 @@ def test_unknown_case_is_not_found(db):
     assert r.ok is False and r.reason == "not_found" and r.http_status == 404
 
 
+def test_transition_cannot_apply_a_decision_to_a_newer_version(db, monkeypatch):
+    cid = _open(db)
+    append = repo.append_version
+    advanced = False
+
+    def intervening_write(*args, **kwargs):
+        nonlocal advanced
+        if not advanced:
+            advanced = True
+            result = wf.transition(
+                db,
+                case_id=cid,
+                event="availability_assessed",
+                actor=AG(),
+                state_patch={"winner": "current"},
+            )
+            assert result.ok
+        return append(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "append_version", intervening_write)
+    stale = wf.transition(
+        db, case_id=cid, event="availability_assessed", actor=AG(), state_patch={"winner": "stale"}
+    )
+    assert not stale.ok
+    assert repo.current_version(db, cid).state_json["winner"] == "current"
+
+
 def test_list_cases_enriches_sku_and_qty_from_open_version(db):
     # the queue columns: list_cases LEFT JOINs the OPEN version's state_json and surfaces SKU + qty.
-    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="recommend",
-                       now_iso="2026-06-26 09:00:00"); db.commit()
-    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
-                  state_patch={"availability": {"item_ref": "GAM-0002", "requested_qty": 7,
-                                                "in_stock": 0, "shortfall": 7}},
-                  now_iso="2026-06-26 09:00:01")
+    cid = wf.open_case(
+        db,
+        buyer_uid_hash="u1",
+        source_trace_id="T1",
+        requested_by="recommend",
+        now_iso="2026-06-26 09:00:00",
+    )
+    db.commit()
+    wf.transition(
+        db,
+        case_id=cid,
+        event="availability_assessed",
+        actor=AG(),
+        state_patch={
+            "availability": {
+                "item_ref": "GAM-0002",
+                "requested_qty": 7,
+                "in_stock": 0,
+                "shortfall": 7,
+            }
+        },
+        now_iso="2026-06-26 09:00:01",
+    )
     rows = repo.list_cases(db)
     row = next(r for r in rows if r["case_id"] == cid)
     assert row["item_ref"] == "GAM-0002" and row["quantity"] == 7

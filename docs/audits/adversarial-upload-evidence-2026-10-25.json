@@ -1,0 +1,278 @@
+{
+  "schema": "shopsquire-scoped-security-evidence-v1",
+  "source_commit": "d61affced1b39e44a353163e71a4fc4e54cfcf7a",
+  "scope": {
+    "native_buyer": true,
+    "api_mocked": false,
+    "models_available": false,
+    "commercial_effects": "sandbox",
+    "external_http": "denied by configured proxy; not OS isolation"
+  },
+  "browser": {
+    "stats": {
+      "startTime": "2026-10-25T02:00:05.933Z",
+      "duration": 61853.754,
+      "expected": 11,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "cases": [
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: QR-SSN.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 1564
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-c2_beacon_simulation-apple-mac.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 2765
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-data_exfiltration_instruction-lenovo-pro7 (1).png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 9167
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-data_exfiltration_instruction-lenovo-pro7 (2).png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 8079
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-data_exfiltration_instruction-lenovo-pro7.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 8163
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 11064
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-payment_fraud_hidden-apple-mac (1).png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 1186
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-payment_fraud_hidden-apple-mac.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 1137
+          }
+        ]
+      },
+      {
+        "file": "original-adversarial-images.spec.ts",
+        "title": "original image is contained and explained: steg-prompt_injection_hidden-Dell_15_DC15255.png",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 7927
+          }
+        ]
+      },
+      {
+        "file": "original-clean-image-controls.spec.ts",
+        "title": "clean carrier has completed steg inspection without an invented payload: apple-mac.jpg",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 326
+          }
+        ]
+      },
+      {
+        "file": "original-clean-image-controls.spec.ts",
+        "title": "clean carrier has completed steg inspection without an invented payload: lenovo-pro7.webp",
+        "status": "expected",
+        "attempts": [
+          {
+            "status": "passed",
+            "duration_ms": 6991
+          }
+        ]
+      }
+    ],
+    "native_exit_code": 0,
+    "elapsed_seconds": 73.281,
+    "peaks": {
+      "rss_bytes": 760205312,
+      "handles": 1160,
+      "threads": 78
+    },
+    "resource_violation": null
+  },
+  "source_sha256": {
+    "src/app/security/image_upload_principal.py": "9e08687123bcd1df4fb020a7974a10858e9ef162c00f7b708ac8268237ffeb65",
+    "src/app/routers/vision.py": "8e481d77c287a3054080cb0a600a6cc868c3709bff17c53e2e4fa2a3cf80db50",
+    "tests/api/test_buyer_image_upload_ownership.py": "bf0768de370e3276cc61fbda2e5ae12df54c62d04306a7cc497bba0dcaa9beda",
+    "frontend/e2e/original-adversarial-images.spec.ts": "75e0bb424cd2cf3091c3291dee92ca6dcee693540d57c60075866f8955452679",
+    "frontend/e2e/original-clean-image-controls.spec.ts": "407c57c79d9730eaedd67fe0ca73b04d5f5fc7297de28d93b19c07fba50b5765",
+    "frontend/src/components/DecisionTrace.tsx": "dec0601980aa511812030c8c599bc132d7a44bb0997b79bba6639647724b8cee",
+    "frontend/src/components/DecisionTrace.module.css": "c567b8136278ae6f55b3c6e776b939287bf9484547d7ac1ecb9a4483d14466d9",
+    "frontend/src/components/decision-trace/traceProjections.ts": "2caec8b84b350057ee987409f7ce95bc82069d32a0645ea4832233a23a59b6a2",
+    "frontend/src/components/decision-trace/uploadSecurityProjection.ts": "c42374672a1f038a56228eae50df96d0a11d2581480fb480d8bf02101d8fa106",
+    "frontend/src/components/__tests__/DecisionTraceSecurityClaims.test.tsx": "f014ea03bfbb5d7b5d1fe552d12ea1651405ad32966bf0947523f62cd0efe411",
+    "frontend/src/components/decision-trace/__tests__/uploadSecurityProjection.test.ts": "8d2f4b6702a7bccea55c40076b5897e6949d67b6171ed4a2515b5692698e20cd"
+  },
+  "corpus": [
+    {
+      "path": "dump/test-sec/QR-SSN.png",
+      "sha256": "fd7c58ecdbf3f80c82524075fa7e615f94b4bd5aeafed9ed9479d4601a3c1060",
+      "bytes": 8621,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-c2_beacon_simulation-apple-mac.png",
+      "sha256": "7be8435dc4397d4f9ddfa158a825ea9e4a101c11083a1eafa0c58e04dcda005d",
+      "bytes": 57728,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-data_exfiltration_instruction-lenovo-pro7 (1).png",
+      "sha256": "d4ac7b69a545a2515f77411754c331c5e3d18d766f622c5b345d525063b51566",
+      "bytes": 1214527,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-data_exfiltration_instruction-lenovo-pro7 (2).png",
+      "sha256": "d4ac7b69a545a2515f77411754c331c5e3d18d766f622c5b345d525063b51566",
+      "bytes": 1214527,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-data_exfiltration_instruction-lenovo-pro7.png",
+      "sha256": "d4ac7b69a545a2515f77411754c331c5e3d18d766f622c5b345d525063b51566",
+      "bytes": 1214527,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-detection-results.json",
+      "sha256": "aa34e97e813c29de941f7673c558394a3b897e819b9e553d275ac3cf58e5f94a",
+      "bytes": 14902,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-lolbin_command_sequence-Macbook_Air_15_inch_-_2__blurred_.png",
+      "sha256": "f472f970347caa407a30c3ac3f42bd87f1aa77e053e975d09e805863bc497aa4",
+      "bytes": 2937229,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-payment_fraud_hidden-apple-mac (1).png",
+      "sha256": "7b2449d76d9e3740c0742bfea67a0e0bf14b011de15207d4bdd200982a50d5a4",
+      "bytes": 57682,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-payment_fraud_hidden-apple-mac.png",
+      "sha256": "7b2449d76d9e3740c0742bfea67a0e0bf14b011de15207d4bdd200982a50d5a4",
+      "bytes": 57682,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-prompt_injection_hidden-Dell_15_DC15255.png",
+      "sha256": "eba00b0c7a2560fe9983525b0f197202f50a296e3066c70aa181831c5f5b7131",
+      "bytes": 863207,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg-test-manifest.json",
+      "sha256": "a59b57dd61cc30a2f677d34b6c27ca77b848bd921d75074bd8f36c7b5dd67ba1",
+      "bytes": 4258,
+      "control": false
+    },
+    {
+      "path": "dump/test-sec/steg_embed.py",
+      "sha256": "040806da8fb5214b5794805a35bfd0cd08fe02efcc104a3d0b612c5457fea99f",
+      "bytes": 14830,
+      "control": false
+    },
+    {
+      "path": "dump/test-cv/apple-mac.jpg",
+      "sha256": "b33b26d66a8efc67bb3e2fa65deb17e27b74767bbad9ac22047bbeb0a783fc29",
+      "bytes": 11106,
+      "control": true
+    },
+    {
+      "path": "dump/test-cv/lenovo-pro7.webp",
+      "sha256": "1c72767e8a2812d9967ccf024e3976462b43c3f3d273b6c14215e188bad2a722",
+      "bytes": 123426,
+      "control": true
+    },
+    {
+      "path": "dump/test-cv/apple-mac.jpg",
+      "sha256": "b33b26d66a8efc67bb3e2fa65deb17e27b74767bbad9ac22047bbeb0a783fc29",
+      "bytes": 11106,
+      "control": true
+    }
+  ],
+  "corpus_unchanged": true,
+  "limitations": [
+    "Duplicate image paths are not independent attacks.",
+    "Clean detector controls do not qualify product usefulness.",
+    "No decoded text, credentials or raw traces are exported.",
+    "Broad release, privacy, runtime, image scanning and endurance gates remain open."
+  ],
+  "source_hash_basis": "source_sha256 identifies tested Windows checkout bytes; git_blob_sha256 identifies committed blobs. LF/CRLF normalization was checked separately.",
+  "git_blob_sha256": {
+    "src/app/security/image_upload_principal.py": "9e08687123bcd1df4fb020a7974a10858e9ef162c00f7b708ac8268237ffeb65",
+    "src/app/routers/vision.py": "0e013190e0f82b4c562ca9e164990ef2d6d292fc82b72506c84f53d3f247c8a5",
+    "tests/api/test_buyer_image_upload_ownership.py": "bf0768de370e3276cc61fbda2e5ae12df54c62d04306a7cc497bba0dcaa9beda",
+    "frontend/e2e/original-adversarial-images.spec.ts": "75e0bb424cd2cf3091c3291dee92ca6dcee693540d57c60075866f8955452679",
+    "frontend/e2e/original-clean-image-controls.spec.ts": "407c57c79d9730eaedd67fe0ca73b04d5f5fc7297de28d93b19c07fba50b5765",
+    "frontend/src/components/DecisionTrace.tsx": "dec0601980aa511812030c8c599bc132d7a44bb0997b79bba6639647724b8cee",
+    "frontend/src/components/DecisionTrace.module.css": "c567b8136278ae6f55b3c6e776b939287bf9484547d7ac1ecb9a4483d14466d9",
+    "frontend/src/components/decision-trace/traceProjections.ts": "2caec8b84b350057ee987409f7ce95bc82069d32a0645ea4832233a23a59b6a2",
+    "frontend/src/components/decision-trace/uploadSecurityProjection.ts": "c42374672a1f038a56228eae50df96d0a11d2581480fb480d8bf02101d8fa106",
+    "frontend/src/components/__tests__/DecisionTraceSecurityClaims.test.tsx": "f014ea03bfbb5d7b5d1fe552d12ea1651405ad32966bf0947523f62cd0efe411",
+    "frontend/src/components/decision-trace/__tests__/uploadSecurityProjection.test.ts": "8d2f4b6702a7bccea55c40076b5897e6949d67b6171ed4a2515b5692698e20cd"
+  }
+}

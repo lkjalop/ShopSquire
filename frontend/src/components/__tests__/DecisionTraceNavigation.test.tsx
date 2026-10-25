@@ -23,6 +23,15 @@ function renderTrace(initialTab: TraceLeafTab = 'summary') {
 }
 
 describe('Decision Trace rendered navigation', () => {
+  it('moves focus inside the modal and returns it to the opener on close', () => {
+    const opener=document.createElement('button');
+    document.body.append(opener);opener.focus();
+    const view=renderTrace();
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    view.unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
   it('docks on desktop by default and can return to a floating panel', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
     renderTrace();

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "purpose": "Frozen routing smoke cohort; not a representative quality benchmark",
+  "cases": [
+    {"id":"browse","query":"Find a laptop for university under AUD 1500","expected_lane":"SEARCH"},
+    {"id":"procurement","query":"I need a quote for 30 laptops for our office","expected_lane":"PROCUREMENT"},
+    {"id":"policy","query":"What is your return policy?","expected_lane":"POLICY_QUESTION"},
+    {"id":"inventory","query":"How many laptops do you have in stock?","expected_lane":"INVENTORY"},
+    {"id":"browse_render","query":"Find a laptop for Blender rendering","expected_lane":"SEARCH"},
+    {"id":"off_catalog","query":"Do you sell forklifts?","expected_lane":"OFF_CATALOG"}
+  ]
+}

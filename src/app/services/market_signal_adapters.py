@@ -245,6 +245,14 @@ def _backfill_one(db, source: str, sql: str, row_map, sig_map, *, limit: int, mi
     outcomes: Counter[str] = Counter()
     watermark: str | None = None
     try:
+        # sqlite3 legacy transaction mode does not BEGIN for SELECT. An outermost
+        # SAVEPOINT would therefore commit its writes on RELEASE, defeating the
+        # pipeline's later rollback. Establish the real transaction first.
+        connection = db.connection()
+        if connection.dialect.name == 'sqlite':
+            driver = connection.connection.driver_connection
+            if not driver.in_transaction:
+                connection.exec_driver_sql('BEGIN')
         with db.begin_nested():
             rows = db.execute(text(sql), {
                 "lim": int(limit), "tenant": tenant_id, "watermark": watermark_before,

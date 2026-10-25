@@ -1,8 +1,9 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import {type APIRequestContext} from '@playwright/test';
+import {test,expect,buyerUid} from './helpers/authenticatedTest';
 
 const headers = {
-  'x-api-key': process.env.VITE_API_KEY || 'local-developer-key',
-  'x-tenant-id': 'default',
+  'x-api-key': process.env.MERCHANT_API_KEY!,
+  'x-tenant-id': process.env.VITE_STOREFRONT_TENANT_ID || 'default',
   'Content-Type': 'application/json',
 };
 
@@ -34,9 +35,10 @@ async function completedTurn(
   return data;
 }
 
-test('every conversational transition publishes one matching case revision', async ({ request }) => {
+test('every conversational transition publishes one matching case revision', async ({ context }) => {
+  const request = context.request;
   test.setTimeout(300_000);
-  const uid = `turn-matrix-${Date.now()}`;
+  const uid = buyerUid;
   let caseId: string | null = null;
   let priorByCase = new Map<string, number>();
 

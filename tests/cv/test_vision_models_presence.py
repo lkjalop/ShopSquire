@@ -15,7 +15,7 @@ MINI_PNG_BASE64 = (
 def ollama_has_model(model: str) -> bool:
     try:
         req = urllib.request.Request(
-            url="http://127.0.0.1:11434/api/tags",
+            url=os.environ["OLLAMA_URL"].rstrip("/") + "/api/tags",
             method="GET",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -26,10 +26,11 @@ def ollama_has_model(model: str) -> bool:
         return False
 
 
+@pytest.mark.skipif(os.getenv("RUN_LIVE_MODEL_TESTS") != "1", reason="Explicit owned Ollama runtime and enrolled models required")
 @pytest.mark.parametrize("model", ["llava", "qwen2.5-vl", "minicpm-v"])
-def test_ollama_vision_models_basic(model):
-    os.environ["CV_PROVIDER"] = "ollama"
-    os.environ["CV_MODEL"] = model
+def test_ollama_vision_models_basic(model, monkeypatch):
+    monkeypatch.setenv("CV_PROVIDER", "ollama")
+    monkeypatch.setenv("CV_MODEL", model)
     if not ollama_has_model(model):
         pytest.skip(f"Ollama model '{model}' not available; skipping")
     provider = ManagedCVProvider()

@@ -3,14 +3,28 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import pytest
 
 from fastapi.testclient import TestClient
 
-from src.app.main import create_app
 
 
-def test_security_event_ingest_correlation_and_ticketing():
-    client = TestClient(create_app())
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    # One owned ASGI lifetime and database per case. A bare TestClient creates
+    # a new portal/event loop for every request in the load loop.
+    import src.app.main as main
+    from src.app.security import security_event_ingest
+    database_url = 'sqlite+pysqlite:///' + (tmp_path / 'security_ingest.sqlite3').as_posix()
+    monkeypatch.setenv('DATABASE_URL', database_url)
+    monkeypatch.setenv('DATABASE_URL_RO', database_url)
+    monkeypatch.setattr(security_event_ingest, '_SECURITY_EVENT_TABLE_READY', False)
+    app = getattr(main, '_original_create_app', main.create_app)()
+    with TestClient(app) as owned_client:
+        yield owned_client
+
+
+def test_security_event_ingest_correlation_and_ticketing(client):
     run = uuid.uuid4().hex[:10]
     trace_id = f"trace-corr-{run}"
     tenant_id = f"tenant-a-{run}"
@@ -49,8 +63,7 @@ def test_security_event_ingest_correlation_and_ticketing():
     assert bool(corr.get("multi_source")) is True
 
 
-def test_security_event_ingest_chaos_missing_duplicate_out_of_order():
-    client = TestClient(create_app())
+def test_security_event_ingest_chaos_missing_duplicate_out_of_order(client):
     run = uuid.uuid4().hex[:10]
     tenant_id = f"tenant-z-{run}"
     trace_1 = f"trace-chaos-{run}-1"
@@ -99,8 +112,7 @@ def test_security_event_ingest_chaos_missing_duplicate_out_of_order():
     assert future.status_code == 200, future.text
 
 
-def test_security_event_replay_deterministic():
-    client = TestClient(create_app())
+def test_security_event_replay_deterministic(client):
     run = uuid.uuid4().hex[:10]
     r = client.post(
         "/api/v1/security/events/ingest",
@@ -126,22 +138,8 @@ def test_security_event_replay_deterministic():
     assert (replay.get("stored_policy") or {}).get("action") == (replay.get("recomputed_policy") or {}).get("action")
 
 
-def test_security_event_ingest_load_and_dashboard_latency():
-    client = TestClient(create_app())
-    # Hermetic baseline: this is a throughput + dashboard-LATENCY test. The trend-pack query
-    # aggregates security_event_ingest by DATE RANGE (not tenant), so without clearing it would
-    # aggregate every OTHER test's ingested events in the shared dev DB — turning a ~10s test into
-    # a ~50min one (and measuring the wrong thing). Clear the table so we measure clean throughput on
-    # this test's own 150 events. (Real concern flagged separately: the trend-pack aggregation should
-    # be index-/range-bounded so it doesn't degrade with table size in production.)
-    try:
-        from sqlalchemy import text as _sql
-        from src.app.models.db import db_session
-        with db_session() as _db:
-            _db.execute(_sql("DELETE FROM security_event_ingest"))
-            _db.commit()
-    except Exception:
-        pass
+def test_security_event_ingest_load_and_dashboard_latency(client):
+    # The private fixture has no other case's history to erase or aggregate.
     run = uuid.uuid4().hex[:10]
     tenant_id = f"tenant-load-{run}"
     start = time.perf_counter()
@@ -168,6 +166,10 @@ def test_security_event_ingest_load_and_dashboard_latency():
     # a meaningful upper bound for ingest throughput.
     budget_sec = float(os.getenv("SECURITY_EVENT_INGEST_LOAD_BUDGET_SEC", "90.0") or 90.0)
     assert ingest_elapsed < budget_sec
+    from sqlalchemy import text
+    from src.app.models.db import db_session
+    with db_session() as db:
+        assert db.execute(text('SELECT COUNT(*) FROM security_event_ingest')).scalar() == 150
 
     trend = client.get(
         "/api/v1/admin/bi/security-events/trend-pack?start=2026-02-01&end=2026-03-01",

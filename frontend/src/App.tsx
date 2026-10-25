@@ -2,7 +2,8 @@
 import styles from './App.module.css';
 import { lazy, Suspense } from 'react';
 import ProductGrid from './components/ProductGrid';
-import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money';
+import { formatProductPrice } from './lib/money';
+import {laneForProduct, laneTitle, laneSummary, type DeviceLane} from './lib/productLanes';
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
@@ -20,7 +21,7 @@ import CaseContractSelection from './components/CaseContractSelection';
 import StockAcceptancePanel from './components/StockAcceptancePanel';
 import { useShoppingCaseActions } from './hooks/useShoppingCaseActions';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
-import { apiRequestHeaders, apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
+import { storefrontCatalogContext, apiRequestHeaders, apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
 import { nextSourcingTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -30,6 +31,7 @@ import { terminalShelves } from './lib/terminalShelves';
 import { TerminalInstallationGate } from './lib/terminalInstallation';
 import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
 import { isUnusableImageEvidence } from './lib/imageEvidenceAuthority';
+import { fetchImageTriages } from './lib/imageTriageTransport';
 import AttachmentButton from './components/AttachmentButton';
 import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
@@ -169,7 +171,6 @@ type BackendDeviceLane = {
   products?: { sku: string; name: string; price?: number | null; why?: string[] }[];
 };
 
-const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
 const IMAGE_DEEP_TRIAGE_DELAY_MS = 30000;
 
 // Async-narration poll registry: a job id is live while its poll chain is allowed to run.
@@ -211,8 +212,6 @@ type OperatorMetricSnapshot = {
   recordedAt?: string | null;
 };
 
-type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
-
 function normalizeTraceId(value: any): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -227,14 +226,6 @@ function normalizeTraceId(value: any): string | null {
   return null;
 }
 
-function productPrice(p: any): number {
-  const direct = Number(p?.price);
-  if (Number.isFinite(direct) && direct > 0) return direct;
-  const cents = Number(p?.price_cents);
-  if (Number.isFinite(cents) && cents > 0) return cents / 100;
-  return 0;
-}
-
 // Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
 // em-dash when the object carries no price — never a misleading "$0" (demo-truth, same class as the
 // $0 budget-band fix).
@@ -242,21 +233,6 @@ function formatPrice(p: any): string {
   return formatProductPrice(p);
 }
 
-
-function laneForProduct(p: Product): DeviceLane {
-  const name = String(p.name || '').toLowerCase();
-  const features = (p.features || []).join(' ').toLowerCase();
-  const text = `${name} ${features}`;
-  if (/macbook|apple m[0-9]|mac os|macos/.test(text)) return 'macbook';
-  if (/chromebook|chrome os|tablet|ipad|2-in-1|2 in 1|detachable/.test(text)) return 'tablet_chromebook';
-  return 'windows';
-}
-
-function laneTitle(lane: DeviceLane): string {
-  if (lane === 'macbook') return 'MacBook Options';
-  if (lane === 'tablet_chromebook') return 'Tablet / Chromebook Options';
-  return 'Windows Laptop Options';
-}
 
 function _prettyReason(reason: string): string {
   const r = String(reason || '').trim();
@@ -269,54 +245,12 @@ function _prettyReason(reason: string): string {
   return r.replace(/^[+-]/, '').replace(/_/g, ' ');
 }
 
-function _shortUseCase(query: string): string {
-  const q = String(query || '').toLowerCase();
-  if (/highschool|high school|yr\s?(?:7|8|9|10|11|12)|year\s?(?:7|8|9|10|11|12)|teen/.test(q)) return 'high school';
-  if (/student|university|uni|college/.test(q)) return 'study';
-  if (/gaming|fps|rtx|gpu/.test(q)) return 'gaming';
-  if (/office|work|excel|meetings|zoom/.test(q)) return 'work';
-  if (/design|video|editing|creator|creative/.test(q)) return 'creative';
-  return 'daily use';
-}
-
 function _stripTechnicalTokens(text: string): string {
   return String(text || '')
     .replace(/\(\s*[+-]?[a-z_]+(?:\s*,\s*[+-]?[a-z_]+)*\s*\)/gi, '')
     .replace(/\b[+-](?:embedding_similarity|cross_encoder|in_stock|price_fit|use_case_match)\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
-}
-
-function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, query?: string): string {
-  if (!items.length) {
-    if (lane === 'tablet_chromebook') return 'No strong tablet/chromebook inventory match yet. Consider widening budget or screen-size range.';
-    return 'No close matches in this lane right now. Try adjusting budget or use-case filters.';
-  }
-  const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
-  const minPrice = prices.length ? Math.min(...prices) : 0;
-  const maxPrice = prices.length ? Math.max(...prices) : 0;
-  const currencies = Array.from(new Set(items.map((p) => normalizeCurrency((p as any)?.currency))));
-  const priceRange = currencies.length === 1
-    ? `${formatMoney(minPrice, currencies[0])} to ${formatMoney(maxPrice, currencies[0])}`
-    : 'multiple currencies (conversion required before comparison)';
-  const useCase = _shortUseCase(String(query || ''));
-  const top = items.slice(0, 2).map((p) => {
-    const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
-    const label = productShortLabel(p);
-    return reason ? `${label} (${reason})` : label;
-  });
-  const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
-    ? 'Budget is tight, so value-focused picks are prioritized.'
-    : String(budgetStatus || '').toLowerCase().includes('high')
-      ? 'Budget allows performance-oriented options.'
-      : 'Recommendations balance value and use-case fit.';
-  if (lane === 'windows') {
-    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks span ${priceRange}.`;
-  }
-  if (lane === 'macbook') {
-    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, spanning ${priceRange}.`;
-  }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${priceRange}).`;
 }
 
 
@@ -401,6 +335,9 @@ export default function App() {
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
+  const browsingCatalogue = (rightPanelContract as any)?.semantic_resolution?.outcome === 'catalog_browse'
+    && (rightPanelContract as any)?.semantic_resolution?.requirements_status === 'not_requested'
+    && (rightPanelContract as any)?.semantic_resolution?.qualification_authority === 'none';
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   // Recommendation panels are an adjudicated projection, not a second catalogue.
   // Keep their cart controls fail-closed unless the backend explicitly reports
@@ -617,137 +554,6 @@ export default function App() {
     }));
   }, []);
 
-  const makeClientFastImageTriage = useCallback((file: File, artifactId: string) => {
-    const filenameHint = file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
-    const suspiciousName = /\b(ssn|qr|password|credential|token|secret|invoice|receipt)\b/i.test(filenameHint);
-    return {
-      _filename: file.name,
-      filename: file.name,
-      provider: 'client_fast_boundary',
-      labels: filenameHint ? [filenameHint] : [],
-      extracted_text: '',
-      damage_score: 0,
-      intent: 'visual_search',
-      intent_routing: {
-        intent: 'visual_search',
-        confidence: 0.2,
-        reason: 'client_safe_hint_before_deep_triage',
-      },
-      security: {
-        clean: false,
-        artifact_state: 'pending',
-        commercial_authority: 'blocked',
-        signals: {
-          fast_triage_timeout: true,
-          filename_suspicious: suspiciousName,
-          analysis_pending: true,
-        },
-        analysis_stage: 'client_safe_hint',
-        verdict: 'Image bytes are queued for background security inspection. The attachment cannot influence recommendations or commercial actions yet.',
-      },
-      artifact: { artifact_id: artifactId, state: 'pending', authority: 'blocked' },
-      analysis_state: { analysis_pending: true, analysis_degraded: false, security_risk: suspiciousName },
-    };
-  }, []);
-
-  const fetchImageTriages = useCallback(async (
-    files: File[], fast = false, extractTextEvidence = false,
-  ) => {
-    const triagePromises = files.map(async (file) => {
-      const artifactId = String((file as any).__shopsquireArtifactId || crypto.randomUUID());
-      (file as any).__shopsquireArtifactId = artifactId;
-      const fd = new FormData();
-      fd.append('image', file);
-      const triageParams = new URLSearchParams({ artifact_id: artifactId });
-      if (fast) triageParams.set('fast', '1');
-      if (extractTextEvidence) triageParams.set('extract_text', '1');
-      const triagePath = `/api/v1/vision/triage?${triageParams.toString()}`;
-      const controller = new AbortController();
-      const timeoutId = fast
-        ? window.setTimeout(() => controller.abort(), IMAGE_FAST_TRIAGE_TIMEOUT_MS)
-        : null;
-      try {
-        const r = await fetch(apiUrl(triagePath), {
-          method: 'POST',
-          credentials: 'include',
-          body: fd,
-          signal: controller.signal,
-          headers: {
-            ...apiRequestHeaders(),
-            'x-skip-observer': '1',
-          },
-        });
-        const data = await safeJson(r);
-        if (!r.ok) {
-          const detail = data?.detail || {};
-          const error = typeof detail === 'string'
-            ? detail
-            : String(detail?.error || `upload_rejected_${r.status}`);
-          const message = typeof detail === 'object' && detail?.message
-            ? String(detail.message)
-            : 'This attachment was rejected and was not used.';
-          return {
-            _filename: file.name,
-            filename: file.name,
-            _upload_error: error,
-            _http_status: r.status,
-            labels: [],
-            extracted_text: '',
-            artifact: detail?.artifact || { artifact_id: artifactId, state: 'quarantined', authority: 'blocked' },
-            analysis_state: { analysis_pending: false, analysis_degraded: false, security_risk: true },
-            security: {
-              clean: false,
-              artifact_state: 'quarantined',
-              commercial_authority: 'blocked',
-              verdict: message,
-              reupload_needed: true,
-              signals: { upload_rejected: true, upload_error: error },
-            },
-          };
-        }
-        if (!data) {
-          return {
-            _filename: file.name,
-            filename: file.name,
-            _upload_error: 'invalid_triage_response',
-            labels: [],
-            artifact: { state: 'degraded', authority: 'blocked' },
-            analysis_state: { analysis_degraded: true, security_risk: false },
-            security: {
-              clean: false,
-              artifact_state: 'degraded',
-              commercial_authority: 'blocked',
-              verdict: 'Inspection did not return a valid result. The attachment was not used.',
-              signals: { analysis_degraded: true, invalid_triage_response: true },
-            },
-          };
-        }
-        data._filename = file.name;
-        return data;
-      } catch {
-        if (fast) return makeClientFastImageTriage(file, artifactId);
-        return {
-          _filename: file.name,
-          filename: file.name,
-          _upload_error: 'triage_unavailable',
-          labels: [],
-          artifact: { state: 'degraded', authority: 'blocked' },
-          analysis_state: { analysis_degraded: true, security_risk: false },
-          security: {
-            clean: false,
-            artifact_state: 'degraded',
-            commercial_authority: 'blocked',
-            verdict: 'Image inspection is unavailable. The attachment was not used.',
-            signals: { analysis_degraded: true, triage_unavailable: true },
-          },
-        };
-      } finally {
-        if (timeoutId != null) window.clearTimeout(timeoutId);
-      }
-    });
-    return (await Promise.all(triagePromises)).filter(Boolean);
-  }, [makeClientFastImageTriage]);
-
   const fetchSupportAnswer = useCallback(async (question: string): Promise<string | null> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 3000);
@@ -833,6 +639,7 @@ export default function App() {
       windows: [],
       macbook: [],
       tablet_chromebook: [],
+      catalogue: [],
     };
     for (const p of filteredDisplayProducts || []) {
       out[laneForProduct(p)].push(p);
@@ -1859,8 +1666,10 @@ export default function App() {
           setImageRoutingInFlight(false);
           window.setTimeout(() => void (async () => {
             try {
+              if (!terminalInstallation.current.isCurrent(installationToken)) return;
               const deepResults = await fetchImageTriages(currentAttachedFiles, false);
-              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              if (!terminalInstallation.current.isCurrent(installationToken)
+                || !Array.isArray(deepResults) || deepResults.length === 0) return;
               setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
               setImageTriageRaw(deepResults);
             } catch {
@@ -1896,8 +1705,10 @@ export default function App() {
             }
           } else {
             imageTriageResults = await fetchImageTriages(currentAttachedFiles, true);
-            void fetchImageTriages(currentAttachedFiles, false).then((deepResults) => {
-              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+            if (!terminalInstallation.current.isCurrent(installationToken)) return;
+            void fetchImageTriages(currentAttachedFiles, false, false, imageTriageResults).then((deepResults) => {
+              if (!terminalInstallation.current.isCurrent(installationToken)
+                || !Array.isArray(deepResults) || deepResults.length === 0) return;
               setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
               setImageTriageRaw(deepResults);
               const deepTraceId = deepResults.find((row: any) => (
@@ -1916,8 +1727,10 @@ export default function App() {
             });
           }
         } finally {
-          setImageRoutingInFlight(false);
+          if (terminalInstallation.current.isCurrent(installationToken)) setImageRoutingInFlight(false);
         }
+
+        if (!terminalInstallation.current.isCurrent(installationToken)) return;
 
         const unusableImageEvidence = imageTriageResults.filter(isUnusableImageEvidence);
         if (unusableImageEvidence.length > 0) {
@@ -2075,10 +1888,9 @@ export default function App() {
           query: q,
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
-          // This is catalog context, not fit authority. The backend validates
-          // the handle and records the resulting bounded candidate set before
-          // later research is allowed to project requirements onto products.
-          storefront_taxonomy_handle: 'el-6-6',
+          // Absent a configured hint, let the backend resolve this tenant's
+          // catalogue context. This hint grants no fit or commerce authority.
+          ...storefrontCatalogContext(),
         };
         if (pastedOfficialUrl) chatPayload.buyer_source_url = pastedOfficialUrl;
         if (activeShoppingCase?.case_id || ambiguityExploration?.case_id) {
@@ -3443,7 +3255,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {(activeShoppingCase?.case_id || ambiguityExploration?.case_id) && <CaseContractSelection
+                {!browsingCatalogue && (activeShoppingCase?.case_id || ambiguityExploration?.case_id) && <CaseContractSelection
                   caseId={(activeShoppingCase?.case_id || ambiguityExploration?.case_id)!} uid={uid}
                   revision={activeShoppingCase?.revision}
                   onChange={selection => {
@@ -3454,6 +3266,8 @@ export default function App() {
                   }} />}
                 {stockRequest && stockRequest.caseId === activeShoppingCase?.case_id && <StockAcceptancePanel
                   caseId={stockRequest.caseId} uid={uid} sku={stockRequest.sku} revision={activeShoppingCase.revision}
+                  initialQuantity={Number.isInteger(confirmedSlots.order_quantity) && confirmedSlots.order_quantity > 0
+                    ? confirmedSlots.order_quantity : 1}
                   onAccepted={revision=>{
                     setProductShelves(null);
                     setRecommendationActionsAuthorized(false);
@@ -3743,8 +3557,8 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  {researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
-                  {architectureAlternatives && (
+                  {!browsingCatalogue && researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
+                  {!browsingCatalogue && architectureAlternatives && (
                     <ArchitectureAlternativesPanel projection={architectureAlternatives} />
                   )}
                   {ambiguityExploration && (
@@ -3772,9 +3586,10 @@ export default function App() {
                       researchStartedAt={researchStartedAt}
                     />
                   )}
-                  {import.meta.env.VITE_ENABLE_SIMULATED_STOCK === '1' && activeShoppingCase?.case_id && productShelves && !materialProductFitBlocked &&
-                    [...new Set(productShelves.shelves.flatMap(shelf=>[...shelf.initial,...shelf.next_page])
-                      .filter(item=>item.fit_status==='qualified').map(item=>item.product.sku))].map(sku=>(
+                  {import.meta.env.VITE_ENABLE_SIMULATED_STOCK === '1' && activeShoppingCase?.case_id && (browsingCatalogue || productShelves) && !materialProductFitBlocked &&
+                    [...new Set(browsingCatalogue ? filteredDisplayProducts.map(product=>product.sku)
+                      : productShelves!.shelves.flatMap(shelf=>[...shelf.initial,...shelf.next_page])
+                        .filter(item=>item.fit_status==='qualified').map(item=>item.product.sku))].map(sku=>(
                       <button key={sku} onClick={()=>setStockRequest({caseId:activeShoppingCase.case_id,sku})}>
                         Review simulated stock for {sku}
                       </button>
@@ -3954,7 +3769,7 @@ export default function App() {
                     && filteredDisplayProducts.length > 0
                     && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
                     <div className={styles.deviceLanePanel}>
-                      {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
+                      {(['catalogue', 'windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
                         const items = laneBuckets[lane] || [];
                         if (!items.length) return null;
                         return (

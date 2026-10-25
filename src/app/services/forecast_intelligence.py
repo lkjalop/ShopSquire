@@ -20,7 +20,7 @@ from src.app.services.demand_forecast import (
 )
 
 
-COMPUTATION_VERSION = "forecast_intelligence_v1"
+COMPUTATION_VERSION = "forecast_intelligence_v2"
 
 
 def prediction_interval_coverage_report(
@@ -53,6 +53,8 @@ def prediction_interval_coverage_report(
 
 
 def _daily_series(rows: list[Any], *, lookback_days: int, as_of: date) -> tuple[list[float], list[str]]:
+    if not rows:
+        return [], []  # absence of observations is not a measured zero-demand history
     start = as_of - timedelta(days=max(1, int(lookback_days)) - 1)
     by_day: dict[str, float] = {}
     sources: set[str] = set()
@@ -286,7 +288,8 @@ def _load_histories(
         "watermark": watermark,
         "sources": sorted(source_set),
         "row_count": len(rows),
-        "status": "available" if rows else "no_data",
+        "target_row_count": len(grouped[target_sku]),
+        "status": "available" if grouped[target_sku] else "no_data",
     }
 
 

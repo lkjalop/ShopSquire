@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
+from weakref import WeakKeyDictionary
 from typing import Dict, Any, List, Optional
 from sqlalchemy import text as sql_text
 
-from src.app.models.db import db_session
+from src.app.models.db import db_session, get_engine
 
 
 class RuleStore:
@@ -16,7 +17,7 @@ class RuleStore:
 
     def __init__(self, cache_ttl: int = 30):
         self.cache_ttl = cache_ttl
-        self._cache: Dict[Optional[str], Dict[str, Any]] = {}
+        self._cache = WeakKeyDictionary()
 
     def _now(self) -> float:
         return time.time()
@@ -27,7 +28,8 @@ class RuleStore:
         When `domain` is provided, only rules with matching `domain` are returned.
         """
         key = f"{tenant_id or '__global__'}::{domain or '__any__'}"
-        cached = self._cache.get(key)
+        owner_cache = self._cache.setdefault(get_engine(), {})
+        cached = owner_cache.get(key)
         if cached and (self._now() - cached.get('ts', 0) < self.cache_ttl):
             return cached.get('rules', [])
 
@@ -59,14 +61,14 @@ class RuleStore:
                 "created_at": r[12],
             })
 
-        self._cache[key] = {"ts": self._now(), "rules": rules}
+        owner_cache[key] = {"ts": self._now(), "rules": rules}
         return rules
 
     def refresh(self, tenant_id: Optional[str] = None, *, domain: Optional[str] = None) -> List[Dict[str, Any]]:
         """Force refresh cache for tenant/domain."""
         key = f"{tenant_id or '__global__'}::{domain or '__any__'}"
-        if key in self._cache:
-            del self._cache[key]
+        owner_cache = self._cache.get(get_engine(), {})
+        owner_cache.pop(key, None)
         return self.get_active_rules(tenant_id, domain=domain)
 
     def create_rule(self, rule: Dict[str, Any]) -> bool:
@@ -97,7 +99,7 @@ class RuleStore:
         except Exception:
             return False
 
-    def update_rule(self, rule_id: str, updates: Dict[str, Any]) -> bool:
+    def update_rule(self, rule_id: str, updates: Dict[str, Any], *, tenant_id: Optional[str] = None) -> bool:
         try:
             with db_session() as db:
                 field_sql = {
@@ -124,7 +126,11 @@ class RuleStore:
                             pass
                     elif k == "active":
                         v = 1 if bool(v) else 0
-                    db.execute(sql_text(stmt), {"id": rule_id, "v": v})
+                    if tenant_id is not None:
+                        stmt += " AND tenant_id = :scope_tenant"
+                    result = db.execute(sql_text(stmt), {"id": rule_id, "v": v, "scope_tenant": tenant_id})
+                    if result.rowcount == 0:
+                        return False
                     touched += 1
                 if touched == 0:
                     return False
@@ -135,23 +141,28 @@ class RuleStore:
         except Exception:
             return False
 
-    def delete_rule(self, rule_id: str) -> bool:
+    def delete_rule(self, rule_id: str, *, tenant_id: Optional[str] = None) -> bool:
         try:
             with db_session() as db:
-                db.execute(sql_text("DELETE FROM rule_definitions WHERE id = :id"), {"id": rule_id})
+                statement = "DELETE FROM rule_definitions WHERE id = :id"
+                if tenant_id is not None:
+                    statement += " AND tenant_id = :scope_tenant"
+                result = db.execute(sql_text(statement), {"id": rule_id, "scope_tenant": tenant_id})
+                if result.rowcount == 0 and tenant_id is not None:
+                    return False
                 db.commit()
             self._cache.clear()
             return True
         except Exception:
             return False
 
-    def get_rule(self, rule_id: str) -> Optional[Dict[str, Any]]:
+    def get_rule(self, rule_id: str, *, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         try:
             with db_session() as db:
-                r = db.execute(
-                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id"),
-                    {"id": rule_id},
-                ).fetchone()
+                statement = "SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id"
+                if tenant_id is not None:
+                    statement += " AND tenant_id = :scope_tenant"
+                r = db.execute(sql_text(statement), {"id": rule_id, "scope_tenant": tenant_id}).fetchone()
             if not r:
                 return None
             return {

@@ -38,6 +38,10 @@ def test_actual_fixture_has_a_working_database(client):
     basetemp = working / 'pytest-tmp'
     assert basetemp.resolve().is_relative_to(tmp_path.resolve()) and not basetemp.exists()
     env = {**os.environ, 'PYTHONPATH': str(application),
+           # These child tests own only an in-process API fixture. They must
+           # not try to provision the parent's already-owned HTTP runtime.
+           'SECURITY_SERVER_SPAWN': '0', 'E2E_BASE_URL': '',
+           'PYTEST_OWNED_SECURITY_DIRECTORY': '',
            'PYTEST_RESULT_STREAM': str(working / 'child-phases.jsonl'),
            'PYTEST_LAST_RUNNING_FILE': str(working / 'child-last-running.txt'),
            'FEATURE_FLAGS_PATH': str(working / 'flags.json')}

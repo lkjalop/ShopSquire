@@ -1,4 +1,23 @@
-import { test, expect, type Page } from '@playwright/test';
+import {type Page} from '@playwright/test';
+import {test,expect,buyerUid} from './helpers/authenticatedTest';
+
+test.beforeAll(() => {
+  expect(Boolean(process.env.EXTERNAL_RESEARCH_SEARCH_URL?.trim()),
+    'This intake profile requires unenrolled discovery; successful research has its own provider profile').toBe(false);
+});
+
+function expectUnverifiedAcceptance(body: any) {
+  expect(body).toMatchObject({
+    status: 'accepted_provisional', qualification_authority: 'none', cart_mutation: 'not_authorized',
+    corroboration: {status: 'blocked', reason: 'local_discovery_not_enrolled'},
+    research_outcome: {discovery_status: 'not_attempted', fetch_status: 'not_attempted',
+      requirement_completeness: 'partial', commerce_authority: 'none'},
+    evidence_acquisition: {external_calls: 0, paid_calls: 0},
+  });
+  expect(body.buyer_claim_reconciliation_status_counts.corroborated).toBe(0);
+  expect(body.buyer_claim_reconciliation_status_counts.unresolved).toBeGreaterThan(0);
+  expect(body.accepted_claims.length).toBeGreaterThan(0);
+}
 
 async function requirementScreenshot(page: Page): Promise<Buffer> {
   await page.setViewportSize({ width: 760, height: 760 });
@@ -47,7 +66,7 @@ test('requirements screenshot becomes reviewable provisional claims', async ({ p
   const screenshot = await requirementScreenshot(page);
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
-    `enterprise-e2e-upload-${suffix}`,
+    buyerUid,
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
@@ -76,7 +95,16 @@ test('requirements screenshot becomes reviewable provisional claims', async ({ p
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await review.getByRole('textbox', { name: 'Correct ram gb value' }).first().fill('64');
+  const screenshotAcceptanceResponse = page.waitForResponse(response =>
+    /\/api\/v1\/shopping-cases\/[^/]+\/requirement-proposals\/[^/]+\/accept$/.test(new URL(response.url()).pathname));
   await review.getByRole('button', { name: 'Research and corroborate' }).click();
+  const screenshotAcceptance = await screenshotAcceptanceResponse;
+  expect(screenshotAcceptance.ok()).toBe(true);
+  const screenshotBody = await screenshotAcceptance.json();
+  expectUnverifiedAcceptance(screenshotBody);
+  expect(screenshotBody.accepted_claims).toEqual(expect.arrayContaining([
+    expect.objectContaining({attribute: 'ram_gb', value: 64, authority_status: 'unverified'}),
+  ]));
   const reconciliation = page.getByTestId('buyer-claim-reconciliation');
   await expect(reconciliation).toBeVisible({ timeout: 60_000 });
   await expect(reconciliation).toContainText(/corroborated|contradicted|unresolved|preference only/i);
@@ -84,9 +112,8 @@ test('requirements screenshot becomes reviewable provisional claims', async ({ p
   await expect(shelves).toBeVisible({ timeout: 30_000 });
   await expect(shelves).toContainText(/official research|approved-source research|provisional/i);
   await expect(shelves).toContainText(/best across accepted shared needs/i);
-  await expect(shelves).toContainText(/mobile workstation/i);
-  await expect(shelves).toContainText(/freshness:\s*specification/i);
-  await expect(page.getByText(/completed approved-source/i)).toBeVisible();
+  await expect(shelves).toContainText(/conditional/i);
+  await expect(page.getByText(/approved-source research is currently unavailable/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 });
 
@@ -95,7 +122,7 @@ test('PDF requirements use the same review and correction contract', async ({ pa
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
-    `enterprise-e2e-pdf-upload-${suffix}`,
+    buyerUid,
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
@@ -128,6 +155,10 @@ test('PDF requirements use the same review and correction contract', async ({ pa
   const pdfResearch = await pdfResearchResponse;
   expect(pdfResearch.ok()).toBe(true);
   const pdfResearchBody = await pdfResearch.json();
+  expectUnverifiedAcceptance(pdfResearchBody);
+  expect(pdfResearchBody.accepted_claims).toEqual(expect.arrayContaining([
+    expect.objectContaining({attribute: 'ram_gb', value: 64, authority_status: 'unverified'}),
+  ]));
   const pdfCaseId = pdfResearch.url().match(/shopping-cases\/([^/]+)\/requirement-proposals/)?.[1];
   expect(pdfResearchBody.case_id).toBe(pdfCaseId);
   await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
@@ -139,7 +170,7 @@ test('plain-text requirements use the same provisional review contract', async (
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
-    `enterprise-e2e-text-upload-${suffix}`,
+    buyerUid,
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
@@ -178,6 +209,10 @@ test('plain-text requirements use the same provisional review contract', async (
   const textResearch = await textResearchResponse;
   expect(textResearch.ok()).toBe(true);
   const textResearchBody = await textResearch.json();
+  expectUnverifiedAcceptance(textResearchBody);
+  expect(textResearchBody.accepted_claims).toEqual(expect.arrayContaining([
+    expect.objectContaining({attribute: 'storage_gb', value: 2000, authority_status: 'unverified'}),
+  ]));
   const textCaseId = textResearch.url().match(/shopping-cases\/([^/]+)\/requirement-proposals/)?.[1];
   expect(textResearchBody.case_id).toBe(textCaseId);
   await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
@@ -189,7 +224,7 @@ test('manual specifications use the same editable same-case corroboration contra
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
-    `enterprise-e2e-manual-requirements-${suffix}`,
+    buyerUid,
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
@@ -226,8 +261,16 @@ test('manual specifications use the same editable same-case corroboration contra
     ),
   );
   await review.getByRole('button', { name: 'Research and corroborate' }).click();
-  expect((await acceptanceResponse).ok()).toBe(true);
+  const manualAcceptance = await acceptanceResponse;
+  expect(manualAcceptance.ok()).toBe(true);
+  const manualBody = await manualAcceptance.json();
+  expectUnverifiedAcceptance(manualBody);
+  expect(manualBody.accepted_claims).toEqual(expect.arrayContaining([
+    expect.objectContaining({attribute: 'ram_gb', value: 64, authority_status: 'unverified'}),
+  ]));
   await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('product-shelves')).toContainText(/best across accepted shared needs/i);
-  await expect(page.getByRole('button', { name: 'Research approved sources' })).toHaveCount(0);
+  await expect(page.getByText(/approved-source research is currently unavailable/i)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Research approved sources' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 });
