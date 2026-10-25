@@ -3266,6 +3266,8 @@ export default function App() {
                   }} />}
                 {stockRequest && stockRequest.caseId === activeShoppingCase?.case_id && <StockAcceptancePanel
                   caseId={stockRequest.caseId} uid={uid} sku={stockRequest.sku} revision={activeShoppingCase.revision}
+                  initialQuantity={Number.isInteger(confirmedSlots.order_quantity) && confirmedSlots.order_quantity > 0
+                    ? confirmedSlots.order_quantity : 1}
                   onAccepted={revision=>{
                     setProductShelves(null);
                     setRecommendationActionsAuthorized(false);
@@ -3584,9 +3586,10 @@ export default function App() {
                       researchStartedAt={researchStartedAt}
                     />
                   )}
-                  {import.meta.env.VITE_ENABLE_SIMULATED_STOCK === '1' && activeShoppingCase?.case_id && productShelves && !materialProductFitBlocked &&
-                    [...new Set(productShelves.shelves.flatMap(shelf=>[...shelf.initial,...shelf.next_page])
-                      .filter(item=>item.fit_status==='qualified').map(item=>item.product.sku))].map(sku=>(
+                  {import.meta.env.VITE_ENABLE_SIMULATED_STOCK === '1' && activeShoppingCase?.case_id && (browsingCatalogue || productShelves) && !materialProductFitBlocked &&
+                    [...new Set(browsingCatalogue ? filteredDisplayProducts.map(product=>product.sku)
+                      : productShelves!.shelves.flatMap(shelf=>[...shelf.initial,...shelf.next_page])
+                        .filter(item=>item.fit_status==='qualified').map(item=>item.product.sku))].map(sku=>(
                       <button key={sku} onClick={()=>setStockRequest({caseId:activeShoppingCase.case_id,sku})}>
                         Review simulated stock for {sku}
                       </button>

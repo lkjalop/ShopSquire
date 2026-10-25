@@ -1,0 +1,44 @@
+import {test,expect} from './helpers/ordinaryBuyerTest';
+import {terminalTurn as turn} from './helpers/terminalTurn';
+
+test('catalogue buyer explicitly accepts stock and retains the exact shortage draft after reload',async({page},info)=>{
+  test.setTimeout(180000);
+  const privileged:string[]=[];
+  const externalEffects:string[]=[];
+  page.on('request',request=>{
+    const path=new URL(request.url()).pathname;
+    if(path.startsWith('/api/v1/')&&request.headers()['x-api-key'])privileged.push(path);
+    if(request.method()==='POST'&&/\/(?:dispatch|payments|orders)(?:\/|$)/.test(path))externalEffects.push(path);
+  });
+  await page.goto('/');await page.getByRole('button',{name:/Ask Me/i}).click();
+  const choices=await turn(page,'Show me 40 laptops under AUD 1500 each. I am browsing the catalogue.');
+  await info.attach('catalogue-entry.json',{body:JSON.stringify(choices,null,2),contentType:'application/json'});
+  expect(choices.products.length).toBeGreaterThan(0);
+  expect(choices.semantic_resolution.outcome).toBe('catalog_browse');
+  const sku=choices.products[0].sku;
+  await page.getByRole('button',{name:`Review simulated stock for ${sku}`,exact:true}).click();
+  await expect(page.getByTestId('live-available')).toHaveText('15');
+  await expect(page.getByLabel('Requested units')).toHaveValue('40');
+  const accepting=page.waitForResponse(r=>r.url().endsWith('/stock-acceptance')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Accept simulated stock request',exact:true}).click();
+  const acceptedResponse=await accepting;
+  expect(acceptedResponse.ok(),await acceptedResponse.text()).toBe(true);
+  const accepted=await acceptedResponse.json();
+  expect([accepted.requested_quantity,accepted.held_quantity,accepted.shortfall]).toEqual([40,15,25]);
+  await expect(page.getByTestId('accepted-stock')).toHaveText('Requested 40 · Held 15 · Shortfall 25');
+  const draft=await turn(page,'Draft an email asking the supplier for the remaining unit shortfall. Do not send it.');
+  expect(draft.case_id).toBe(choices.case_id);
+  expect(draft.email_draft).toMatchObject({sku,requested_quantity:40,shortfall:25,dispatch_authorized:false});
+  expect(draft.email_draft.body).toContain('25 units');
+  expect(draft.email_draft.body).toContain('40 units');
+  expect(draft.email_draft.draft_artifact.content_hash).toMatch(/^[a-f0-9]{64}$/);
+  await page.reload();
+  if(!await page.getByPlaceholder('Type your message...').isVisible())await page.getByRole('button',{name:/Ask Me/i}).click();
+  const restored=await turn(page,'Show the supplier email draft for my current request.');
+  expect(restored.email_draft.draft_artifact).toEqual(draft.email_draft.draft_artifact);
+  expect(restored.retained_buyer_facts.requested_quantity).toBe(40);
+  expect(restored.terminal_outcome.commerce_authority).toBe('none');
+  expect(privileged).toEqual([]);expect(externalEffects).toEqual([]);
+  await info.attach('catalogue-shortfall-draft.json',{body:JSON.stringify({accepted,draft,restored},null,2),contentType:'application/json'});
+  await info.attach('catalogue-shortfall-screen',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
+});
