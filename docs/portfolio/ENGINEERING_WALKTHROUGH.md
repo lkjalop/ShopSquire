@@ -6,6 +6,8 @@ ShopSquire is substantially AI-assisted, using Claude Code and Codex. The author
 
 ## 25 October evidence update
 
+The [consolidated savepoint and pilot roadmap](../CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md) is the current integration assessment. All 339 original dirty paths are now in explicit commits. Baseline is `a9778cf8`; the repaired code/test freeze is `e56a501d`. Source restore was independently verified. The earlier counts below retain their original candidate identities. The integration branch now contains the stage rollback/dependency implementations described as local changes in the original tour; those descriptions do not imply they are on public main or the earlier draft PR.
+
 The [execution delta and remaining W00-W15 roadmap](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) supersedes the historical counts below. It separates public main, the draft repair branch and larger frozen local candidates. The branch adds grounded pricing, scoped cited market context, immutable supplier-draft review, atomic cache erasure, worker-context preservation and timeout retry controls. C23's serial full Python profile reports **8,820 passes, 0 failures, 0 errors and 310 skips**. C23 broad browser remains 97/54/33, with its included 28-case focused subset passing. See the [ASCII architecture](../architecture/CURRENT_ARCHITECTURE_2026-10-25.md), [unmodified screenshots](../audits/2026-10-25-browser-visual-assessment.md) and [code findings](../audits/2026-10-25-c22-code-review-findings.md). Required hosted/security gates and C23 endurance remain open. The original tour remains dated evidence.
 
 ## The engineering problem

@@ -1,0 +1,659 @@
+{
+  "schema_version": "shopsquire-consolidation-evidence.v1",
+  "recorded_at": "2026-10-25T01:21:44.200300+00:00",
+  "scope": "Consolidation, code review and bounded mock-catalogue pilot verification. Not release certification or manual semantic review of every line.",
+  "baseline": {
+    "commit": "a9778cf86f441cb05c4befdbefb4166a2fa35a88",
+    "files": 5947,
+    "source_manifest_sha256": "40e3d4aba55f632a4188c6e5bdcaf1977d66538c41f698307acf44f406d042f0",
+    "source_integrity": {
+      "candidate": "a9778cf86f441cb05c4befdbefb4166a2fa35a88",
+      "manifest_commit_matches": true,
+      "protected_files": 5947,
+      "changed_inputs": [],
+      "tracked_diff": []
+    },
+    "broad_browser": {
+      "source_commit": "a9778cf86f441cb05c4befdbefb4166a2fa35a88",
+      "complete": true,
+      "selected_specs": 86,
+      "elapsed_seconds": 2604.687,
+      "outcomes": {
+        "expected": 97,
+        "unexpected": 58,
+        "skipped": 33,
+        "flaky": 0
+      },
+      "changed_inputs": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "all_observed_ports_closed": true,
+      "resource_violations": [],
+      "native_receipt": ".artifacts/consolidation-2026-10-25/broad-browser/receipt.json",
+      "native_receipt_sha256": "3d04ebbaf382a507263d23fd75e2a02943aae7bef7abf5fba1bb3ad0fb4e75fa"
+    },
+    "live_merchant_assisted_browser": {
+      "source_commit": "a9778cf86f441cb05c4befdbefb4166a2fa35a88",
+      "complete": true,
+      "selected_specs": 2,
+      "elapsed_seconds": 58.812,
+      "outcomes": {
+        "expected": 0,
+        "unexpected": 2,
+        "skipped": 0,
+        "flaky": 0
+      },
+      "changed_inputs": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "all_observed_ports_closed": true,
+      "resource_violations": [],
+      "native_receipt": ".artifacts/consolidation-2026-10-25/live-browser/receipt.json",
+      "native_receipt_sha256": "7a853432a234b20d2bbef53601afa235d94480bab8721f3f75aca8d16b94320b"
+    },
+    "full_python": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 2069.829,
+      "peaks": {
+        "rss_bytes": 1358438400,
+        "handles": 3866,
+        "threads": 207
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 9139,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 311
+      },
+      "passed": 8828,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-full-v1/receipt.json",
+      "native_receipt_sha256": "95b3ca53949f8572492962fad41eca112915a8e8ac1e1d01eee0559d8acfab95",
+      "native_junit_sha256": "5475bc45061389ea82a24576b937f019c525e3f5fc9bade71bbd3ba870d71da7"
+    }
+  },
+  "final_code": {
+    "commit": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+    "files": 5950,
+    "source_manifest_file_sha256": "3d9ee59a6a92f1e0a4951ca2262eb07fd9a3c871425c8aa510523f1a1bdec746",
+    "source_manifest_content_sha256": "da98eaae22c30aa6fe16598e5da2e8567743d372191e837ae0a8cdd179aa8015",
+    "source_integrity": {
+      "candidate": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "manifest_commit_matches": true,
+      "protected_files": 5950,
+      "changed_inputs": [],
+      "tracked_diff": []
+    },
+    "native_registered_live_browser": {
+      "source_commit": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "complete": true,
+      "selected_specs": 2,
+      "elapsed_seconds": 63.594,
+      "outcomes": {
+        "expected": 2,
+        "unexpected": 0,
+        "skipped": 0,
+        "flaky": 0
+      },
+      "changed_inputs": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "all_observed_ports_closed": true,
+      "resource_violations": [],
+      "native_receipt": ".artifacts/consolidation-2026-10-25/final-live-browser/receipt.json",
+      "native_receipt_sha256": "f452c0c17fd79e91c2255ca1b40e8352fdad5083fec434fd8a95ffd58d341577"
+    },
+    "focused_browser": {
+      "source_commit": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "complete": true,
+      "selected_specs": 15,
+      "elapsed_seconds": 321.234,
+      "outcomes": {
+        "expected": 28,
+        "unexpected": 4,
+        "skipped": 0,
+        "flaky": 0
+      },
+      "changed_inputs": [],
+      "owned_container_removed": true,
+      "owned_network_removed": true,
+      "all_observed_ports_closed": true,
+      "resource_violations": [],
+      "native_receipt": ".artifacts/consolidation-2026-10-25/final-focused-browser/receipt.json",
+      "native_receipt_sha256": "eecbf69c4b5fe493b685e45c3d4395c9c51674b266c8e5da08b5d98d5e7e342b"
+    },
+    "full_python": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 2081.656,
+      "peaks": {
+        "rss_bytes": 1322221568,
+        "handles": 3878,
+        "threads": 211
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 9157,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 311
+      },
+      "passed": 8846,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-final-full-v1/receipt.json",
+      "native_receipt_sha256": "46445bded06030764f7b38fabb9b6a133dade5f98370dc0a80d5e53c9cb654f6",
+      "native_junit_sha256": "ac2332ee966c58255cc2da039fb96494dd18846c22da9cf91ea15ddb0b18ff03"
+    },
+    "linux_api_overlay": {
+      "exit": 0,
+      "elapsed_seconds": 34.656,
+      "image": "sha256:7147d98301bfa6424294ee28f2758d7cff6d55efa09ee5d870e30e89b2837880",
+      "candidate": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "scope": "Owned offline lean Linux API image dependencies and read-only frozen source overlay; native HTTP and registration, not a fresh image build or Linux browser certificate"
+    },
+    "linux_setup_failure_retained": {
+      "exit": 125,
+      "elapsed_seconds": 0.531,
+      "image": "sha256:7147d98301bfa6424294ee28f2758d7cff6d55efa09ee5d870e30e89b2837880",
+      "candidate": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "scope": "Owned offline lean Linux API image dependencies and read-only frozen source overlay; native HTTP and registration, not a fresh image build or Linux browser certificate"
+    },
+    "live_task_scope": {
+      "draft": {
+        "requested_quantity": 40,
+        "shortfall": null,
+        "dispatch_authorized": false,
+        "missing_inputs": [
+          "supplier_contact",
+          "current_accepted_selection"
+        ]
+      },
+      "market": {
+        "delivery_status": "blocked",
+        "delivery_reason": "no_current_scoped_evidence",
+        "answered_market_facets": [],
+        "unanswered_market_facets": [
+          "lead_time"
+        ]
+      },
+      "unique_dispatched_receipts": [
+        {
+          "provider_id": "searxng_compatible_discovery",
+          "provider_capability": "WEB_DISCOVERY",
+          "fixture": false,
+          "execution_status": "completed",
+          "http_status": 200,
+          "result_count": 10,
+          "response_body_hash": "be00fff64217de8b6fcd0cff1b1b429f047e0ea610b02d7a12ae39d063dcd6e9",
+          "query_hash": "ef92e972dcc4a644",
+          "observed_at": "2026-10-25T00:40:32.973982+00:00"
+        },
+        {
+          "provider_id": "searxng_compatible_discovery",
+          "provider_capability": "WEB_DISCOVERY",
+          "fixture": false,
+          "execution_status": "completed",
+          "http_status": 200,
+          "result_count": 14,
+          "response_body_hash": "2b63f2e2b69f5a862f6a235c7fc2a9964df9ae8e93524ca18576a875664cf968",
+          "query_hash": "6e35bef09fa88f9c",
+          "observed_at": "2026-10-25T00:40:33.946604+00:00"
+        },
+        {
+          "provider_id": "searxng_compatible_discovery",
+          "provider_capability": "WEB_DISCOVERY",
+          "fixture": false,
+          "execution_status": "completed",
+          "http_status": 200,
+          "result_count": 15,
+          "response_body_hash": "2a2daf1b8c91b275d37b57b75d47fa9abd7854e7384e7281c68a5226f12f903e",
+          "query_hash": "d8456aa59e1d0bb2",
+          "observed_at": "2026-10-25T00:40:34.913681+00:00"
+        }
+      ],
+      "screenshot": {
+        "sha256": "190becab2a6514ad4cd7030261ad3bf44acd31e2a1c08adbaba8fdbb53b696ed",
+        "bytes": 1078312
+      },
+      "qualification": "Native registered-buyer live search and task-delivery scope; unknown stock shortfall and unavailable market analysis remain unknown."
+    }
+  },
+  "regressions": {
+    "research_case_before": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 21.047,
+      "peaks": {
+        "rss_bytes": 262852608,
+        "handles": 1075,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 4,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "passed": 3,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-research-case-before/receipt.json",
+      "native_receipt_sha256": "f7b0aa3faf3941ff2426f86df72329158d5998437323e2163381d1ed1017a79a",
+      "native_junit_sha256": "72cdfd3d3a731b9907958989166f5738a49bc3eede0270d69cebc39933d98bf6"
+    },
+    "research_case_after": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.297,
+      "peaks": {
+        "rss_bytes": 261242880,
+        "handles": 1075,
+        "threads": 36
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 45,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "passed": 45,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-research-case-after/receipt.json",
+      "native_receipt_sha256": "0bc51600383ad397905f28f017b42c11700364e563ef44e285338d75cd020dcb",
+      "native_junit_sha256": "11cd46547f0917cc62cee1cf20b4294ebada30f4e7cb70723d057720589645a1"
+    },
+    "windows_ruff_before": {
+      "native_exit_code": 1,
+      "elapsed_seconds": 16.016,
+      "peaks": {
+        "rss_bytes": 245317632,
+        "handles": 1076,
+        "threads": 33
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 4,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "passed": 2,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-ruff-runner-before-v2/receipt.json",
+      "native_receipt_sha256": "8d53e2d8778d7b68597af43adc742a6f5ab7dfc993eb24747ddbdc3756dbc65a",
+      "native_junit_sha256": "8109b15152ff76e0c0bb9b166f9c8ea3084062a60a4f0c4626ff0b5e9db5c583"
+    },
+    "windows_ruff_after": {
+      "native_exit_code": 0,
+      "elapsed_seconds": 18.125,
+      "peaks": {
+        "rss_bytes": 237486080,
+        "handles": 1075,
+        "threads": 31
+      },
+      "resource_violation": null,
+      "counts": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "passed": 5,
+      "native_receipt": ".artifacts/roadmap-execution-2026-10-20/consolidation-20261025-ruff-runner-after-v2/receipt.json",
+      "native_receipt_sha256": "f2d1413ee40395bb4c720de3825d94084e605b22129dbebbedee665a6f1481a7",
+      "native_junit_sha256": "884db154b0ed852935af484d67d0fae7ae264d5a8dff8f398623c56a45d93f4f"
+    }
+  },
+  "browser_deltas": {
+    "baseline_to_c23": {
+      "offline_counts": {
+        "expected": 97,
+        "skipped": 33,
+        "unexpected": 58
+      },
+      "live_counts": {
+        "unexpected": 2
+      },
+      "offline_classifications": {
+        "passed_scope_limited_to_declared_profile": 97,
+        "skipped_prerequisite_or_optional": 33,
+        "locator_ambiguity": 1,
+        "live_profile_prerequisite": 1,
+        "behavior_or_fixture_failure_requires_triage": 56
+      },
+      "matched_c23_cases": 184,
+      "new_cases": 4,
+      "missing_c23_cases": 0,
+      "c23_to_consolidated": {
+        "unexpected -> unexpected": 54,
+        "expected -> expected": 97,
+        "skipped -> skipped": 33
+      },
+      "qualification": "Same named scenarios, distinct frozen sources/dates. Classifications are triage, not established root causes. Offline and live outcomes are not additive or interchangeable."
+    },
+    "registered_before_to_final": {
+      "profiles": {
+        "registered_live_before": {
+          "unexpected": 6
+        },
+        "registered_offline_categories_before": {
+          "unexpected": 4
+        },
+        "final_live": {
+          "expected": 2
+        },
+        "final_focused": {
+          "expected": 28,
+          "unexpected": 4
+        }
+      },
+      "registered_matched_cases": 6,
+      "registered_transitions": {
+        "unexpected -> expected": 2,
+        "unexpected -> unexpected": 4
+      },
+      "qualification": "Distinct frozen sources and declared profiles; overlapping cases are not additive. Disabled models, fixture stock and source-policy refusals do not qualify live task usefulness."
+    }
+  },
+  "full_suite_delta": {
+    "matched_cases": 9139,
+    "matched_transitions": {
+      "passed -> passed": 8828,
+      "skipped -> skipped": 311
+    },
+    "added_cases": [
+      {
+        "classname": "tests.api.test_chat_owned_research_continuity",
+        "name": "test_admitted_research_preserves_the_owned_case_without_weakening_replacement[continuation]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.api.test_chat_owned_research_continuity",
+        "name": "test_admitted_research_preserves_the_owned_case_without_weakening_replacement[foreign]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.api.test_chat_owned_research_continuity",
+        "name": "test_admitted_research_preserves_the_owned_case_without_weakening_replacement[fresh]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.api.test_chat_owned_research_continuity",
+        "name": "test_admitted_research_preserves_the_owned_case_without_weakening_replacement[replacement]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.scripts.test_ci_ruff_changed",
+        "name": "test_terminated_ruff_process_never_reports_clean",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.scripts.test_ci_ruff_changed",
+        "name": "test_wide_native_scope_reports_clean_or_bad_source_without_command_overflow[False]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.scripts.test_ci_ruff_changed",
+        "name": "test_wide_native_scope_reports_clean_or_bad_source_without_command_overflow[True]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Check the official current software requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Instead search online for the official FreeCAD 1.0 requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Search online for the official 30 requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Search online for the official AnotherCAD 1.0 requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Search online for the official CAD requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Search online for the official FreeCAD 1.0 requirements and Blender requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_different_version_topic_generic_or_nonliteral_subject_is_not_associated[Search online for the official FreeCAD 2.0 requirements.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_literal_same_subject_requirements_can_be_associated[Check the official FreeCAD 1.0 requirements]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_literal_same_subject_requirements_can_be_associated[Find FreeCAD requirements]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_literal_same_subject_requirements_can_be_associated[Look up requirements for FreeCAD 1.0.]",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.services.test_literal_research_continuity",
+        "name": "test_literal_same_subject_requirements_can_be_associated[Search online for the official FreeCAD 1.0 requirements.]",
+        "status": "passed"
+      }
+    ],
+    "missing_cases": [],
+    "final_skip_reasons": {
+      "collection skipped": 4,
+      "live acceptance not explicitly enabled": 9,
+      "live model acceptance not explicitly enabled": 10,
+      "Playwright not configured in local CI": 2,
+      "E2E_FRONTEND_URL not set": 3,
+      "Set FORCE_PLAYWRIGHT_TESTS=1 to run browser e2e on Windows": 2,
+      "Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)": 86,
+      "explicit isolated PostgreSQL certificate required": 1,
+      "TEST_POSTGRES_URL is required for real PostgreSQL concurrency tests": 5,
+      "TEST_POSTGRES_URL is required for isolated request ownership checks": 37,
+      "TEST_POSTGRES_URL is required": 11,
+      "TEST_POSTGRES_URL is required for isolated outbound races": 13,
+      "TEST_POSTGRES_URL is required for isolated inventory concurrency": 7,
+      "TEST_POSTGRES_URL (Postgres) required for the true order-transition race": 1,
+      "TEST_POSTGRES_URL is required for isolated refund authority races": 5,
+      "Ollama executable not found on expected path; skipping env check": 1,
+      "CV certification not run: local licensed/real sample pack is absent; missing=['apple-mac.jpg', 'macbook-QR.png', 'lenovo-pro7.webp']": 1,
+      "Explicit owned Ollama runtime and enrolled models required": 3,
+      "set GATE1_INTEL_ON=1 against a HIPPOGRAPH_FEEDBACK_ENABLED deployment": 1,
+      "set GATE2_FULLSTACK=1 with API+DB+Redis+Celery up and signals seeded": 1,
+      "set GATE3_LIVE_RANKING=1 against a RANKING_NUDGE_EXPERIMENT_ENABLED + live experiment": 1,
+      "Manual run: requires local server": 1,
+      "Manual run: requires Playwright and running server": 1,
+      "playwright disabled": 2,
+      "CV_VISION_ENABLED=0 \u2014 cv pipeline disabled": 1,
+      "requires running backend and admin frontend": 2,
+      "requires the running demo stack": 2,
+      "set GATE_PROCUREMENT=1 against a live stack": 3,
+      "Integration tests disabled. Set RUN_INTEGRATION=1 to enable.": 4,
+      "playwright disabled or unsupported on this platform": 3,
+      "live Playwright tests disabled (set LIVE_PLAYWRIGHT_TESTS=1)": 2,
+      "storefront not reachable; skip e2e check": 1,
+      "live Playwright regression disabled; set LIVE_PLAYWRIGHT_TESTS=1": 1,
+      "Postgres/Timescale matrix requires postgres engine + ENABLE_DB_MATRIX=1": 2,
+      "slow test \u2014 pass --run-slow to enable": 11,
+      "separately owned Redis required": 10,
+      "Explicit owned Redis is required for controller isolation": 1,
+      "Explicit owned Redis required; no inherited backend is contacted": 2,
+      "roadmap \u00a78 TODO: image-match shape needs a multipart upload fixture, not reachable via plain GET": 1,
+      "roadmap \u00a78 TODO: security/Maestro block shape not reliably triggered by injection-text GET; needs policy-gate fixture": 1,
+      "Ollama generate failed for 'llama3:8b'; skipping": 1,
+      "Ollama text model 'mistral:latest' not available; skipping": 1,
+      "Ollama generate failed for 'qwen2.5:latest'; skipping": 1,
+      "got empty parameter set for (entry)": 1,
+      "Requires the explicitly selected task-owned native Docker profile": 1,
+      "Ollama llava not available": 3,
+      "Heavy integration test (steg + QR on real attachments). Set PYTEST_FULL_INTEGRATION=1 to enable.": 1,
+      "Ollama not reachable at http://127.0.0.1:1": 6,
+      "Ollama model 'llama3.2:3b' not available at http://127.0.0.1:1": 3,
+      "fixture missing: dump/test-cv/Dell 15 DC15255.webp": 1,
+      "set RUN_LIVE_PUBLIC_SOURCE_TESTS=1 for official USGS protocol probe": 1,
+      "no reachable Redis (integration test)": 5,
+      "frozen V1 RecommendationService/CV/NQE characterization; active V2 multimodal and security contracts live in protocol and browser suites": 21,
+      "macbook-QR.png missing in dump/test-cv": 1,
+      "ms-texti.png missing in dump/test-cv": 2,
+      "no frontend dist built \u2014 nothing to scan": 1,
+      "requires the explicit owned Redis security profile": 2,
+      "Replay detection requires Redis": 4
+    },
+    "qualification": "Same full-suite profile, distinct frozen sources. Counts are not coverage or release qualification."
+  },
+  "post_freeze_evidence_checker": {
+    "scope": "One evidence-target list addition, outside application freeze; existing controls run with --noconftest.",
+    "native_exit_code": 0,
+    "native_junit_sha256": "38a8d7833a81f1907d70dae67953b893abea4ceb19423ca88fd317f8f2b34a12",
+    "control_cases": 2
+  },
+  "dependencies": {
+    "lock_sha256": "5a13f34581ad8603c7fa1d28c63861ba79ceea758f5f3b8ce43cbb88ca17147b",
+    "lock_advisory_audit": {
+      "recorded_at": "2026-10-24T23:29:39.624152+00:00",
+      "service": "pip-audit PyPIService; all distinct lock versions; no host marker filtering",
+      "locked_package_versions": 217,
+      "package_advisory_matches": 0,
+      "errors_or_skips": []
+    },
+    "installed_full_advisory_audit": {
+      "recorded_at": "2026-10-25T00:23:40.500887+00:00",
+      "service": "pip-audit PyPIService; all installed full-test environment versions; export membership assessed separately",
+      "installed_package_versions": 184,
+      "package_advisory_matches": 0,
+      "errors_or_skips": []
+    },
+    "full_environment": {
+      "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+      "platform": "Windows-10-10.0.26200-SP0",
+      "required_profile_packages": 127,
+      "installed_distributions": 184,
+      "mismatches": [
+        {
+          "name": "async-timeout",
+          "expected": "==5.0.1",
+          "actual": null
+        }
+      ],
+      "qualification": "Read-only environment inventory. Extra installed packages remain; this is not a fresh isolated install."
+    },
+    "host_lock_marker_analysis": {
+      "python_full_version": "3.11.9",
+      "platform": "win32",
+      "mandatory_host_lock_packages": 184,
+      "missing_mandatory": [],
+      "installed_outside_mandatory_host_set": [],
+      "unparsed_markers": [
+        {
+          "name": "nvidia-cusparse",
+          "error": "InvalidMarker"
+        }
+      ],
+      "async_timeout_marker": "python_version == \"3.11\" and python_full_version < \"3.11.3\"",
+      "export_target": "generate_runtime_requirements deliberately evaluates python_full_version=3.11.0; the exported superset includes compatibility packages inactive on later patch versions"
+    },
+    "installed_requirement_check": {
+      "recorded_at": "2026-10-25T00:57:19.274517+00:00",
+      "exit": 0,
+      "elapsed_seconds": 0.656,
+      "output": "No broken requirements found.\n",
+      "command": [
+        "C:/AI/ssv4env/Scripts/python.exe",
+        "-m",
+        "pip",
+        "check"
+      ]
+    },
+    "profile_interpretation": "All full 184 installed versions are locked and pip check passes. Export async-timeout applies below 3.11.3 and is intentionally included by the 3.11.0 export target; its absence on 3.11.9 is expected. Supplementary host-marker scan cannot interpret one NVIDIA <empty> marker, so is not a complete resolution proof. Full environment was reused, not freshly installed.",
+    "lean_browser_environment": {
+      "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+      "platform": "Windows-10-10.0.26200-SP0",
+      "required_profile_packages": 127,
+      "installed_distributions": 127,
+      "mismatches": [],
+      "extra_distributions": 0,
+      "qualification": "Read-only version/membership inventory; installation provenance is a separate receipt."
+    },
+    "frontend_scope": "Fresh npm ci on both committed locks; 409 storefront and 63 admin unit passes; both types/builds. Later changes only legacy JSX syntax and browser tests.",
+    "frontend_validation_receipt_sha256": "6a12ef32a1ffdb5fc1d609a7ed42361ad0ddc109d71391c1f19fcc9677da69f4"
+  },
+  "recovery": {
+    "original_dirty_paths": 339,
+    "all_paths_accounted": 339,
+    "original_archive_sha256": "093fb6e67e2cc4c94fd0a7c7b7907da342a224aab960da81b32675dd45374f29",
+    "raw_restore_mismatches": 0,
+    "original_bundle_fsck_exit": 0,
+    "final_code_savepoint": {
+      "commit": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "tag": "savepoint/pilot-code-20261025",
+      "bundle_bytes": 58604599,
+      "bundle_sha256": "a94732b1a1552f90dbfab32d815483067feac4247bc0a1913d763cdd422446ed",
+      "bundle_verified": true,
+      "independent_restore_fsck": true,
+      "restored_commit_matches": true,
+      "local_only": true,
+      "qualification": "Code recovery; native final verification recorded separately, not a release certificate"
+    },
+    "private_runtime_published": false,
+    "scope": "Source and consistent local SQLite/private config recovery. Same-drive copy; packages, models and private test artifacts are not fully archived."
+  },
+  "static_review": {
+    "final_census_files": 5950,
+    "python_files_parsed": 3223,
+    "python_parse_errors": 0,
+    "js_ts_files": 405,
+    "js_ts_syntax_errors": 0,
+    "public_navigation_validation": {
+      "candidate": "e56a501d3c7ff042f6a4333aaf9218e947b1c9b8",
+      "census_paths_and_hashes_checked": 5950,
+      "mapped_packages_checked": 16,
+      "code_and_test_references_checked": 32,
+      "failures": [],
+      "qualification": "Navigation, frozen-source hashes and line/symbol resolution; not semantic correctness or executed line coverage."
+    },
+    "maintained_text_files": 1550,
+    "maintained_text_lines": 366551,
+    "maintained_files_over_1000_lines": 49,
+    "broad_except_pass_candidates": 2017,
+    "line_or_branch_coverage": "not measured",
+    "lint": {
+      "integration_base_findings": 333,
+      "checkpoint_findings": 959,
+      "batch_findings": [
+        516,
+        253,
+        190
+      ],
+      "checkpoint_python_files": 1487,
+      "native_windows_overflow_repaired": true,
+      "gate_green": false
+    },
+    "qualification": "AST/syntax/size census and targeted critical-path review. Candidate counts are not confirmed bugs or semantic line certification."
+  },
+  "interpretation": {
+    "release_green": false,
+    "live_market_task_complete": false,
+    "live_exact_shortfall_complete_without_stock_selection": false,
+    "real_supplier_delivery_qualified": false,
+    "model_accuracy_qualified_by_these_offline_profiles": false,
+    "overlapping_counts_may_be_added": false,
+    "remaining": [
+      "required broad and hosted security gates",
+      "category/bundle usefulness and non-electronics journeys",
+      "buyer-safe explanation and derived-data privacy",
+      "licensed/current cited market sources and quality evaluation",
+      "natural-language disclosure and multiple draft selection",
+      "unit/pack/landed-cost and real merchant adapters",
+      "worker/provider recovery, socket exhaustion diagnosis and final-source endurance"
+    ]
+  }
+}

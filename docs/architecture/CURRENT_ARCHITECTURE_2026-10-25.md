@@ -1,6 +1,21 @@
 # ShopSquire architecture and current authority boundaries
 
-Reviewed 25 October 2026. This describes implemented components across the draft repair branch and explicitly identified local integration work. Arrows describe wiring; qualification is in the [execution delta and roadmap](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md). The earlier [23 October architecture](CURRENT_ARCHITECTURE_2026-10-23.md) remains historical evidence.
+Reviewed 25 October 2026. The integration branch contains the original 339 dirty paths in explicit commits; baseline is `a9778cf8` and the repaired code/test freeze is `e56a501d`. Public main and the earlier draft PR remain distinct. Arrows describe wiring; current qualification is in the [consolidated savepoint and pilot roadmap](../CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md). The [earlier execution delta](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) and [23 October architecture](CURRENT_ARCHITECTURE_2026-10-23.md) remain historical evidence.
+
+Selected rehearsal data path:
+
+```text
+ August electronics .txt -> exclusive new fixture DB -> buyer category/bundle choices
+   mock prices/stock          identity + case/revision      explicit acceptance
+                                                           |
+ SearXNG live discovery <- explicit source-check consent     v
+   candidate URLs -> fetch/admission -> relevant citations  exact shortfall
+                         |                                 |
+                         +-> current scoped market answer  v
+                                          one versioned supplier draft
+                                          preview -> review -> amendment/reload
+                                          real sending disabled
+```
 
 ```text
  BUYER                                  OPERATOR / ADMIN
@@ -74,7 +89,9 @@ Reviewed 25 October 2026. This describes implemented components across the draft
  query clustering -> invocation-time model attempts / hash fallback
                   -> embedding_cache.json [tenant/model/retention gap]
                   -> query_clusters SQL [tenant/job scope gap]
- Grafana JSON adapters [syntax/dependency failures; separate from Prometheus]
+ Grafana JSON adapters -> shared built-in Node HTTP adapter
+   explicit credentials / bounded upstream / typed failures
+   [native controls pass; Linux observability deployment remains unqualified]
 
  OTHER IMPLEMENTED SURFACES [qualification varies by profile]
 
