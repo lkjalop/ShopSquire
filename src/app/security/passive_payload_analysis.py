@@ -28,7 +28,9 @@ _HYPOTHESIS_TO_POSSIBLE_MITRE_ATTACK: Dict[str, List[str]] = {
     "ransomware": ["T1486", "T1059", "T1490"],
     "macros": ["T1566.001", "T1204.002", "T1059.001", "T1059.005"],
     "fileless_attack": ["T1059.001", "T1620", "T1546.003", "T1134.004", "T1027", "T1562.001"],
-    "steg_unknown_payload": ["T1027.001", "T1027"],
+    # T1027.003 is Steganography; T1027.001 is Binary Padding. This remains
+    # a possible technique mapping, not proof that hidden content executed.
+    "steg_unknown_payload": ["T1027.003", "T1027"],
     "pii_data_exfil_via_qr": ["T1041", "T1078"],
     "unknown": [],
 }
