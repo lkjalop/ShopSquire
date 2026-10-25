@@ -1,0 +1,235 @@
+{
+  "observed_at_utc": "2026-10-25T07:12:17.004206+00:00",
+  "head": "785da49d0cb2f62ce194841a4fb6a8d5edddd0ba",
+  "pr": 31,
+  "draft": true,
+  "merge_state": "UNSTABLE",
+  "checks": [
+    {
+      "name": "smoke-clean-checkout",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "browser",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "changed-python",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (0)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (0)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "security-focused",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "integration",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "smoke",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "focused-core",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "pci-no-pan-scan",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "pci-no-pan-scan",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "v2-gates",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "test (1)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (1)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (2)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (2)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "test (3)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (3)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (4)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (4)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "services (5)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (5)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "test (6)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "services (6)",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "services (7)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (7)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "test (8)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "test (9)",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "name": "test (10)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (11)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "test (3.11)",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "worker",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "name": "frontend (frontend)",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "trivy-filesystem",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "trivy-filesystem",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "frontend (src/frontend/admin-react)",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "architecture-ratchets",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "sbom-generate",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "sbom-generate",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "snyk-scan",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "snyk-scan",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "pip-audit",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "pip-audit",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "slsa-provenance",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "name": "slsa-provenance",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "scope": "Point-in-time hosted status for this exact earlier head. In-progress jobs have no final conclusion. Later local and pushed source does not inherit these results."
+}

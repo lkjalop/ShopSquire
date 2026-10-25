@@ -1,0 +1,74 @@
+{
+  "source_commit": "5057e3eda88a21636f78c6ddf92c96b622ae8ea1",
+  "workflow": {
+    "path": ".github/workflows/clean-checkout-smoke.yml",
+    "git_blob_sha256": "c5d069dc4e6c751c7fec4790778c49abe8603fa2690d81f45ea29dc51690ad0d"
+  },
+  "profiles": [
+    {
+      "name": "mvp-clean-checkout-env-before",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 3,
+        "skipped": 0
+      },
+      "native_exit_code": 2,
+      "elapsed_seconds": 6.609,
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-clean-checkout-env-after",
+      "counts": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 12.094,
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-clean-checkout-security-controls",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 8.546,
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-clean-checkout-owned-security-enabled",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 16.5,
+      "resource_violation": null
+    }
+  ],
+  "hosted_source_head": "785da49d0cb2f62ce194841a4fb6a8d5edddd0ba",
+  "hosted_runs_reviewed": [
+    40171325047,
+    40171325031,
+    40171325012
+  ],
+  "diagnosis": {
+    "clean_checkout": "Absent APP_ENV caused imports to use production defaults and fail missing_required_secret:REDIS_URL_password.",
+    "membership": "Several worker/service positives were rejected by operator_tenant_membership_required. Hosted APP_ENV=testing and the local supervisor APP_ENV=test select different default membership modes. Fixtures and strict coverage require review; no membership mode or enforcement was changed.",
+    "other": "Rule API HTTP503 and other hosted failures require separate investigation."
+  },
+  "repair": "Declare APP_ENV=test only in the clean-checkout test job. Production code and authentication policies are unchanged.",
+  "limits": [
+    "Local reproduction uses the existing Windows test environment, not a newly installed hosted Linux runner.",
+    "The first security-control profile has six passes/two opt-in skips. Explicit owned-server follow-up has three passes/zero skips; results overlap.",
+    "Fifteen smoke-test passes do not establish completion of the entire clean-checkout workflow or release gates."
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "source_commit": "ff40facd3fc69509d1ef133f2670d41c1fd91b82",
+  "sources": [
+    {
+      "path": "frontend/src/App.tsx",
+      "checkout_sha256": "e6f9d33f882c00849d596c2c6cc28e1f8669e12403c81288d798a682bd23cdad",
+      "git_blob_sha256": "cfb7f4d8857909a923a9c619eb80e17fa66eaf10dc6f6292d64a882ca6031c37"
+    },
+    {
+      "path": "frontend/src/lib/imageTriageTransport.ts",
+      "checkout_sha256": "f60daed3d40f030c88987c111b1b619d68038a5a54c89049cf8e4237dae34668",
+      "git_blob_sha256": "a067ddbc882a7a41cec24cac64b7e9c92d9d08dc0d4423aec430d96670199243"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/imageTriageTransport.test.ts",
+      "checkout_sha256": "2500874f4e033c4eb373c8d8993109e8c1271caccafd97da3b4e73e2f8e5d683",
+      "git_blob_sha256": "2500874f4e033c4eb373c8d8993109e8c1271caccafd97da3b4e73e2f8e5d683"
+    },
+    {
+      "path": "frontend/e2e/late-image-trace-continuity.spec.ts",
+      "checkout_sha256": "a55d2389847f7cf598e6d28af6f0b25c2d0d5ac8baa640278507d4cbc01ceffb",
+      "git_blob_sha256": "a55d2389847f7cf598e6d28af6f0b25c2d0d5ac8baa640278507d4cbc01ceffb"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "mvp-image-transport-before",
+      "counts": {
+        "tests": 6,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 1,
+      "elapsed_seconds": 1.062,
+      "peaks": {
+        "rss_bytes": 107372544,
+        "handles": 270,
+        "threads": 78
+      },
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-image-transport-after",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 1.047,
+      "peaks": {
+        "rss_bytes": 109158400,
+        "handles": 270,
+        "threads": 78
+      },
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-image-transport-storefront-unit",
+      "counts": {
+        "tests": 467,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 59.25,
+      "peaks": {
+        "rss_bytes": 256053248,
+        "handles": 273,
+        "threads": 78
+      },
+      "resource_violation": null
+    }
+  ],
+  "browser_stats": {
+    "startTime": "2026-10-25T07:09:14.363Z",
+    "duration": 63864.585,
+    "expected": 13,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "browser_composition": {
+    "adversarial_upload_paths": 9,
+    "unique_adversarial_image_hashes": 6,
+    "clean_controls": 2,
+    "late_dispatch_control": 1,
+    "unavailable_deep_transport_control": 1
+  },
+  "refactor": {
+    "app_lines_before": 4232,
+    "app_lines_after": 4101,
+    "owner": "frontend/src/lib/imageTriageTransport.ts"
+  },
+  "scope": "Unit transport checks use mocked fetch and fake timers; native successful inspections use original files and actual API. Browser unavailable control deliberately aborts deep upload and must show degraded, not detected. No model, supplier dispatch or external HTTP is enabled.",
+  "limits": [
+    "The 30-second deadline bounds browser waiting and aborts fetch, not server worker execution.",
+    "The first new unavailable-inspection browser test used a containment-ledger selector for authority, giving 12 passes/1 failure. The corrected assertion targets the existing persistent trust strip; no containment action is invented.",
+    "Failure identity comes only from the matching ordered fast-result batch; it is presentation metadata and grants no backend authority.",
+    "Bundling and completed live research-to-shortfall-to-reviewed-draft remain open; full release suites were not rerun."
+  ]
+}
