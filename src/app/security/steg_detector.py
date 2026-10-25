@@ -24,7 +24,7 @@ import io
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 try:
     import numpy as np  # type: ignore
@@ -78,21 +78,17 @@ def _chi_square_lsb(channel: Any) -> float:
     Returns p-value approximation (higher = more suspicious).
     """
     flat = channel.flatten().astype(np.int32)
-    # Pair consecutive values by their PoV (pair of values) category
-    # Values differing only in LSB form a pair: (2k, 2k+1)
-    even = flat & ~1  # zero the LSB
-    # Count frequency of each even value
-    vals, counts = np.unique(even, return_counts=True)
-    if len(vals) < 2:
+    # One histogram counts the 8-bit values once. Repeated full-channel masks
+    # used to scan every pixel twice for each of the 128 possible value pairs.
+    counts = np.bincount(flat, minlength=256)
+    if np.count_nonzero(counts[::2] + counts[1::2]) < 2:
         return 0.0
     # For each pair category, count occurrences of even vs odd
     chi2 = 0.0
     dof = 0
-    for v, c in zip(vals, counts):
-        mask_even = flat == v
-        mask_odd = flat == (v + 1)
-        n_even = int(np.sum(mask_even))
-        n_odd = int(np.sum(mask_odd))
+    for v in range(0, 256, 2):
+        n_even = int(counts[v])
+        n_odd = int(counts[v + 1])
         total = n_even + n_odd
         if total < 2:
             continue
@@ -122,7 +118,6 @@ def _spa_estimate(channel: Any) -> float:
     # Count close pairs (differ by exactly 1 = potential LSB flip)
     diffs = np.abs(flat[:-1] - flat[1:])
     close_pairs = int(np.sum(diffs == 1))
-    zero_pairs = int(np.sum(diffs == 0))
     total_pairs = n
     if total_pairs < 1:
         return 0.0
