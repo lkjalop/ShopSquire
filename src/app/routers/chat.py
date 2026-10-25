@@ -3920,6 +3920,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # P0 multi-intent plan (present only on a genuine mixed turn; None otherwise). Carries the scoped
         # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
         "multi_intent": multi_intent,
+        "catalog_bundle": data.get("catalog_bundle"),
         "shopping_case_obligations": case_commercial_obligations,
         "shopping_case_id": active_shopping_case_id or None,
         "shopping_case_retained_purpose": active_shopping_case_purpose or None,

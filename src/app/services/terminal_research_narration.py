@@ -60,6 +60,8 @@ def terminal_research_narration(
             and browse.get('qualification_authority') == 'none'
             and browse.get('requirements_status') == 'not_requested'
             and browse.get('commerce_authority') == 'none'):
+        if browse.get('bundle_browse') is True:
+            return str(existing_message or '')
         degraded = ('The workload interpreter was unavailable. '
                     if (execution_evidence or {}).get('failure_code') == 'model_execution_unavailable'
                     else '')

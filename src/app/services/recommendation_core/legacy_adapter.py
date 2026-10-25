@@ -177,6 +177,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "fulfillment_options": core.extras.get("fulfillment_options"),
         "sourcing_intent": core.extras.get("sourcing_intent"),
         "semantic_resolution": core.extras.get("semantic_resolution"),
+        "catalog_bundle": core.extras.get("catalog_bundle"),
         "provisional_catalog_authority": core.extras.get("provisional_catalog_authority"),
         "workload_authorization": core.extras.get("workload_authorization"),
         "ambiguity_exploration": core.extras.get("ambiguity_exploration"),

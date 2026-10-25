@@ -45,6 +45,8 @@ class CatalogScope(BaseModel):
     requested_product_form_factor: str | None = None
     allowed_taxonomy_roots: list[str] = Field(default_factory=list)
     selected_taxonomy_root: str | None = None
+    requested_taxonomy_roots: list[str] = Field(default_factory=list)
+    bundle_lines: list[dict] = Field(default_factory=list)
     source: Literal[
         "buyer_explicit", "tenant_primary", "validated_client_context", "unresolved", "validated_semantic_proposal",
     ]
@@ -228,6 +230,25 @@ def build_case_catalog_candidate_set(
 ) -> CatalogCandidateSet:
     purpose = " ".join(str(retained_purpose or "").split())[:500] or "Unresolved buyer request"
     client_handle = str(storefront_taxonomy_handle or "").strip() or None
+    from src.app.services.catalog_bundle_browse import parse_bundle_browse, bundle_nodes
+    bundle = parse_bundle_browse(purpose)
+    bundle_roots = bundle_nodes(db, plan=bundle, tenant_id=tenant_id) if bundle else None
+    if bundle and bundle_roots and not unresolved_product_subject:
+        return CatalogCandidateSet(
+            retained_purpose=purpose, status="unresolved", taxonomy_source="explicit_query",
+            reason="bundle_category_browse_has_no_qualified_configuration_contract",
+            catalog_scope=CatalogScope(
+                case_id=case_id, case_revision=case_revision, tenant_id=tenant_id,
+                source="buyer_explicit", confidence=1,
+                allowed_taxonomy_roots=sorted(sold_nodes(db, tenant_id=tenant_id) or []),
+                requested_taxonomy_roots=[node.handle for node in bundle_roots],
+                bundle_lines=[dict(category=line.category, quantity=line.quantity,
+                                   taxonomy_handle=node.handle)
+                              for line, node in zip(bundle.lines, bundle_roots)],
+                client_context_disposition="overridden" if client_handle else "not_supplied",
+                client_taxonomy_handle=client_handle, reason="explicit_multi_category_browse_only",
+            ),
+        )
     if unresolved_product_subject:
         return CatalogCandidateSet(
             retained_purpose=purpose, status="unresolved", taxonomy_source="unresolved",
