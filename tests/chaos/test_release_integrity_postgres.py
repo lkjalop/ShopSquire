@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
@@ -184,3 +184,55 @@ def test_audit_recovery_replays_crash_after_durable_decision_once(pg, monkeypatc
         assert db.execute(text('SELECT COUNT(*) FROM decision_logs')).scalar() == 1
     assert real_writer(agent_name='test', input_data={}, retrieved_context={}, proposed_action={},
                        decision_id='trace', tenant_id='b') is None
+
+
+def test_decision_columns_follow_resolved_table_across_search_paths(pg):
+    from src.app.services.decision_log import _decision_log_columns
+
+    engine, schema, admin = pg
+    other_schema = schema + '_other'
+    other = create_engine(engine.url, connect_args={'options': f'-csearch_path={other_schema}'})
+    try:
+        with admin.begin() as db:
+            db.execute(text(f'CREATE SCHEMA "{other_schema}"'))
+        with engine.begin() as db:
+            db.execute(text('CREATE TABLE decision_logs (id TEXT, tenant_id TEXT NOT NULL)'))
+        with other.begin() as db:
+            db.execute(text('CREATE TABLE decision_logs (id TEXT, tenant_id TEXT NOT NULL, actor_id TEXT)'))
+        with Session(other) as db:
+            assert set(_decision_log_columns(db)) == {'id', 'tenant_id', 'actor_id'}
+        with Session(engine) as db:
+            assert set(_decision_log_columns(db)) == {'id', 'tenant_id'}
+        with Session(other) as db:
+            assert set(_decision_log_columns(db)) == {'id', 'tenant_id', 'actor_id'}
+    finally:
+        other.dispose()
+        with admin.begin() as db:
+            db.execute(text(f'DROP SCHEMA IF EXISTS "{other_schema}" CASCADE'))
+
+
+def test_tenant_audit_insert_error_never_retries_without_ownership(pg, monkeypatch):
+    from src.app.services import decision_log
+
+    engine, _, _ = pg
+    with engine.begin() as db:
+        db.execute(text('''CREATE TABLE decision_logs (
+            id TEXT PRIMARY KEY, tenant_id TEXT, agent_name TEXT, valid_from TIMESTAMP,
+            input_data TEXT, proposed_action TEXT, policy_version TEXT,
+            approval_required BOOLEAN, execution_status TEXT)'''))
+
+    @contextmanager
+    def session():
+        with Session(engine) as db:
+            yield db
+
+    def fail_insert(*args):
+        raise RuntimeError('owned_insert_fault')
+
+    monkeypatch.setattr(decision_log, 'db_session', session)
+    monkeypatch.setattr(decision_log, '_exec_decision_log_insert_mapped', fail_insert)
+    result = decision_log.log_decision(agent_name='test', input_data={}, retrieved_context={},
+                                      proposed_action={}, tenant_id='owned', decision_id='owned-fault')
+    assert result is None
+    with engine.connect() as db:
+        assert db.scalar(text('SELECT COUNT(*) FROM decision_logs')) == 0

@@ -35,7 +35,6 @@ try:
 except Exception:
     _enqueue_webhook = None
 
-_DECISION_LOG_COL_CACHE: dict[str, list[str]] = {}
 _TRACE_TABLE_ENSURED = False
 _OUTBOX_TABLE_ENSURED = False
 
@@ -292,13 +291,6 @@ def _decision_log_columns(db) -> list[str]:
         bind = getattr(db, "get_bind", lambda: None)()
     except Exception:
         bind = None
-    key = ""
-    try:
-        key = str(getattr(bind, "url", "")) if bind is not None else ""
-    except Exception:
-        key = ""
-    if key in _DECISION_LOG_COL_CACHE:
-        return _DECISION_LOG_COL_CACHE[key]
     cols: list[str] = []
     dialect = ""
     try:
@@ -312,6 +304,16 @@ def _decision_log_columns(db) -> list[str]:
             cols = [r[1] for r in rows or [] if len(r) > 1]
         except Exception:
             cols = []
+    elif dialect == "postgresql":
+        try:
+            rows = db.execute(text(
+                "SELECT attname FROM pg_catalog.pg_attribute "
+                "WHERE attrelid = to_regclass('decision_logs') "
+                "AND attnum > 0 AND NOT attisdropped ORDER BY attnum"
+            )).fetchall()
+            cols = [row[0] for row in rows]
+        except Exception:
+            cols = []
     else:
         try:
             rows = db.execute(
@@ -320,7 +322,7 @@ def _decision_log_columns(db) -> list[str]:
                     SELECT column_name
                     FROM information_schema.columns
                     WHERE table_name = 'decision_logs'
-                      AND table_schema IN (current_schema(), 'public')
+                      AND table_schema = current_schema()
                     """
                 )
             ).fetchall()
@@ -333,10 +335,8 @@ def _decision_log_columns(db) -> list[str]:
             db.rollback()
         except Exception:
             pass
-    # SQLite schemas are frequently recreated in tests under the same URL;
-    # avoid stale schema cache entries that can misroute insert mapping.
-    if dialect != "sqlite":
-        _DECISION_LOG_COL_CACHE[key] = cols
+    # Resolve the actual table on this connection. An engine URL does not
+    # identify a PostgreSQL search path, schema version or transaction owner.
     return cols
 
 
@@ -460,7 +460,11 @@ def log_decision(
                     # Fall back to extended insert if we cannot introspect columns
                     db.execute(_DECISION_LOG_INSERT_EXTENDED, payload)
             except Exception:
-                logging.exception("decision_logs insert failed; falling back to minimal schema")
+                logging.exception("decision_logs insert failed; checking legacy-schema compatibility")
+                if not cols or "tenant_id" in cols:
+                    # Never turn a failed owned audit into an unowned success.
+                    db.rollback()
+                    return None
                 try:
                     try:
                         db.rollback()
