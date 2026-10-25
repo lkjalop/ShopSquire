@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
+import { projectUploadSecurityFallback } from './decision-trace/uploadSecurityProjection';
 import styles from './DecisionTrace.module.css';
 import MarketIntelligencePanel from './decision-trace/MarketIntelligencePanel';
 import RawTracePanel from './decision-trace/RawTracePanel';
@@ -1532,56 +1533,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     return normalizeSecurityPayload(securityLikeEvent?.payload);
   };
 
-  const fallbackSecurity = (() => {
-    const tr: any = trace || {};
-    const recPayload: any = recommendationEventPayload || {};
-    const triage = (Array.isArray(imageTriage) && imageTriage.length > 0) ? (imageTriage[0] || {}) : {};
-    const triageSec = (triage?.security && typeof triage.security === 'object') ? triage.security : triage;
-    const triageSignals = (triageSec?.signals && typeof triageSec.signals === 'object') ? triageSec.signals : {};
-    const imageSecurity =
-      (tr?.image_security && typeof tr.image_security === 'object')
-      ? tr.image_security
-      : ((recPayload?.image_security && typeof recPayload.image_security === 'object') ? recPayload.image_security : {});
-    const matrix =
-      (tr?.right_panel?.security_matrix && typeof tr.right_panel.security_matrix === 'object')
-      ? tr.right_panel.security_matrix
-      : ((recPayload?.right_panel_contract?.security_matrix && typeof recPayload.right_panel_contract.security_matrix === 'object')
-        ? recPayload.right_panel_contract.security_matrix
-        : {});
-
-    if (
-      Object.keys(triageSignals || {}).length === 0
-      && Object.keys(imageSecurity || {}).length === 0
-      && Object.keys(matrix || {}).length === 0
-    ) {
-      return null;
-    }
-
-    const unsafeFlags = Array.isArray(imageSecurity?.unsafe_flags) ? imageSecurity.unsafe_flags : [];
-    const mergedSignals: Record<string, any> = {
-      ...triageSignals,
-      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
-      recommendation_allowed: true,
-      deep_security_pending: true,
-    };
-    for (const flag of unsafeFlags) {
-      mergedSignals[String(flag)] = true;
-    }
-    return {
-      severity: imageSecurity?.trust_state === 'under_review' ? 'review' : 'info',
-      policy_route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
-      route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
-      owasp_llm_top10: Array.isArray(matrix?.owasp) ? matrix.owasp : [],
-      mitre_atlas: Array.isArray(matrix?.mitre) ? matrix.mitre : [],
-      maestro: Array.isArray(matrix?.maestro) ? matrix.maestro : [],
-      signals: mergedSignals,
-      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
-      recommendation_allowed: true,
-      deep_security_pending: true,
-      image_triage: Array.isArray(imageTriage) ? imageTriage : [],
-      image_security: imageSecurity,
-    };
-  })();
+  const fallbackSecurity = projectUploadSecurityFallback(trace,recommendationEventPayload,imageTriage);
 
   const security = extractSecurity() || fallbackSecurity;
 
@@ -1783,7 +1735,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const mapping: Record<string, string> = {
       ssn_leakage_linked_qr: 'Linked QR path suggests SSN or PII exposure.',
       prompt_injection_hidden: 'Hidden prompt-injection content was detected.',
-      c2_beacon_pattern: 'Hidden beacon or callback behavior was detected.',
+      c2_beacon_pattern: 'Decoded text contains a beacon or callback pattern; runtime activity is unconfirmed.',
       lolbin_command_sequence: 'Hidden LOLBin execution instructions were detected.',
       data_exfiltration_instruction: 'Hidden data-exfiltration instructions were detected.',
     };
@@ -1806,31 +1758,31 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const sigs = triageItems[0]?.security?.signals || triageItems[0]?.signals || security?.signals || {};
     const primaryFinding = payloadFindings[0] || {};
     const qrDestinationKnown = !isMissingValue(qrInfo?.destination_url) || !isMissingValue(qrInfo?.final_url);
-    const correlationSeen = !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict) || qrDestinationKnown;
+    const correlationSeen = !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict);
     const agentRows = [
       {
-        label: 'Payload Agent',
-        direct: sigs.qr_code_detected ? 'Decoded QR content or hidden payload content was inspected.' : 'No direct QR or hidden payload content was observed.',
+        label: 'Payload inspection',
+        direct: sigs.qr_code_detected || Boolean(sigs.steg_details?.decoded_content) || payloadAnalysis.payload_type === 'steg_decoded_payload' ? 'Decoded QR content or hidden payload content was inspected.' : 'No decoded QR or hidden payload content was recorded.',
         inferred: payloadFindings.length ? summarizeSecurityFindingType(String(primaryFinding.finding_type || '')) : 'No stronger payload hypothesis was needed.',
         contextual: 'Did not widen the verdict using narrative or contextual text alone.',
         detail: payloadFindings.length > 1 ? payloadFindings.slice(1).map((finding: any) => summarizeSecurityFindingType(String(finding?.finding_type || ''))) : [],
       },
       {
-        label: 'Correlation Agent',
-        direct: correlationSeen ? 'Checked QR destination reputation and linked-artifact context against supporting telemetry.' : 'No stronger infrastructure overlap was observed.',
-        inferred: correlationSeen ? 'Only widened the incident story when destination or reputation overlap was present.' : 'No extra correlation lead was justified.',
+        label: 'Correlation evidence',
+        direct: correlationSeen ? 'Destination reputation results were recorded; endpoint activity is not established by those results.' : qrDestinationKnown ? 'A QR destination was decoded; reputation and runtime correlation were not recorded.' : 'No destination reputation or runtime correlation was recorded.',
+        inferred: correlationSeen ? 'Use the recorded indicators for human correlation; they do not establish a compromise.' : 'No runtime or linked-host activity was confirmed.',
         contextual: 'Did not escalate based on missing or placeholder enrichment values.',
         detail: [],
       },
       {
-        label: 'Threat Hunter Agent',
+        label: 'Suggested hunting',
         direct: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.what_we_observed?.[0], 'Evidence-backed hunt lead available.') : 'No direct artifact or infrastructure lead was strong enough to widen the hunt.',
         inferred: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.why_it_matters, 'Used only evidence-backed overlap to suggest likely next checks.') : 'No hunt lead was emitted without direct evidence or real overlap.',
         contextual: 'Did not widen the hunt using contextual guides, specs, or generator files alone.',
         detail: [],
       },
       {
-        label: 'Playbook Agent',
+        label: 'Suggested response',
         direct: playbookPreview ? `Recommended ${formatDisplayText(playbookData?.title || playbookData?.id || 'response playbook')}.` : 'No response playbook was attached.',
         inferred: 'Mapped the evidence to next steps only after policy and severity were known.',
         contextual: 'Did not add response actions from low-authority context alone.',
@@ -1899,7 +1851,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       ? 'Push to SIEM/XDR now'
       : 'Hold push until human review';
     return {
-      decision: `${decision} - ${severity} confidence`,
+      decision,
       triggers: Array.from(new Set(triggers)).slice(0, 3),
       agentBriefs,
       businessImpact,
@@ -3405,7 +3357,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               </ul>
                             </div>
                             <div className={styles.briefCard}>
-                              <div className={styles.briefTitle}>What Agents Found</div>
+                              <div className={styles.briefTitle}>Inspection and suggested follow-up</div>
                               <div className={styles.agentBriefStack}>
                                 {(incident.agentBriefs || []).map((agent: any, idx: number) => (
                                   <details key={`agent-${idx}`} className={styles.detailSection}>
