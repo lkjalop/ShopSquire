@@ -728,7 +728,9 @@ def classify_decoded_payload(text: str | None) -> Dict[str, Any]:
         signals: List[str] = []
         if re.search(r"powershell|cmd\.exe|certutil|bitsadmin|mshta|rundll32|regsvr32|wscript|\bcurl\b|\bwget\b", tl):
             signals.append("lolbin_command_sequence")
-        if re.search(r"https?://|www\.|\.onion|beacon|c2\b|callback", tl):
+        # A destination is an artifact to inspect, not evidence of beaconing.
+        # Keep this a passive content-pattern label; runtime needs telemetry.
+        if re.search(r"\b(?:beacon\w*|c2|callback)\b", tl):
             signals.append("c2_beacon")
         if re.search(r"ignore (?:previous|above|all)|disregard|system prompt|you are now|new instructions", tl):
             signals.append("prompt_injection")
