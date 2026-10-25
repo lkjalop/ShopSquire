@@ -17,9 +17,15 @@ for (const scenario of [
     expect(answer.products?.length, 'Browsing must return useful in-category candidates').toBeGreaterThan(0);
     expect(answer.products.some((p:any)=>scenario.names.test(String(p.name ?? p.title ?? '')))).toBe(true);
     const source=readFileSync(join(process.env.ROADMAP_TEST_ROOT!,'docs/2026-08-08 laptop-products-aug.txt'),'utf8');
-    for(const product of answer.products)expect(source).toContain(String(product.name ?? product.title));
+    // The importer joins wrapped product-title lines. Preserve the source
+    // membership expectation across that documented whitespace normalization.
+    const normalizedSource=source.replace(/\s+/g,' ').trim();
+    for(const product of answer.products)expect(normalizedSource).toContain(String(product.name ?? product.title).replace(/\s+/g,' ').trim());
     expect(answer.terminal_outcome.commerce_authority).toBe('none');
     await expect(page.getByText(answer.assistant_message,{exact:true}).last()).toBeVisible();
+    await expect(page.getByTestId('architecture-alternatives')).toHaveCount(0);
+    await expect(page.getByRole('heading',{name:'Choose the requirements to evaluate'})).toHaveCount(0);
+    await expect(page.getByText('Research unresolved',{exact:true})).toHaveCount(0);
   });
 }
 

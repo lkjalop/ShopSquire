@@ -401,6 +401,9 @@ export default function App() {
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
+  const browsingCatalogue = (rightPanelContract as any)?.semantic_resolution?.outcome === 'catalog_browse'
+    && (rightPanelContract as any)?.semantic_resolution?.requirements_status === 'not_requested'
+    && (rightPanelContract as any)?.semantic_resolution?.qualification_authority === 'none';
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   // Recommendation panels are an adjudicated projection, not a second catalogue.
   // Keep their cart controls fail-closed unless the backend explicitly reports
@@ -3443,7 +3446,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {(activeShoppingCase?.case_id || ambiguityExploration?.case_id) && <CaseContractSelection
+                {!browsingCatalogue && (activeShoppingCase?.case_id || ambiguityExploration?.case_id) && <CaseContractSelection
                   caseId={(activeShoppingCase?.case_id || ambiguityExploration?.case_id)!} uid={uid}
                   revision={activeShoppingCase?.revision}
                   onChange={selection => {
@@ -3743,8 +3746,8 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  {researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
-                  {architectureAlternatives && (
+                  {!browsingCatalogue && researchOutcome && <ResearchOutcomeSummary outcome={researchOutcome} />}
+                  {!browsingCatalogue && architectureAlternatives && (
                     <ArchitectureAlternativesPanel projection={architectureAlternatives} />
                   )}
                   {ambiguityExploration && (
