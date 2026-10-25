@@ -10,6 +10,16 @@ from src.app.services.accepted_catalog_projection import project_accepted_catalo
 from src.app.services.catalog_evidence_seed import ingest_reviewed_configurations
 
 
+@pytest.mark.parametrize('expiry,expected', [
+    ('not-a-date', 'unknown'), ('2026-02-30T00:00:00Z', 'unknown'), ('', 'unknown'),
+    ('2026-10-24T00:00:00Z', 'stale'), ('2026-10-26T00:00:00Z', 'fresh'), (None, 'fresh'),
+])
+def test_explicit_malformed_expiry_cannot_fall_back_to_observation_age(expiry, expected):
+    from src.app.services.accepted_catalog_projection import _freshness
+    now = datetime(2026, 10, 25, tzinfo=timezone.utc)
+    assert _freshness(now, now=now, max_age_hours=24, expires_at=expiry) == expected
+
+
 @pytest.mark.parametrize('operator,expected,observed,verdict', [
     ('=', 'GPU 10', 'GPU 100', 'below_minimum'),
     ('one_of', ['GPU 10'], 'GPU 10 Mobile', 'below_minimum'),

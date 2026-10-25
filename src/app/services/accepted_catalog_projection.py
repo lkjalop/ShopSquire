@@ -124,6 +124,8 @@ def _freshness(
     if observed > now:
         return "unknown"
     expiry = _as_utc(expires_at)
+    if expires_at is not None and expiry is None:
+        return "unknown"
     if expiry is not None:
         return "fresh" if now <= expiry else "stale"
     age_hours = (now - observed).total_seconds() / 3600
