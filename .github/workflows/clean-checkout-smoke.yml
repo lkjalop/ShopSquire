@@ -9,6 +9,10 @@ on:
 jobs:
   smoke-clean-checkout:
     runs-on: ubuntu-latest
+    env:
+      # Test imports must not boot with production-only secret requirements.
+      # Production validation and owned security profiles remain separate.
+      APP_ENV: test
     services:
       redis:
         image: redis:7-alpine
