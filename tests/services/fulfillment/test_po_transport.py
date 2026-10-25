@@ -1,5 +1,6 @@
 """PO→ERP transport seam (Phase-8) — sandbox default, HTTP-ERP adapter (fake client), selection, and
 purchase_order.execute routing through it (an ERP failure records NO creation; replay → one PO)."""
+
 from __future__ import annotations
 
 import pytest
@@ -28,12 +29,18 @@ def test_get_po_transport_default_and_erp(monkeypatch):
 
 
 class _FakeResp:
-    def __init__(self, data, status_code=201): self._d = data; self.status_code=status_code
-    def json(self): return self._d
+    def __init__(self, data, status_code=201):
+        self._d = data
+        self.status_code = status_code
+
+    def json(self):
+        return self._d
 
 
 class _FakeClient:
-    def __init__(self): self.calls = []
+    def __init__(self):
+        self.calls = []
+
     def post(self, url, json=None, headers=None):
         self.calls.append({"url": url, "json": json, "headers": headers})
         return _FakeResp({"po_ref": "ERP-REAL-7"})
@@ -42,8 +49,14 @@ class _FakeClient:
 def test_erp_posts_and_returns_ref():
     c = _FakeClient()
     tx = PT.HttpErpTransport(url="https://erp.example/po", api_key="K", client=c)
-    r = tx.create(supplier_ref="SUP-7", item_ref="LAP-021", quantity=6, unit_amount_cents=90000,
-                  total_amount_cents=540000, idempotency_key="po-1-create")
+    r = tx.create(
+        supplier_ref="SUP-7",
+        item_ref="LAP-021",
+        quantity=6,
+        unit_amount_cents=90000,
+        total_amount_cents=540000,
+        idempotency_key="po-1-create",
+    )
     assert r.status == "created" and r.po_ref == "ERP-REAL-7" and r.detail == "erp"
     sent = c.calls[-1]
     assert sent["url"] == "https://erp.example/po"
@@ -57,31 +70,44 @@ def test_erp_no_url_fails():
 
 def test_erp_client_error_has_unknown_outcome():
     class _Boom:
-        def post(self, *a, **k): raise OSError("erp down")
-    r = PT.HttpErpTransport(url="https://erp.example/po", client=_Boom()).create(item_ref="x",idempotency_key='key')
-    assert r.status == "unknown" and r.detail=='transport_outcome_unknown'
+        def post(self, *a, **k):
+            raise OSError("erp down")
+
+    r = PT.HttpErpTransport(url="https://erp.example/po", client=_Boom()).create(
+        item_ref="x", idempotency_key="key"
+    )
+    assert r.status == "unknown" and r.detail == "transport_outcome_unknown"
 
 
-@pytest.mark.parametrize('status,data',[(200,{}),(201,{}),(202,{'id':'queued'}),(400,{'id':'error'}),(500,{'id':'error'})])
-def test_erp_does_not_invent_completion_from_error_or_missing_receipt(status,data):
+@pytest.mark.parametrize(
+    "status,data",
+    [(200, {}), (201, {}), (202, {"id": "queued"}), (400, {"id": "error"}), (500, {"id": "error"})],
+)
+def test_erp_does_not_invent_completion_from_error_or_missing_receipt(status, data):
     class Client:
-        def post(self,*args,**kwargs):return _FakeResp(data,status)
-    result=PT.HttpErpTransport(url='https://erp.example/po',client=Client()).create(idempotency_key='bounded')
-    assert result.status!='created'
-    assert result.po_ref==''
+        def post(self, *args, **kwargs):
+            return _FakeResp(data, status)
+
+    result = PT.HttpErpTransport(url="https://erp.example/po", client=Client()).create(
+        idempotency_key="bounded"
+    )
+    assert result.status != "created"
+    assert result.po_ref == ""
 
 
 def test_erp_requires_idempotency_before_transport():
-    client=_FakeClient()
-    result=PT.HttpErpTransport(url='https://erp.example/po',client=client).create()
-    assert result.status=='failed' and result.detail=='idempotency_key_required'
-    assert client.calls==[]
+    client = _FakeClient()
+    result = PT.HttpErpTransport(url="https://erp.example/po", client=client).create()
+    assert result.status == "failed" and result.detail == "idempotency_key_required"
+    assert client.calls == []
 
 
 # ── execute routes through the transport ─────────────────────────────────────
 @pytest.fixture()
 def db():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    eng = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True
+    )
     s = sessionmaker(bind=eng, future=True)()
     try:
         yield s
@@ -90,34 +116,80 @@ def db():
 
 
 def _to_selected(db):
-    AG = Actor(A.AGENT, "Procurement_Agent"); BU = Actor(A.BUYER, "u1"); HU = Actor(A.HUMAN_OPERATOR, "op")
-    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T", requested_by="u1",
-                       now_iso="2026-06-27 09:00:00"); db.commit()
+    AG = Actor(A.AGENT, "Procurement_Agent")
+    BU = Actor(A.BUYER, "u1")
+    HU = Actor(A.HUMAN_OPERATOR, "op")
+    cid = wf.open_case(
+        db,
+        buyer_uid_hash="u1",
+        source_trace_id="T",
+        requested_by="u1",
+        now_iso="2026-06-27 09:00:00",
+    )
+    db.commit()
     seq = [
-        ("availability_assessed", AG, {"availability": {"requested_qty": 10, "in_stock": 4, "shortfall": 6}}),
-        ("request_buyer_commitment", AG, None), ("buyer_committed", BU, None),
-        ("external_message_drafted", AG, {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6}}}),
-        ("approval_requested", AG, None), ("approval_granted", HU, None), ("external_message_sent", HU, None),
+        (
+            "availability_assessed",
+            AG,
+            {"availability": {"requested_qty": 10, "in_stock": 4, "shortfall": 6}},
+        ),
+        ("request_buyer_commitment", AG, None),
+        ("buyer_committed", BU, None),
+        (
+            "external_message_drafted",
+            AG,
+            {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6}}},
+        ),
+        ("approval_requested", AG, None),
+        ("approval_granted", HU, None),
+        ("external_message_sent", HU, None),
         ("external_message_received", Actor(A.EXTERNAL, "s"), None),
-        ("supplier_quote_validated", HU, {"validated_quote": {"quoted_quantity": 6, "unit_amount_cents": 90000,
-                                                              "estimated_delivery_at": "2026-07-08", "confidence": 0.9}}),
+        (
+            "supplier_quote_validated",
+            HU,
+            {
+                "validated_quote": {
+                    "quoted_quantity": 6,
+                    "unit_amount_cents": 90000,
+                    "estimated_delivery_at": "2026-07-08",
+                    "confidence": 0.9,
+                }
+            },
+        ),
     ]
     ts = 0
     for ev, ac, patch in seq:
         ts += 1
-        assert wf.transition(db, case_id=cid, event=ev, actor=ac, state_patch=patch,
-                             now_iso=f"2026-06-27 09:0{ts}:00").ok, ev
-    O.generate_and_record(db, case_id=cid, actor=AG, unit_price_cents=120000, now_iso="2026-06-27 09:30:00")
-    chosen = next(o for o in wf.repository.current_version(db, cid).state_json["options"]
-                  if o["option_type"] == O.OPTION_SHIP_TOGETHER)
-    O.select_option(db, case_id=cid, actor=BU, option_id=chosen["option_id"], now_iso="2026-06-27 10:00:00")
+        assert wf.transition(
+            db,
+            case_id=cid,
+            event=ev,
+            actor=ac,
+            state_patch=patch,
+            now_iso=f"2026-06-27 09:0{ts}:00",
+        ).ok, ev
+    O.generate_and_record(
+        db, case_id=cid, actor=AG, unit_price_cents=120000, now_iso="2026-06-27 09:30:00"
+    )
+    chosen = next(
+        o
+        for o in wf.repository.current_version(db, cid).state_json["options"]
+        if o["option_type"] == O.OPTION_SHIP_TOGETHER
+    )
+    O.select_option(
+        db, case_id=cid, actor=BU, option_id=chosen["option_id"], now_iso="2026-06-27 10:00:00"
+    )
     return cid, HU
 
 
 def test_execute_sandbox_creates_po(db):
     cid, HU = _to_selected(db)
-    PO.propose(db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00")
-    r = PO.execute(db, case_id=cid, actor=HU, idempotency_key="k1", today="2026-06-27")  # default sandbox
+    PO.propose(
+        db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00"
+    )
+    r = PO.execute(
+        db, case_id=cid, actor=HU, idempotency_key="k1", today="2026-06-27"
+    )  # default sandbox
     assert r.ok and wf.current_state(db, cid) == S.READY_TO_SHIP
     po = wf.repository.current_version(db, cid).state_json["purchase_order"]
     assert po["po_ref"].startswith("PO-") and po["sandbox"] is True
@@ -125,52 +197,88 @@ def test_execute_sandbox_creates_po(db):
 
 def test_execute_erp_failure_records_no_po(db):
     cid, HU = _to_selected(db)
-    PO.propose(db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00")
+    PO.propose(
+        db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00"
+    )
 
     class _FailTx:
-        def create(self, **kw): return PT.PoResult(po_ref="", status="failed", detail="erp down")
+        def create(self, **kw):
+            return PT.PoResult(po_ref="", status="failed", detail="erp down")
 
-    r = PO.execute(db, case_id=cid, actor=HU, idempotency_key="k1", today="2026-06-27", po_transport=_FailTx())
+    r = PO.execute(
+        db, case_id=cid, actor=HU, idempotency_key="k1", today="2026-06-27", po_transport=_FailTx()
+    )
     assert r.ok is False and r.reason == "po_create_failed"
-    assert wf.current_state(db, cid) == S.PROCUREMENT_IN_PROGRESS  # approved but not created — retryable
+    assert (
+        wf.current_state(db, cid) == S.PROCUREMENT_IN_PROGRESS
+    )  # approved but not created — retryable
 
 
 def test_execute_is_idempotent_one_po_even_via_erp(db):
     cid, HU = _to_selected(db)
-    PO.propose(db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00")
+    PO.propose(
+        db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"), now_iso="2026-06-27 10:05:00"
+    )
 
     class _CountTx:
         n = 0
+
         def create(self, **kw):
             _CountTx.n += 1
             return PT.PoResult(po_ref="ERP-1", status="created", detail="erp")
 
-    PO.execute(db, case_id=cid, actor=HU, idempotency_key="same", today="2026-06-27", po_transport=_CountTx())
-    PO.execute(db, case_id=cid, actor=HU, idempotency_key="same", today="2026-06-27", po_transport=_CountTx())
+    PO.execute(
+        db,
+        case_id=cid,
+        actor=HU,
+        idempotency_key="same",
+        today="2026-06-27",
+        po_transport=_CountTx(),
+    )
+    PO.execute(
+        db,
+        case_id=cid,
+        actor=HU,
+        idempotency_key="same",
+        today="2026-06-27",
+        po_transport=_CountTx(),
+    )
     assert _CountTx.n == 1  # the replay guard skipped the second ERP create
     assert wf.current_state(db, cid) == S.READY_TO_SHIP
 
 
-@pytest.mark.parametrize('crash',[False,True])
-def test_uncertain_or_crashed_po_requires_reconciliation_before_retry(db,crash):
-    cid,human=_to_selected(db)
-    PO.propose(db,case_id=cid,actor=Actor(A.AGENT,'Procurement_Agent'))
+@pytest.mark.parametrize("crash", [False, True])
+def test_uncertain_or_crashed_po_requires_reconciliation_before_retry(db, crash):
+    cid, human = _to_selected(db)
+    PO.propose(db, case_id=cid, actor=Actor(A.AGENT, "Procurement_Agent"))
+
     class Unknown:
-        calls=0
-        def create(self,**kwargs):
-            self.calls+=1
-            if crash:raise SystemExit('simulated_crash_after_provider_acceptance')
-            return PT.PoResult(po_ref='',status='unknown',detail='timeout')
-    provider=Unknown()
+        calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if crash:
+                raise SystemExit("simulated_crash_after_provider_acceptance")
+            return PT.PoResult(po_ref="", status="unknown", detail="timeout")
+
+    provider = Unknown()
     if crash:
-        with pytest.raises(SystemExit):PO.execute(db,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
+        with pytest.raises(SystemExit):
+            PO.execute(
+                db, case_id=cid, actor=human, idempotency_key="unknown", po_transport=provider
+            )
     else:
-        result=PO.execute(db,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
+        result = PO.execute(
+            db, case_id=cid, actor=human, idempotency_key="unknown", po_transport=provider
+        )
         assert not result.ok
     # A new Session observes the committed dispatch intent after process loss.
     from sqlalchemy.orm import Session
+
     with Session(db.bind) as restarted:
-        retry=PO.execute(restarted,case_id=cid,actor=human,idempotency_key='unknown',po_transport=provider)
-        assert not retry.ok and retry.reason=='po_reconciliation_required'
-    assert provider.calls==1
-    assert wf.current_state(db,cid)==S.PROCUREMENT_IN_PROGRESS
+        retry = PO.execute(
+            restarted, case_id=cid, actor=human, idempotency_key="unknown", po_transport=provider
+        )
+        assert not retry.ok and retry.reason == "po_reconciliation_required"
+    assert provider.calls == 1
+    assert wf.current_state(db, cid) == S.PROCUREMENT_IN_PROGRESS

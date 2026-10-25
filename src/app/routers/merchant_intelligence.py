@@ -3,6 +3,7 @@
 Exposes endpoints for the merchant dashboard to view returning customer data,
 agent learning stats, and observation analytics.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -18,23 +19,43 @@ router = APIRouter(prefix="/api/v1/merchant/intelligence", tags=["merchant", "in
 from src.app.models.db import get_db
 
 
-@router.get('/replenishment/{sku}')
-def replenishment_decision(sku: str, query: str='supplier delivery capacity and replenishment', db=Depends(get_db),
-        role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
+@router.get("/replenishment/{sku}")
+def replenishment_decision(
+    sku: str,
+    query: str = "supplier delivery capacity and replenishment",
+    db=Depends(get_db),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+):
     from datetime import datetime, timezone
     from src.app.platform.tenant_context import current_tenant_id
     from src.app.services.merchant_decision_dataset import latest_snapshot, reorder_baseline
+
     snapshot = latest_snapshot(db, tenant_id=current_tenant_id(), sku=sku)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail='merchant_dataset_not_found')
-    decision = reorder_baseline(snapshot['dataset'], quote=snapshot['quote'], now=datetime.now(timezone.utc))
+        raise HTTPException(status_code=404, detail="merchant_dataset_not_found")
+    decision = reorder_baseline(
+        snapshot["dataset"], quote=snapshot["quote"], now=datetime.now(timezone.utc)
+    )
     from src.app.services.merchant_evidence_retrieval import retrieve
+
     try:
-        evidence=retrieve(query=query,documents=snapshot.get('evidence_documents',[]),
-            tenant_id=current_tenant_id(),sku=sku,now=datetime.now(timezone.utc))
-    except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc)) from exc
-    return dict(snapshot_id=snapshot['id'], as_of=snapshot['dataset']['as_of'],
-                covered_days=len(snapshot['dataset']['daily']), quote=snapshot['quote'], decision=decision,evidence=evidence)
+        evidence = retrieve(
+            query=query,
+            documents=snapshot.get("evidence_documents", []),
+            tenant_id=current_tenant_id(),
+            sku=sku,
+            now=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return dict(
+        snapshot_id=snapshot["id"],
+        as_of=snapshot["dataset"]["as_of"],
+        covered_days=len(snapshot["dataset"]["daily"]),
+        quote=snapshot["quote"],
+        decision=decision,
+        evidence=evidence,
+    )
 
 
 @router.get("/user_profiles/{user_id}")
@@ -54,6 +75,7 @@ def get_user_profile(
         if not profile:
             return {"user_id": user_id, "found": False}
         from dataclasses import asdict
+
         data = asdict(profile)
         data["found"] = True
         return data
@@ -105,6 +127,7 @@ def citation_memory_stats(
     """Get citation memory statistics for monitoring dashboards."""
     try:
         from src.app.services.citation_memory import get_claim_stats
+
         return get_claim_stats(agent_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -121,8 +144,16 @@ def trusted_claims(
     """Get high-trust agent claims for transparency."""
     try:
         from src.app.services.citation_memory import get_trusted_claims
-        claims = get_trusted_claims(agent_name, claim_type, min_trust=min_trust, limit=limit, strict=True)
-        return {"agent_name": agent_name, "claim_type": claim_type, "count": len(claims), "claims": claims}
+
+        claims = get_trusted_claims(
+            agent_name, claim_type, min_trust=min_trust, limit=limit, strict=True
+        )
+        return {
+            "agent_name": agent_name,
+            "claim_type": claim_type,
+            "count": len(claims),
+            "claims": claims,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -136,6 +167,7 @@ def agent_trust_score(
     """Get aggregate trust score for an agent."""
     try:
         from src.app.services.citation_memory import get_agent_trust_score
+
         score = get_agent_trust_score(agent_name, claim_type)
         return {"agent_name": agent_name, "claim_type": claim_type, "trust_score": score}
     except Exception as e:
