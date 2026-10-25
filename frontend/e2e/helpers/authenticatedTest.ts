@@ -5,7 +5,7 @@ export const buyerUid=process.env.ROADMAP_TEST_BUYER_UID || 'roadmap-browser-buy
 
 // Only the test process holds this key. The application still verifies a real
 // signed credential; no test endpoint or browser-side authority bypass exists.
-export async function authenticateBuyer(context:BrowserContext,baseURL:string,subject=buyerUid){
+export async function authenticateBuyer(context:BrowserContext,baseURL:string,subject=buyerUid,tenantOverride?:string){
     const secret=process.env.ROADMAP_TEST_JWT_KEY;
     if(!secret)throw new Error('ROADMAP_TEST_JWT_KEY must match the isolated server signing key');
     const now=Math.floor(Date.now()/1000);
@@ -14,7 +14,7 @@ export async function authenticateBuyer(context:BrowserContext,baseURL:string,su
       iss:'shopsquire',aud:'shopsquire-api',iat:now,exp:now+3600});
     const token=unsigned+'.'+createHmac('sha256',secret).update(unsigned).digest('base64url');
     await context.addCookies([{name:'shopsquire_access',value:token,url:baseURL!,httpOnly:true,sameSite:'Lax'}]);
-    const tenant = process.env.VITE_STOREFRONT_TENANT_ID;
+    const tenant = tenantOverride || process.env.VITE_STOREFRONT_TENANT_ID;
     await context.setExtraHTTPHeaders({'x-api-key':process.env.MERCHANT_API_KEY!,
       ...(tenant ? {'x-tenant-id':tenant} : {})});
     await context.addInitScript(uid=>sessionStorage.setItem('uid',uid),subject);

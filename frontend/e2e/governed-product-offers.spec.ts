@@ -4,7 +4,7 @@ const root='/api/v1/demo/product-offer-cases';
 
 for(const kind of ['bundle','upgrade'])test(`buyer reviews and explicitly accepts a supported ${kind} with durable prices`,async({page,context,baseURL},info)=>{
  const subject=process.env[kind==='bundle'?'ROADMAP_BUNDLE_BUYER':'ROADMAP_UPGRADE_BUYER']||`roadmap-${kind}-buyer`;
- await authenticateBuyer(context,baseURL!,subject);
+ await authenticateBuyer(context,baseURL!,subject,'synthetic-bundles');
  await page.goto('/?surface=product-offers');
  await page.getByRole('button',{name:'Start fictional offer case'}).click();
  const cart=page.getByRole('region',{name:'Durable draft cart'});
