@@ -1,5 +1,7 @@
 # MVP security and buyer-workflow delta
 
+Later update: [pilot resumption, 456 storefront passes, trace binding and buyer snapshot transport](PILOT_RESUMPTION_DELTA_2026-10-25.md). The results below retain their original source scope.
+
 25 October 2026, Australia/Sydney. Tested source: `c11d51b048e5cc25b40231822d55e79c7202d796`. This supplements the [consolidated roadmap](CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md), retaining its historical freezes and failures. The platform is not declared MVP-ready or release-green by this update.
 
 ## What changed and what passes
