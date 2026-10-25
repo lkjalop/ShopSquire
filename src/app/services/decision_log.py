@@ -382,6 +382,34 @@ def close_decision_validity(
         return False
 
 
+def _insert_decision_row(db, cols, payload):
+    """Insert under the resolved schema; ownership survives every fallback."""
+    try:
+        if cols:
+            if not _exec_decision_log_insert_mapped(db, cols, payload):
+                raise RuntimeError("decision_logs columns not available")
+        else:
+            # Fall back to extended insert if we cannot introspect columns
+            db.execute(_DECISION_LOG_INSERT_EXTENDED, payload)
+    except Exception:
+        logging.exception("decision_logs insert failed; checking legacy-schema compatibility")
+        if not cols or "tenant_id" in cols:
+            # Never turn a failed owned audit into an unowned success.
+            db.rollback()
+            return False
+        try:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            db.execute(_DECISION_LOG_INSERT_MINIMAL, payload)
+        except Exception:
+            logging.exception("decision_logs minimal insert failed")
+            db.rollback()
+            return False
+    return True
+
+
 def log_decision(
     agent_name: str,
     input_data: Dict[str, Any],
@@ -452,29 +480,8 @@ def log_decision(
                 except Exception:
                     pass
                 cols = _decision_log_columns(db)
-            try:
-                if cols:
-                    if not _exec_decision_log_insert_mapped(db, cols, payload):
-                        raise RuntimeError("decision_logs columns not available")
-                else:
-                    # Fall back to extended insert if we cannot introspect columns
-                    db.execute(_DECISION_LOG_INSERT_EXTENDED, payload)
-            except Exception:
-                logging.exception("decision_logs insert failed; checking legacy-schema compatibility")
-                if not cols or "tenant_id" in cols:
-                    # Never turn a failed owned audit into an unowned success.
-                    db.rollback()
-                    return None
-                try:
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-                    db.execute(_DECISION_LOG_INSERT_MINIMAL, payload)
-                except Exception:
-                    logging.exception("decision_logs minimal insert failed")
-                    db.rollback()
-                    return None
+            if not _insert_decision_row(db, cols, payload):
+                return None
             try:
                 if supersedes_decision_id:
                     _close_decision_validity_in_session(
