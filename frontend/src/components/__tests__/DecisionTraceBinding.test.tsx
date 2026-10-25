@@ -1,8 +1,9 @@
 import {cleanup, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import DecisionTrace from '../DecisionTrace';
+import {clearOwnerApiKey,setOwnerApiKey} from '../../lib/browserSession';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); clearOwnerApiKey(); vi.restoreAllMocks(); });
 const projection = (trace: string, query: string) => ({
   schema_version:'revision-bound-turn-read-model.v1', trace_id:trace,
   case_id:'case-current', case_revision:2, buyer_query:query, products:[],
@@ -41,4 +42,22 @@ it('retains matching image inspection evidence while excluding a foreign artifac
   expect(screen.getByText('Decoded QR content or hidden payload content was inspected.')).toBeInTheDocument();
   view.rerender(<DecisionTrace traceId="trace-other" initialTab="security" onClose={()=>{}} imageTriage={triage} />);
   expect(screen.queryByText('Decoded QR content or hidden payload content was inspected.')).not.toBeInTheDocument();
+});
+it('uses a buyer snapshot without requesting operator-only trace endpoints', async () => {
+  const request=vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:false,status:403} as Response);
+  render(<DecisionTrace traceId="trace-current" initialTab="summary" onClose={()=>{}}
+    evidence={{turn_read_model:projection('trace-current','OWNED BUYER QUERY')}} />);
+  expect(screen.getByText('OWNED BUYER QUERY')).toBeInTheDocument();
+  await waitFor(()=>expect(screen.getByTitle('Trace data source')).toHaveTextContent('snapshot'));
+  expect(request.mock.calls.filter(([url])=>String(url).includes('/api/v1/decisions/'))).toHaveLength(0);
+});
+it('continues authenticated operator trace reads and treats rejection as terminal', async () => {
+  setOwnerApiKey('test-only-operator-key');
+  const request=vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:false,status:403} as Response);
+  render(<DecisionTrace traceId="trace-current" initialTab="security" onClose={()=>{}}
+    evidence={{turn_read_model:projection('trace-current','OWNED QUERY')}} />);
+  await waitFor(()=>expect(screen.getByText('auth',{exact:true})).toBeInTheDocument());
+  const reads=request.mock.calls.filter(([url])=>String(url).includes('/api/v1/decisions/'));
+  expect(reads).toHaveLength(1);
+  expect(reads[0][1]?.headers).toEqual({'x-api-key':'test-only-operator-key'});
 });

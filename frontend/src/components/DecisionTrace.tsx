@@ -726,7 +726,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [docked, setDocked] = useState(() => window.innerWidth >= 1100);
-  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth'>('poll');
+  const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll' | 'auth' | 'snapshot'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
   const noTraceTelemetrySentRef = useRef(false);
@@ -768,7 +768,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
   const selectTraceLeaf = (leaf: TraceLeafTab) => {
     setActiveTab(leaf);
     setActiveSectionId(traceSectionForLeaf(leaf).id);
-    if (leaf === 'audit' && !auditTrail && traceIdText && !auditLoading) {
+    if (leaf === 'audit' && effectiveApiKey && !auditTrail && traceIdText && !auditLoading) {
       setAuditLoading(true);
       setAuditError(null);
       fetchJsonWithDeadline(
@@ -967,7 +967,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
   }, []);
 
   const fetchExplainReplayLazy = useCallback(async () => {
-    if (!effectiveTraceId) return;
+    if (!effectiveTraceId || !effectiveApiKey) return;
     const tabsAllowFetch = activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
     if (!tabsAllowFetch) return;
 
@@ -1057,6 +1057,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
         products: Array.isArray(localTurnProjection.products) ? localTurnProjection.products : [],
         right_panel: localTurnProjection.right_panel || null,
       });
+    }
+
+    // Returned buyer evidence is a bound snapshot, not permission to read the
+    // operator event stream. Avoid predictably rejected reads and retry loops.
+    if (!effectiveApiKey) {
+      setStreamMode(localTurnProjection || imageTriage.length ? 'snapshot' : 'auth');
+      setUpdating(false);
+      return;
     }
 
     const stopLiveTransport = () => {
@@ -1238,7 +1246,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
         if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
       } catch {}
     };
-  }, [effectiveTraceId, localTurnProjection, effectiveApiKey]);
+  }, [effectiveTraceId, localTurnProjection, suppliedImageTriage, effectiveApiKey]);
 
   useEffect(() => {
     if (!effectiveTraceId) return;
@@ -2055,7 +2063,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedI
               </span>
             )}
             {updating && <span className={styles.updating}>updating</span>}
-            <span className={`${styles.streamBadge} ${streamMode === 'ws' ? styles.streamWS : (streamMode === 'sse' ? styles.streamSSE : styles.streamPoll)}`} title="Streaming mode">
+            <span className={`${styles.streamBadge} ${streamMode === 'ws' ? styles.streamWS : (streamMode === 'sse' ? styles.streamSSE : styles.streamPoll)}`} title="Trace data source">
               {streamMode}
             </span>
           </div>

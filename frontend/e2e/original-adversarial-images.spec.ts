@@ -23,9 +23,10 @@ for(const filename of files){
     test.setTimeout(120000);
     const path=resolve(corpus!,filename),raw=readFileSync(path);
     const before=createHash('sha256').update(raw).digest('hex');
-    const effects:string[]=[],uploads:any[]=[];
+    const effects:string[]=[],operatorReads:string[]=[],uploads:any[]=[];
     page.on('request',request=>{
       if(request.method()==='POST'&&/\/api\/v1\/(?:cart|orders|payments)(?:\/|$)/.test(new URL(request.url()).pathname))effects.push(request.url());
+      if(request.method()==='GET'&&new URL(request.url()).pathname.startsWith('/api/v1/decisions/'))operatorReads.push(request.url());
     });
     page.on('response',response=>{
       if(new URL(response.url()).pathname==='/api/v1/vision/triage')
@@ -50,6 +51,8 @@ for(const filename of files){
     await page.getByTestId('trace-leaf-security').click();
     const panel=page.getByRole('tabpanel',{name:/Security/i});
     await expect(panel).toBeVisible();
+    await expect(page.getByTitle('Trace data source')).toHaveText('snapshot');
+    expect(operatorReads,'Owned upload evidence must not require operator-only trace reads').toEqual([]);
     await expect(page.getByTestId('trace-trust-strip').getByText(/Commercial actions blocked/i)).toBeVisible();
     await expect(panel.getByText(/commercial actions: blocked/i)).toBeVisible();
     await expect(panel.getByText(/(steg|hidden|QR|sensitive|PII)/i).first()).toBeVisible();
