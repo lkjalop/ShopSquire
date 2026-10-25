@@ -1,5 +1,42 @@
 # ShopSquire architecture and current authority boundaries
 
+Latest source-bound assessment: [timeboxed execution delta](../TIMEBOX_EXECUTION_DELTA_2026-10-25.md), final functional/test freeze `5f84554c` after the first `56a91bdc` verification. Source identities and gap statements in the earlier notes below retain their historical scope. The current demonstrated route is:
+
+```text
+ ordinary registered buyer (no operator key)
+        |
+ identity + tenant + case revision + untrusted-input admission
+        |
+ canonical case --------------------------- explicit research consent
+        |                                              |
+ tenant-admitted catalogue                       real SearXNG discovery
+        |                                              |
+ literal category bundle / single SKU        source/time/region/facet admission
+ listed cents + whole-budget math                      |
+        |                                  lead-time unsupported -> unknown
+ explicit stock acceptance                            |
+ 40 requested -> 15 held -> 25 short <---- revision changed -> reaccept stock
+        |
+ one saved draft artifact: version + content hash
+        +--------------------+-------------------------+
+        |                    |                         |
+ buyer preview/reload   operator author          independent reviewer
+        |                    +---- material edit ----> approval revoked
+        +---------- same version 2, same hash ----------+
+                             |
+                 draft-only pilot; sending disabled
+
+ SQL: cases / revisions / evidence / holds / drafts / audit
+ PostgreSQL audit: resolve actual relation per connection; retain tenant on failure
+Typed minted ticket UUIDs: preserve audit joins while arbitrary PII stays redacted
+ Redis: separate scoped semantic-memory/cache and erasure contract
+       real cross-instance API deletion + partition retry tested; all-plane gap
+ RuleStore cache: weak runtime-engine ownership; no cross-database cached reads
+ Browser: rendered answer/trace bind to the same case revision
+```
+
+This demonstrates controlled fixture stock and communications, not real merchant fulfilment or positively answered supplier lead time. Bundle compatibility, shipping/tax/FX, complete erasure/recovery and required broad release gates remain open.
+
 Reviewed 25 October 2026. The integration branch contains the original 339 dirty paths in explicit commits; baseline is `a9778cf8` and the repaired code/test freeze is `e56a501d`. Public main and the earlier draft PR remain distinct. Arrows describe wiring; current qualification is in the [consolidated savepoint and pilot roadmap](../CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md). The [earlier execution delta](../EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) and [23 October architecture](CURRENT_ARCHITECTURE_2026-10-23.md) remain historical evidence.
 
 Selected rehearsal data path:

@@ -1,0 +1,942 @@
+{
+  "recorded_at": "2026-10-25T10:49:34.900139+00:00",
+  "functional_source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+  "documentation_source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+  "browser": {
+    "scope": "90 spec files in disjoint fresh strict-membership synthetic shops, compiled UI, offline models/search; spec route counts identify potential mocked boundaries. Dedicated live and original-byte profiles separate. Counts overlap; do not sum profiles.",
+    "totals": {
+      "expected": 96,
+      "skipped": 46,
+      "unexpected": 60
+    },
+    "cases": 202,
+    "shards": [
+      {
+        "shard": 1,
+        "selected_specs": 45,
+        "completed_specs": 45,
+        "source_unchanged": true,
+        "fingerprint": "689d1fe26e4c380ec585b9a6ff8e48072ae004c568344756360e7a2205cba9e3",
+        "elapsed_seconds": 1753.36
+      },
+      {
+        "shard": 2,
+        "selected_specs": 45,
+        "completed_specs": 45,
+        "source_unchanged": true,
+        "fingerprint": "689d1fe26e4c380ec585b9a6ff8e48072ae004c568344756360e7a2205cba9e3",
+        "elapsed_seconds": 1367.906
+      }
+    ],
+    "ledger_sha256": "51bf25c2f6d018385363d0c20ea3af118e9366e343192e2022cf372163b3757a"
+  },
+  "dedicated_profiles": {
+    "original_images": {
+      "stats": {
+        "startTime": "2026-10-25T10:05:09.305Z",
+        "duration": 85833.909,
+        "expected": 13,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "report_sha256": "c1a97858097d3dabe288b3b064bf88c977e571318fcc853970f05fa6e59172d7"
+    },
+    "consented_live_research_and_draft": {
+      "stats": {
+        "startTime": "2026-10-25T10:05:00.742Z",
+        "duration": 28292.682,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "report_sha256": "708b51057c8072af1029052c8999c02e1f29ac665c58d2bc4ed7cb28d25a0359"
+    }
+  },
+  "python_advisories": {
+    "recorded_at": "2026-10-25T09:43:56.571895+00:00",
+    "source_head": "56a91bdc11abcef198c088536d7055dec0812b43",
+    "lock_sha256": "5a13f34581ad8603c7fa1d28c63861ba79ceea758f5f3b8ce43cbb88ca17147b",
+    "service": "pip-audit 2.10.1 PyPIService; fresh cache; no ignored advisories",
+    "profiles": {
+      "lock": {
+        "package_versions": 217,
+        "affected_packages": 0,
+        "advisory_entries": 0,
+        "errors_or_skips": 0,
+        "metadata_sha256": "7bb5e0317b348001f31e1642ec8395bf1005949eb3e1a548c34423bab16a0345"
+      },
+      "installed-full": {
+        "package_versions": 184,
+        "affected_packages": 0,
+        "advisory_entries": 0,
+        "errors_or_skips": 0,
+        "metadata_sha256": "a8872f8a2ea9bd6dfd41646120c99e3c77f3feae7ece57d99e45d6f993374caf"
+      },
+      "installed-clean": {
+        "package_versions": 127,
+        "affected_packages": 0,
+        "advisory_entries": 0,
+        "errors_or_skips": 0,
+        "metadata_sha256": "a19ec30c8ba92e95e2687d73398a62bb0032121398ebd498f88435e046eb14eb"
+      }
+    }
+  },
+  "census": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "tracked_files": 5997,
+    "text_files": 5954,
+    "text_lines": 1202978,
+    "python_files_parsed": 3235,
+    "python_parse_errors": [],
+    "maintained_source_files": 1546,
+    "maintained_source_lines": 367931,
+    "maintained_files_over_1000_lines": 49,
+    "longest_files": [
+      {
+        "path": "src/app/routers/chat.py",
+        "sha256": "3d18a2335422af520596379effde23017364fb34ad466580d0623855c3d01538",
+        "bytes": 254479,
+        "text_lines": 4826
+      },
+      {
+        "path": "frontend/src/components/DecisionTrace.tsx",
+        "sha256": "aefea76850a34f90613af2b0085a406ac73ad3f5dc7a59829c71c6e19438bc14",
+        "bytes": 268838,
+        "text_lines": 4339
+      },
+      {
+        "path": "src/app/routers/admin.py",
+        "sha256": "d17f62da492a012b50c930d70c5aeb4401a1d1c1e2d0993de6951dd946179b4e",
+        "bytes": 184458,
+        "text_lines": 4106
+      },
+      {
+        "path": "frontend/src/App.tsx",
+        "sha256": "47775cc8054e551bd24d6398b57d2d6da73e8a42c6459322f4e7d3c40ecd03d9",
+        "bytes": 227003,
+        "text_lines": 4104
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "sha256": "31b8f521212489592c17c16c82b16af317c04418653eba9cd314b18fd465d1f1",
+        "bytes": 169780,
+        "text_lines": 4025
+      },
+      {
+        "path": "src/frontend/storefront-react/src/App.jsx",
+        "sha256": "c6c4f9c80fb3ecbd834835aa005a38d216af2b724900efa17323dd3bd077b907",
+        "bytes": 189156,
+        "text_lines": 4003
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "sha256": "0e7cbc42f15ed5d1d5b03da6bd553b570e2c4e41d06717a54dafd727b76018f8",
+        "bytes": 188824,
+        "text_lines": 3888
+      },
+      {
+        "path": "src/app/routers/admin_email_security.py",
+        "sha256": "71d9ce049be9b113331e4e93a77f5daa6c43c863fc8e802416242eed1c175f06",
+        "bytes": 148128,
+        "text_lines": 3239
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "sha256": "0425973896fc41b40060d056eaa41cbeaaf4c54c98887a28c6531c7b9ff3f25b",
+        "bytes": 241128,
+        "text_lines": 3188
+      },
+      {
+        "path": "src/app/security/email_security.py",
+        "sha256": "a5218096a998d25e798923a31a3b01041d615b7f133ebc8d622ea71511093c8f",
+        "bytes": 145416,
+        "text_lines": 2856
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "sha256": "7df86f82a6e8f1d734f94b7e69b276c33ea3e086af3b87b72671bb9f8aad6401",
+        "bytes": 146058,
+        "text_lines": 2799
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "sha256": "d27504d285e1de8100b2898b56c4801ef88d2fd6bc451563758d55d51ec8cb8c",
+        "bytes": 150624,
+        "text_lines": 2778
+      },
+      {
+        "path": "src/app/routers/decisions.py",
+        "sha256": "30f5d7c3abe3dfa50c97b7b1c05c897b6a15325ba2ca8c7e8a828594152a9369",
+        "bytes": 119495,
+        "text_lines": 2614
+      },
+      {
+        "path": "src/app/routers/fulfillment_cases.py",
+        "sha256": "b2318e186325d43f8b99be3177aad21944137918dcf17af5dd13efe7cb07b303",
+        "bytes": 127907,
+        "text_lines": 2445
+      },
+      {
+        "path": "src/app/main.py",
+        "sha256": "4c78f96c81572a193289138925b5cbc787325c744d2d1c01a4dfe53101d618ab",
+        "bytes": 116524,
+        "text_lines": 2409
+      }
+    ],
+    "functions_over_200_lines": 96,
+    "longest_functions": [
+      {
+        "path": "src/app/routers/chat.py",
+        "symbol": "_chat_query_impl",
+        "line": 281,
+        "lines": 4470
+      },
+      {
+        "path": "src/app/routers/merchant_dashboard.py",
+        "symbol": "merchant_email_lab",
+        "line": 860,
+        "lines": 2328
+      },
+      {
+        "path": "src/app/main.py",
+        "symbol": "create_app",
+        "line": 200,
+        "lines": 2200
+      },
+      {
+        "path": "src/app/security/email_security.py",
+        "symbol": "evaluate_email_security",
+        "line": 836,
+        "lines": 2021
+      },
+      {
+        "path": "src/app/services/recommendation_core/turn_router.py",
+        "symbol": "_route_turn_raw",
+        "line": 1444,
+        "lines": 1329
+      },
+      {
+        "path": "src/app/routers/vision.py",
+        "symbol": "triage",
+        "line": 534,
+        "lines": 1303
+      },
+      {
+        "path": "src/app/services/recommendation_core/core.py",
+        "symbol": "_recommend_turn",
+        "line": 184,
+        "lines": 1282
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint",
+        "line": 1669,
+        "lines": 1245
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "_run_internal",
+        "line": 2661,
+        "lines": 1154
+      },
+      {
+        "path": "src/app/services/orchestrator.py",
+        "symbol": "run_nlp_cv",
+        "line": 821,
+        "lines": 986
+      },
+      {
+        "path": "src/app/routers/cv.py",
+        "symbol": "analyze",
+        "line": 197,
+        "lines": 853
+      },
+      {
+        "path": "src/app/flows/nqe.py",
+        "symbol": "propose",
+        "line": 245,
+        "lines": 846
+      },
+      {
+        "path": "src/app/services/official_workload_research.py",
+        "symbol": "research_official_sources",
+        "line": 850,
+        "lines": 659
+      },
+      {
+        "path": "src/app/services/cv_tier2_pipeline.py",
+        "symbol": "_run_tier2_impl",
+        "line": 508,
+        "lines": 647
+      },
+      {
+        "path": "src/app/routers/support_complaints.py",
+        "symbol": "submit_complaint_guest",
+        "line": 2917,
+        "lines": 638
+      }
+    ],
+    "bare_pass_exception_handlers": 2307,
+    "exception_handler_hotspots": [
+      [
+        "src/app/services/orchestrator.py",
+        140
+      ],
+      [
+        "src/app/main.py",
+        111
+      ],
+      [
+        "src/app/routers/admin.py",
+        107
+      ],
+      [
+        "src/app/routers/support_complaints.py",
+        79
+      ],
+      [
+        "src/app/observability/metrics.py",
+        74
+      ],
+      [
+        "src/app/routers/decisions.py",
+        57
+      ],
+      [
+        "src/app/security/email_security.py",
+        47
+      ],
+      [
+        "src/app/services/inventory_agent.py",
+        41
+      ],
+      [
+        "src/app/security/auth.py",
+        32
+      ],
+      [
+        "src/app/services/decision_log.py",
+        31
+      ],
+      [
+        "src/app/routers/auth.py",
+        27
+      ],
+      [
+        "src/app/routers/admin_email_security.py",
+        24
+      ]
+    ],
+    "census_sha256": "3fbe55ca38d6d92527bb36230a8bd483badf67514a74e615489233bece186ff0",
+    "limits": "Static inventory and candidates for review. Not a claim of manual semantic review of each line, dead-code certainty, execution coverage or zero hangs."
+  },
+  "limits": [
+    "No assertion of manual semantic review of every line.",
+    "No provider/image/model or distributed-release endurance claim.",
+    "No real merchant stock, approved supplier terms, payment or supplier dispatch qualification."
+  ],
+  "full_python": {
+    "native_exit_code": 0,
+    "elapsed_seconds": 2390.235,
+    "peaks": {
+      "rss_bytes": 1379770368,
+      "handles": 3969,
+      "threads": 210
+    },
+    "resource_violation": null,
+    "counts": {
+      "tests": 9285,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 309
+    },
+    "receipt_sha256": "151d64d6cd26f0186de942b5b99685079e9cbd377bb0e828e51c5fce11fc9a91"
+  },
+  "case_recovery": {
+    "source": "5f84554c",
+    "stages": [
+      {
+        "stage": "before",
+        "exit": 0
+      },
+      {
+        "stage": "after",
+        "exit": 0
+      },
+      {
+        "stage": "restore",
+        "exit": 0
+      }
+    ],
+    "scope": "Accepted buyer case facts, real owned server process restart, then SQLite online backup restored into a separate file. Same machine; no Redis, no full-erasure/backups or whole-system disaster recovery qualification."
+  },
+  "frontends": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "results": [
+      {
+        "check": "storefront-tests",
+        "exit": 0,
+        "elapsed_seconds": 91.297
+      },
+      {
+        "check": "storefront-types",
+        "exit": 0,
+        "elapsed_seconds": 17.14
+      },
+      {
+        "check": "storefront-build",
+        "exit": 0,
+        "elapsed_seconds": 0.5
+      },
+      {
+        "check": "admin-tests",
+        "exit": 0,
+        "elapsed_seconds": 40.844
+      },
+      {
+        "check": "admin-types",
+        "exit": 0,
+        "elapsed_seconds": 7.422
+      },
+      {
+        "check": "admin-build",
+        "exit": 0,
+        "elapsed_seconds": 0.359
+      }
+    ]
+  },
+  "bounded_browser_replay": {
+    "status": "passed",
+    "requested_seconds": 1200,
+    "elapsed_seconds": 1200.0,
+    "successful_cycles": 17,
+    "source_digest": "40e130197d142289fd7811d946e81b9c3aaed35ae23c603f1d42a1fb2b662a14",
+    "scope": "configured real-API browser replay; no model/image endurance claim",
+    "started_at": "2026-10-25T10:10:36.720148+00:00",
+    "sixty_minute_checkpoint": false,
+    "resource_limits": {
+      "minimum_available_bytes": 1073741824,
+      "maximum_process_rss_bytes": 2147483648,
+      "maximum_process_handles": 5000
+    },
+    "specs": [
+      "e2e/portfolio-qualification.spec.ts",
+      "e2e/case-contract-selection.spec.ts",
+      "e2e/electronics-shop-scenario.spec.ts"
+    ],
+    "updated_at": "2026-10-25T10:30:36.733737+00:00"
+  },
+  "hosted_functional_candidate": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "checks": [
+      {
+        "name": "slsa-provenance",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121139009195"
+      },
+      {
+        "name": "test (6)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138874080"
+      },
+      {
+        "name": "test (9)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138874026"
+      },
+      {
+        "name": "test (4)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873995"
+      },
+      {
+        "name": "test (8)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873988"
+      },
+      {
+        "name": "test (3)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873972"
+      },
+      {
+        "name": "test (0)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873971"
+      },
+      {
+        "name": "test (7)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873964"
+      },
+      {
+        "name": "test (2)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873955"
+      },
+      {
+        "name": "test (5)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873933"
+      },
+      {
+        "name": "test (11)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873919"
+      },
+      {
+        "name": "test (10)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873906"
+      },
+      {
+        "name": "test (1)",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281238/job/121138873754"
+      },
+      {
+        "name": "browser",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281259/job/121138855465"
+      },
+      {
+        "name": "worker",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281259/job/121138855155"
+      },
+      {
+        "name": "slsa-provenance",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138808376"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121138663594"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121138663581"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121138663578"
+      },
+      {
+        "name": "pip-audit",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121138663560"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281338/job/121138663443"
+      },
+      {
+        "name": "security-focused",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281227/job/121138663201"
+      },
+      {
+        "name": "frontend (frontend)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281212/job/121138663166"
+      },
+      {
+        "name": "frontend (src/frontend/admin-react)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281212/job/121138663160"
+      },
+      {
+        "name": "services (1)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663131"
+      },
+      {
+        "name": "architecture-ratchets",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281212/job/121138663127"
+      },
+      {
+        "name": "services (3)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663111"
+      },
+      {
+        "name": "services (4)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663107"
+      },
+      {
+        "name": "services (5)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663101"
+      },
+      {
+        "name": "services (6)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663100"
+      },
+      {
+        "name": "services (0)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663095"
+      },
+      {
+        "name": "services (7)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138663080"
+      },
+      {
+        "name": "test (3.11)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281227/job/121138663038"
+      },
+      {
+        "name": "focused-core",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281212/job/121138663013"
+      },
+      {
+        "name": "smoke",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281215/job/121138662934"
+      },
+      {
+        "name": "services (2)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281209/job/121138662903"
+      },
+      {
+        "name": "integration",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281249/job/121138662846"
+      },
+      {
+        "name": "changed-python",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281240/job/121138662803"
+      },
+      {
+        "name": "smoke-clean-checkout",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281217/job/121138662713"
+      },
+      {
+        "name": "v2-gates",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183281204/job/121138662702"
+      },
+      {
+        "name": "sbom-generate",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138649587"
+      },
+      {
+        "name": "pci-no-pan-scan",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138649542"
+      },
+      {
+        "name": "trivy-filesystem",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138649518"
+      },
+      {
+        "name": "pip-audit",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138649465"
+      },
+      {
+        "name": "snyk-scan",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/lkjalop/ShopSquire/actions/runs/40183276966/job/121138649307"
+      }
+    ]
+  },
+  "original_corpus_integrity": {
+    "baseline": "f49892ba9a95467db09de32c0c34ba41ac348021",
+    "files_checked": 15,
+    "unchanged": true,
+    "changed_paths": []
+  },
+  "nested_async_timeout_probe": {
+    "returned_value": null,
+    "returned_before_completion": true,
+    "elapsed_seconds": 30.0,
+    "owned_worker_alive": true,
+    "worker_cleaned_up": true,
+    "source_head": "5f84554c"
+  },
+  "installed_lock_alignment": {
+    "full": {
+      "installed": 184,
+      "version_mismatches": [],
+      "extra_names": [],
+      "applicable_locked_names_not_installed": 0,
+      "scope": "Marker-aware installed-version comparison, not a claim that optional/dev profile packages are all installed."
+    },
+    "clean": {
+      "installed": 127,
+      "version_mismatches": [],
+      "extra_names": [
+        "async-timeout"
+      ],
+      "applicable_locked_names_not_installed": 58,
+      "scope": "Marker-aware installed-version comparison, not a claim that optional/dev profile packages are all installed."
+    }
+  },
+  "owned_redis_privacy": {
+    "native_exit_code": 0,
+    "elapsed_seconds": 58.093,
+    "peaks": {
+      "rss_bytes": 293675008,
+      "handles": 1175,
+      "threads": 56
+    },
+    "resource_violation": null,
+    "counts": {
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "receipt_sha256": "c7f331191243f06dc3b58df64ec3c20d400567d7e52c87afb947639e852d61fb"
+  },
+  "native_postgres_sweep": {
+    "native_exit_code": 0,
+    "elapsed_seconds": 37.922,
+    "peaks": {
+      "rss_bytes": 297725952,
+      "handles": 1090,
+      "threads": 62
+    },
+    "resource_violation": null,
+    "counts": {
+      "tests": 79,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "receipt_sha256": "e4c8014737fd12bf53fcbdb6357f08297de5df0956bb05c6a2a5e9a97149b974"
+  },
+  "native_postgres_draft_certificate": {
+    "native_exit_code": 0,
+    "elapsed_seconds": 2.188,
+    "peaks": {
+      "rss_bytes": 120938496,
+      "handles": 481,
+      "threads": 7
+    },
+    "resource_violation": null,
+    "counts": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "receipt_sha256": "dcd612e6202175a33eaf904c0afe304f350f2ed97366b37475112ba69eb70932"
+  },
+  "explicit_live_source_positive_attempt": {
+    "stats": {
+      "startTime": "2026-10-25T10:16:58.289Z",
+      "duration": 24104.108,
+      "expected": 0,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "report_sha256": "8e11d2c4fab36e515103b7b3576090fff7c4da594910bad37304197c9a38eebe",
+    "failure": "Missing buyer governed-evidence-ladder after the reviewed canonical source-fetch UI assertions."
+  },
+  "visual_capture": {
+    "path": "screenshots/timebox-catalogue-draft-v2-2026-10-25.png",
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "sha256": "16e04f621fc69d42ea193ea711ab8d72f64a60a63669668cdbceab6eddcc571f",
+    "transformation": "Unmodified native browser screenshot; no image editing."
+  },
+  "first_full_python_candidate": {
+    "source_head": "56a91bdc11abcef198c088536d7055dec0812b43",
+    "counts": {
+      "tests": 9280,
+      "failures": 6,
+      "errors": 1,
+      "skipped": 307
+    },
+    "scope": "Earlier full run retained, including six failures and one startup error; not replaced by isolated reruns."
+  },
+  "storefront": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "counts": {
+      "tests": 470,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "junit_sha256": "333e00bd870d18afa3c134cec2ade68e42d3f29df925be0e945ae0d7f438894c"
+  },
+  "admin": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "counts": {
+      "tests": 63,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "junit_sha256": "fadd837ed6ecb8615b8d6f8e77f62804518a378b0ad957b92d671fb28f870442"
+  },
+  "native_real_redis_cart": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "stats": {
+      "startTime": "2026-10-25T10:27:33.709Z",
+      "duration": 1875.5079999999998,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "report_sha256": "b67aa504eb4b77a1e3cb111b4438cf1d79033859fe652ac7cdf94416b30977fc",
+    "actor": "Signed fixture buyer with merchant headers; clean API profile; compiled UI; dedicated real Redis. Not the no-key ordinary buyer profile."
+  },
+  "owned_backend_cleanup": {
+    "recorded_at": "2026-10-25T10:31:46.964659+00:00",
+    "backends": [
+      {
+        "container": "shopsquire-timebox-pg-20261025-1903",
+        "container_id": "8dfb99d8d26e12ca83697a529c7e18967bd34a7235e5d5f6a3f4fbd8726b1e77",
+        "stopped_and_removed": true,
+        "owned_port_closed": true
+      },
+      {
+        "container": "shopsquire-timebox-redis-20261025-1903",
+        "container_id": "e6f0e4f38ba0f8ba2c6aa10f014edeecef1733d67a44056826ec01fd40810bb4",
+        "stopped_and_removed": true,
+        "owned_port_closed": true
+      }
+    ],
+    "scope": "Only exact task-owned IDs were removed, including their anonymous test volumes. Shared SearXNG and the unrelated PostgreSQL service were not changed."
+  },
+  "formatting_equivalence": {
+    "parent_source": "56a91bdc11abcef198c088536d7055dec0812b43",
+    "formatted_source": "f5b7ec62a8725802c62654e6cf3a276958febb0c",
+    "files": 26,
+    "all_ast_equal": true,
+    "receipt_sha256": "e6462b6d9fdc65c515e205317234b08f3471e5989e17460073720825d1607f70"
+  },
+  "repository_python_lint": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "python_files": 3235,
+    "findings": 1680,
+    "codes": {
+      "F401": 542,
+      "E402": 263,
+      "E702": 297,
+      "F541": 26,
+      "E401": 35,
+      "F841": 53,
+      "F811": 112,
+      "E722": 1,
+      "E741": 83,
+      "E701": 203,
+      "E721": 46,
+      "E731": 18,
+      "F402": 1
+    },
+    "undefined_names": [],
+    "scope": "All tracked Python files explicitly passed to configured Ruff rules. Findings are static review candidates, not proof that every path executes or each finding is a vulnerability."
+  },
+  "changed_python_lint": {
+    "source_head": "5f84554c0e243cfb208460e3b6078cc3abc312d1",
+    "base": "fcb6cccd8a86f856359bd41281ef8b139edeb6e3",
+    "changed_files": 231,
+    "findings": 224,
+    "codes": {
+      "E402": 14,
+      "E702": 88,
+      "F401": 31,
+      "E401": 10,
+      "E701": 27,
+      "E741": 16,
+      "F841": 4,
+      "E721": 16,
+      "F402": 1,
+      "E731": 1,
+      "F811": 16
+    },
+    "scope": "Configured changed-file PR gate; not the all-repository scan."
+  },
+  "full_named_delta": {
+    "new_skips": [
+      {
+        "case": "tests.e2e.test_full_platform_e2e::test_full_recommend_and_decision_trace_tabs",
+        "before": "passed",
+        "reason": "frontend not reachable"
+      },
+      {
+        "case": "tests.e2e.test_full_platform_e2e::test_browser_recommend_to_cart_upsell",
+        "before": "passed",
+        "reason": "frontend not reachable"
+      }
+    ],
+    "resolved_failures": [
+      "tests.api.test_decision_logs_ticketing_security::test_ticketing_agent_logs_decision",
+      "tests.security.test_rate_limits::test_rate_limit_headers_present",
+      "tests.services.test_api_fixture_lifetime_ownership::test_api_fixture_releases_database_and_application_owner[tests.api.test_complaints_pipeline_smoke]",
+      "tests.services.test_api_fixture_lifetime_ownership::test_api_fixture_releases_database_and_application_owner[tests.api.test_pipeline_e2e_fraud_and_warehouse]",
+      "tests.services.test_api_fixture_lifetime_ownership::test_api_fixture_releases_database_and_application_owner[tests.api.test_redteam_storefront_security_wiring]",
+      "tests.services.test_api_fixture_lifetime_ownership::test_api_fixture_releases_database_and_application_owner[tests.api.test_support_complaints_security]",
+      "tests.unit.test_pytest_cleanup_scaling::test_unchanged_runtime_bounds_full_heap_scans_and_cyclic_handles"
+    ]
+  },
+  "source_map_sha256": "cf9e4c8bf0761091eccad9220baf3f28cfe8140f732dad6c72b849c35ff712bc",
+  "browser_named_delta_sha256": "ec30009c94bc901c942fbf7831a63a8b013f9cd06f1bbcdbf525635714efc312"
+}

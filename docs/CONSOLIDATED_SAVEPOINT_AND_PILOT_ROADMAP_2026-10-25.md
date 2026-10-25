@@ -2,7 +2,7 @@
 
 25 October 2026, Australia/Sydney. This is the current consolidation assessment. The [earlier execution roadmap](EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) remains the detailed historical evidence ledger. Its 339-dirty-path statement describes the starting point, not the cleaned integration branch.
 
-Later same-day qualification is recorded in the [MVP security and buyer delta](MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md): original-image browser controls pass, three ordinary category journeys now pass, and the bundle contract remains red. Read that source-bound update alongside the historical results below.
+The latest [timeboxed execution delta and reordered W00–W15 roadmap](TIMEBOX_EXECUTION_DELTA_2026-10-25.md) supersedes current-status statements below. Explicit bundles and the ordinary catalogue → live search → exact shortfall → reviewed draft/reload journey now have bounded positive evidence. Broad failures, unknown live lead time and required release gates remain. The [earlier MVP security and buyer delta](MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md) retains its historical red bundle result.
 
 ## Decision and scope
 

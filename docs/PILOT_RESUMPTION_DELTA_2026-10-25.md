@@ -1,5 +1,7 @@
 # Pilot resumption and remaining work
 
+**Later execution:** use the [current capability, frozen test ledger and reordered roadmap](TIMEBOX_EXECUTION_DELTA_2026-10-25.md). Source identities and “latest” statements in this earlier resumption ledger are historical; subsequent repairs demonstrate bounded bundles and exact ordinary shortfall-draft continuity while retaining broad failures.
+
 25 October 2026, Australia/Sydney. Latest application source: `ff40facd3fc69509d1ef133f2670d41c1fd91b82`; latest workflow source: `5057e3eda88a21636f78c6ddf92c96b622ae8ea1`. The [original resumption ledger](audits/pilot-resumption-evidence-2026-10-25.json) records source `82e5cabc`; later source-specific ledgers are linked below. See also the [earlier buyer/security delta](MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md) and [full roadmap](CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md). This is a source checkpoint, not MVP or release approval.
 
 ## Later merchant and asynchronous-image follow-up
