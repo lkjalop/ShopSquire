@@ -17,7 +17,7 @@ import textwrap
 from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
 from sqlalchemy import text as sql_text
-from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.security.image_upload_principal import image_upload_role, scoped_upload_artifact_id
 from src.app.services.cv_triage_basic import BasicCVTriage
 from src.app.services.cv_provider import ManagedCVProvider, VisionProviderBusy
 from src.app.services.cv_ocr import extract_text as extract_text_stage_a
@@ -535,8 +535,8 @@ async def triage(
     image: UploadFile = File(...),
     fast: bool = Query(False),
     extract_text: bool = Query(False),
-    artifact_id: Optional[str] = Query(None, min_length=8, max_length=128),
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    artifact_id: Optional[str] = Depends(scoped_upload_artifact_id),
+    role: str = Depends(image_upload_role),
 ) -> Dict:
     """Run lightweight CV triage from uploaded image and persist event metadata."""
     if image is None:

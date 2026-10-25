@@ -73,6 +73,13 @@ export function resolveSemanticProjection(trace: any, events: TraceProjectionEve
 
 export function projectTraceDomains(events: TraceProjectionEvent[], imageTriage: any[] = []) {
   const corpus = JSON.stringify(events || []).toLowerCase();
+  // Upload verdicts arrive before (and independently of) privileged audit events.
+  // Missing operator transport must not hide a known blocked inspection.
+  const uploadNeedsReview=(imageTriage || []).some(row=>{
+    const state=String(row?.artifact?.state || row?.security?.artifact_state || '').toLowerCase();
+    return ['pending','degraded','quarantined','superseded'].includes(state)
+      || row?.security?.commercial_authority==='blocked';
+  });
   const procurementEvents = (events || []).filter((event: any) => {
     const source = String(event?.source_id || '').toLowerCase();
     const type = originalEventType(event);
@@ -89,7 +96,7 @@ export function projectTraceDomains(events: TraceProjectionEvent[], imageTriage:
     procurementEvents,
     outboundIntegrityEvents: (events || []).filter((event) => originalEventType(event).includes('outbound_integrity')),
     security: {
-      present: /(security|quarantin|blocked|threat|risk|review_required)/.test(corpus),
+      present: uploadNeedsReview || /(security|quarantin|blocked|threat|risk|review_required)/.test(corpus),
       multimodal: Boolean(imageTriage?.length || /(image|multimodal|ocr|qr_|vision)/.test(corpus)),
       authority: 'evidence_only',
     },

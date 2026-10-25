@@ -9,6 +9,18 @@ import {
 } from '../traceProjections';
 
 describe('Decision Trace projections', () => {
+  it.each(['pending','degraded','quarantined'])('keeps a %s upload safety panel visible without operator events', state => {
+    const projection=projectTraceDomains([],[{artifact:{artifact_id:'own-upload',state,authority:'blocked'},
+      security:{artifact_state:state,commercial_authority:'blocked',signals:{}}}]);
+    expect(projection.security.present).toBe(true);
+    expect(projection.security.authority).toBe('evidence_only');
+  });
+
+  it('does not manufacture a security finding from a clean image filename',()=>{
+    expect(projectTraceDomains([],[{filename:'threat-blocked-review.png',
+      artifact:{state:'clean'},security:{clean:true,signals:{steg_suspicious:false}}}]).security.present).toBe(false);
+    expect(projectTraceDomains([]).security.present).toBe(false);
+  });
   it('prefers typed trace execution over persisted fallback', () => {
     const persisted = [{ kind: 'connector', source_id: 'search' }];
     const typed = [{ kind: 'stage', source_id: 'fit' }];
