@@ -2,6 +2,8 @@
 
 25 October 2026, Australia/Sydney. This is the current consolidation assessment. The [earlier execution roadmap](EXECUTION_DELTA_AND_MVP_ROADMAP_2026-10-25.md) remains the detailed historical evidence ledger. Its 339-dirty-path statement describes the starting point, not the cleaned integration branch.
 
+Later same-day qualification is recorded in the [MVP security and buyer delta](MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md): original-image browser controls pass, three ordinary category journeys now pass, and the bundle contract remains red. Read that source-bound update alongside the historical results below.
+
 ## Decision and scope
 
 The user's selected pilot uses the existing [August electronics text catalogue](2026-08-08%20laptop-products-aug.txt), live consented SearXNG discovery, market questions, exact unit-shortfall communications and reviewed supplier drafts. Catalogue, stock and supplier quotes are fictional fixtures. Discovery results are live observations, not current merchant stock, approved supplier terms or verified compatibility. No real supplier sending, purchasing or payment is part of this pilot.

@@ -2,6 +2,8 @@
 
 An evidence-governed commerce prototype: conversational buying, inventory and procurement proposals, with explicit boundaries between observations, evidence, authorization and execution.
 
+Latest qualification: [25 October security and buyer delta](docs/MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md). Original-image browser controls and three catalogue-category journeys pass; bundling and the complete live-search-to-shortfall workflow remain open.
+
 **Start with the [engineering walkthrough](docs/portfolio/ENGINEERING_WALKTHROUGH.md), [current ASCII architecture](docs/architecture/CURRENT_ARCHITECTURE_2026-10-25.md), and [consolidated savepoint and pilot roadmap](docs/CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md).** Implementation is substantially AI-assisted. This is an engineering portfolio and an unfinished product; release readiness has not been established.
 
 The 25 October integration branch consolidates all 339 original dirty paths and adds native tenant-stream, startup-port, observability and research-continuity repairs. The integration baseline is `a9778cf8`; the repaired code/test freeze is `e56a501d`. The selected rehearsal uses mock electronics data, live consented search and reviewed draft-only supplier communications. The roadmap separates exact-source verification from the older evidence below; local integration is not a published-main or release-green claim.
