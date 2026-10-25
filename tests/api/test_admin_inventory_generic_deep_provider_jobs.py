@@ -1,9 +1,4 @@
-import os
-
 import pytest
-from fastapi.testclient import TestClient
-
-from src.app.main import create_app
 from src.app.erp.connectors.provider_sync import DeepProviderConnector
 
 
@@ -22,9 +17,8 @@ class _Resp:
             raise RuntimeError(f"http_{self.status_code}")
 
 
-def test_generic_provider_delta_and_outbound(monkeypatch):
-    os.environ["OWNER_API_KEY"] = "local-owner-key"
-    os.environ["SAP_BASE_URL"] = "https://sap.example"
+def test_generic_provider_delta_and_outbound(monkeypatch, owned_operator_client):
+    monkeypatch.setenv("SAP_BASE_URL", "https://sap.example")
 
     def _request(method, url, params=None, json=None, headers=None, timeout=None):
         _ = headers, timeout
@@ -39,12 +33,11 @@ def test_generic_provider_delta_and_outbound(monkeypatch):
 
     monkeypatch.setattr("src.app.erp.connectors.provider_sync.requests.request", _request)
 
-    app = create_app()
-    client = TestClient(app)
+    client, headers = owned_operator_client("t-sap")
 
     d = client.post(
         "/api/v1/admin/inventory/sync/erp/delta",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"provider": "sap", "tenant_id": "t-sap", "dry_run": False, "upsert_products": False},
     )
     assert d.status_code == 200
@@ -54,14 +47,14 @@ def test_generic_provider_delta_and_outbound(monkeypatch):
 
     e = client.post(
         "/api/v1/admin/inventory/sync/erp/outbound/enqueue",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"provider": "sap", "tenant_id": "t-sap", "entity_type": "customer", "payload": {"external_id": "bp-1", "email": "x@y.z", "name": "X Y"}},
     )
     assert e.status_code == 200
 
     r = client.post(
         "/api/v1/admin/inventory/sync/erp/outbound/run",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"provider": "sap", "tenant_id": "t-sap", "limit": 10},
     )
     assert r.status_code == 200

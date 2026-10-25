@@ -1,10 +1,3 @@
-import os
-
-from fastapi.testclient import TestClient
-
-from src.app.main import create_app
-
-
 class _Resp:
     def __init__(self, status_code=200, payload=None):
         self.status_code = status_code
@@ -20,9 +13,8 @@ class _Resp:
             raise RuntimeError(f"http_{self.status_code}")
 
 
-def test_netsuite_delta_and_outbound_jobs(monkeypatch):
-    os.environ["OWNER_API_KEY"] = "local-owner-key"
-    os.environ["NETSUITE_BASE_URL"] = "https://netsuite.example"
+def test_netsuite_delta_and_outbound_jobs(monkeypatch, owned_operator_client):
+    monkeypatch.setenv("NETSUITE_BASE_URL", "https://netsuite.example")
 
     seen = {"delta_calls": 0, "cursor_values": []}
 
@@ -48,12 +40,11 @@ def test_netsuite_delta_and_outbound_jobs(monkeypatch):
 
     monkeypatch.setattr("src.app.erp.connectors.netsuite.requests.request", _request)
 
-    app = create_app()
-    client = TestClient(app)
+    client, headers = owned_operator_client("tns")
 
     d1 = client.post(
         "/api/v1/admin/inventory/sync/netsuite/delta",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"tenant_id": "tns", "dry_run": False, "upsert_products": False},
     )
     assert d1.status_code == 200
@@ -63,7 +54,7 @@ def test_netsuite_delta_and_outbound_jobs(monkeypatch):
 
     d2 = client.post(
         "/api/v1/admin/inventory/sync/netsuite/delta",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"tenant_id": "tns", "dry_run": False, "upsert_products": False},
     )
     assert d2.status_code == 200
@@ -72,13 +63,13 @@ def test_netsuite_delta_and_outbound_jobs(monkeypatch):
 
     eq = client.post(
         "/api/v1/admin/inventory/sync/netsuite/outbound/enqueue",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"tenant_id": "tns", "entity_type": "customer", "payload": {"external_id": "c-1", "email": "a@b.c", "name": "A B"}},
     )
     assert eq.status_code == 200
     run = client.post(
         "/api/v1/admin/inventory/sync/netsuite/outbound/run",
-        headers={"x-api-key": "local-owner-key"},
+        headers=headers,
         json={"tenant_id": "tns", "limit": 10},
     )
     assert run.status_code == 200

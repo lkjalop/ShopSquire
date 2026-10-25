@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from src.app.models.db import db_session
 from src.app.platform.tenant_context import current_tenant_id
+from src.app.routers.operator_supplier_enquiries import router as supplier_enquiry_router
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT, require_role_or_oidc
 from src.app.erp.jobs import (
     enqueue_netsuite_outbound,
@@ -28,8 +29,15 @@ from src.app.services.inventory_projection_read_model import (
 
 
 router = APIRouter(prefix="/api/v1/admin/inventory", tags=["admin-inventory"])
-from src.app.routers.operator_supplier_enquiries import router as supplier_enquiry_router
 router.include_router(supplier_enquiry_router)
+
+
+def _scoped_inventory_tenant(requested: Any = None) -> str:
+    """A body/query tenant cannot widen the operator's authenticated context."""
+    tenant = str(current_tenant_id() or "default")
+    if requested is not None and str(requested) != tenant:
+        raise HTTPException(status_code=403, detail="inventory_tenant_mismatch")
+    return tenant
 
 
 class InventoryOperationBody(BaseModel):
@@ -89,8 +97,10 @@ def read_inventory_operation(request_id: str, request: Request,
     from src.app.services.operator_inventory_requests import get_request
     actor=_inventory_operator(request)
     with db_session() as db:
-        try:return _inventory_operation_view(get_request(db,tenant_id=actor.tenant_id,request_id=request_id))
-        except ValueError as exc:raise HTTPException(status_code=404,detail=str(exc)) from exc
+        try:
+            return _inventory_operation_view(get_request(db,tenant_id=actor.tenant_id,request_id=request_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=404,detail=str(exc)) from exc
 
 
 @router.post('/operations/{request_id}/approve')
@@ -103,7 +113,8 @@ def approve_inventory_operation(request_id: str, request: Request,
             row=approve_request(db,tenant_id=actor.tenant_id,request_id=request_id,approver_principal=actor.principal_hash)
             db.commit()
             return _inventory_operation_view(row)
-    except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
 
 
 @router.post('/operations/{request_id}/execute')
@@ -118,7 +129,8 @@ def execute_inventory_operation(request_id: str, request: Request,
             result=execute_request(db,tenant_id=actor.tenant_id,request_id=request_id)
             db.commit()
             return {**result,'simulation_only':True}
-    except ValueError as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
 
 
 @router.get('/operation-stock/{sku}')
@@ -128,11 +140,14 @@ def inventory_operation_stock(sku: str, request: Request,
     from src.app.services.shop_operational_history import reconcile_inventory
     actor=_inventory_operator(request)
     with db_session() as db:
-        try:_person(db,actor.tenant_id,actor.principal_hash)
-        except ValueError as exc:raise HTTPException(status_code=403,detail=str(exc)) from exc
+        try:
+            _person(db,actor.tenant_id,actor.principal_hash)
+        except ValueError as exc:
+            raise HTTPException(status_code=403,detail=str(exc)) from exc
         args=dict(tenant=actor.tenant_id,sku=sku)
         rows=db.execute(text('SELECT location_id,on_hand,reserved,available FROM inventory_level WHERE tenant_id=:tenant AND sku=:sku ORDER BY location_id'),args).mappings().all()
-        if not rows:raise HTTPException(status_code=404,detail='inventory_not_found')
+        if not rows:
+            raise HTTPException(status_code=404,detail='inventory_not_found')
         count=db.execute(text('SELECT COUNT(*) FROM inventory_stock_movement WHERE tenant_id=:tenant AND sku=:sku'),args).scalar_one()
         reservations=db.execute(text('''SELECT r.reservation_id,r.location_id,r.quantity,r.status,r.returned_quantity,r.expires_at,
             s.case_id,s.revision AS selection_revision,c.revision AS case_revision FROM inventory_reservation r
@@ -248,6 +263,7 @@ def connectors_summary(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     """Return per-connector health plus last sync run and sample snapshot rows."""
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(0, min(int(limit_samples or 5), 25))
     csv_path = os.getenv("CSV_INVENTORY_PATH") or ""
     connectors = [
@@ -274,11 +290,6 @@ def connectors_summary(
         prev_run = None
         sample = []
         try:
-            where = "WHERE source = :source"
-            params: Dict[str, Any] = {"source": cid}
-            if tenant_id:
-                where += " AND tenant_id = :tenant_id"
-                params["tenant_id"] = str(tenant_id)
             with db_session() as db:
                 runs = db.execute(
                     text(
@@ -322,10 +333,10 @@ def connectors_summary(
                         text(
                             "SELECT sku, warehouse, stock, observed_at "
                             "FROM inventory_external_stock "
-                            "WHERE source = :source "
+                            "WHERE source = :source AND tenant_id = :tenant_id "
                             "ORDER BY observed_at DESC LIMIT :lim"
                         ),
-                        {"source": cid, "lim": lim},
+                        {"source": cid, "tenant_id": tenant_id, "lim": lim},
                     ).fetchall()
         except Exception:
             last_run = None
@@ -361,26 +372,18 @@ def sync_runs(
     tenant_id: str | None = None,
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(1, min(int(limit or 50), 500))
     rows = []
     try:
         with db_session() as db:
-            if tenant_id:
-                rows = db.execute(
-                    text(
-                        "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
-                        "FROM inventory_sync_runs WHERE tenant_id = :tid ORDER BY started_at DESC LIMIT :lim"
-                    ),
-                    {"tid": str(tenant_id), "lim": lim},
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    text(
-                        "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
-                        "FROM inventory_sync_runs ORDER BY started_at DESC LIMIT :lim"
-                    ),
-                    {"lim": lim},
-                ).fetchall()
+            rows = db.execute(
+                text(
+                    "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
+                    "FROM inventory_sync_runs WHERE tenant_id = :tid ORDER BY started_at DESC LIMIT :lim"
+                ),
+                {"tid": tenant_id, "lim": lim},
+            ).fetchall()
     except Exception:
         rows = []
     items = []
@@ -407,7 +410,7 @@ def sync(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     connector_id = str(body.get("connector") or "csv").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     csv_path = body.get("csv_path")
@@ -447,7 +450,7 @@ def sync_netsuite_delta(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     limit = int(body.get("limit", 2000) or 2000)
@@ -464,7 +467,7 @@ def enqueue_netsuite(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     entity_type = str(body.get("entity_type") or "").strip().lower()
     if entity_type not in {"customer", "sales_order", "order"}:
         raise HTTPException(status_code=400, detail="unsupported_entity_type")
@@ -483,7 +486,7 @@ def run_netsuite_outbound(
     body: Dict[str, Any],
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     limit = int(body.get("limit", 100) or 100)
     return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
 
@@ -494,7 +497,7 @@ def sync_erp_delta(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     dry_run = bool(body.get("dry_run", True))
     upsert_products = bool(body.get("upsert_products", False))
     limit = int(body.get("limit", 2000) or 2000)
@@ -548,7 +551,7 @@ def enqueue_erp_outbound(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     entity_type = str(body.get("entity_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     max_attempts = int(body.get("max_attempts", 3) or 3)
@@ -569,7 +572,7 @@ def run_erp_outbound(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     provider = str(body.get("provider") or "").strip().lower()
-    tenant_id = body.get("tenant_id")
+    tenant_id = _scoped_inventory_tenant(body.get("tenant_id"))
     limit = int(body.get("limit", 100) or 100)
     if provider == "netsuite":
         return run_netsuite_outbound_sync(tenant_id=str(tenant_id) if tenant_id is not None else None, limit=limit)
@@ -585,6 +588,7 @@ def external_stock_recent(
     sku: str | None = None,
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    tenant_id = _scoped_inventory_tenant(tenant_id)
     lim = max(1, min(int(limit or 200), 1000))
     params: Dict[str, Any] = {
         "lim": lim,
@@ -600,7 +604,7 @@ def external_stock_recent(
                 text(
                     "SELECT id, tenant_id, source, sku, warehouse, stock, observed_at, raw_json "
                     "FROM inventory_external_stock "
-                    "WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id) "
+                    "WHERE tenant_id = :tenant_id "
                     "AND (:source IS NULL OR source = :source) "
                     "AND (:sku IS NULL OR sku = :sku) "
                     "ORDER BY observed_at DESC LIMIT :lim"
