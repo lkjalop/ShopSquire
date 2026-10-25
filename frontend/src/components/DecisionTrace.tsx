@@ -44,6 +44,7 @@ import {
 } from './decision-trace/traceNavigation';
 import { useMarketHippographTrace } from '../hooks/useMarketHippographTrace';
 import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from '../hooks/useDecisionTraceData';
+import { boundImageTriage, boundResearchOutcome, boundTurnProjection } from '../lib/traceSnapshotBinding';
 import DecisionRunTracePanel from './decision-trace/DecisionRunTracePanel';
 import type { ResearchOutcome } from './ResearchOutcomeSummary';
 
@@ -683,7 +684,7 @@ export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
   return <HippographEvidencePanel insights={insights} classNames={styles} />;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
+export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedImageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
@@ -691,9 +692,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // component can use the authenticated operator projection rather than the buyer-safe trace summary.
   const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
-  const localTurnProjection = evidence?.turn_read_model?.schema_version === 'revision-bound-turn-read-model.v1'
-    ? evidence.turn_read_model : null;
-  const currentResearchOutcome = researchOutcome || localTurnProjection?.research_outcome || null;
+  const localTurnProjection = boundTurnProjection(evidence?.turn_read_model, traceId);
+  const currentResearchOutcome = boundResearchOutcome(researchOutcome, localTurnProjection)
+    || boundResearchOutcome(localTurnProjection?.research_outcome, localTurnProjection);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -730,6 +731,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
   const noTraceTelemetrySentRef = useRef(false);
   const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
+  const imageTriage = boundImageTriage(suppliedImageTriage, effectiveTraceId);
   const traceIdText = effectiveTraceId || '';
   const procurementRevision = events.reduce((revision, event) => {
     if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) return revision;
@@ -1022,6 +1024,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   useEffect(() => {
     const currentTraceId = effectiveTraceId;
+    setTrace(null);
+    setEvents([]);
+    setExplain(null);
+    setReplay(null);
+    setAuditTrail(null);
     if (!currentTraceId) {
       setTrace(null);
       setEvents([]);
@@ -1231,7 +1238,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
       } catch {}
     };
-  }, [effectiveTraceId]);
+  }, [effectiveTraceId, localTurnProjection, effectiveApiKey]);
 
   useEffect(() => {
     if (!effectiveTraceId) return;
