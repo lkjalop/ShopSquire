@@ -2686,10 +2686,19 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         and not (explicit_replacement_turn or purchased_category_changed
                  or named_workload_replacement or deterministic_workload_replacement)
     )
-    if owned_evidence_intake:
+    from src.app.services.chat_research_entry import literal_research_subject_matches
+    owned_research_intake = bool(
+        active_shopping_case_id and turn_research_authorized and turn_explicit_research_consent
+        and literal_research_subject_matches(literal_buyer_turn, active_shopping_case_purpose)
+        and not (explicit_replacement_turn or purchased_category_changed
+                 or named_workload_replacement or deterministic_workload_replacement)
+    )
+    if owned_evidence_intake or owned_research_intake:
         # An attachment to an owned request supplies evidence for review. A
-        # model outage/switch suggestion cannot detach its proposal from that
-        # request; a literal new subject still takes the replacement boundary.
+        # model outage/switch suggestion cannot detach it from that request.
+        # Explicitly consented requirements research naming that same literal
+        # purpose has the same boundary. New subjects still require replacement;
+        # this association grants neither source evidence nor product fit.
         routed_subject_action = "continue"
         if routed_clarification_relation == "supersede":
             routed_clarification_relation = "none"

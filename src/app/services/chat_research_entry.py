@@ -1,5 +1,6 @@
 """Resolve consent and its displayed policy from one immutable turn snapshot."""
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from src.app.services.clarification_state import external_research_consent_granted
@@ -13,6 +14,32 @@ class ResearchEntry:
     policy_authorized: bool
     authorized: bool
     basis: str
+
+
+def literal_research_subject_matches(query: str, retained_purpose: str) -> bool:
+    """Associate a bounded literal requirements question; grant no source/fit authority.
+
+    Only an exact token span already in the owned purpose is accepted, including
+    version tokens. Other topics, broad pronouns and paraphrases remain unresolved.
+    """
+    prefix = r'(?:search(?:\s+online)?(?:\s+for)?|check|look\s+up|find|research)\s+(?:the\s+)?(?:official\s+)?'
+    patterns = (
+        prefix + r'(?P<subject>[^!?;\n]{2,160}?)\s+(?:system\s+|hardware\s+)?requirements[.!?]?\s*',
+        prefix + r'(?:system\s+|hardware\s+)?requirements\s+for\s+(?P<subject>[^!?;\n]{2,160}?)[.!?]?\s*',
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, str(query or '').strip(), flags=re.IGNORECASE)
+        if not match:
+            continue
+        subject = re.findall(r'[a-z0-9]+', match.group('subject').lower())
+        if not any(len(token) >= 3 and any(c.isalpha() for c in token)
+                   and token not in {'the', 'this', 'that', 'current', 'software', 'hardware', 'system', 'our'}
+                   for token in subject):
+            continue
+        purpose = ' ' + ' '.join(re.findall(r'[a-z0-9]+', str(retained_purpose or '').lower())) + ' '
+        if ' ' + ' '.join(subject) + ' ' in purpose:
+            return True
+    return False
 
 
 def research_entry_authorization(*, payload, submitted_query: str) -> ResearchEntry:
