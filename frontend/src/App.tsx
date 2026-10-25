@@ -2,7 +2,8 @@
 import styles from './App.module.css';
 import { lazy, Suspense } from 'react';
 import ProductGrid from './components/ProductGrid';
-import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money';
+import { formatProductPrice } from './lib/money';
+import {laneForProduct, laneTitle, laneSummary, type DeviceLane} from './lib/productLanes';
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
@@ -211,8 +212,6 @@ type OperatorMetricSnapshot = {
   recordedAt?: string | null;
 };
 
-type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
-
 function normalizeTraceId(value: any): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -227,14 +226,6 @@ function normalizeTraceId(value: any): string | null {
   return null;
 }
 
-function productPrice(p: any): number {
-  const direct = Number(p?.price);
-  if (Number.isFinite(direct) && direct > 0) return direct;
-  const cents = Number(p?.price_cents);
-  if (Number.isFinite(cents) && cents > 0) return cents / 100;
-  return 0;
-}
-
 // Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
 // em-dash when the object carries no price — never a misleading "$0" (demo-truth, same class as the
 // $0 budget-band fix).
@@ -242,21 +233,6 @@ function formatPrice(p: any): string {
   return formatProductPrice(p);
 }
 
-
-function laneForProduct(p: Product): DeviceLane {
-  const name = String(p.name || '').toLowerCase();
-  const features = (p.features || []).join(' ').toLowerCase();
-  const text = `${name} ${features}`;
-  if (/macbook|apple m[0-9]|mac os|macos/.test(text)) return 'macbook';
-  if (/chromebook|chrome os|tablet|ipad|2-in-1|2 in 1|detachable/.test(text)) return 'tablet_chromebook';
-  return 'windows';
-}
-
-function laneTitle(lane: DeviceLane): string {
-  if (lane === 'macbook') return 'MacBook Options';
-  if (lane === 'tablet_chromebook') return 'Tablet / Chromebook Options';
-  return 'Windows Laptop Options';
-}
 
 function _prettyReason(reason: string): string {
   const r = String(reason || '').trim();
@@ -269,54 +245,12 @@ function _prettyReason(reason: string): string {
   return r.replace(/^[+-]/, '').replace(/_/g, ' ');
 }
 
-function _shortUseCase(query: string): string {
-  const q = String(query || '').toLowerCase();
-  if (/highschool|high school|yr\s?(?:7|8|9|10|11|12)|year\s?(?:7|8|9|10|11|12)|teen/.test(q)) return 'high school';
-  if (/student|university|uni|college/.test(q)) return 'study';
-  if (/gaming|fps|rtx|gpu/.test(q)) return 'gaming';
-  if (/office|work|excel|meetings|zoom/.test(q)) return 'work';
-  if (/design|video|editing|creator|creative/.test(q)) return 'creative';
-  return 'daily use';
-}
-
 function _stripTechnicalTokens(text: string): string {
   return String(text || '')
     .replace(/\(\s*[+-]?[a-z_]+(?:\s*,\s*[+-]?[a-z_]+)*\s*\)/gi, '')
     .replace(/\b[+-](?:embedding_similarity|cross_encoder|in_stock|price_fit|use_case_match)\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
-}
-
-function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, query?: string): string {
-  if (!items.length) {
-    if (lane === 'tablet_chromebook') return 'No strong tablet/chromebook inventory match yet. Consider widening budget or screen-size range.';
-    return 'No close matches in this lane right now. Try adjusting budget or use-case filters.';
-  }
-  const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
-  const minPrice = prices.length ? Math.min(...prices) : 0;
-  const maxPrice = prices.length ? Math.max(...prices) : 0;
-  const currencies = Array.from(new Set(items.map((p) => normalizeCurrency((p as any)?.currency))));
-  const priceRange = currencies.length === 1
-    ? `${formatMoney(minPrice, currencies[0])} to ${formatMoney(maxPrice, currencies[0])}`
-    : 'multiple currencies (conversion required before comparison)';
-  const useCase = _shortUseCase(String(query || ''));
-  const top = items.slice(0, 2).map((p) => {
-    const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
-    const label = productShortLabel(p);
-    return reason ? `${label} (${reason})` : label;
-  });
-  const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
-    ? 'Budget is tight, so value-focused picks are prioritized.'
-    : String(budgetStatus || '').toLowerCase().includes('high')
-      ? 'Budget allows performance-oriented options.'
-      : 'Recommendations balance value and use-case fit.';
-  if (lane === 'windows') {
-    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks span ${priceRange}.`;
-  }
-  if (lane === 'macbook') {
-    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, spanning ${priceRange}.`;
-  }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${priceRange}).`;
 }
 
 
@@ -836,6 +770,7 @@ export default function App() {
       windows: [],
       macbook: [],
       tablet_chromebook: [],
+      catalogue: [],
     };
     for (const p of filteredDisplayProducts || []) {
       out[laneForProduct(p)].push(p);
@@ -3957,7 +3892,7 @@ export default function App() {
                     && filteredDisplayProducts.length > 0
                     && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
                     <div className={styles.deviceLanePanel}>
-                      {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
+                      {(['catalogue', 'windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
                         const items = laneBuckets[lane] || [];
                         if (!items.length) return null;
                         return (

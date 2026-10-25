@@ -26,6 +26,8 @@ for (const scenario of [
     await expect(page.getByTestId('architecture-alternatives')).toHaveCount(0);
     await expect(page.getByRole('heading',{name:'Choose the requirements to evaluate'})).toHaveCount(0);
     await expect(page.getByText('Research unresolved',{exact:true})).toHaveCount(0);
+    await expect(page.getByText('Windows Laptop Options',{exact:true})).toHaveCount(0);
+    await expect(page.getByText('Catalogue options',{exact:true})).toBeVisible();
   });
 }
 
