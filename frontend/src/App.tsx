@@ -1797,8 +1797,10 @@ export default function App() {
           setImageRoutingInFlight(false);
           window.setTimeout(() => void (async () => {
             try {
+              if (!terminalInstallation.current.isCurrent(installationToken)) return;
               const deepResults = await fetchImageTriages(currentAttachedFiles, false);
-              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              if (!terminalInstallation.current.isCurrent(installationToken)
+                || !Array.isArray(deepResults) || deepResults.length === 0) return;
               setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
               setImageTriageRaw(deepResults);
             } catch {
@@ -1834,8 +1836,10 @@ export default function App() {
             }
           } else {
             imageTriageResults = await fetchImageTriages(currentAttachedFiles, true);
+            if (!terminalInstallation.current.isCurrent(installationToken)) return;
             void fetchImageTriages(currentAttachedFiles, false).then((deepResults) => {
-              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              if (!terminalInstallation.current.isCurrent(installationToken)
+                || !Array.isArray(deepResults) || deepResults.length === 0) return;
               setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
               setImageTriageRaw(deepResults);
               const deepTraceId = deepResults.find((row: any) => (
@@ -1854,8 +1858,10 @@ export default function App() {
             });
           }
         } finally {
-          setImageRoutingInFlight(false);
+          if (terminalInstallation.current.isCurrent(installationToken)) setImageRoutingInFlight(false);
         }
+
+        if (!terminalInstallation.current.isCurrent(installationToken)) return;
 
         const unusableImageEvidence = imageTriageResults.filter(isUnusableImageEvidence);
         if (unusableImageEvidence.length > 0) {
