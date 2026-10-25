@@ -74,5 +74,16 @@ test('buyer can request a laptop monitor and bag bundle without involuntary cart
   expect(answer.terminal_outcome.commerce_authority).toBe('none');
   expect(effects).toEqual([]);
   await expect(page.getByText('Cart (0)',{exact:true})).toBeVisible();
+  // Carousels may scroll internally; their parent panel must fit the dialog.
+  const panel=page.getByText('Catalogue options',{exact:true}).locator('xpath=ancestor::div[contains(@class,"rightPanel")][1]');
+  const panelBounds=await panel.boundingBox();
+  const dialogBounds=await panel.locator('xpath=ancestor::div[contains(@class,"chatContainer")][1]').boundingBox();
+  expect(panelBounds).not.toBeNull();
+  expect(dialogBounds).not.toBeNull();
+  expect(panelBounds!.x+panelBounds!.width).toBeLessThanOrEqual(dialogBounds!.x+dialogBounds!.width+1);
+  const listedBag=products.find((product:any)=>product.sku===bundle.lines[2].sku);
+  if(listedBag.price_cents%100!==0){
+    await expect(page.getByText(new RegExp(`AUD\\s+${(listedBag.price_cents/100).toFixed(2)}`)).first()).toBeVisible();
+  }
   await info.attach('bundle-browser-screen',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
 });
