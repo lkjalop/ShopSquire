@@ -2,6 +2,19 @@
 
 25 October 2026, Australia/Sydney. Tested code: `82e5cabcb83d43cd00911e6155a17daabcfb0c97`. See the [sanitized receipt ledger](audits/pilot-resumption-evidence-2026-10-25.json), [earlier buyer/security delta](MVP_SECURITY_AND_BUYER_DELTA_2026-10-25.md) and [full roadmap](CONSOLIDATED_SAVEPOINT_AND_PILOT_ROADMAP_2026-10-25.md). This is a source checkpoint, not MVP or release approval.
 
+## Later merchant and asynchronous-image follow-up
+
+Latest tested code: `c7338465dfdbcfbaed201510d591723260027336`. Results above and below retain their stated source scopes.
+
+- **461 storefront tests pass**, zero failures/skips, 59.515 s on the latest image-continuity code. TypeScript, native production preview and source/function size ratchets pass.
+- **12 native original-image browser cases pass**, zero failures/skips/flaky outcomes, 63.780 s browser duration: nine adversarial upload paths, two clean carriers and a new delayed-inspection race. The race reproduced the old upload artifact ID replacing a newer monitor decision ID. Reusing the existing terminal-generation guard fixes it without adding another state framework. The latest screenshot was visually inspected.
+- **Merchant history routing** respects configured storefront tenant over stale session storage; absent configuration retains the session/default fallback. Native backend ownership still authorizes access. Focused history checks: 6 pass / 1 fail before, 7 pass after; timeout, explicit retry and rejection controls remain covered with mocked fetch.
+- **Catalogue routing** no longer supplies laptop taxonomy with every chat turn. An optional non-secret `VITE_STOREFRONT_TAXONOMY_HANDLE` is sent only when configured; otherwise backend tenant context applies. On source `59e430a0`, the five-case native buyer profile went from 1 pass / 4 fail to **4 pass / 1 fail**: three new request-body failures fixed, the unchanged bundle failure retained. Useful monitor/bag/storage browsing and reviewed simulated supplier-draft continuity remain the four positives.
+
+See [merchant-context receipts and source hashes](audits/merchant-context-evidence-2026-10-25.json) and [late-image receipts and source hashes](audits/late-image-continuity-evidence-2026-10-25.json). Two initial race harness attempts replayed multipart through `route.fetch` and received HTTP400 before exercising the target assertion. The corrected test delays and then continues the browser's original request; those setup failures are not counted as application repairs or positives. They occurred during this later test construction, separately from the 13:47 Codex interruption.
+
+Remaining limitations include unbounded deep-image request duration, complete historical artifact retrieval, the unexercised delayed-support branch, and catalogue-versus-commercial authority labels. The generation repair prevents an obsolete completion changing the active view; it does not cancel server work or establish endurance. The bundle and joined live workflow remain open. The five MVP work packages below still apply, with configured tenant routing and the unconditional laptop request hint now repaired.
+
 ## Interruption investigation
 
 Local Codex diagnostics record HTTP 400 from an official OpenAI host at 13:47:18 Sydney time, followed by the generic `Bad Request` detail in the turn log. The saved application/browser logs searched did not contain a matching 400. This supports a Codex request-path interruption; the available error does not establish the rejection reason. No account/configuration changes were made. Credentials, headers, raw request bodies and conversation logs are not published. Official [Codex error documentation](https://learn.chatgpt.com/docs/app-server#errors) describes failed turns and upstream error metadata; it does not diagnose this particular rejection.
