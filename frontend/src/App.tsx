@@ -21,7 +21,7 @@ import CaseContractSelection from './components/CaseContractSelection';
 import StockAcceptancePanel from './components/StockAcceptancePanel';
 import { useShoppingCaseActions } from './hooks/useShoppingCaseActions';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
-import { apiRequestHeaders, apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
+import { storefrontCatalogContext, apiRequestHeaders, apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan, type OffCatalogSourcingOffer } from './lib/api';
 import { nextSourcingTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -2013,10 +2013,9 @@ export default function App() {
           query: q,
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
-          // This is catalog context, not fit authority. The backend validates
-          // the handle and records the resulting bounded candidate set before
-          // later research is allowed to project requirements onto products.
-          storefront_taxonomy_handle: 'el-6-6',
+          // Absent a configured hint, let the backend resolve this tenant's
+          // catalogue context. This hint grants no fit or commerce authority.
+          ...storefrontCatalogContext(),
         };
         if (pastedOfficialUrl) chatPayload.buyer_source_url = pastedOfficialUrl;
         if (activeShoppingCase?.case_id || ambiguityExploration?.case_id) {

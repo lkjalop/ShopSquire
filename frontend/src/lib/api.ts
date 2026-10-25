@@ -19,6 +19,12 @@ export function resolveImplicitApiBase(
 const API_BASE = rawBase ? rawBase.replace(/\/+$/, '') : resolveImplicitApiBase();
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 
+/** Optional catalogue routing hint; backend tenant/category validation still applies. */
+export function storefrontCatalogContext(): {storefront_taxonomy_handle?: string} {
+  const handle = String(import.meta.env.VITE_STOREFRONT_TAXONOMY_HANDLE || '').trim();
+  return handle ? {storefront_taxonomy_handle: handle} : {};
+}
+
 function csrfHeaders(): Record<string, string> {
   if (typeof document === 'undefined') return {};
   const entry = document.cookie

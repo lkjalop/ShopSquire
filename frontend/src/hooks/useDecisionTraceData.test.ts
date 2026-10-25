@@ -1,7 +1,34 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { shoppingCaseIdFromTraceEvents, useDecisionTraceData } from './useDecisionTraceData';
+
+afterEach(()=>{vi.unstubAllEnvs();sessionStorage.removeItem('tenant_id');});
+
+it('routes buyer history to the configured merchant without borrowing operator credentials', async()=>{
+  vi.stubEnv('VITE_STOREFRONT_TENANT_ID','merchant-configured');
+  sessionStorage.setItem('tenant_id','merchant-stale');
+  const request=vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:true,json:async()=>({turn_history:[]})} as Response);
+  try {
+    const {result,unmount}=renderHook(()=>useDecisionTraceData({active:true,caseId:'case-one',revision:2}));
+    await waitFor(()=>expect(result.current.status).toBe('ready'));
+    expect(request.mock.calls[0][1]?.headers).toEqual({'x-tenant-id':'merchant-configured'});
+    expect(request.mock.calls[0][1]?.credentials).toBe('include');
+    unmount();
+  } finally {request.mockRestore();}
+});
+
+it('uses the session tenant when the storefront has no merchant configuration',async()=>{
+  vi.stubEnv('VITE_STOREFRONT_TENANT_ID','');sessionStorage.setItem('tenant_id','merchant-session');
+  const request=vi.spyOn(globalThis,'fetch').mockResolvedValue({ok:false,status:403} as Response);
+  try {
+    const {result,unmount}=renderHook(()=>useDecisionTraceData({active:true,caseId:'case-one'}));
+    await waitFor(()=>expect(result.current.status).toBe('unavailable'));
+    expect(request.mock.calls[0][1]?.headers).toEqual({'x-tenant-id':'merchant-session'});
+    expect(request).toHaveBeenCalledTimes(1);
+    unmount();
+  } finally {request.mockRestore();}
+});
 
 it('ends a stalled read at the bounded audit deadline', async () => {
   vi.useFakeTimers();

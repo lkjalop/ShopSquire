@@ -11,8 +11,15 @@ for (const scenario of [
 ]) {
   test(`ordinary buyer can browse useful ${scenario.category} candidates from the mock file`, async ({page}, info) => {
     test.setTimeout(120000);
+    const chatRequests:any[]=[];
+    page.on('request',request=>{
+      if(request.method()==='POST'&&/^\/api\/v1\/chat\/(query|stream)$/.test(new URL(request.url()).pathname))
+        chatRequests.push(request.postDataJSON());
+    });
     await page.goto('/'); await page.getByRole('button',{name:/Ask Me/i}).click();
     const answer=await turn(page,scenario.query);
+    expect(chatRequests.length).toBeGreaterThan(0);
+    for(const request of chatRequests)expect(request).not.toHaveProperty('storefront_taxonomy_handle');
     await info.attach('catalogue-answer.json',{body:JSON.stringify(answer,null,2),contentType:'application/json'});
     expect(answer.products?.length, 'Browsing must return useful in-category candidates').toBeGreaterThan(0);
     expect(answer.products.some((p:any)=>scenario.names.test(String(p.name ?? p.title ?? '')))).toBe(true);

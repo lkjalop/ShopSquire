@@ -10,6 +10,7 @@ import {
   emitPageView,
   resolveImplicitApiBase,
   apiRequestHeaders,
+  storefrontCatalogContext,
 } from '../api';
 
 function resp(body: any, status = 200) {
@@ -21,6 +22,18 @@ beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 describe('storefront tenant grounding', () => {
+  it('does not force a laptop taxonomy when merchant context is unconfigured',()=>{
+    vi.stubEnv('VITE_STOREFRONT_TAXONOMY_HANDLE','');
+    expect(storefrontCatalogContext()).not.toHaveProperty('storefront_taxonomy_handle');
+  });
+  it('passes a configured non-laptop catalogue hint without adding authority',()=>{
+    vi.stubEnv('VITE_STOREFRONT_TAXONOMY_HANDLE','  lb-15  ');
+    expect(storefrontCatalogContext()).toEqual({storefront_taxonomy_handle:'lb-15'});
+  });
+  it('treats whitespace-only merchant context as absent',()=>{
+    vi.stubEnv('VITE_STOREFRONT_TAXONOMY_HANDLE','   ');
+    expect(storefrontCatalogContext()).toEqual({});
+  });
   it('uses the configured tenant without treating it as an authentication credential', () => {
     vi.stubEnv('VITE_STOREFRONT_TENANT_ID', 'fictional-shop');
     expect(apiRequestHeaders()['x-tenant-id']).toBe('fictional-shop');
