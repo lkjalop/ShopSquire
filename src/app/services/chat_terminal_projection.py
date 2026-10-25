@@ -51,6 +51,8 @@ def project_chat_terminal(*, out, server_research_result, server_research_failur
         ),
         existing_message=str(out.get("assistant_message") or ""),
         product_shelves=out.get('product_shelves'),
+        catalog_browse=out.get('semantic_resolution'),
+        catalog_product_count=len(products),
     )
     from src.app.services.terminal_qualification import terminal_questions
     out['next_questions'] = terminal_questions(out.get('next_questions'), _research_outcome)

@@ -20,6 +20,34 @@ from src.app.services.electronics_shop_scenario import seed_scenario, assess_req
 from scripts.backfill_brand_from_title import _brand_list, match_brand
 
 
+# Reviewed source-section metadata for this fictional electronics importer.
+# These nodes permit category retrieval only, never compatibility or stock authority.
+SOURCE_CATEGORY_NODES = {
+    'laptop': 'el-6-6', 'monitor': 'el-17-1', 'bag': 'lb-15',
+    'hard_drive': 'el-7-9-14-4', 'router': 'el-12-1', 'tablet': 'el-6-8',
+    'headset': 'el-2-2-7', 'printer': 'el-13-4', 'all_in_one': 'el-6-12',
+    'mini_pc': 'el-6-3', 'desktop_tower': 'el-6-3',
+}
+
+
+def enrol_source_category(db, row, *, tenant_id):
+    """Enrol admitted source metadata; unknown categories and held prices stay held."""
+    from src.app.services.taxonomy_registry import upsert_classification, add_sold_node
+
+    handle = SOURCE_CATEGORY_NODES.get(row['category'])
+    if handle is None or row['price_cents'] is None:
+        return False
+    for function, kwargs in (
+        (upsert_classification, dict(sku=row['sku'], node_handle=handle,
+                                    status='approved', confidence=1)),
+        (add_sold_node, dict(node_handle=handle)),
+    ):
+        if not function(db, tenant_id=tenant_id, source='simulation:source-category',
+                        approved_by='synthetic-fixture-only', **kwargs):
+            raise RuntimeError('source_category_enrolment_failed')
+    return True
+
+
 def add_product(db, row):
     """Keep source category and conservative, reviewed title metadata at ingestion."""
     product = Product(sku=row['sku'], name=row['name'], price_cents=row['price_cents'],
@@ -58,20 +86,7 @@ def main():
                 continue
             add_product(db, row)
             seed_scenario(db,tenant_id='synthetic-electronics',sku=row['sku'],retail_cents=row['price_cents'])
-            # Enrol the source's declared laptop category for this fictional
-            # tenant. Without this, the later single workload fixture became
-            # the entire taxonomy shelf and its AUD 3,699 price hid the source's
-            # AUD 629 laptop. Classification grants no workload-fit evidence.
-            if row['category'] == 'laptop':
-                from src.app.services.taxonomy_registry import upsert_classification, add_sold_node
-                for function, kwargs in (
-                    (upsert_classification, dict(sku=row['sku'], node_handle='el-6-6',
-                                                status='approved', confidence=1)),
-                    (add_sold_node, dict(node_handle='el-6-6')),
-                ):
-                    if not function(db, tenant_id='synthetic-electronics',
-                                    source='simulation:source-category', approved_by='synthetic-fixture-only', **kwargs):
-                        raise RuntimeError('source_category_enrolment_failed')
+            enrol_source_category(db, row, tenant_id='synthetic-electronics')
         db.flush()
         from src.app.services.portfolio_qualification import seed_configuration
         seed_configuration(db)
