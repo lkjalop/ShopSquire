@@ -17,10 +17,11 @@ def owned_operator_client(monkeypatch):
     monkeypatch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "strict")
     clients = []
     grants = []
+    role_keys = {}
 
     def create(tenant_id, *, role="owner"):
         environment = {"owner": "OWNER_API_KEY", "developer": "DEVELOPER_API_KEY", "merchant": "MERCHANT_API_KEY"}
-        key = f"owned-operator-test-{uuid.uuid4().hex}"
+        key = role_keys.setdefault(role, f"owned-operator-test-{uuid.uuid4().hex}")
         monkeypatch.setenv(environment[role], key)
         app = create_app()
         principal = principal_hash_for_api_key(key)
