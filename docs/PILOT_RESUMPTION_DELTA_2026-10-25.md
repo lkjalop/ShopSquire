@@ -16,6 +16,8 @@ The clean-checkout job omitted `APP_ENV`, so application imports used production
 
 Worker and service logs also contain `operator_tenant_membership_required` rejections. Hosted `APP_ENV=testing` and the local supervisor's `APP_ENV=test` select different default membership modes in the current service. Those positive fixtures and required strict coverage need review; no mode was weakened to obtain a pass. Rules API HTTP503, remaining browser/worker/backend failures and the changed-Python lint gate still require separate investigation. A later hosted run must verify the workflow repair before its gate can be called green.
 
+One strict fixture cohort is now repaired on source `26f4d41cc78f6dc5238996006b340bdc513f91a4`: [projection/newsletter fixture evidence](audits/strict-projection-fixture-evidence-2026-10-25.json). Enforcing strict mode reproduced three failures among the six original tests. A unique test principal and tenant now receive a persisted membership through the production service, with precise cleanup; the original review-only/no-execution/draft assertions remain unchanged. All **eight tests pass**, including two added HTTP403 controls for an ungranted tenant and revoked membership. This file passes Ruff. Projection and approval-queue mocks remain; the result qualifies the fixture/endpoint contract, not commercial pricing or live delivery. Production enforcement is unchanged, and other membership-related hosted failures remain open.
+
 Preceding tested code: `c7338465dfdbcfbaed201510d591723260027336`. Results above and below retain their stated source scopes.
 
 - **461 storefront tests pass**, zero failures/skips, 59.515 s on the latest image-continuity code. TypeScript, native production preview and source/function size ratchets pass.

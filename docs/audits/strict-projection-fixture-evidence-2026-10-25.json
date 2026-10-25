@@ -1,0 +1,52 @@
+{
+  "source_commit": "26f4d41cc78f6dc5238996006b340bdc513f91a4",
+  "test_file": {
+    "path": "tests/services/test_operator_product_projection.py",
+    "git_blob_sha256": "083e67f2744244c4b64e37743489c103c9cc52da9232a59956586d4d1f57a570"
+  },
+  "profiles": [
+    {
+      "name": "mvp-operator-fixture-before",
+      "counts": {
+        "tests": 6,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 1,
+      "elapsed_seconds": 9.625,
+      "peaks": {
+        "rss_bytes": 282005504,
+        "handles": 953,
+        "threads": 55
+      },
+      "resource_violation": null
+    },
+    {
+      "name": "mvp-operator-fixture-after",
+      "counts": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "native_exit_code": 0,
+      "elapsed_seconds": 10.078,
+      "peaks": {
+        "rss_bytes": 282587136,
+        "handles": 951,
+        "threads": 55
+      },
+      "resource_violation": null
+    }
+  ],
+  "membership_mode": "strict, explicitly selected in both profile invocations and enforced in the repaired positive fixture",
+  "repair": "Unique test operator/tenant, persisted grant through production membership service, precise cleanup. Existing review-only, no-execution and human-gated draft expectations remain unchanged.",
+  "controls": [
+    "Unauthenticated operator projection remains rejected.",
+    "Foreign ungranted tenant is rejected with HTTP403.",
+    "Revoked membership is rejected with HTTP403."
+  ],
+  "scope": "Test fixture repair only. Endpoint projection and approval queue are mocked as in the original tests. This does not qualify real commercial pricing or supplier delivery. Production membership enforcement was not altered.",
+  "lint": "Ruff check passes for this test file; repository-wide Ruff remains a separate gate."
+}
