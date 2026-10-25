@@ -10,10 +10,13 @@ from uuid import uuid4
 
 import pytest
 import requests
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from tests.owned_security_runtime import _owned_runtime
 from src.app.services.memory import Memory
 from src.app.services.semantic_cache import CacheContract, SemanticCache
+from src.app.services.operator_tenant_membership import grant_membership, principal_hash_for_api_key
 
 
 @pytest.mark.integration
@@ -41,6 +44,7 @@ def test_erasure_is_visible_from_another_api_process_and_never_hides_partition(
     owner_key, merchant_key = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     overrides = {"DATABASE_URL": database_url, "DATABASE_URL_RO": database_url,
                  "OWNER_API_KEY": owner_key, "MERCHANT_API_KEY": merchant_key,
+                 "OPERATOR_TENANT_MEMBERSHIP_MODE": "strict",
                  "REDIS_URL": redis_url, "ROUTER_MODEL_ENABLED": "0"}
     try:
         own.set_kv(uid, {"quantity": 40, "private_canary": subject_canary})
@@ -59,11 +63,23 @@ def test_erasure_is_visible_from_another_api_process_and_never_hides_partition(
                 artifact_directory=tmp_path / "instance-b", publish_base_url=False,
                 env_overrides=overrides))
             assert first["process_id"] != second["process_id"]
+            # Both real APIs share this migrated disposable database. Persist
+            # only the explicitly requested default-controller operator grants.
+            engine = create_engine(database_url)
+            stack.callback(engine.dispose)
+            with Session(engine) as db:
+                for key, role in ((owner_key, "owner"), (merchant_key, "merchant")):
+                    grant_membership(db, principal_hash=principal_hash_for_api_key(key),
+                        tenant_id="default", role=role, auth_method="api_key",
+                        created_by="owned-privacy-integration-fixture")
+                db.commit()
             owner = {"x-api-key": owner_key, "x-tenant-id": "default"}
             path = "/api/v1/privacy/data/" + uid
             assert http.delete(second["base_url"] + path, timeout=10).status_code == 401
             assert http.delete(second["base_url"] + path,
                 headers={**owner, "x-api-key": merchant_key}, timeout=10).status_code == 403
+            assert http.delete(second["base_url"] + path,
+                headers={**owner, "x-tenant-id": "other-controller"}, timeout=10).status_code == 403
             exported = http.get(second["base_url"] + "/api/v1/privacy/export/" + uid,
                                 headers=owner, timeout=10)
             # This raw export route is deliberately denied by PII-01, even to
