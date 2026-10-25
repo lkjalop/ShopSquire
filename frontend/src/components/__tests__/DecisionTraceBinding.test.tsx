@@ -1,9 +1,16 @@
 import {cleanup, render, screen, waitFor} from '@testing-library/react';
-import {afterEach, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import DecisionTrace from '../DecisionTrace';
 import {clearOwnerApiKey,setOwnerApiKey} from '../../lib/browserSession';
 
-afterEach(() => { cleanup(); clearOwnerApiKey(); vi.restoreAllMocks(); });
+beforeEach(() => {
+  // This file models a buyer unless a test explicitly installs an operator key.
+  // Hosted browser jobs also provide build keys for their separate operator UI.
+  vi.stubEnv('VITE_API_KEY','');
+  vi.stubEnv('VITE_OWNER_API_KEY','');
+  clearOwnerApiKey();
+});
+afterEach(() => { cleanup(); clearOwnerApiKey(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 const projection = (trace: string, query: string) => ({
   schema_version:'revision-bound-turn-read-model.v1', trace_id:trace,
   case_id:'case-current', case_revision:2, buyer_query:query, products:[],

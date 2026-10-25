@@ -685,7 +685,7 @@ export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
 }
 
 export default function DecisionTrace({ traceId, onClose, imageTriage: suppliedImageTriage, initialTab, evidence, researchOutcome }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any; researchOutcome?: ResearchOutcome | null }) {
-  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const API_KEY = import.meta.env.VITE_API_KEY || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
   // An explicitly supplied operator key must outrank the storefront's build-time merchant key so the
