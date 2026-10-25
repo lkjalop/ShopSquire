@@ -97,7 +97,7 @@ class RuleStore:
         except Exception:
             return False
 
-    def update_rule(self, rule_id: str, updates: Dict[str, Any]) -> bool:
+    def update_rule(self, rule_id: str, updates: Dict[str, Any], *, tenant_id: Optional[str] = None) -> bool:
         try:
             with db_session() as db:
                 field_sql = {
@@ -124,7 +124,11 @@ class RuleStore:
                             pass
                     elif k == "active":
                         v = 1 if bool(v) else 0
-                    db.execute(sql_text(stmt), {"id": rule_id, "v": v})
+                    if tenant_id is not None:
+                        stmt += " AND tenant_id = :scope_tenant"
+                    result = db.execute(sql_text(stmt), {"id": rule_id, "v": v, "scope_tenant": tenant_id})
+                    if result.rowcount == 0:
+                        return False
                     touched += 1
                 if touched == 0:
                     return False
@@ -135,23 +139,28 @@ class RuleStore:
         except Exception:
             return False
 
-    def delete_rule(self, rule_id: str) -> bool:
+    def delete_rule(self, rule_id: str, *, tenant_id: Optional[str] = None) -> bool:
         try:
             with db_session() as db:
-                db.execute(sql_text("DELETE FROM rule_definitions WHERE id = :id"), {"id": rule_id})
+                statement = "DELETE FROM rule_definitions WHERE id = :id"
+                if tenant_id is not None:
+                    statement += " AND tenant_id = :scope_tenant"
+                result = db.execute(sql_text(statement), {"id": rule_id, "scope_tenant": tenant_id})
+                if result.rowcount == 0 and tenant_id is not None:
+                    return False
                 db.commit()
             self._cache.clear()
             return True
         except Exception:
             return False
 
-    def get_rule(self, rule_id: str) -> Optional[Dict[str, Any]]:
+    def get_rule(self, rule_id: str, *, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         try:
             with db_session() as db:
-                r = db.execute(
-                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id"),
-                    {"id": rule_id},
-                ).fetchone()
+                statement = "SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id"
+                if tenant_id is not None:
+                    statement += " AND tenant_id = :scope_tenant"
+                r = db.execute(sql_text(statement), {"id": rule_id, "scope_tenant": tenant_id}).fetchone()
             if not r:
                 return None
             return {
