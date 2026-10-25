@@ -217,6 +217,13 @@ def hash_value(value: str) -> str:
 
 def _canonical_trace_reference(key: object, value: object) -> bool:
     """Keep typed UUID references joinable; arbitrary ID strings remain untrusted."""
+    if key == "ticket_id" and isinstance(value, str):
+        # Ticketing mints TKT-UUIDv4 identifiers. Numeric UUID segments must
+        # remain joinable, but this field is not a general PII exemption.
+        return bool(re.fullmatch(
+            r"TKT-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+            value,
+        ))
     return bool(
         key in {"case_id", "trace_id", "decision_trace_id", "source_trace_id", "operation_id", "research_run_id"}
         and isinstance(value, str)
