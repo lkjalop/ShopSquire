@@ -497,5 +497,14 @@
     "real_commercial_effects": "disabled",
     "api_mocks": "none in selected buyer browser cases",
     "oracle_change": "Source-title whitespace normalized; browsing presentation rejection controls added. Other useful-product/draft expectations retained."
+  },
+  "source_hash_basis": "source_sha256 identifies tested Windows checkout bytes; git_blob_sha256 identifies committed blobs. LF/CRLF normalization was checked separately.",
+  "git_blob_sha256": {
+    "scripts/seed_electronics_shop.py": "00b006a0bdb137c720f6bf0fa92a69d91836181503c99fafb1d8dcf7ee33d178",
+    "src/app/services/terminal_research_narration.py": "fc1327a80c19aab46f7a42a9c3636c5df29e70cfb5c58e8c053cc3ac6f52461c",
+    "src/app/services/turn_transition.py": "932f30e19acdc121589d2b6f2903bc23fc7935f749452195e1123170d3614134",
+    "src/app/services/chat_terminal_projection.py": "6aa4669ed63da97a2ac814e6e97e60a3165baac75c90f387bdb0152c31a7d471",
+    "frontend/src/App.tsx": "3f6d3bb611847833920502e854625aacda48ae400930277b89f21e8a6543e716",
+    "frontend/e2e/mock-catalog-category-pilot.spec.ts": "c0ed8507bb9cfe5ff97290c527861f25288a8fc947541b568362c22b2e38281d"
   }
 }
