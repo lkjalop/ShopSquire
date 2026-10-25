@@ -167,6 +167,9 @@ jobs:
           poetry run python scripts/seed_gaming_laptops.py
           poetry run python -m scripts.seed_reviewed_product_evidence
           poetry run python -m scripts.seed_suppliers
+          # Persist only the owned test operators' default-tenant grants.
+          # Production enforcement stays strict; no stock is created here.
+          poetry run python -m scripts.seed_operator_inventory_demo --tenant default --enroll-only
       - name: React component battery
         run: |
           timeout 420s npm --prefix frontend test -- --run --reporter=verbose --testTimeout=15000
