@@ -1,6 +1,6 @@
 # Deployable runtime profiles. The API target deliberately excludes local ML
 # training/evaluation and OCR engines; vision workloads use the vision target.
-FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce AS api-runtime
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS api-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DEFAULT_TIMEOUT=120
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
